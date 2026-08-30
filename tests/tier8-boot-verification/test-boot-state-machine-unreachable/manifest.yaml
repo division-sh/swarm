@@ -1,0 +1,6 @@
+name: test-boot-state-machine-unreachable
+version: 1.0.0
+description: 'Boot verification: declared workflow state is unreachable from the authored initial state and transition carriers. Platform must surface a warning-grade semantic drift finding on the supported verify path.
+
+'
+platform_version: ">=0.7.0 <0.8.0"

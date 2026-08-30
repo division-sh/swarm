@@ -1,9 +1,0 @@
-guards:
-  - id: accept_item
-    category: validation
-    description: Accepts new work items.
-    check: payload.item_id != ''
-  - id: delivery_enabled
-    category: policy
-    description: Delivery must remain enabled.
-    policy_ref: delivery_enabled

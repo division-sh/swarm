@@ -44,7 +44,7 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 	byKey := make(map[string]*aggregate)
 	for index := range snapshot.FanOutFacts {
 		fact := snapshot.FanOutFacts[index]
-		key := strings.Join([]string{fact.TriggeringDeliveryID, fact.PackageKey, fact.ElementID}, "|")
+		key := strings.Join([]string{fact.TriggeringDeliveryID, fact.FlowPath, fact.DeclarationFamily, fact.SemanticPath}, "|")
 		item := byKey[key]
 		if item == nil {
 			item = &aggregate{}
@@ -86,14 +86,14 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 		source := fanoutobligation.SourceRef{
 			Kind: fanoutobligation.SourceKind(fact.SourceKind), EventID: fact.SourceEventID, RunID: fact.SourceRunID,
 			EntityID: fact.SourceEntityID, Field: fact.SourceField, MutationID: fact.SourceMutationID,
-			Declaration: durabledata.DeclarationRef{PackageKey: fact.SourceResourcePackageKey, EventName: fact.SourceResourceEventName},
+			Declaration: durabledata.DeclarationRef{FlowPath: fact.SourceResourceFlowPath, EventName: fact.SourceResourceEventName},
 			VersionID:   durabledata.VersionID(fact.SourceResourceVersionID),
 		}
 		requestSource := source
 		if requestSource.Kind == fanoutobligation.SourceEntityField {
 			requestSource.MutationID = ""
 		}
-		element := runtimecontracts.FanOutElementRef{PackageKey: fact.PackageKey, ElementID: fact.ElementID}
+		element := runtimecontracts.FanOutElementRef{FlowPath: fact.FlowPath, Family: fact.DeclarationFamily, SemanticPath: fact.SemanticPath}
 		intent := fanoutobligation.Intent{
 			Request: fanoutobligation.IntentRequest{
 				Key:     fanoutobligation.IntentKey{RunID: snapshot.RunID, TriggeringDeliveryID: fact.TriggeringDeliveryID, ElementRef: element},
@@ -177,9 +177,10 @@ func projectRunForkFanOutBarrier(runID string, fact *runForkRevisionFanOutFact, 
 	if !ok {
 		return nil, fmt.Errorf("timer handle is not a fan-out delivery join")
 	}
-	if fanOutRef.PackageKey() != fact.PackageKey || fanOutRef.ElementID() != fact.ElementID ||
+	declaration, declarationErr := key.ElementRef.DeclarationIdentity()
+	if declarationErr != nil || !fanOutRef.DeclarationIdentity().Equal(declaration) ||
 		fanOutRef.BundleHash() != fact.BundleHash || fanOutRef.SemanticDigest() != fact.SemanticDigest ||
-		joinRef.Node().PackageKey() != fact.BarrierTargetPackageKey || joinRef.Node().FlowID() != fact.BarrierTargetFlowID ||
+		joinRef.Node().FlowPath() != fact.BarrierTargetFlowPath ||
 		joinRef.Node().NodeID() != fact.BarrierTargetNodeID || joinRef.HandlerEvent() != fact.BarrierHandlerEvent ||
 		joinRef.JoinID() != fact.BarrierJoinID {
 		return nil, fmt.Errorf("typed timer handle contradicts projected barrier identity")

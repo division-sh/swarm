@@ -79,7 +79,7 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	if err != nil {
 		return err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash, BundleSource: static.BundleSource}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash}
 	records, err := am.resolvedStaticTopologyRecords(source)
 	if err != nil {
 		return err
@@ -127,14 +127,14 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 			continue
 		}
 		owner := current.Topology.Authority.Static
-		ownerSource := runtimeagenttopology.SourceCoordinate{BundleHash: owner.BundleHash, BundleSource: owner.BundleSource}
+		ownerSource := runtimeagenttopology.SourceCoordinate{BundleHash: owner.BundleHash}
 		if !sourceSetContainsCoordinate(completePlan, ownerSource) {
 			if err := am.retireRemovedStaticTopology(ctx, current, admission); err != nil {
 				return err
 			}
 			continue
 		}
-		if owner.BundleHash != static.BundleHash || owner.BundleSource != static.BundleSource {
+		if owner.BundleHash != static.BundleHash {
 			continue
 		}
 		key, err := identity.Fingerprint()
@@ -342,7 +342,7 @@ func validateDurableSourceSetLifecycleState(state AgentLifecycleState) (runtimea
 	}
 	if state.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
 		owner := state.Topology.Authority.Static
-		if owner.BundleHash != state.ProcessBinding.BundleHash || owner.BundleSource != state.ProcessBinding.BundleSource {
+		if owner.BundleHash != state.ProcessBinding.BundleHash {
 			return runtimeagentidentity.Identity{}, "", fmt.Errorf("durable static topology and process source disagree for %s", identity.Description())
 		}
 	}
@@ -358,7 +358,7 @@ func lifecycleStateMatchesCell(state AgentLifecycleState, cell *agentLifecycleCe
 
 func sourceSetBindingIsAdjacent(predecessor, successor ProcessExecutionBinding) bool {
 	return sameProcessExecutionOwner(predecessor, successor) &&
-		predecessor.BundleHash == successor.BundleHash && predecessor.BundleSource == successor.BundleSource &&
+		predecessor.BundleHash == successor.BundleHash &&
 		predecessor.RuntimeInstanceID == successor.RuntimeInstanceID &&
 		predecessor.RuntimeGeneration != ^uint64(0) && successor.RuntimeGeneration == predecessor.RuntimeGeneration+1 &&
 		predecessor.GenerationGrantID != successor.GenerationGrantID
@@ -398,17 +398,17 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 	if transitionAdmission.SourceSetRevision() != plan.Revision {
 		return nil, errors.New("durable topology source-set rebind admission targets another complete source set")
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash, BundleSource: static.BundleSource}.Normalize()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash}.Normalize()
 	if err := currentBinding.Validate(); err != nil {
 		return nil, fmt.Errorf("durable topology source-set rebind current process binding: %w", err)
 	}
-	if currentBinding.BundleHash != coordinate.BundleHash || currentBinding.BundleSource != coordinate.BundleSource {
+	if currentBinding.BundleHash != coordinate.BundleHash {
 		return nil, errors.New("durable topology source-set rebind process binding differs from runtime source")
 	}
 	if err := predecessorBinding.Validate(); err != nil {
 		return nil, fmt.Errorf("durable topology source-set rebind predecessor process binding: %w", err)
 	}
-	if predecessorBinding.BundleHash != coordinate.BundleHash || predecessorBinding.BundleSource != coordinate.BundleSource {
+	if predecessorBinding.BundleHash != coordinate.BundleHash {
 		return nil, errors.New("durable topology source-set rebind predecessor differs from runtime source")
 	}
 	if currentIsSuccessor {
@@ -477,7 +477,7 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		}
 		state.Identity = identity
 		census[identity] = state
-		if state.ProcessBinding.BundleHash == coordinate.BundleHash && state.ProcessBinding.BundleSource == coordinate.BundleSource {
+		if state.ProcessBinding.BundleHash == coordinate.BundleHash {
 			selected[identity] = state
 		}
 	}
@@ -506,12 +506,12 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		}
 		if cell.topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
 			owner := cell.topology.Authority.Static
-			if owner.BundleHash != cell.processBinding.BundleHash || owner.BundleSource != cell.processBinding.BundleSource {
+			if owner.BundleHash != cell.processBinding.BundleHash {
 				am.lifecycle.mu.Unlock()
 				return nil, fmt.Errorf("process-local static topology and source binding disagree for %s", identity.Description())
 			}
 		}
-		if cell.processBinding.BundleHash == coordinate.BundleHash && cell.processBinding.BundleSource == coordinate.BundleSource {
+		if cell.processBinding.BundleHash == coordinate.BundleHash {
 			processCells[identity.Normalize()] = cell
 		}
 	}
@@ -701,7 +701,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 	if err != nil {
 		return fmt.Errorf("durable topology source-set rebind target process binding: %w", err)
 	}
-	if targetBinding.BundleHash != p.coordinate.BundleHash || targetBinding.BundleSource != p.coordinate.BundleSource {
+	if targetBinding.BundleHash != p.coordinate.BundleHash {
 		return errors.New("durable topology source-set rebind target differs from runtime source")
 	}
 	if p.currentIsSuccessor {

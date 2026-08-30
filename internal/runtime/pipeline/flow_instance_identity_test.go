@@ -140,7 +140,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 
 	instance := WorkflowInstance{
-		WorkflowName: "grandchild",
+		WorkflowName: "child/grandchild",
 		StorageRef:   "child/grandchild/inst-1",
 		InstanceID:   "inst-1",
 		EntityType:   "test_entity",
@@ -149,7 +149,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	if workflowInstanceOwnedByFlow(source, instance, "child", "") {
 		t.Fatal("did not expect child to own child/grandchild/inst-1")
 	}
-	if !workflowInstanceOwnedByFlow(source, instance, "grandchild", "") {
+	if !workflowInstanceOwnedByFlow(source, instance, "child/grandchild", "") {
 		t.Fatal("expected grandchild to own child/grandchild/inst-1")
 	}
 }
@@ -157,7 +157,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 func TestWorkflowInstanceRouteForPersistedUsesAuthoredNestedSingletonScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	instance := WorkflowInstance{
-		WorkflowName: "grandchild",
+		WorkflowName: "child/grandchild",
 		StorageRef:   "child/grandchild",
 		InstanceID:   "grandchild",
 		EntityType:   "test_entity",

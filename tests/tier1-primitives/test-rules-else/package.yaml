@@ -1,5 +1,0 @@
-name: test-rules-else
-version: 1.0.0
-description: Rules handler with explicit else fallthrough routes unmatched payloads.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

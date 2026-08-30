@@ -91,7 +91,7 @@ func TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		filepath.Join(repo, "internal", "releasee2e", "testdata", "claude_cli_managed_lifecycle"),
 		filepath.Join(releaseRoot, "contracts"),
 	)
-	payloadSource := filepath.Join(releaseRoot, "contracts", "payload.json")
+	payloadSource := filepath.Join(releaseRoot, "contracts", "tests", "payload.json")
 	payloadPath := filepath.Join(releaseRoot, "payload.json")
 	if err := os.Rename(payloadSource, payloadPath); err != nil {
 		t.Fatalf("move release payload: %v", err)
@@ -118,6 +118,7 @@ func TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	run := runReleaseCommand(t, 4*time.Minute, releaseRoot, env, "",
 		binaryPath,
 		"run", "start",
+		filepath.Join(releaseRoot, "contracts"),
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "work.requested",
@@ -136,7 +137,7 @@ func TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 			t.Fatalf("paid public-binary output contains %q:\n%s", forbidden, run.output)
 		}
 	}
-	assertPaidAgenticToolEvidence(t, filepath.Join(releaseRoot, ".swarm", "stores", "dev.db"))
+	assertPaidAgenticToolEvidence(t, filepath.Join(releaseRoot, "contracts", ".swarm", "stores", "dev.db"))
 }
 
 func claudeInitTools(raw []byte) ([]string, bool, error) {

@@ -6,7 +6,6 @@ fan-out-node:
   event_handlers:
     batch.received:
       fan_out:
-        element_id: 43080512-9978-4593-af68-ff94656915cf
         items_from: payload.items
         as: task
         identity: task.id

@@ -117,9 +117,9 @@ func validateCatalog(catalog runtimedata.Catalog) error {
 			return fmt.Errorf("bundle repeats resource declaration %s", declaration.Ref.Key())
 		}
 		seenRefs[declaration.Ref.Key()] = struct{}{}
-		nameKey := declaration.Ref.PackageKey + "\x00" + declaration.Name
+		nameKey := declaration.Ref.FlowPath + "\x00" + declaration.Name
 		if _, duplicate := seenNames[nameKey]; duplicate {
-			return fmt.Errorf("bundle repeats resource name %s in package %s", declaration.Name, declaration.Ref.PackageKey)
+			return fmt.Errorf("bundle repeats resource name %s in package %s", declaration.Name, declaration.Ref.FlowPath)
 		}
 		seenNames[nameKey] = struct{}{}
 	}
@@ -145,18 +145,18 @@ func validateCatalog(catalog runtimedata.Catalog) error {
 
 func (o *Owner) registerDeclaration(ctx context.Context, tx *sql.Tx, bundleHash string, declaration runtimedata.Declaration, now time.Time) error {
 	result, err := tx.ExecContext(ctx, o.query(`
-		INSERT INTO resource_declarations (package_key, event_name, admitted_at)
-		VALUES (%s, %s, %s) ON CONFLICT (package_key, event_name) DO NOTHING
-	`, 3), declaration.Ref.PackageKey, declaration.Ref.EventName, now)
+		INSERT INTO resource_declarations (flow_path, event_name, admitted_at)
+		VALUES (%s, %s, %s) ON CONFLICT (flow_path, event_name) DO NOTHING
+	`, 3), declaration.Ref.FlowPath, declaration.Ref.EventName, now)
 	if err != nil {
 		return fmt.Errorf("insert resource declaration identity: %w", err)
 	}
 	inserted, _ := result.RowsAffected()
 	if inserted > 0 {
 		if _, err := tx.ExecContext(ctx, o.query(`
-			INSERT INTO resource_heads (package_key, event_name, version_id, revision, updated_at)
+			INSERT INTO resource_heads (flow_path, event_name, version_id, revision, updated_at)
 			VALUES (%s, %s, NULL, 0, %s)
-		`, 3), declaration.Ref.PackageKey, declaration.Ref.EventName, now); err != nil {
+		`, 3), declaration.Ref.FlowPath, declaration.Ref.EventName, now); err != nil {
 			return fmt.Errorf("insert resource head: %w", err)
 		}
 	}
@@ -166,8 +166,8 @@ func (o *Owner) registerDeclaration(ctx context.Context, tx *sql.Tx, bundleHash 
 	err = tx.QueryRowContext(ctx, o.query(`
 		SELECT display_name, owner_flow_id, COALESCE(business_key_field, ''), schema_digest, canonical_schema_bytes
 		FROM resource_bundle_declarations
-		WHERE bundle_hash = %s AND package_key = %s AND event_name = %s
-	`, 3), bundleHash, declaration.Ref.PackageKey, declaration.Ref.EventName).Scan(
+		WHERE bundle_hash = %s AND flow_path = %s AND event_name = %s
+	`, 3), bundleHash, declaration.Ref.FlowPath, declaration.Ref.EventName).Scan(
 		&existing.Name, &existing.OwnerFlowID, &existing.BusinessKey, &existing.SchemaDigest, &schema,
 	)
 	if err == nil {
@@ -183,9 +183,9 @@ func (o *Owner) registerDeclaration(ctx context.Context, tx *sql.Tx, bundleHash 
 	}
 	_, err = tx.ExecContext(ctx, o.query(`
 		INSERT INTO resource_bundle_declarations
-		(bundle_hash, package_key, event_name, display_name, owner_flow_id, business_key_field, schema_digest, canonical_schema_bytes, admitted_at)
+		(bundle_hash, flow_path, event_name, display_name, owner_flow_id, business_key_field, schema_digest, canonical_schema_bytes, admitted_at)
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-	`, 9), bundleHash, declaration.Ref.PackageKey, declaration.Ref.EventName, declaration.Name, declaration.OwnerFlowID,
+	`, 9), bundleHash, declaration.Ref.FlowPath, declaration.Ref.EventName, declaration.Name, declaration.OwnerFlowID,
 		nullableText(declaration.BusinessKey), declaration.SchemaDigest, declaration.CanonicalSchema, now)
 	if err != nil {
 		return fmt.Errorf("insert resource bundle declaration: %w", err)
@@ -199,14 +199,14 @@ func declarationsEqual(a, b runtimedata.Declaration) bool {
 }
 
 func (o *Owner) registerStaticData(ctx context.Context, tx *sql.Tx, item runtimedata.StaticData, now time.Time) error {
-	var bundleHash, label, packageKey, flowID, relativePath, digest, contentType string
+	var bundleHash, label, flowPath, relativePath, digest, contentType string
 	var content []byte
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT bundle_hash, canonical_input_label, package_key, owner_flow_id, relative_path, content_digest, content_type, content_bytes
+		SELECT bundle_hash, canonical_input_label, flow_path, relative_path, content_digest, content_type, content_bytes
 		FROM bundle_static_data WHERE static_id = %s
-	`, 1), item.StaticID).Scan(&bundleHash, &label, &packageKey, &flowID, &relativePath, &digest, &contentType, &content)
+	`, 1), item.StaticID).Scan(&bundleHash, &label, &flowPath, &relativePath, &digest, &contentType, &content)
 	if err == nil {
-		if bundleHash != item.Ref.BundleHash || label != item.Ref.CanonicalInputLabel || packageKey != item.PackageKey || flowID != item.OwnerFlowID ||
+		if bundleHash != item.Ref.BundleHash || label != item.Ref.CanonicalInputLabel || flowPath != item.FlowPath ||
 			relativePath != item.RelativePath || digest != item.ContentDigest || contentType != item.ContentType || !bytes.Equal(content, item.Content) {
 			return fmt.Errorf("static data %s conflicts with immutable admitted bytes", item.StaticID)
 		}
@@ -217,9 +217,9 @@ func (o *Owner) registerStaticData(ctx context.Context, tx *sql.Tx, item runtime
 	}
 	_, err = tx.ExecContext(ctx, o.query(`
 		INSERT INTO bundle_static_data
-		(static_id, bundle_hash, canonical_input_label, package_key, owner_flow_id, relative_path, content_digest, content_type, content_bytes, admitted_at)
-		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-	`, 10), item.StaticID, item.Ref.BundleHash, item.Ref.CanonicalInputLabel, item.PackageKey, item.OwnerFlowID,
+		(static_id, bundle_hash, canonical_input_label, flow_path, relative_path, content_digest, content_type, content_bytes, admitted_at)
+		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+	`, 9), item.StaticID, item.Ref.BundleHash, item.Ref.CanonicalInputLabel, item.FlowPath,
 		item.RelativePath, item.ContentDigest, item.ContentType, item.Content, now)
 	return err
 }
@@ -321,8 +321,8 @@ func (o *Owner) commitSourceEvaluationTx(ctx context.Context, tx *sql.Tx, evalua
 		result.Head.Revision++
 		_, err = tx.ExecContext(ctx, o.query(`
 			UPDATE resource_heads SET version_id = %s, revision = %s, updated_at = %s
-			WHERE package_key = %s AND event_name = %s
-		`, 5), evaluation.compiled.VersionID, result.Head.Revision, result.CompletedAt, evaluation.command.Declaration.PackageKey, evaluation.command.Declaration.EventName)
+			WHERE flow_path = %s AND event_name = %s
+		`, 5), evaluation.compiled.VersionID, result.Head.Revision, result.CompletedAt, evaluation.command.Declaration.FlowPath, evaluation.command.Declaration.EventName)
 		if err != nil {
 			return fmt.Errorf("advance resource head: %w", err)
 		}
@@ -336,9 +336,9 @@ func (o *Owner) commitSourceEvaluationTx(ctx context.Context, tx *sql.Tx, evalua
 		}
 		if _, err := tx.ExecContext(ctx, o.query(`
 				INSERT INTO resource_head_history
-				(package_key, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at)
+				(flow_path, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at)
 				VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-			`, 8), evaluation.command.Declaration.PackageKey, evaluation.command.Declaration.EventName, result.Head.Revision, before,
+			`, 8), evaluation.command.Declaration.FlowPath, evaluation.command.Declaration.EventName, result.Head.Revision, before,
 			evaluation.compiled.VersionID, operationKind, evaluation.command.SourceInvocationID, result.CompletedAt); err != nil {
 			return fmt.Errorf("record resource head history: %w", err)
 		}
@@ -381,17 +381,17 @@ func (o *Owner) persistVersion(ctx context.Context, tx *sql.Tx, compiled runtime
 	}
 	if err := tx.QueryRowContext(ctx, o.query(`
 		SELECT COALESCE(MAX(sequence_alias), 0) + 1 FROM resource_versions
-		WHERE package_key = %s AND event_name = %s
-	`, 2), command.Declaration.PackageKey, command.Declaration.EventName).Scan(&alias); err != nil {
+		WHERE flow_path = %s AND event_name = %s
+	`, 2), command.Declaration.FlowPath, command.Declaration.EventName).Scan(&alias); err != nil {
 		return 0, fmt.Errorf("allocate resource version alias: %w", err)
 	}
 	manifestJSON, _ = json.Marshal(compiled.Manifest)
 	_, err = tx.ExecContext(ctx, o.query(`
 		INSERT INTO resource_versions
-		(version_id, package_key, event_name, sequence_alias, schema_digest, canonical_schema_bytes, business_key_field, content_digest, row_codec, row_count,
+		(version_id, flow_path, event_name, sequence_alias, schema_digest, canonical_schema_bytes, business_key_field, content_digest, row_codec, row_count,
 		 manifest_json, canonical_jsonl, created_at, pruned_at)
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
-	`, 13), compiled.VersionID, command.Declaration.PackageKey, command.Declaration.EventName, alias,
+	`, 13), compiled.VersionID, command.Declaration.FlowPath, command.Declaration.EventName, alias,
 		compiled.Manifest.SchemaDigest, declaration.CanonicalSchema, nullableText(declaration.BusinessKey),
 		compiled.Manifest.ContentDigest, compiled.Manifest.RowCodec, compiled.Manifest.RowCount,
 		manifestJSON, compiled.CanonicalJSONL, now)
@@ -509,10 +509,10 @@ func (o *Owner) insertSourceReceipt(ctx context.Context, tx *sql.Tx, command run
 	}
 	_, err = tx.ExecContext(ctx, o.query(`
 		INSERT INTO resource_source_invocations
-		(source_invocation_id, request_hash, operation, parent_run_id, actor, bundle_hash, package_key, event_name, request_json, evaluation_json, result_json, evidence_json, observed_head_revision, completed_at)
+		(source_invocation_id, request_hash, operation, parent_run_id, actor, bundle_hash, flow_path, event_name, request_json, evaluation_json, result_json, evidence_json, observed_head_revision, completed_at)
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 	`, 14), command.SourceInvocationID, hash, command.Operation, nullableUUID(command.ParentRunID), command.Actor, command.BundleHash,
-		command.Declaration.PackageKey, command.Declaration.EventName, requestJSON, evaluationJSON, resultJSON, evidenceJSON,
+		command.Declaration.FlowPath, command.Declaration.EventName, requestJSON, evaluationJSON, resultJSON, evidenceJSON,
 		evaluation.context.Base.Head.Revision, evaluation.result.CompletedAt)
 	if err != nil {
 		return err
@@ -580,7 +580,7 @@ func nullableText(raw string) any {
 
 func (o *Owner) loadCatalogDeclaration(ctx context.Context, tx *sql.Tx, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.Declaration, error) {
 	var marker int
-	if err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM bundles WHERE bundle_hash = %s`, 1), bundleHash).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM source_artifacts WHERE bundle_hash = %s`, 1), bundleHash).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.Declaration{}, runtimedata.NewDomainError(runtimedata.CodeContractNotFound, "bundle %s is not in the exact selected-store catalog", bundleHash)
 	} else if err != nil {
 		return runtimedata.Declaration{}, err
@@ -590,8 +590,8 @@ func (o *Owner) loadCatalogDeclaration(ctx context.Context, tx *sql.Tx, bundleHa
 	err := tx.QueryRowContext(ctx, o.query(`
 		SELECT display_name, owner_flow_id, COALESCE(business_key_field, ''), schema_digest, canonical_schema_bytes
 		FROM resource_bundle_declarations
-		WHERE bundle_hash = %s AND package_key = %s AND event_name = %s
-	`, 3), bundleHash, ref.PackageKey, ref.EventName).Scan(&declaration.Name, &declaration.OwnerFlowID,
+		WHERE bundle_hash = %s AND flow_path = %s AND event_name = %s
+	`, 3), bundleHash, ref.FlowPath, ref.EventName).Scan(&declaration.Name, &declaration.OwnerFlowID,
 		&declaration.BusinessKey, &declaration.SchemaDigest, &declaration.CanonicalSchema)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.Declaration{}, runtimedata.NewDomainError(runtimedata.CodeContractNotFound, "resource declaration %s is not admitted by bundle %s", ref.Key(), bundleHash)
@@ -606,13 +606,13 @@ func (o *Owner) loadCatalogDeclaration(ctx context.Context, tx *sql.Tx, bundleHa
 }
 
 func (o *Owner) loadHead(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, lock bool) (runtimedata.HeadResult, error) {
-	query := o.query(`SELECT version_id, revision FROM resource_heads WHERE package_key = %s AND event_name = %s`, 2)
+	query := o.query(`SELECT version_id, revision FROM resource_heads WHERE flow_path = %s AND event_name = %s`, 2)
 	if lock && o.dialect == dialectPostgres {
 		query += " FOR UPDATE"
 	}
 	var version sql.NullString
 	var revision uint64
-	if err := tx.QueryRowContext(ctx, query, ref.PackageKey, ref.EventName).Scan(&version, &revision); err != nil {
+	if err := tx.QueryRowContext(ctx, query, ref.FlowPath, ref.EventName).Scan(&version, &revision); err != nil {
 		return runtimedata.HeadResult{}, err
 	}
 	head := runtimedata.AbsentHead()
@@ -673,7 +673,7 @@ func (o *Owner) Show(ctx context.Context, bundleHash string, ref runtimedata.Dec
 			}
 		} else {
 			var marker int
-			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_declarations WHERE package_key = %s AND event_name = %s`, 2), ref.PackageKey, ref.EventName).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_declarations WHERE flow_path = %s AND event_name = %s`, 2), ref.FlowPath, ref.EventName).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
 				return runtimedata.NewDomainError(runtimedata.CodeDeclarationMissing, "data declaration %s does not exist", ref.Key())
 			} else if err != nil {
 				return err
@@ -703,19 +703,19 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 	var summaries []runtimedata.DeclarationSummary
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
-			SELECT d.package_key, d.event_name, d.display_name, d.schema_digest, d.canonical_schema_bytes,
+			SELECT d.flow_path, d.event_name, d.display_name, d.schema_digest, d.canonical_schema_bytes,
 			       h.version_id, h.revision,
 			       (SELECT COUNT(*) FROM resource_versions v
-			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name),
+			        WHERE v.flow_path = d.flow_path AND v.event_name = d.event_name),
 			       (SELECT COUNT(*) FROM resource_versions v
-			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.pruned_at IS NULL),
+			        WHERE v.flow_path = d.flow_path AND v.event_name = d.event_name AND v.pruned_at IS NULL),
 			       (SELECT COALESCE(SUM(LENGTH(v.canonical_jsonl)), 0) FROM resource_versions v
-			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.pruned_at IS NULL),
+			        WHERE v.flow_path = d.flow_path AND v.event_name = d.event_name AND v.pruned_at IS NULL),
 			       (SELECT COUNT(*) FROM resource_versions v
-			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.version_id = h.version_id)
+			        WHERE v.flow_path = d.flow_path AND v.event_name = d.event_name AND v.version_id = h.version_id)
 			FROM resource_bundle_declarations d
-			LEFT JOIN resource_heads h ON h.package_key = d.package_key AND h.event_name = d.event_name
-			WHERE d.bundle_hash = %s ORDER BY d.package_key, d.event_name
+			LEFT JOIN resource_heads h ON h.flow_path = d.flow_path AND h.event_name = d.event_name
+			WHERE d.bundle_hash = %s ORDER BY d.flow_path, d.event_name
 		`, 1), bundleHash)
 		if err != nil {
 			return err
@@ -727,7 +727,7 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 			var headVersion sql.NullString
 			var revision sql.NullInt64
 			var versionCount, materializedCount, materializedBytes, headMatchCount int64
-			if err := rows.Scan(&summary.Declaration.PackageKey, &summary.Declaration.EventName, &summary.LocalName,
+			if err := rows.Scan(&summary.Declaration.FlowPath, &summary.Declaration.EventName, &summary.LocalName,
 				&summary.SchemaDigest, &canonicalSchema, &headVersion, &revision, &versionCount,
 				&materializedCount, &materializedBytes, &headMatchCount); err != nil {
 				return err
@@ -773,7 +773,7 @@ func validateReadPageLimit(limit int) error {
 
 func (o *Owner) requireDeclarationExistsTx(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef) error {
 	var marker int
-	err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM resource_declarations WHERE package_key = %s AND event_name = %s`, 2), ref.PackageKey, ref.EventName).Scan(&marker)
+	err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM resource_declarations WHERE flow_path = %s AND event_name = %s`, 2), ref.FlowPath, ref.EventName).Scan(&marker)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.NewDomainError(runtimedata.CodeDeclarationMissing, "data declaration %s does not exist", ref.Key())
 	}
@@ -839,7 +839,7 @@ func (o *Owner) ListVersionSummaries(ctx context.Context, ref runtimedata.Declar
 		}
 		if afterSequence != 0 {
 			var marker int
-			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_versions WHERE package_key = %s AND event_name = %s AND sequence_alias = %s`, 3), ref.PackageKey, ref.EventName, afterSequence).Scan(&marker); err != nil {
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_versions WHERE flow_path = %s AND event_name = %s AND sequence_alias = %s`, 3), ref.FlowPath, ref.EventName, afterSequence).Scan(&marker); err != nil {
 				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version cursor anchor is absent for declaration %s", ref.Key())
 			}
 		}
@@ -848,9 +848,9 @@ func (o *Owner) ListVersionSummaries(ctx context.Context, ref runtimedata.Declar
 			       v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
 			       (SELECT COUNT(*) FROM resource_version_provenance p WHERE p.version_id = v.version_id)
 			FROM resource_versions v
-			WHERE v.package_key = %s AND v.event_name = %s AND v.sequence_alias > %s
+			WHERE v.flow_path = %s AND v.event_name = %s AND v.sequence_alias > %s
 			ORDER BY v.sequence_alias LIMIT %s
-		`, 4), ref.PackageKey, ref.EventName, afterSequence, limit)
+		`, 4), ref.FlowPath, ref.EventName, afterSequence, limit)
 		if err != nil {
 			return err
 		}
@@ -899,14 +899,14 @@ func (o *Owner) resolveVersionSummaryTx(ctx context.Context, tx *sql.Tx, ref run
 	var args []any
 	switch selector.Kind {
 	case "head":
-		where = `v.package_key = %s AND v.event_name = %s AND v.version_id = (SELECT h.version_id FROM resource_heads h WHERE h.package_key = %s AND h.event_name = %s)`
-		args = []any{ref.PackageKey, ref.EventName, ref.PackageKey, ref.EventName}
+		where = `v.flow_path = %s AND v.event_name = %s AND v.version_id = (SELECT h.version_id FROM resource_heads h WHERE h.flow_path = %s AND h.event_name = %s)`
+		args = []any{ref.FlowPath, ref.EventName, ref.FlowPath, ref.EventName}
 	case "version":
-		where = `v.package_key = %s AND v.event_name = %s AND v.version_id = %s`
-		args = []any{ref.PackageKey, ref.EventName, selector.VersionID}
+		where = `v.flow_path = %s AND v.event_name = %s AND v.version_id = %s`
+		args = []any{ref.FlowPath, ref.EventName, selector.VersionID}
 	case "alias":
-		where = `v.package_key = %s AND v.event_name = %s AND v.sequence_alias = %s`
-		args = []any{ref.PackageKey, ref.EventName, selector.SequenceAlias}
+		where = `v.flow_path = %s AND v.event_name = %s AND v.sequence_alias = %s`
+		args = []any{ref.FlowPath, ref.EventName, selector.SequenceAlias}
 	}
 	query := `SELECT v.version_id, v.sequence_alias, v.manifest_json, COALESCE(v.business_key_field, ''),
 	                 v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
@@ -1020,14 +1020,14 @@ func (o *Owner) ListPins(ctx context.Context, versionID runtimedata.VersionID, a
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var packageKey, eventName string
 		var schemaDigest runtimedata.SchemaDigest
-		if err := tx.QueryRowContext(txctx, o.query(`SELECT package_key, event_name, schema_digest FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&packageKey, &eventName, &schemaDigest); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(txctx, o.query(`SELECT flow_path, event_name, schema_digest FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&packageKey, &eventName, &schemaDigest); errors.Is(err, sql.ErrNoRows) {
 			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist", versionID)
 		} else if err != nil {
 			return err
 		}
-		ref := runtimedata.DeclarationRef{PackageKey: packageKey, EventName: eventName}
+		ref := runtimedata.DeclarationRef{FlowPath: packageKey, EventName: eventName}
 		query := `
-			SELECT p.run_id, r.status, p.package_key, p.event_name, p.schema_digest, p.version_id, p.selection
+			SELECT p.run_id, r.status, p.flow_path, p.event_name, p.schema_digest, p.version_id, p.selection
 			FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
 			WHERE p.version_id = %s`
 		args := []any{versionID}
@@ -1045,7 +1045,7 @@ func (o *Owner) ListPins(ctx context.Context, versionID runtimedata.VersionID, a
 		last := afterRunID
 		for rows.Next() {
 			var pin runtimedata.Pin
-			if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.PackageKey, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
+			if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.FlowPath, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
 				return err
 			}
 			if err := pin.Validate(); err != nil || pin.Declaration != ref || pin.SchemaDigest != schemaDigest || pin.VersionID != versionID || pin.RunID <= last {
@@ -1076,16 +1076,16 @@ func (o *Owner) ListHeadHistory(ctx context.Context, ref runtimedata.Declaration
 		}
 		if afterRevision != 0 {
 			var marker int
-			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_head_history WHERE package_key = %s AND event_name = %s AND revision = %s`, 3), ref.PackageKey, ref.EventName, afterRevision).Scan(&marker); err != nil {
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_head_history WHERE flow_path = %s AND event_name = %s AND revision = %s`, 3), ref.FlowPath, ref.EventName, afterRevision).Scan(&marker); err != nil {
 				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head-history cursor anchor is absent for declaration %s", ref.Key())
 			}
 		}
 		rows, err := tx.QueryContext(txctx, o.query(`
 			SELECT revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at
 			FROM resource_head_history
-			WHERE package_key = %s AND event_name = %s AND revision > %s
+			WHERE flow_path = %s AND event_name = %s AND revision > %s
 			ORDER BY revision LIMIT %s
-		`, 4), ref.PackageKey, ref.EventName, afterRevision, limit)
+		`, 4), ref.FlowPath, ref.EventName, afterRevision, limit)
 		if err != nil {
 			return err
 		}
@@ -1214,8 +1214,8 @@ func (o *Owner) LoadHeadHistory(ctx context.Context, ref runtimedata.Declaration
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
 			SELECT revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at
-			FROM resource_head_history WHERE package_key = %s AND event_name = %s ORDER BY revision
-		`, 2), ref.PackageKey, ref.EventName)
+			FROM resource_head_history WHERE flow_path = %s AND event_name = %s ORDER BY revision
+		`, 2), ref.FlowPath, ref.EventName)
 		if err != nil {
 			return err
 		}
@@ -1274,8 +1274,8 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 			var versionID runtimedata.VersionID
 			err := tx.QueryRowContext(txctx, o.query(`
 				SELECT schema_digest, version_id FROM resource_version_pins
-				WHERE run_id = %s AND package_key = %s AND event_name = %s
-			`, 3), runID, ref.PackageKey, ref.EventName).Scan(&schemaDigest, &versionID)
+				WHERE run_id = %s AND flow_path = %s AND event_name = %s
+			`, 3), runID, ref.FlowPath, ref.EventName).Scan(&schemaDigest, &versionID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return runtimedata.NewDomainError(runtimedata.CodeAccessDenied, "run %s has no exact pin for declaration %s", runID, ref.Key())
 			}
@@ -1313,8 +1313,8 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 func (o *Owner) loadVersions(ctx context.Context, tx *sql.Tx, declaration runtimedata.Declaration) ([]runtimedata.Version, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
 		SELECT version_id, sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl, pruned_at
-		FROM resource_versions WHERE package_key = %s AND event_name = %s ORDER BY sequence_alias
-	`, 2), declaration.Ref.PackageKey, declaration.Ref.EventName)
+		FROM resource_versions WHERE flow_path = %s AND event_name = %s ORDER BY sequence_alias
+	`, 2), declaration.Ref.FlowPath, declaration.Ref.EventName)
 	if err != nil {
 		return nil, err
 	}
@@ -1448,12 +1448,12 @@ func (o *Owner) loadStoredVersionPayload(ctx context.Context, tx *sql.Tx, ref ru
 	version.VersionID = versionID
 	query := o.query(`
 		SELECT sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl, pruned_at
-		FROM resource_versions WHERE version_id = %s AND package_key = %s AND event_name = %s
+		FROM resource_versions WHERE version_id = %s AND flow_path = %s AND event_name = %s
 	`, 3)
 	if o.dialect == dialectPostgres {
 		query += " FOR UPDATE"
 	}
-	err := tx.QueryRowContext(ctx, query, versionID, ref.PackageKey, ref.EventName).Scan(
+	err := tx.QueryRowContext(ctx, query, versionID, ref.FlowPath, ref.EventName).Scan(
 		&version.SequenceAlias, &manifestJSON, &version.BusinessKey, &version.CanonicalSchema, &version.CanonicalJSONL, &pruned,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1538,8 +1538,8 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 		}
 		var marker int
 		err = tx.QueryRowContext(txctx, o.query(`
-			SELECT 1 FROM resource_declarations WHERE package_key = %s AND event_name = %s
-		`, 2), command.Declaration.PackageKey, command.Declaration.EventName).Scan(&marker)
+			SELECT 1 FROM resource_declarations WHERE flow_path = %s AND event_name = %s
+		`, 2), command.Declaration.FlowPath, command.Declaration.EventName).Scan(&marker)
 		if errors.Is(err, sql.ErrNoRows) {
 			result.Outcome = "rejected"
 			page := pagePruneDefects([]runtimedata.PruneDefect{{Code: "declaration_not_found", Message: "data declaration does not exist"}})
@@ -1626,7 +1626,7 @@ func (o *Owner) Prune(ctx context.Context, command runtimedata.PruneCommand) (ru
 
 func (o *Owner) loadPins(ctx context.Context, tx *sql.Tx, versionID runtimedata.VersionID) ([]runtimedata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT p.run_id, r.status, p.package_key, p.event_name, p.schema_digest, p.version_id, p.selection
+		SELECT p.run_id, r.status, p.flow_path, p.event_name, p.schema_digest, p.version_id, p.selection
 		FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
 		WHERE p.version_id = %s ORDER BY p.run_id
 	`, 1), versionID)
@@ -1637,7 +1637,7 @@ func (o *Owner) loadPins(ctx context.Context, tx *sql.Tx, versionID runtimedata.
 	var pins []runtimedata.Pin
 	for rows.Next() {
 		var pin runtimedata.Pin
-		if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.PackageKey, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
+		if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.FlowPath, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
 			return nil, err
 		}
 		pins = append(pins, pin)
@@ -1688,18 +1688,18 @@ func (o *Owner) insertPruneReceipt(ctx context.Context, tx *sql.Tx, command runt
 	resultJSON, _ := json.Marshal(result)
 	if _, err := tx.ExecContext(ctx, o.query(`
 		INSERT INTO resource_prune_invocations
-		(prune_invocation_id, request_hash, actor, package_key, event_name, version_id, request_json, result_json, completed_at)
+		(prune_invocation_id, request_hash, actor, flow_path, event_name, version_id, request_json, result_json, completed_at)
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-	`, 9), command.PruneInvocationID, hash, command.Actor, command.Declaration.PackageKey, command.Declaration.EventName,
+	`, 9), command.PruneInvocationID, hash, command.Actor, command.Declaration.FlowPath, command.Declaration.EventName,
 		command.VersionID, requestJSON, resultJSON, result.CompletedAt); err != nil {
 		return err
 	}
 	for index, pin := range pins {
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_prune_pin_evidence
-			(prune_invocation_id, ordinal, run_id, run_state, package_key, event_name, schema_digest, version_id, selection)
+			(prune_invocation_id, ordinal, run_id, run_state, flow_path, event_name, schema_digest, version_id, selection)
 			VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-		`, 9), command.PruneInvocationID, index+1, pin.RunID, pin.RunState, pin.Declaration.PackageKey,
+		`, 9), command.PruneInvocationID, index+1, pin.RunID, pin.RunState, pin.Declaration.FlowPath,
 			pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection); err != nil {
 			return fmt.Errorf("store prune pin evidence: %w", err)
 		}
@@ -1719,7 +1719,7 @@ func (o *Owner) insertPruneReceipt(ctx context.Context, tx *sql.Tx, command runt
 
 func (o *Owner) loadPrunePinEvidence(ctx context.Context, tx *sql.Tx, id string) ([]runtimedata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT ordinal, run_id, run_state, package_key, event_name, schema_digest, version_id, selection
+		SELECT ordinal, run_id, run_state, flow_path, event_name, schema_digest, version_id, selection
 		FROM resource_prune_pin_evidence WHERE prune_invocation_id = %s ORDER BY ordinal
 	`, 1), id)
 	if err != nil {
@@ -1730,7 +1730,7 @@ func (o *Owner) loadPrunePinEvidence(ctx context.Context, tx *sql.Tx, id string)
 	for rows.Next() {
 		var ordinal int
 		var pin runtimedata.Pin
-		if err := rows.Scan(&ordinal, &pin.RunID, &pin.RunState, &pin.Declaration.PackageKey, &pin.Declaration.EventName,
+		if err := rows.Scan(&ordinal, &pin.RunID, &pin.RunState, &pin.Declaration.FlowPath, &pin.Declaration.EventName,
 			&pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
 			return nil, err
 		}

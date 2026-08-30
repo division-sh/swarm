@@ -87,13 +87,13 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	evt := eventtest.ExistingRunRootIngress(

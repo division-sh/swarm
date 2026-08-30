@@ -10,7 +10,7 @@ import (
 
 func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "score.dimension_complete"}}},

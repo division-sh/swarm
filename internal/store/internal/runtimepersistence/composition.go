@@ -27,16 +27,15 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storebudgetspend "github.com/division-sh/swarm/internal/store/internal/budgetspend"
-	storebundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	storepreservation "github.com/division-sh/swarm/internal/store/internal/preservationpersistence"
 	storeroutingrules "github.com/division-sh/swarm/internal/store/internal/routingrules"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
+	storesourceartifact "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
@@ -99,11 +98,11 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.channelOnboardingPostgresOwner = channelOnboarding
-	bundleCatalog, err := storebundlecatalog.NewPostgres(backend, store.requireCurrentSchema)
+	sourceArtifacts, err := storesourceartifact.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
-	store.postgres = bundleCatalog
+	store.sourceArtifactOwner = sourceArtifacts
 	durableData, err := storedurabledata.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -144,11 +143,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.mailboxPostgresOwner = mailbox
-	bundleDeleteOwner, err := storeadmin.NewBundleDeletePostgres(backend, store.requireCurrentSchema)
-	if err != nil {
-		return nil, err
-	}
-	store.bundleDeletePostgresOwner = bundleDeleteOwner
 	destructiveResetOwner, err := storeadmin.NewDestructiveResetPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -269,12 +263,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := eventOwner.BindRunFork(runForkOwner); err != nil {
 		return nil, err
 	}
-	preservationOwner, err := storepreservation.NewPostgres(backend, store.requireCurrentSchema, deliveryOwner, pipelineOwner, runLifecycle, runForkOwner)
-	if err != nil {
-		return nil, err
-	}
-	store.preservationPostgresOwner = preservationOwner
-	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, bundleDeleteOwner, destructiveResetOwner)
+	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, destructiveResetOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -360,11 +349,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.channelOnboardingSQLiteOwner = channelOnboarding
-	bundleCatalog, err := storebundlecatalog.NewSQLite(backend, store.requireCurrentSchema)
+	sourceArtifacts, err := storesourceartifact.NewSQLite(backend, store.requireCurrentSchema, store.now)
 	if err != nil {
 		return nil, err
 	}
-	store.sQLite = bundleCatalog
+	store.sourceArtifactOwner = sourceArtifacts
 	durableData, err := storedurabledata.NewSQLite(backend, store.requireCurrentSchema, store.now)
 	if err != nil {
 		return nil, err

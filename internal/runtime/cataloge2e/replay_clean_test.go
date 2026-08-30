@@ -77,7 +77,6 @@ type catalogExecutionTranscript struct {
 	version            string
 	platformSpecDigest string
 	bundleHash         string
-	bundleSource       string
 	fixtureName        string
 	runID              string
 	runtimeStart       bool
@@ -115,7 +114,7 @@ type catalogReceiptOutcome struct {
 func buildCatalogExecutionTranscript(t testing.TB, fixture testcatalog.Fixture) *catalogExecutionTranscript {
 	t.Helper()
 	var expected catalogExpectedDocument
-	loadYAML(t, filepath.Join(fixture.Root, "expected.yaml"), &expected)
+	loadYAML(t, catalogExpectedPath(fixture.Root), &expected)
 	if expected.Trigger.Boot || strings.TrimSpace(expected.Expected.BootResult) != "" {
 		t.Fatalf("boot-only fixture %s cannot construct replay-clean transcript", fixture.Name)
 	}
@@ -158,7 +157,6 @@ func buildCatalogExecutionTranscript(t testing.TB, fixture testcatalog.Fixture) 
 	transcript.version = catalogReplayTranscriptVersion
 	transcript.platformSpecDigest = platformSpecDigest
 	transcript.bundleHash = bundleHash
-	transcript.bundleSource = "catalog-fixture:" + fixture.RelativePath
 	baseTime := time.Now().UTC().Truncate(time.Microsecond)
 	stepIndex := 0
 	for groupIndex := range transcript.groups {
@@ -222,7 +220,6 @@ func catalogTranscriptBytes(t testing.TB, transcript *catalogExecutionTranscript
 		Version            string                  `json:"version"`
 		PlatformSpecDigest string                  `json:"platform_spec_digest"`
 		BundleHash         string                  `json:"bundle_hash"`
-		BundleSource       string                  `json:"bundle_source"`
 		FixtureName        string                  `json:"fixture_name"`
 		RunID              string                  `json:"run_id"`
 		RuntimeStart       bool                    `json:"runtime_start"`
@@ -231,7 +228,7 @@ func catalogTranscriptBytes(t testing.TB, transcript *catalogExecutionTranscript
 		AgentFixtures      agentFixtureDoc         `json:"agent_fixtures"`
 	}{
 		Version: transcript.version, PlatformSpecDigest: transcript.platformSpecDigest,
-		BundleHash: transcript.bundleHash, BundleSource: transcript.bundleSource,
+		BundleHash:  transcript.bundleHash,
 		FixtureName: transcript.fixtureName, RunID: transcript.runID, RuntimeStart: transcript.runtimeStart,
 		Expected: transcript.expected, AgentFixtures: transcript.agentFixtures,
 	}
@@ -264,12 +261,12 @@ func catalogReplayPlatformSpecDigest(repoRoot string) (string, error) {
 
 func requireCatalogTranscriptIdentity(t testing.TB, fixtureRoot string, bundle *runtimecontracts.WorkflowContractBundle, transcript *catalogExecutionTranscript) {
 	t.Helper()
-	if err := validateCatalogTranscriptIdentity(repoRootFromCatalogE2E(t), fixtureRoot, bundle, transcript); err != nil {
+	if err := validateCatalogTranscriptIdentity(repoRootFromCatalogE2E(t), bundle, transcript); err != nil {
 		t.Fatalf("catalog replay transcript admission: %v", err)
 	}
 }
 
-func validateCatalogTranscriptIdentity(repoRoot, fixtureRoot string, bundle *runtimecontracts.WorkflowContractBundle, transcript *catalogExecutionTranscript) error {
+func validateCatalogTranscriptIdentity(repoRoot string, bundle *runtimecontracts.WorkflowContractBundle, transcript *catalogExecutionTranscript) error {
 	if transcript == nil {
 		return fmt.Errorf("transcript is required")
 	}
@@ -281,24 +278,17 @@ func validateCatalogTranscriptIdentity(repoRoot, fixtureRoot string, bundle *run
 	if err != nil {
 		return fmt.Errorf("read bundle identity: %w", err)
 	}
-	relative, err := filepath.Rel(repoRoot, fixtureRoot)
-	if err != nil {
-		return fmt.Errorf("resolve bundle source identity: %w", err)
-	}
-	wantSource := "catalog-fixture:" + filepath.ToSlash(relative)
 	if err := replayconformance.ValidateIdentity(
 		replayconformance.Identity{
 			Version:            transcript.version,
 			PlatformSpecDigest: transcript.platformSpecDigest,
 			BundleHash:         transcript.bundleHash,
-			BundleSource:       transcript.bundleSource,
 			RunID:              transcript.runID,
 		},
 		replayconformance.Identity{
 			Version:            replayconformance.TranscriptVersion,
 			PlatformSpecDigest: wantSpec,
 			BundleHash:         wantBundle,
-			BundleSource:       wantSource,
 			RunID:              catalogRuntimeRunID,
 		},
 	); err != nil {

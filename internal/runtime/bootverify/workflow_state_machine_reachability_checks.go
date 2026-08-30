@@ -21,7 +21,7 @@ func (c *checkerContext) stateReachability() []Finding {
 	for _, entry := range lifecycleFlowSchemas(c.source) {
 		flowID := strings.TrimSpace(entry.flowID)
 		usesStages := flowUsesAuthoredStages(c.source, flowID)
-		if flowID == "" && !usesStages {
+		if flowID == "." && !usesStages {
 			continue
 		}
 		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))

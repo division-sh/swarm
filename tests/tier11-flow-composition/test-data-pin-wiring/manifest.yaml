@@ -1,0 +1,4 @@
+name: test-data-pin-wiring
+version: 1.0.0
+description: Parent writes data pin, child reads it and writes result back.
+platform_version: ">=0.7.0 <0.8.0"

@@ -119,7 +119,7 @@ func transitionOwningFlowID(transition runtimecontracts.WorkflowTransitionContra
 		return flowID
 	}
 	if transition.ExecutableNode.Valid() {
-		return transition.ExecutableNode.FlowID()
+		return transition.ExecutableNode.FlowPath()
 	}
 	return ""
 }
@@ -256,7 +256,7 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 		}
 		if handlers := c.source.ExecutableNodeEventHandlers(requirement.owner); len(handlers) > 0 {
 			matched := false
-			for _, endpoint := range census.MatchingConsumers(requirement.owner.FlowID(), requirement.eventType) {
+			for _, endpoint := range census.MatchingConsumers(requirement.owner.FlowPath(), requirement.eventType) {
 				if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.Node.Equal(requirement.owner) {
 					matched = true
 					break
@@ -286,14 +286,14 @@ func runtimeHandledEventRequirements(source semanticview.Source) []runtimeHandle
 		return nil
 	}
 	out := make([]runtimeHandledEventRequirement, 0)
-	appendEntries := func(packageKey, flowID string, entries map[string]runtimecontracts.EventCatalogEntry) {
+	appendEntries := func(flowID string, entries map[string]runtimecontracts.EventCatalogEntry) {
 		for eventType, entry := range entries {
 			eventType = strings.TrimSpace(eventType)
 			handling := strings.TrimSpace(entry.RuntimeHandling)
 			if eventType == "" || !requiresOwningNode(handling) {
 				continue
 			}
-			owner, _ := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, flowID, entry.OwningNode)
+			owner, _ := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, entry.OwningNode)
 			out = append(out, runtimeHandledEventRequirement{
 				eventType: eventType,
 				handling:  handling,
@@ -301,11 +301,8 @@ func runtimeHandledEventRequirements(source semanticview.Source) []runtimeHandle
 			})
 		}
 	}
-	for _, scope := range source.ProjectScopes() {
-		appendEntries(scope.Key, scope.OwningFlowID, scope.Events)
-	}
 	for _, scope := range source.FlowScopes() {
-		appendEntries(scope.PackageKey, scope.ID, scope.Events)
+		appendEntries(scope.ID, scope.Events)
 	}
 	return out
 }
@@ -348,13 +345,6 @@ func requiresOwningNode(runtimeHandling string) bool {
 func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
 	if source == nil {
 		return false
-	}
-	for _, scope := range source.ProjectScopes() {
-		for _, entry := range scope.Events {
-			if strings.TrimSpace(entry.OwningNode) != "" {
-				return true
-			}
-		}
 	}
 	for _, scope := range source.FlowScopes() {
 		for _, entry := range scope.Events {

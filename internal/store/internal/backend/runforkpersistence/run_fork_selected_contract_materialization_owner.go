@@ -31,13 +31,13 @@ type runForkSelectedContractMaterializationPort struct {
 	lockSourceStatus    func(context.Context, *sql.Tx, string) (string, error)
 	plan                func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	deliveries          *storedelivery.Adapter
-	loadSource          func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
-	activeForkSource    func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
-	admitProfile        func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.BundleSourceFact) (scenarioexecution.Profile, bool, error)
+	loadSource          func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
+	activeForkSource    func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
+	admitProfile        func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.SourceArtifactFact) (scenarioexecution.Profile, bool, error)
 	loadSnapshot        runForkLifecycleSnapshotLoader
 	requireProfile      func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
 	durableData         *storedurabledata.Owner
-	insertRun           func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, string, int, time.Time, runtimecorrelation.BundleSourceFact) error
+	insertRun           func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, string, int, time.Time, runtimecorrelation.SourceArtifactFact) error
 	ensureProfile       func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
 	materializeEntity   func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, activeRunSourceOwnerFunc, *runforkrevision.Effects, string, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
 	materializeBarriers runForkFanOutBarrierOwner
@@ -95,18 +95,18 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := ensureRunForkActivationNoForkReplayState(txctx, tx, port.deliveries, forkRunID); err != nil {
 			return err
 		}
-		source := runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		source := runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.loadSource(ctx, tx, runID)
 		})
-		identity, err := resolveRunForkBundleInsertIdentity(txctx, source, plan.SourceRunID, req.BundleSourceFact)
+		identity, err := resolveRunForkBundleInsertIdentity(txctx, source, plan.SourceRunID, req.SourceArtifactFact)
 		if err != nil {
 			return fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 		}
-		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.BundleSourceFact.BundleHash(), req.FanOutPlanRefs)
+		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.FanOutPlanRefs)
 		if err != nil {
 			return err
 		}
-		scenarioProfile, sourceProfiled, err := port.admitProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
+		scenarioProfile, sourceProfiled, err := port.admitProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.SourceArtifactFact)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err := port.requireProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 				return err
 			}
-			pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
+			pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 			if err != nil {
 				return err
 			}
@@ -156,16 +156,16 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		now := port.now().UTC()
-		txctx = runtimecorrelation.WithBundleSourceFact(txctx, identity.BundleSourceFact)
-		forkScope, err := runtimeauthoractivity.BundleScopeForTarget(txctx, identity.BundleSourceFact.BundleHash())
+		txctx = runtimecorrelation.WithSourceArtifactFact(txctx, identity.SourceArtifactFact)
+		forkScope, err := runtimeauthoractivity.BundleScopeForTarget(txctx, identity.SourceArtifactFact.BundleHash())
 		if err != nil {
 			return fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 		}
 		txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-		if err := port.insertRun(txctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.BundleSourceFact); err != nil {
+		if err := port.insertRun(txctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
 			return fmt.Errorf("insert selected-contract fork run: %w", err)
 		}
-		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, false, now)
+		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 		}
 		forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
-		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.activeForkSource(ctx, tx, runID)
 		})
 		for _, entity := range plan.Entities {
@@ -258,10 +258,10 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
 		},
 		deliveries: postgresDeliveryAdapter,
-		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return s.RunLifecyclePostgresOwner.RequirePresentSourceTx(ctx, tx, runID)
 		},
-		activeForkSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		activeForkSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 		},
 		admitProfile: admitRunForkScenarioProfile,
@@ -315,10 +315,10 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
 		},
 		deliveries: sqliteDeliveryAdapter,
-		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		loadSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(ctx, tx, runID)
 		},
-		activeForkSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		activeForkSource: func(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return s.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
 		},
 		admitProfile: admitSQLiteRunForkScenarioProfile,

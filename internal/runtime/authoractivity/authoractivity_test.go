@@ -103,7 +103,7 @@ func TestRenderModesKeepHumanProseSeparateFromTypedNDJSON(t *testing.T) {
 		OccurrenceID: uuid.NewString(), Sequence: 1, Kind: KindDeliveryLifecycle, Version: Version,
 		Transition: "failed", SourceOwner: "event_deliveries", SourceIdentity: "delivery-a", DedupKey: "delivery-a:failed",
 		OccurredAt: now, RunID: "11111111-1111-1111-1111-111111111111",
-		Scope:      BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64)),
+		Scope:      BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v2:sha256:"+strings.Repeat("a", 64)),
 		Projection: Projection{SubjectType: "agent", SubjectID: "normalizer", EventType: "message.normalized"}, Failure: failure,
 	}}
 	var plain bytes.Buffer
@@ -139,7 +139,7 @@ func TestAgentLifecycleFailureWithoutEnvelopeStillRendersDiagnosticRoute(t *test
 		OccurrenceID: uuid.NewString(), Sequence: 1, Kind: KindAgentLifecycle, Version: Version,
 		Transition: "failed", SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: "transition-a",
 		DedupKey: "agent-transition:transition-a", OccurredAt: now, RunID: "11111111-1111-1111-1111-111111111111",
-		Scope:   BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64)),
+		Scope:   BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v2:sha256:"+strings.Repeat("a", 64)),
 		AgentID: "normalizer", Projection: Projection{SubjectType: "agent", SubjectID: "normalizer", NextPhase: "failed"},
 	}
 	var plain bytes.Buffer
@@ -191,7 +191,7 @@ func testScopeForContract(contract kindContract, transition string) Scope {
 	case ScopeGlobal:
 		return Scope{Kind: ScopeGlobal}
 	default:
-		return BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v1:sha256:"+strings.Repeat("a", 64))
+		return BundleScope("22222222-2222-2222-2222-222222222222", "bundle-v2:sha256:"+strings.Repeat("a", 64))
 	}
 }
 

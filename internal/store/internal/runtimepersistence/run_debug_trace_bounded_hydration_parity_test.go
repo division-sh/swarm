@@ -11,8 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
@@ -99,7 +99,7 @@ func TestRunDebugTraceProjectsPersistedHandlerRuleSelectionWithoutContractLookup
 			if err != nil {
 				t.Fatal(err)
 			}
-			ref, err := contractelementidentity.ParseContractElementRef("flows/scout", "00000000-0000-4000-8000-000000000201")
+			ref, err := runtimeidentity.AdmitDeclarationIdentity("scout", "handler_rule", `nodes["scout"].handlers["trace.rule_selected"].rules[0]`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,12 +120,16 @@ func TestRunDebugTraceProjectsPersistedHandlerRuleSelectionWithoutContractLookup
 			}
 			projection := rows[0].HandlerRuleSelection
 			if projection.Context != handlerselection.ContextRules || projection.Disposition != handlerselection.DispositionSelected ||
-				projection.PackageCoordinate != "flows/scout" || projection.ElementID != ref.ElementID().String() || projection.DisplayLabel != "renamable-label" {
+				projection.FlowPath != ref.Flow().String() || projection.Family != ref.Family() || projection.SemanticPath != ref.SemanticPath() || projection.DisplayLabel != "renamable-label" {
 				t.Fatalf("trace selection = %#v", projection)
 			}
 			encoded, err := json.Marshal(rows[0])
-			if err != nil || !strings.Contains(string(encoded), `"handler_rule_selection"`) || !strings.Contains(string(encoded), ref.ElementID().String()) {
+			if err != nil || !strings.Contains(string(encoded), `"handler_rule_selection"`) {
 				t.Fatalf("public JSON = %s, %v", encoded, err)
+			}
+			var roundTrip operatorread.RunDebugTraceRow
+			if err := json.Unmarshal(encoded, &roundTrip); err != nil || roundTrip.HandlerRuleSelection == nil || roundTrip.HandlerRuleSelection.SemanticPath != ref.SemanticPath() {
+				t.Fatalf("public JSON round trip = %#v, %v", roundTrip.HandlerRuleSelection, err)
 			}
 		})
 	}

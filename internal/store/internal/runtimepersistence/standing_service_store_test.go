@@ -81,13 +81,14 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				workflowStore = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
 
+			artifact := storeTestSourceArtifact("standing-startup-order-" + backend)
 			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-startup-order"),
-				PackageKey: "project", FlowID: "signal-startup-order",
+				ServiceID:  runtimeflowidentity.StandingServiceID("project/signal-startup-order"),
+				FlowPath:   "project/signal-startup-order",
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64)),
+				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 			}
-			seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+			seedStoreTestPersistedArtifact(t, db, artifact)
 			created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 			if err != nil || len(created) != 1 {
 				t.Fatalf("seed standing service = %#v, %v", created, err)
@@ -166,17 +167,20 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	packageKey := "project"
 	flowID := "ingress"
-	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
+	flowPath := packageKey + "/" + flowID
+	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	instanceID := uuid.NewString()
 	entityID := uuid.NewString()
-	firstHash := "bundle-v1:sha256:" + strings.Repeat("1", 64)
-	secondHash := "bundle-v1:sha256:" + strings.Repeat("2", 64)
+	firstArtifact := storeTestSourceArtifact("sqlite-standing-first")
+	secondArtifact := storeTestSourceArtifact("sqlite-standing-second")
+	firstHash := firstArtifact.BundleHash()
+	secondHash := secondArtifact.BundleHash()
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: packageKey, FlowID: flowID,
+		ServiceID: serviceID, FlowPath: flowPath,
 		InstanceID: instanceID, EntityID: entityID,
-		Source: mustStoreTestPersistedBundleSourceFact(firstHash),
+		Source: mustStoreTestSourceArtifactFact(firstHash),
 	}
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), firstHash)
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), firstArtifact)
 
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
@@ -203,8 +207,8 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 	if _, err := store.backend.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, stopped_at, updated_at) VALUES (?, 'stopped', 'server_restart_abandon', 'swarm.serve.abandon_active_runs', ?, ?)`, created.RunID, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed restart-abandon provenance: %v", err)
 	}
-	candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), secondHash)
+	candidate.Source = mustStoreTestSourceArtifactFact(secondHash)
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), secondArtifact)
 	stopped, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService(terminal): %v", err)
@@ -231,13 +235,14 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
-	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
+	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
+	artifact := storeTestSourceArtifact("standing-unknown-terminality")
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
+		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("3", 64)),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -261,13 +266,14 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
-	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
+	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
+	artifact := storeTestSourceArtifact("sqlite-standing-operator-lifecycle")
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
+		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("4", 64)),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -410,13 +416,14 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
-	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
+	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
+	artifact := storeTestSourceArtifact("sqlite-standing-orphan")
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
+		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("5", 64)),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("create set = %#v, %v", created, err)
@@ -447,13 +454,14 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, selected)
-	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
+	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
+	artifact := storeTestSourceArtifact("postgres-standing-operator-lifecycle")
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
+		ServiceID: serviceID, FlowPath: "project/ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("6", 64)),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, db, artifact)
 	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
@@ -952,12 +960,13 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
-	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
+	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
+	artifact := storeTestSourceArtifact("sqlite-standing-run-stop")
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64)),
+		ServiceID: serviceID, FlowPath: "project/ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, store.backend.ConstructionHandle(), artifact)
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -999,13 +1008,15 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 				StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
 			})
 			ctx := testAuthorActivityRuntimeContext()
-			serviceID := runtimeflowidentity.StandingServiceID("run-stop-guidance", backend)
+			flowPath := "run-stop-guidance/" + backend
+			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
+			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)
 			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID: serviceID, PackageKey: "run-stop-guidance", FlowID: backend,
+				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
+				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 			}
-			seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+			seedStoreTestPersistedArtifact(t, db, artifact)
 			created, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing service: %v", err)

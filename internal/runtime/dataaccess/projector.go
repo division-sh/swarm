@@ -29,8 +29,8 @@ func Build(ctx context.Context, source semanticview.Source, store durabledata.Re
 	list := durabledata.AccessList{SchemaVersion: durabledata.AccessSchemaVersion, RunID: runID, AgentIdentity: identity}
 	for _, item := range flowdata.AllowedStaticData(source, actor) {
 		static := durabledata.StaticAccessItem{
-			Kind: "static_file", StaticID: item.StaticID, StaticRef: item.StaticRef, PackageKey: item.PackageKey,
-			OwnerFlowID: item.OwnerFlowID, RelativePath: item.RelativePath, ContentDigest: item.ContentDigest,
+			Kind: "static_file", StaticID: item.StaticID, StaticRef: item.StaticRef, FlowPath: item.FlowPath,
+			RelativePath: item.RelativePath, ContentDigest: item.ContentDigest,
 			SizeBytes: len(item.Content), ContentType: item.ContentType, MountPath: item.MountPath,
 			Content: append([]byte(nil), item.Content...),
 		}

@@ -17,7 +17,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -27,17 +26,24 @@ import (
 	"github.com/google/uuid"
 )
 
-const runStartTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+var runStartTestBundleHash = authorActivityTestSourceArtifact.BundleHash()
 
-func runStartTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	return mustAPITestBundleSourceFact(runStartTestBundleHash)
+func runStartTestSourceArtifactFact() runtimecorrelation.SourceArtifactFact {
+	return mustAPITestSourceArtifactFact(runStartTestBundleHash)
 }
 
 func runStartTestEventBusOptions(source semanticview.Source) runtimebus.EventBusOptions {
 	return runtimebus.EventBusOptions{
-		ContractBundle:   source,
-		BundleSourceFact: runStartTestBundleSourceFact(),
+		ContractBundle:     source,
+		SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source)),
 	}
+}
+
+func runStartTestBundleHashForSource(source semanticview.Source) string {
+	if bundle, ok := semanticview.Bundle(source); ok && bundle.SourceArtifact != nil {
+		return bundle.SourceArtifact.BundleHash()
+	}
+	return runStartTestBundleHash
 }
 
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
@@ -210,7 +216,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-mismatch"))
+		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-mismatch"))
 		if resp.Error == nil {
 			t.Fatal("run.start non-routable bundle error = nil")
 		}
@@ -235,7 +241,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			BundleHash: runStartTestBundleHash,
 		})
 
-		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
+		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
 		if resp.Error == nil {
 			t.Fatal("run.start existing-run bundle mismatch error = nil")
 		}
@@ -384,8 +390,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-			ContractBundle:   source,
-			BundleSourceFact: runStartTestBundleSourceFact(),
+			ContractBundle:     source,
+			SourceArtifactFact: runStartTestSourceArtifactFact(),
 			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
 				if eventType != "scan.requested" {
 					return fmt.Errorf("unexpected event type %q", eventType)
@@ -638,8 +644,8 @@ func (p failingRunStartPublisher) PublishAPIEventWithRunCreationAcknowledged(con
 	return apiidempotency.Completion{}, false, p.err
 }
 
-func (p failingRunStartPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
-	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact()), nil
+func (p failingRunStartPublisher) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	return runtimecorrelation.WithSourceArtifactFact(ctx, runStartTestSourceArtifactFact()), nil
 }
 
 type missingRunStartBundleScopePublisher struct{}
@@ -767,19 +773,19 @@ func stringSliceFromAny(t *testing.T, value any) []string {
 
 func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string) {
 	t.Helper()
-	var runStatus, triggerType, bundleHash, bundleSource string
+	var runStatus, triggerType, bundleHash string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, bundle_hash, bundle_source
+		SELECT status, trigger_event_type, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource); err != nil {
+	`, runID).Scan(&runStatus, &triggerType, &bundleHash); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
 	if runStatus != "running" || triggerType != eventName {
 		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
 	}
-	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
-		t.Fatalf("run row bundle identity = hash:%q source:%q, want %s/%s", bundleHash, bundleSource, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral)
+	if bundleHash != runStartTestBundleHash {
+		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, runStartTestBundleHash)
 	}
 	var entityID, flowInstance, producedBy, targetRoute, targetSet string
 	var payload json.RawMessage
@@ -852,7 +858,7 @@ func countAllRunRows(t *testing.T, db *sql.DB) int {
 
 func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -871,7 +877,8 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "review", Version: "1.0.0"},
+		SourceArtifact: authorActivityTestSourceArtifact,
+		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventName: {},
 		},

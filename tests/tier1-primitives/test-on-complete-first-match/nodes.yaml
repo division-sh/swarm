@@ -6,11 +6,9 @@ test-node:
   event_handlers:
     item.evaluated:
       on_complete:
-        - element_id: a2628f55-7860-44ad-9bc5-3e2cd60075d2
-          condition: "payload.score >= 70"
+        - condition: "payload.score >= 70"
           emit:
             event: item.passed
           advances_to: passed
-        - element_id: d092b6e5-7b4b-4fdb-af7b-51ed0aa83b0b
-          condition: "else"
+        - condition: "else"
           advances_to: failed

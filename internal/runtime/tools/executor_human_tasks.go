@@ -94,7 +94,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 	if !ok {
 		return nil, errors.New("ask_human requires canonical logical tool-operation identity")
 	}
-	bundleFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	bundleFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return nil, errors.New("ask_human requires pinned bundle identity")
 	}

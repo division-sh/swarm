@@ -16,7 +16,7 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if resolved == nil || resolved.Kind != yaml.MappingNode {
-		return fmt.Errorf("handler rule must be a mapping with element_id; run `swarm mint-element-ids --contracts <path>`")
+		return fmt.Errorf("handler rule must be a mapping")
 	}
 	if len(resolved.Content) == 0 {
 		return fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
@@ -96,6 +96,8 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 			continue
 		}
 		switch key {
+		case "element_id":
+			return fmt.Errorf("RETIRED: rule.element_id is no longer authored; identity derives from the canonical declaration site")
 		case "emits":
 			return fmt.Errorf("RETIRED: rule field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "payload_transform":
@@ -115,7 +117,6 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 }
 
 var ruleFieldOptions = map[string]struct{}{
-	"element_id":        {},
 	"id":                {},
 	"description":       {},
 	"condition":         {},

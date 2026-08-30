@@ -61,7 +61,7 @@ func DeriveRootInputSet(source semanticview.Source) (RootInputSet, error) {
 	if source == nil {
 		return RootInputSet{}, fmt.Errorf("semantic source is required")
 	}
-	declared := normalizeUnique(source.FlowInputEvents(""))
+	declared := normalizeUnique(source.FlowInputEvents("."))
 	routeTable, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		return RootInputSet{}, err

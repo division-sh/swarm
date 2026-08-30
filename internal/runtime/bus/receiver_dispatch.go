@@ -17,12 +17,12 @@ import (
 // PreparedPublish. Event, route, bundle, and execution facts remain owned by
 // their typed owners and are reconstructed when receiver work starts.
 type receiverDispatchProjection struct {
-	occurrence        worklifetime.Occurrence
-	runtimeInstanceID string
-	bundleSourceFact  runtimecorrelation.BundleSourceFact
-	deliveryContext   events.DeliveryContext
-	channelExecution  *runtimechannelactivation.Lease
-	completion        *localDeliveryCompletionGroup
+	occurrence         worklifetime.Occurrence
+	runtimeInstanceID  string
+	sourceArtifactFact runtimecorrelation.SourceArtifactFact
+	deliveryContext    events.DeliveryContext
+	channelExecution   *runtimechannelactivation.Lease
+	completion         *localDeliveryCompletionGroup
 }
 
 func (p receiverDispatchProjection) validate() error {
@@ -47,15 +47,15 @@ func (eb *EventBus) receiverProjection(ctx context.Context, deliveryContext even
 		return receiverDispatchProjection{}, errors.New("event bus is required")
 	}
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
-	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	channelExecution, _ := runtimechannelactivation.ExecutionLeaseFromContext(ctx)
 	projection := receiverDispatchProjection{
-		occurrence:        eb.workOwner,
-		runtimeInstanceID: runtimeInstanceID,
-		bundleSourceFact:  bundleSourceFact,
-		deliveryContext:   deliveryContext.Normalized(),
-		channelExecution:  channelExecution,
-		completion:        localDeliveryCompletionGroupFromContext(ctx),
+		occurrence:         eb.workOwner,
+		runtimeInstanceID:  runtimeInstanceID,
+		sourceArtifactFact: sourceArtifactFact,
+		deliveryContext:    deliveryContext.Normalized(),
+		channelExecution:   channelExecution,
+		completion:         localDeliveryCompletionGroupFromContext(ctx),
 	}
 	return projection, projection.validate()
 }
@@ -90,8 +90,8 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 	}
 	ctx = worklifetime.WithOccurrence(ctx, projection.occurrence)
 	ctx = runtimechannelactivation.WithExecutionLease(ctx, projection.channelExecution)
-	ctx = withReceiverBundleSource(ctx, projection.runtimeInstanceID, projection.bundleSourceFact)
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx = withReceiverSourceArtifact(ctx, projection.runtimeInstanceID, projection.sourceArtifactFact)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		_ = closeReceiver()
 		return receiverDispatchContext{}, nil, err
@@ -129,14 +129,14 @@ func (eb *EventBus) receiverRouteContext(parent context.Context, evt events.Even
 	owner, hasOwner := worklifetime.OccurrenceFromContext(parent)
 	completion := localDeliveryCompletionGroupFromContext(parent)
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(parent)
-	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(parent)
+	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(parent)
 	ctx, cleanup := eventreceiver.NewContext(context.Background())
 	if hasOwner {
 		ctx = worklifetime.WithOccurrence(ctx, owner)
 	}
-	ctx = withReceiverBundleSource(ctx, runtimeInstanceID, bundleSourceFact)
+	ctx = withReceiverSourceArtifact(ctx, runtimeInstanceID, sourceArtifactFact)
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -171,7 +171,7 @@ func (eb *EventBus) receiverRouteContext(parent context.Context, evt events.Even
 	return ctx, cleanup, nil
 }
 
-func withReceiverBundleSource(ctx context.Context, runtimeInstanceID string, sourceFact runtimecorrelation.BundleSourceFact) context.Context {
+func withReceiverSourceArtifact(ctx context.Context, runtimeInstanceID string, sourceFact runtimecorrelation.SourceArtifactFact) context.Context {
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	return runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	return runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 }

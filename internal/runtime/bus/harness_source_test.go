@@ -47,7 +47,6 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 	patterns, err := routeResolveSubscriberPatterns(
 		source,
 		subscriberNode,
-		scope.PackageKey,
 		scope.ID,
 		scope.InputEvents,
 		scope.Path,

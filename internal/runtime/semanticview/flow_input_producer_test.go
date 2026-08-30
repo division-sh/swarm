@@ -33,8 +33,8 @@ func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testi
 		},
 	}
 
-	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "work.requested"}}}, nil)
-	resolution := ResolveNonConnectFlowInputProducer(source, "", "work.requested")
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "work.requested"}}}, nil)
+	resolution := ResolveNonConnectFlowInputProducer(source, ".", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("evidence = %#v, want boundary external ingress", resolution.Evidence)
@@ -49,7 +49,7 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+			CompositionConnects: []runtimecontracts.FlowConnect{{
 				Event: "work.requested",
 				From:  "worker",
 				To:    ".",
@@ -57,8 +57,8 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 		},
 	}
 
-	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "work.requested"}}}, nil)
-	resolution := ResolveNonConnectFlowInputProducer(source, "", "work.requested")
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "work.requested"}}}, nil)
+	resolution := ResolveNonConnectFlowInputProducer(source, ".", "work.requested")
 
 	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
 		t.Fatalf("evidence = %#v, non-connect projection must not interpret authored connects", resolution.Evidence)
@@ -68,32 +68,32 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 	}
 }
 
-func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressRepositoryRootIngress(t *testing.T) {
+func TestResolveFlowInputProducer_NestedFlowRootConnectDoesNotSuppressRepositoryRootIngress(t *testing.T) {
 	rootInput := runtimecontracts.FlowInputEventPin{Event: "root.work.requested"}
 	childInput := runtimecontracts.FlowInputEventPin{Event: "child.work.requested"}
 	child := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{childInput}}}},
 		Path:   "child",
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "child": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
-		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-			PackageKey: "flows/child",
-			Event:      "work.requested",
-			From:       "producer",
-			To:         ".",
+		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowConnect{{
+			OwnerFlowPath: "child",
+			Event:         "work.requested",
+			From:          "producer",
+			To:            ".",
 		}}},
 	}
-	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {rootInput}, "child": {childInput}}, nil)
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {rootInput}, "child": {childInput}}, nil)
 
-	rootResolution := ResolveNonConnectFlowInputProducer(source, "", rootInput.EventType())
+	rootResolution := ResolveNonConnectFlowInputProducer(source, ".", rootInput.EventType())
 	if !rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("root evidence = %#v, want repository-root external ingress", rootResolution.Evidence)
 	}
@@ -110,7 +110,7 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *testing.T) {
 	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.requested",
-	}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: ".", To: "worker"}})
+	}, []runtimecontracts.FlowConnect{{Event: "work.requested", From: ".", To: "worker"}})
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
@@ -155,19 +155,6 @@ func TestResolveFlowInputAutoWire_HarnessEvidenceHasNoPatternsOrProducerFlows(t 
 	}
 	if patterns := FlowInputProducerPatterns(source, "worker", "work.requested"); len(patterns) != 0 {
 		t.Fatalf("producer patterns = %#v, want none", patterns)
-	}
-}
-
-func TestImportBoundaryHarnessInputCreatesNoAlias(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
-		Event: "work.requested", Source: runtimecontracts.FlowInputPinSourceHarness,
-	}, nil)
-
-	if ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
-		t.Fatal("bare harness input unexpectedly requires an import-boundary alias")
-	}
-	if aliases := ImportBoundaryInputAliases(source, "worker", "work.requested"); len(aliases) != 0 {
-		t.Fatalf("import aliases = %#v, want none", aliases)
 	}
 }
 
@@ -243,10 +230,10 @@ func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) 
 	}
 }
 
-func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowConnect) Source {
 	t.Helper()
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.requested"}}},
@@ -255,7 +242,7 @@ func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputE
 		Path: "producer",
 	}
 	worker := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{inputPin}},
@@ -286,7 +273,7 @@ func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputE
 	return withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"worker": {inputPin}}, map[string][]runtimecontracts.FlowOutputEventPin{"producer": {{Event: "work.requested"}}})
 }
 
-func harnessOnlyFlowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+func harnessOnlyFlowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowConnect) Source {
 	t.Helper()
 	source := flowInputProducerFixture(t, inputPin, connects)
 	bundle, ok := Bundle(source)

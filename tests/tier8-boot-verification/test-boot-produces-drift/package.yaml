@@ -1,7 +1,0 @@
-name: test-boot-produces-drift
-version: 1.0.0
-description: >
-  Boot verification: handler emits an event not declared in the node's
-  produces list. Platform must catch PRODUCES-DRIFT warning.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

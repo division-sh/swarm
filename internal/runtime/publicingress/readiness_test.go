@@ -94,8 +94,8 @@ func TestPublicIngressReadinessRejectsMixedStartupAuthorityEvidence(t *testing.T
 
 func TestRegistrationSnapshotSelectionReplacesRoutesAndStatesAtomically(t *testing.T) {
 	owner := newRegistrationSnapshotOwner()
-	left := RegistrationPair{BindingID: "left", Target: RegistrationTarget{Selector: "ingress:left:telegram:telegram", Alias: "left", Provider: "telegram"}}
-	right := RegistrationPair{BindingID: "right", Target: RegistrationTarget{Selector: "ingress:right:telegram:telegram", Alias: "right", Provider: "telegram"}}
+	left := RegistrationPair{BindingID: "left", Target: RegistrationTarget{Selector: "ingress:left:telegram", Alias: "left", Provider: "telegram"}}
+	right := RegistrationPair{BindingID: "right", Target: RegistrationTarget{Selector: "ingress:right:telegram", Alias: "right", Provider: "telegram"}}
 	leftSlot, rightSlot := "provider:slot:left", "provider:slot:right"
 	owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}})
 
@@ -134,7 +134,7 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 	owner := newRegistrationSnapshotOwner()
 	pair := RegistrationPair{
 		BindingID: "binding",
-		Target:    RegistrationTarget{Selector: "ingress:support:telegram:telegram", Alias: "support", Provider: "telegram", Generation: 1},
+		Target:    RegistrationTarget{Selector: "ingress:support:telegram", Alias: "support", Provider: "telegram", Generation: 1},
 	}
 	const slotID = "provider:slot:binding"
 	owner.replaceSelected([]admittedPair{{pair: pair, slotID: slotID}})

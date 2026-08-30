@@ -147,7 +147,7 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 			eventType: "platform.activity_requested",
 			payload: map[string]any{
 				"activity_id": "telegram_send_message", "tool": "telegram.send_message",
-				"bundle_hash": "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "workflow_version": "1",
+				"bundle_hash": "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "workflow_version": "1",
 				"input":        map[string]any{"chat_id": float64(42), "text": "hello"},
 				"effect_class": "non_idempotent_write", "success_event": "telegram-chat/telegram_send_message.succeeded",
 				"failure_event":  "telegram-chat/telegram_send_message.failed",
@@ -285,7 +285,7 @@ func TestEventSchemaRegistryFromCatalog_NormalizesPrecisionQualifiedTypeRefsRecu
 
 func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 	reviewFlow := FlowContractView{
-		Paths: FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: FlowContractPaths{FlowPath: "review"},
 		Path:  "review",
 		Events: map[string]EventCatalogEntry{
 			"task.requested": {
@@ -405,7 +405,7 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 
 func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *testing.T) {
 	reviewFlow := FlowContractView{
-		Paths: FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: FlowContractPaths{FlowPath: "review"},
 		Path:  "review",
 		Events: map[string]EventCatalogEntry{
 			"task.requested": {
@@ -505,7 +505,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 
 func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *testing.T) {
 	childFlow := FlowContractView{
-		Paths: FlowContractPaths{ID: "child", Flow: "child"},
+		Paths: FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{

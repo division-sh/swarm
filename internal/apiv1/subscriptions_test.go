@@ -31,7 +31,7 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",
-			BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:      "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 	handler := testHandler(t, Options{
@@ -89,12 +89,12 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 
 func TestRuntimeIdentityAndHealthReadCurrentPublicationPerObservation(t *testing.T) {
 	const (
-		predecessorHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		successorHash   = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		predecessorHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		successorHash   = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
 	publicationSnapshot := func(bundleHash string) runtime.RuntimeContextPublicationSnapshot {
 		t.Helper()
-		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+		fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 		if err != nil {
 			t.Fatalf("construct source fact: %v", err)
 		}
@@ -102,7 +102,7 @@ func TestRuntimeIdentityAndHealthReadCurrentPublicationPerObservation(t *testing
 			PrimaryBundle: runtimecontracts.BundleIdentity{
 				WorkflowName: "review", WorkflowVersion: "1.2.3", BundleHash: bundleHash,
 			},
-			BundleSourceFacts: []runtimecorrelation.BundleSourceFact{fact},
+			SourceArtifactFacts: []runtimecorrelation.SourceArtifactFact{fact},
 		}
 	}
 	publication := &mutableTestRuntimePublicationReader{}
@@ -136,7 +136,7 @@ func TestRuntimeIdentityAndHealthReadCurrentPublicationPerObservation(t *testing
 		if identity.Error != nil {
 			t.Fatalf("runtime.identity error = %#v", identity.Error)
 		}
-		sources := asMap(t, identity.Result)["bundle_sources"].([]any)
+		sources := asMap(t, identity.Result)["source_artifacts"].([]any)
 		if len(sources) != 1 || asMap(t, sources[0])["bundle_hash"] != wantHash {
 			t.Fatalf("runtime.identity sources = %#v, want %s", sources, wantHash)
 		}
@@ -678,7 +678,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 		"id":      "sub-runtime-logs",
 		"method":  "runtime.subscribe_logs",
 		"params": map[string]any{
-			"bundle_hash":  "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"bundle_hash":  "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"run_id":       "run-1",
 			"entity_id":    "entity-1",
 			"session_id":   "sess-1",
@@ -703,7 +703,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 		t.Fatalf("runtime log notification result = %#v", got)
 	}
 	if observability.lastRuntimeLogs.RunID != "run-1" ||
-		observability.lastRuntimeLogs.BundleHash != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
+		observability.lastRuntimeLogs.BundleHash != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
 		observability.lastRuntimeLogs.EntityID != "entity-1" ||
 		observability.lastRuntimeLogs.SessionID != "sess-1" ||
 		observability.lastRuntimeLogs.Component != "scheduler" ||

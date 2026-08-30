@@ -148,7 +148,7 @@ func sourceLiveWorkflowActivitySites(source semanticview.Source) map[string][]st
 		if err != nil {
 			continue
 		}
-		scopeLabel := "package " + node.PackageKey()
+		scopeLabel := "flow " + node.FlowPath()
 		appendWorkflowActivitySites(sitesByTool, seen, scopeLabel, runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)))
 	}
 	for toolID := range sitesByTool {
@@ -180,7 +180,7 @@ func workflowActivitySiteLabel(scopeLabel string, site runtimecontracts.Activity
 	if scopeLabel = strings.TrimSpace(scopeLabel); scopeLabel != "" {
 		parts = append(parts, scopeLabel)
 	}
-	if flowID := site.Node.FlowID(); flowID != "" {
+	if flowID := site.Node.FlowPath(); flowID != "" {
 		parts = append(parts, "flow "+flowID)
 	}
 	parts = append(parts, "node "+site.Node.NodeID(), "handler "+strings.TrimSpace(site.HandlerEventKey))
@@ -201,9 +201,6 @@ func sourceToolEntriesByID(source semanticview.Source) map[string][]runtimecontr
 		}
 	}
 	appendEntries(source.ToolEntries())
-	for _, scope := range source.ProjectScopes() {
-		appendEntries(scope.Tools)
-	}
 	for _, scope := range source.FlowScopes() {
 		appendEntries(scope.Tools)
 	}

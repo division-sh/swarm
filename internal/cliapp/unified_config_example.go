@@ -68,7 +68,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours.", unifiedConfigExampleTierProjectSafe),
 		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget.", unifiedConfigExampleTierProjectSafe),
 
-		e("paths.contracts_path", "./contracts", "Project-contained contract bundle root.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.verification_gates_file", "./verification-gates.yaml", "Project-contained verification gates file.", unifiedConfigExampleTierProjectContainedPath),

@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -64,8 +63,8 @@ func (o *Owner) RunBundleAvailability() runbundle.AvailabilityStore {
 	return o.required.runBundleAvailability
 }
 func (o *Owner) RunStalled() runtimerunstalled.ProjectionReader { return o.required.runStalled }
-func (o *Owner) ServeBundleIngestWriter() bundlecatalog.ServeIngestWriter {
-	return o.required.serveBundleIngest
+func (o *Owner) SourceArtifactWriter() SourceArtifactDataWriter {
+	return o.required.sourceArtifacts
 }
 
 func (o *Owner) Effects() runtimeeffects.Store              { return o.core.EffectsStore }
@@ -78,32 +77,11 @@ func (o *Owner) ScenarioExecutionProfiles() runtimepipeline.ScenarioExecutionPro
 	return o.core.ScenarioExecutionProfiles
 }
 
-func (o *Owner) BundleCatalog() (apiv1.BundleCatalogReadStore, bool) {
-	if o == nil || !o.products.bundleCatalogAvailable {
-		return nil, false
+func (o *Owner) SourceArtifactStore() runtimerunforkexecution.SourceArtifactSelectedContractSourceStore {
+	if o == nil {
+		return nil
 	}
-	return o.products.bundleCatalog, true
-}
-
-func (o *Owner) BundleRuntimeCatalog() (runtimerunforkexecution.BundleCatalogSelectedContractSourceStore, bool) {
-	if o == nil || !o.products.bundleRuntimeAvailable {
-		return nil, false
-	}
-	return o.products.bundleRuntimeCatalog, true
-}
-
-func (o *Owner) BundleRegisterWriter() (apiv1.BundleCatalogRegisterStore, bool) {
-	if o == nil || !o.products.bundleRegisterAvailable {
-		return nil, false
-	}
-	return o.products.bundleRegister, true
-}
-
-func (o *Owner) BundleDelete() (BundleDelete, bool) {
-	if o == nil || !o.products.bundleDeleteAvailable {
-		return BundleDelete{}, false
-	}
-	return o.products.bundleDelete, true
+	return o.required.sourceArtifactReader
 }
 
 func (o *Owner) ConversationFork() (ConversationFork, bool) {

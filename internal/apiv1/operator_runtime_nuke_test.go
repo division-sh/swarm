@@ -36,7 +36,7 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 		t.Fatalf("runtime.nuke dry-run error = %#v", resp.Error)
 	}
 	result := asMap(t, resp.Result)
-	if result["ok"] != true || result["status"] != "dry_run" || result["dry_run"] != true || result["include_bundles"] != true || result["partial_failure"] != false {
+	if result["ok"] != true || result["status"] != "dry_run" || result["dry_run"] != true || result["include_source_artifacts"] != true || result["partial_failure"] != false {
 		t.Fatalf("runtime.nuke dry-run result = %#v", result)
 	}
 	if got, want := strings.Join(owners.calls, ","), "plan,quiescence,cleanup,containers"; got != want {
@@ -47,8 +47,8 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	if owners.lastPlan.DryRun != true || owners.lastQuiescence.Result.DryRun != true || owners.lastCleanup.Result.DryRun != true || owners.lastContainers.Result.DryRun != true {
 		t.Fatalf("dry-run flag not propagated through owners: plan=%v quiescence=%v cleanup=%v containers=%v", owners.lastPlan.DryRun, owners.lastQuiescence.Result.DryRun, owners.lastCleanup.Result.DryRun, owners.lastContainers.Result.DryRun)
 	}
-	if !owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || !owners.lastQuiescence.Result.IncludeBundles || !owners.lastCleanup.Result.IncludeBundles || !owners.lastContainers.Result.IncludeBundles {
-		t.Fatalf("include_bundles default not propagated through owners: plan=%#v quiescence=%v cleanup=%v containers=%v", owners.lastPlan, owners.lastQuiescence.Result.IncludeBundles, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
+	if !owners.lastPlan.IncludeSourceArtifacts || !owners.lastPlan.IncludeSourceArtifactsSet || !owners.lastQuiescence.Result.IncludeSourceArtifacts || !owners.lastCleanup.Result.IncludeSourceArtifacts || !owners.lastContainers.Result.IncludeSourceArtifacts {
+		t.Fatalf("include_source_artifacts default not propagated through owners: plan=%#v quiescence=%v cleanup=%v containers=%v", owners.lastPlan, owners.lastQuiescence.Result.IncludeSourceArtifacts, owners.lastCleanup.Result.IncludeSourceArtifacts, owners.lastContainers.Result.IncludeSourceArtifacts)
 	}
 	if _, err := uuid.Parse(owners.lastPlan.OperationID); err != nil {
 		t.Fatalf("runtime.nuke operation id = %q: %v", owners.lastPlan.OperationID, err)
@@ -106,18 +106,18 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 			ResetCoordinator: owners,
 		}),
 	})
-	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":false,"idempotency_key":"apply"}}`
+	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_source_artifacts":false,"idempotency_key":"apply"}}`
 
 	resp := rpcCall(t, handler, body)
 	if resp.Error != nil {
 		t.Fatalf("runtime.nuke apply error = %#v", resp.Error)
 	}
 	result := asMap(t, resp.Result)
-	if result["ok"] != false || result["status"] != "partial_failure" || result["include_bundles"] != false || result["partial_failure"] != true {
+	if result["ok"] != false || result["status"] != "partial_failure" || result["include_source_artifacts"] != false || result["partial_failure"] != true {
 		t.Fatalf("runtime.nuke partial result = %#v", result)
 	}
-	if owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || owners.lastCleanup.Result.IncludeBundles || owners.lastContainers.Result.IncludeBundles {
-		t.Fatalf("include_bundles=false not propagated through owners: plan=%#v cleanup=%v containers=%v", owners.lastPlan, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
+	if owners.lastPlan.IncludeSourceArtifacts || !owners.lastPlan.IncludeSourceArtifactsSet || owners.lastCleanup.Result.IncludeSourceArtifacts || owners.lastContainers.Result.IncludeSourceArtifacts {
+		t.Fatalf("include_source_artifacts=false not propagated through owners: plan=%#v cleanup=%v containers=%v", owners.lastPlan, owners.lastCleanup.Result.IncludeSourceArtifacts, owners.lastContainers.Result.IncludeSourceArtifacts)
 	}
 	if len(owners.calls) != 4 {
 		t.Fatalf("owner call count = %d, want 4", len(owners.calls))
@@ -131,7 +131,7 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 		t.Fatalf("owner calls after replay = %d, want unchanged 4", len(owners.calls))
 	}
 
-	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"apply"}}`)
+	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_source_artifacts":true,"idempotency_key":"apply"}}`)
 	if conflict.Error == nil {
 		t.Fatal("runtime.nuke idempotency conflict error = nil")
 	}
@@ -140,7 +140,7 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 	}
 }
 
-func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *testing.T) {
+func TestOperatorRuntimeNukeIncludeSourceArtifactsDeactivatesLoadedRuntimeContexts(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
@@ -157,14 +157,14 @@ func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *te
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"nuke-contexts"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_source_artifacts":true,"idempotency_key":"nuke-contexts"}}`)
 	if resp.Error != nil {
 		t.Fatalf("runtime.nuke error = %#v", resp.Error)
 	}
 	assertRuntimeContextsUnloaded(t, fixture.manager)
 }
 
-func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntimeContextsAndReplay(t *testing.T) {
+func TestOperatorRuntimeNukeIncludeSourceArtifactsPartialFailureDeactivatesLoadedRuntimeContextsAndReplay(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	idempotency := newRecordingAPIIdempotencyStore()
 	fixture := newOperatorRuntimeContextFixture(t)
@@ -182,15 +182,15 @@ func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntime
 			ResetCoordinator: owners,
 		}),
 	})
-	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"nuke-contexts-partial"}}`
+	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_source_artifacts":true,"idempotency_key":"nuke-contexts-partial"}}`
 
 	resp := rpcCall(t, handler, body)
 	if resp.Error != nil {
 		t.Fatalf("runtime.nuke partial error = %#v", resp.Error)
 	}
 	result := asMap(t, resp.Result)
-	if result["ok"] != false || result["status"] != "partial_failure" || result["include_bundles"] != true || result["partial_failure"] != true {
-		t.Fatalf("runtime.nuke include_bundles partial result = %#v", result)
+	if result["ok"] != false || result["status"] != "partial_failure" || result["include_source_artifacts"] != true || result["partial_failure"] != true {
+		t.Fatalf("runtime.nuke include_source_artifacts partial result = %#v", result)
 	}
 	if len(owners.calls) != 4 {
 		t.Fatalf("runtime.nuke partial owner calls = %d, want 4", len(owners.calls))
@@ -240,7 +240,7 @@ func assertRuntimeContextsLoaded(t *testing.T, manager *swruntime.RuntimeContext
 	}
 }
 
-func TestOperatorRuntimeNukeExcludeBundlesStillQuiescesRuntimeContexts(t *testing.T) {
+func TestOperatorRuntimeNukeExcludeSourceArtifactsStillQuiescesRuntimeContexts(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
@@ -257,9 +257,9 @@ func TestOperatorRuntimeNukeExcludeBundlesStillQuiescesRuntimeContexts(t *testin
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":false,"idempotency_key":"nuke-no-contexts"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_source_artifacts":false,"idempotency_key":"nuke-no-contexts"}}`)
 	if resp.Error != nil {
-		t.Fatalf("runtime.nuke include_bundles=false error = %#v", resp.Error)
+		t.Fatalf("runtime.nuke include_source_artifacts=false error = %#v", resp.Error)
 	}
 	assertRuntimeContextsUnloaded(t, fixture.manager)
 }
@@ -341,13 +341,13 @@ func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructiv
 		return destructivereset.Result{}, false, o.planErr
 	}
 	return destructivereset.Result{
-		OperationName:  destructivereset.DefaultOperationName,
-		DryRun:         req.DryRun,
-		IncludeBundles: req.IncludeBundles,
-		PlannedAt:      req.RequestedAt,
+		OperationName:          destructivereset.DefaultOperationName,
+		DryRun:                 req.DryRun,
+		IncludeSourceArtifacts: req.IncludeSourceArtifacts,
+		PlannedAt:              req.RequestedAt,
 		Plan: destructivereset.Plan{
-			IncludeBundles: req.IncludeBundles,
-			ActiveRuns:     []destructivereset.RunRef{{RunID: "00000000-0000-0000-0000-000000000001", Status: "running"}},
+			IncludeSourceArtifacts: req.IncludeSourceArtifacts,
+			ActiveRuns:             []destructivereset.RunRef{{RunID: "00000000-0000-0000-0000-000000000001", Status: "running"}},
 			EntityContainers: []destructivereset.ContainerRef{{
 				Name:          "swarm-agent-1",
 				Kind:          "agent",
@@ -409,11 +409,11 @@ func (q recordingRuntimeNukeQuiescer) Apply(ctx context.Context, req destructive
 
 func (o *recordingRuntimeNukeOwners) ApplyCleanup(req destructivereset.CleanupRequest) destructivereset.CleanupResult {
 	return destructivereset.CleanupResult{
-		OperationName:  req.Result.OperationName,
-		DryRun:         req.Result.DryRun,
-		IncludeBundles: req.Result.IncludeBundles,
-		AppliedAt:      req.RequestedAt,
-		RunIDs:         []string{"00000000-0000-0000-0000-000000000001"},
+		OperationName:          req.Result.OperationName,
+		DryRun:                 req.Result.DryRun,
+		IncludeSourceArtifacts: req.Result.IncludeSourceArtifacts,
+		AppliedAt:              req.RequestedAt,
+		RunIDs:                 []string{"00000000-0000-0000-0000-000000000001"},
 	}
 }
 

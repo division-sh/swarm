@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -30,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -65,6 +67,7 @@ type scenarioTestCommandOptions struct {
 type scenarioTestFile struct {
 	Path     string
 	FlowID   string
+	Raw      []byte
 	Document *scenarioDocument
 }
 
@@ -205,7 +208,7 @@ type scenarioRunner struct {
 	bundle                  *runtimecontracts.WorkflowContractBundle
 	source                  semanticview.Source
 	bundleHash              string
-	contractsDir            string
+	sourceRoot              string
 	timeout                 time.Duration
 	pollInterval            time.Duration
 	out                     io.Writer
@@ -226,17 +229,23 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 		pollInterval: defaultScenarioTestPoll,
 	}
 	cmd := &cobra.Command{
-		Use:   "test [scenario-file ...]",
+		Use:   "test [directory] [scenario-label]",
 		Short: "Run deterministic scenario tests through public read owners.",
-		Args:  cobra.ArbitraryArgs,
+		Args:  argcount.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnScenarioTestValidationError(cmd.ErrOrStderr(), err)
 			}
-			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
+			var scenarios []string
+			if len(args) > 0 {
+				testOpts.contracts = args[0]
+			}
+			if len(args) > 1 {
+				scenarios = args[1:]
+			}
+			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), scenarios, testOpts)
 		},
 	}
-	cmd.Flags().StringVar(&testOpts.contracts, "contracts", "", "Contract package root containing scenario tests")
 	cmd.Flags().StringVar(&testOpts.platformSpec, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().DurationVar(&testOpts.timeout, "timeout", defaultScenarioTestTimeout, "Safety deadline for test quiescence")
 	cmd.Flags().DurationVar(&testOpts.pollInterval, "poll-interval", defaultScenarioTestPoll, "Canonical readback polling interval while waiting for quiescence")
@@ -262,7 +271,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load runtime config: %w", err))
 	}
-	contractsDir, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
+	sourceRoot, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -273,25 +282,25 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if deriveFlow != "" && len(args) > 0 {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("--derive cannot be combined with scenario-file arguments"))
 	}
-	var files []scenarioTestFile
-	if deriveFlow == "" {
-		files, err = discoverScenarioTestFiles(contractsDir, args)
-		if err != nil {
-			return returnScenarioTestValidationError(errOut, err)
-		}
-		if len(files) == 0 {
-			return returnScenarioTestValidationError(errOut, fmt.Errorf("no scenario files found under contracts/tests or contracts/flows/<flow>/tests"))
-		}
-	}
 	platformPackBase, err := LoadConfiguredPlatformPackBase(RepoRoot, configResult)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load platform pack base: %w", err))
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, contractsDir, platformSpec, runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, sourceRoot, platformSpec, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: platformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load contract bundle: %w", err))
+	}
+	var files []scenarioTestFile
+	if deriveFlow == "" {
+		files, err = discoverScenarioTestFiles(bundle, args)
+		if err != nil {
+			return returnScenarioTestValidationError(errOut, err)
+		}
+		if len(files) == 0 {
+			return returnScenarioTestValidationError(errOut, fmt.Errorf("no scenario files found in an admitted tests/ resource branch"))
+		}
 	}
 	if deriveFlow == "" {
 		files, err = prepareScenarioTestFiles(files)
@@ -322,13 +331,13 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
-	sourceFact, err := scenarioTestBundleSourceFact(ctx, client, bundleHash)
+	sourceFact, err := scenarioTestSourceArtifactFact(ctx, client, bundleHash)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
-		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
+		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
 		ProviderTriggerCatalog: providerPacks.Catalog, ChannelPlans: channelPacks.Plans,
 	})
 	if err != nil {
@@ -347,7 +356,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		bundle:                  bundle,
 		source:                  source,
 		bundleHash:              bundleHash,
-		contractsDir:            contractsDir,
+		sourceRoot:              sourceRoot,
 		timeout:                 opts.timeout,
 		pollInterval:            opts.pollInterval,
 		out:                     out,
@@ -379,55 +388,50 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	return nil
 }
 
-func scenarioTestBundleSourceFact(ctx context.Context, client *cliAPIClient, bundleHash string) (runtimecorrelation.BundleSourceFact, error) {
+func scenarioTestSourceArtifactFact(ctx context.Context, client *cliAPIClient, bundleHash string) (runtimecorrelation.SourceArtifactFact, error) {
 	if client == nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("runtime API client is required for scenario source identity")
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("runtime API client is required for scenario source identity")
 	}
 	var identity apiv1.RuntimeIdentityResult
 	if err := client.call(ctx, "runtime.identity", map[string]any{}, &identity); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
-	var matched *apiv1.RuntimeBundleSourceIdentity
-	available := make([]string, 0, len(identity.BundleSources))
-	for i := range identity.BundleSources {
-		candidate := identity.BundleSources[i]
-		available = append(available, candidate.BundleHash)
-		if candidate.BundleHash != bundleHash {
+	var matched runtimecorrelation.SourceArtifactFact
+	matchedSet := false
+	seen := make(map[string]struct{}, len(identity.SourceArtifacts))
+	available := make([]string, 0, len(identity.SourceArtifacts))
+	for i := range identity.SourceArtifacts {
+		candidate := identity.SourceArtifacts[i]
+		fact, err := runtimecorrelation.DecodeSourceArtifactFact(candidate.BundleHash)
+		if err != nil {
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("target runtime returned invalid source fact at source_artifacts[%d]: %w", i, err)
+		}
+		canonicalHash := fact.BundleHash()
+		if _, duplicate := seen[canonicalHash]; duplicate {
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("runtime identity returned duplicate source facts for bundle_hash %s", canonicalHash)
+		}
+		seen[canonicalHash] = struct{}{}
+		available = append(available, canonicalHash)
+		if canonicalHash != bundleHash {
 			continue
 		}
-		if matched != nil {
-			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("runtime identity returned duplicate source facts for bundle_hash %s", bundleHash)
-		}
-		matched = &candidate
+		matched = fact
+		matchedSet = true
 	}
-	if matched == nil {
+	if !matchedSet {
 		sort.Strings(available)
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("target runtime does not serve bundle_hash %s (available: %s)", bundleHash, strings.Join(available, ", "))
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("target runtime does not serve bundle_hash %s (available: %s)", bundleHash, strings.Join(available, ", "))
 	}
-	fact, err := runtimecorrelation.DecodeBundleSourceFact(matched.BundleHash, matched.BundleSource)
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("target runtime returned invalid source fact for bundle_hash %s: %w", bundleHash, err)
-	}
-	return fact, nil
+	return matched, nil
 }
 
-func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandConfig) (string, string, error) {
+func resolveScenarioTestSources(RepoRoot, sourceArgument string, cfg cliCommandConfig) (string, string, error) {
 	var err error
 	RepoRoot, err = requireInvocationRootPath(RepoRoot)
 	if err != nil {
 		return "", "", err
 	}
-	contractsDir := strings.TrimSpace(contractsFlag)
-	if contractsDir == "" {
-		contractsDir = strings.TrimSpace(cfg.Paths.ContractsPath)
-	}
-	if contractsDir == "" {
-		contractsDir = filepath.Join(RepoRoot, "contracts")
-		if _, err := os.Stat(filepath.Join(contractsDir, "package.yaml")); err != nil {
-			contractsDir = RepoRoot
-		}
-	}
-	contractsDir, err = absFrom(RepoRoot, contractsDir)
+	sourceRoot, err := ResolveSourceRoot(RepoRoot, sourceArgument)
 	if err != nil {
 		return "", "", err
 	}
@@ -438,7 +442,7 @@ func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandCo
 			return "", "", fmt.Errorf("resolve embedded platform spec: %w", err)
 		}
 	}
-	return contractsDir, ResolvePath(RepoRoot, platformSpec), nil
+	return sourceRoot, ResolvePath(RepoRoot, platformSpec), nil
 }
 
 func absFrom(base, path string) (string, error) {
@@ -456,91 +460,84 @@ func absFrom(base, path string) (string, error) {
 	return abs, nil
 }
 
-func discoverScenarioTestFiles(contractsDir string, args []string) ([]scenarioTestFile, error) {
-	contractsDir, err := filepath.Abs(contractsDir)
+func discoverScenarioTestFiles(bundle *runtimecontracts.WorkflowContractBundle, args []string) ([]scenarioTestFile, error) {
+	if bundle == nil || bundle.SourceArtifact == nil {
+		return nil, fmt.Errorf("scenario discovery requires an admitted source artifact")
+	}
+	byLabel, err := scenarioTestFilesByLabel(bundle.SourceArtifact)
 	if err != nil {
 		return nil, err
 	}
 	if len(args) > 0 {
 		out := make([]scenarioTestFile, 0, len(args))
 		for _, arg := range args {
-			path, err := absFrom(contractsDir, arg)
+			label, err := normalizeScenarioLabel(arg)
 			if err != nil {
 				return nil, err
 			}
-			file, ok := classifyScenarioTestFile(contractsDir, path)
+			file, ok := byLabel[label]
 			if !ok {
-				return nil, fmt.Errorf("scenario file %s is outside supported roots contracts/tests and contracts/flows/<flow>/tests", path)
+				return nil, fmt.Errorf("scenario file %q is not an admitted YAML member of a tests/ resource branch", arg)
 			}
 			out = append(out, file)
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 		return out, nil
 	}
-	var out []scenarioTestFile
-	for _, root := range []string{
-		filepath.Join(contractsDir, "tests"),
-		filepath.Join(contractsDir, "flows"),
-	} {
-		if _, err := os.Stat(root); err != nil {
-			continue
-		}
-		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if ext := strings.ToLower(filepath.Ext(path)); ext != ".yaml" && ext != ".yml" {
-				return nil
-			}
-			if file, ok := classifyScenarioTestFile(contractsDir, path); ok {
-				if autoDiscoveredScenarioCandidate(path) {
-					out = append(out, file)
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
+	out := make([]scenarioTestFile, 0, len(byLabel))
+	for _, file := range byLabel {
+		if autoDiscoveredScenarioCandidate(file.Raw) {
+			out = append(out, file)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
-func classifyScenarioTestFile(contractsDir, path string) (scenarioTestFile, bool) {
-	absContracts, err := filepath.Abs(contractsDir)
-	if err != nil {
-		return scenarioTestFile{}, false
+func scenarioTestFilesByLabel(artifact *sourceartifact.AdmittedSourceArtifact) (map[string]scenarioTestFile, error) {
+	root := artifact.Root()
+	if root == nil {
+		return nil, fmt.Errorf("scenario discovery requires an admitted flow tree")
 	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return scenarioTestFile{}, false
-	}
-	rel, err := filepath.Rel(absContracts, absPath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return scenarioTestFile{}, false
-	}
-	parts := splitPath(rel)
-	if len(parts) >= 2 && parts[0] == "tests" {
-		return scenarioTestFile{Path: absPath}, true
-	}
-	if len(parts) >= 4 && parts[0] == "flows" {
-		for i := 2; i < len(parts); i++ {
-			if parts[i] == "tests" {
-				return scenarioTestFile{Path: absPath, FlowID: strings.Join(parts[1:i], "/")}, true
+	byLabel := map[string]scenarioTestFile{}
+	var visit func(*sourceartifact.FlowNode) error
+	visit = func(flow *sourceartifact.FlowNode) error {
+		for _, label := range flow.Resources("tests") {
+			ext := strings.ToLower(path.Ext(label))
+			if ext != ".yaml" && ext != ".yml" {
+				continue
+			}
+			entry, ok := artifact.Entry(label)
+			if !ok {
+				return fmt.Errorf("scenario resource %q is missing from its admitted source artifact", label)
+			}
+			byLabel[label] = scenarioTestFile{Path: label, FlowID: flow.Path(), Raw: entry.Bytes()}
+		}
+		for _, child := range flow.Children() {
+			if err := visit(child); err != nil {
+				return err
 			}
 		}
+		return nil
 	}
-	return scenarioTestFile{}, false
+	if err := visit(root); err != nil {
+		return nil, err
+	}
+	return byLabel, nil
 }
 
-func autoDiscoveredScenarioCandidate(path string) bool {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return true
+func normalizeScenarioLabel(raw string) (string, error) {
+	if filepath.IsAbs(raw) || strings.Contains(raw, "\\") {
+		return "", fmt.Errorf("scenario file %q must be a selected-root-relative artifact label", raw)
 	}
+	label := path.Clean(strings.TrimSpace(raw))
+	if label == "." || label == ".." || strings.HasPrefix(label, "../") || label != strings.TrimSpace(raw) {
+		return "", fmt.Errorf("scenario file %q must be one normalized selected-root-relative artifact label", raw)
+	}
+	return label, nil
+}
+
+func autoDiscoveredScenarioCandidate(raw []byte) bool {
 	var root yaml.Node
 	if err := yaml.Unmarshal(raw, &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
 		return true
@@ -565,11 +562,11 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 	if file.Document != nil {
 		doc = *file.Document
 	} else {
-		raw, err := os.ReadFile(file.Path)
-		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: read scenario: %w", file.Path, err)}
+		if len(file.Raw) == 0 {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: admitted scenario bytes are missing", file.Path)}
 		}
-		doc, err = parseScenarioDocument(raw)
+		var err error
+		doc, err = parseScenarioDocument(file.Raw)
 		if err != nil {
 			return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
 		}
@@ -642,11 +639,10 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 func prepareScenarioTestFiles(files []scenarioTestFile) ([]scenarioTestFile, error) {
 	prepared := append([]scenarioTestFile(nil), files...)
 	for i := range prepared {
-		raw, err := os.ReadFile(prepared[i].Path)
-		if err != nil {
-			return nil, fmt.Errorf("%s: read scenario: %w", prepared[i].Path, err)
+		if len(prepared[i].Raw) == 0 {
+			return nil, fmt.Errorf("%s: admitted scenario bytes are missing", prepared[i].Path)
 		}
-		doc, err := parseScenarioDocument(raw)
+		doc, err := parseScenarioDocument(prepared[i].Raw)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", prepared[i].Path, err)
 		}
@@ -666,7 +662,7 @@ func (r scenarioRunner) runDerivedPlan(ctx context.Context, plan scenarioderivat
 	}
 	r.scenarioExecution = &selector
 	defer func() { r.scenarioExecution = nil }()
-	file := scenarioTestFile{Path: filepath.Join(r.contractsDir, "tests", "derived-"+scenarioSHA40(plan.FlowID+"\x00"+plan.PinName)+".yaml"), FlowID: plan.FlowID}
+	file := scenarioTestFile{Path: path.Join("tests", "derived-"+scenarioSHA40(plan.FlowID+"\x00"+plan.PinName)+".yaml"), FlowID: plan.FlowID}
 	doc := scenarioDocument{
 		Name:  "derived:" + plan.FlowID + "/" + plan.PinName,
 		Steps: []scenarioStep{{Action: "publish", PublishEvent: plan.EventKey, Payload: payload}},
@@ -871,17 +867,13 @@ func parseScenarioSetupEntity(raw any, i int) (scenarioSetupEntity, error) {
 }
 
 func (r scenarioRunner) scenarioEvaluatorSeed(file scenarioTestFile, doc scenarioDocument) (string, error) {
-	rel, err := filepath.Rel(r.contractsDir, file.Path)
+	label, err := normalizeScenarioLabel(file.Path)
 	if err != nil {
 		return "", fmt.Errorf("derive scenario identity: %w", err)
 	}
-	rel = filepath.ToSlash(filepath.Clean(rel))
-	if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
-		return "", fmt.Errorf("scenario file %s is outside contract package root", file.Path)
-	}
 	parts := []string{
 		"scenario-v1",
-		"path=" + rel,
+		"path=" + label,
 		"name=" + strings.TrimSpace(doc.Name),
 		"seed=" + strings.TrimSpace(doc.Seed),
 	}
@@ -1384,7 +1376,8 @@ func scenarioUUID(seed, label string) string {
 }
 
 func scenarioSetupEntityID(seed, runID string, entity evaluatedScenarioSetupEntity) string {
-	if strings.TrimSpace(entity.FlowID) == "" {
+	flowID := strings.TrimSpace(entity.FlowID)
+	if flowID == "" || flowID == "." {
 		return runtimeflowidentity.EntityID(runID)
 	}
 	return scenarioUUID(seed, "setup.entity."+entity.Alias)
@@ -1608,7 +1601,7 @@ func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]stru
 	out := map[string]struct{}{}
 	for _, record := range r.bundle.ScopedNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowID(), "/") != flowID {
+		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
 			continue
 		}
 		for _, gate := range record.Entry.GateState.Gates {
@@ -1618,7 +1611,7 @@ func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]stru
 		}
 	}
 	for _, transition := range r.bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowID(), "/") != flowID {
+		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
 			continue
 		}
 		if transition.SetsGate != nil {
@@ -1799,10 +1792,14 @@ func (r scenarioRunner) scenarioExecutionParams() map[string]any {
 func (r scenarioRunner) scopedEventName(flowID, eventName string) string {
 	eventName = strings.TrimSpace(eventName)
 	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	if flowID == "" || eventName == "" || strings.Contains(eventName, "/") {
+	if flowID == "" || flowID == "." || eventName == "" || strings.Contains(eventName, "/") {
 		return eventName
 	}
-	return r.bundle.ResolveFlowEventReference(flowID, eventName)
+	resolved := r.bundle.ResolveFlowEventReference(flowID, eventName)
+	if strings.Contains(resolved, "/") {
+		return resolved
+	}
+	return flowID + "/" + eventName
 }
 
 func (r scenarioRunner) buildPublishPayload(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, step scenarioStep) (map[string]any, string, error) {
@@ -2037,58 +2034,35 @@ func (r scenarioRunner) buildPayloadFromSpec(file scenarioTestFile, evaluator *s
 	return payload, nil
 }
 
-func (r scenarioRunner) loadFixturePayload(scenarioPath, rawPath string) (map[string]any, error) {
-	path := rawPath
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(filepath.Dir(scenarioPath), path)
+func (r scenarioRunner) loadFixturePayload(scenarioLabel, rawLabel string) (map[string]any, error) {
+	if r.bundle == nil || r.bundle.SourceArtifact == nil {
+		return nil, fmt.Errorf("payload.from requires an admitted source artifact")
 	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
+	rawLabel = strings.TrimSpace(rawLabel)
+	if rawLabel == "" || path.IsAbs(rawLabel) || strings.Contains(rawLabel, "\\") {
+		return nil, fmt.Errorf("payload.from %q must be a scenario-relative artifact label", rawLabel)
 	}
-	if !pathWithin(r.contractsDir, abs) {
-		return nil, fmt.Errorf("payload.from %s escapes contract package root", rawPath)
+	label := path.Clean(path.Join(path.Dir(scenarioLabel), rawLabel))
+	if label == "." || label == ".." || strings.HasPrefix(label, "../") {
+		return nil, fmt.Errorf("payload.from %s escapes the admitted source artifact", rawLabel)
 	}
-	realContractsDir, err := filepath.EvalSymlinks(r.contractsDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve contract package root: %w", err)
+	entry, ok := r.bundle.SourceArtifact.Entry(label)
+	if !ok {
+		return nil, fmt.Errorf("payload.from %s does not name an admitted source member", rawLabel)
 	}
-	realPath, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return nil, fmt.Errorf("resolve payload.from %s: %w", rawPath, err)
-	}
-	if !pathWithin(realContractsDir, realPath) {
-		return nil, fmt.Errorf("payload.from %s escapes contract package root", rawPath)
-	}
-	raw, err := os.ReadFile(realPath)
-	if err != nil {
-		return nil, fmt.Errorf("read payload.from %s: %w", rawPath, err)
-	}
+	raw := entry.Bytes()
 	var node yaml.Node
 	if err := yaml.Unmarshal(raw, &node); err != nil {
-		return nil, fmt.Errorf("parse payload.from %s: %w", rawPath, err)
+		return nil, fmt.Errorf("parse payload.from %s: %w", rawLabel, err)
 	}
 	if len(node.Content) == 0 {
-		return nil, fmt.Errorf("payload.from %s is empty", rawPath)
+		return nil, fmt.Errorf("payload.from %s is empty", rawLabel)
 	}
 	payload, ok := yamlNodeValue(node.Content[0]).(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("payload.from %s must contain an object", rawPath)
+		return nil, fmt.Errorf("payload.from %s must contain an object", rawLabel)
 	}
 	return payload, nil
-}
-
-func pathWithin(base, path string) bool {
-	base, err := filepath.Abs(base)
-	if err != nil {
-		return false
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(base, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func setPathValue(root map[string]any, rawPath string, value any) error {

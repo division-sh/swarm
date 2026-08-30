@@ -265,7 +265,7 @@ func eventSchemaDeclarationPath(bundle *WorkflowContractBundle, flowID string) [
 			if view == nil {
 				return ""
 			}
-			return view.Paths.ID
+			return view.Paths.FlowPath
 		}, flowViewChildren)
 	}
 	if len(path) == 0 {
@@ -279,7 +279,7 @@ func eventSchemaDeclarationPath(bundle *WorkflowContractBundle, flowID string) [
 		scopeFlowID := ""
 		types := bundle.RootTypeCatalog()
 		if i > 0 {
-			scopeFlowID = strings.TrimSpace(view.Paths.ID)
+			scopeFlowID = strings.TrimSpace(view.Paths.FlowPath)
 			types = bundle.ResolvedTypeCatalogForFlow(scopeFlowID)
 		}
 		out = append(out, eventSchemaDeclarationScope{
@@ -421,7 +421,7 @@ func eventSchemaFlowIDForPath(bundle *WorkflowContractBundle, flowPath string) s
 		return ""
 	}
 	if view := bundle.FlowTree.ByPath[flowPath]; view != nil {
-		return strings.TrimSpace(view.Paths.ID)
+		return strings.TrimSpace(view.Paths.FlowPath)
 	}
 	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
 	for flowID := range bundle.FlowTree.ByID {

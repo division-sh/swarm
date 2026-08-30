@@ -120,7 +120,6 @@ func lifecycleProbeProcessBinding() ProcessExecutionBinding {
 		ProcessBootID:      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		GenerationGrantID:  "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 		BundleHash:         managerTestTopologyBundleHash,
-		BundleSource:       "ephemeral",
 		RuntimeInstanceID:  "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 		RuntimeGeneration:  1,
 	}

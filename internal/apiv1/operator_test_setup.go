@@ -49,7 +49,7 @@ func testSetupConfigured(opts TestSetupHandlerOptions) bool {
 	if opts.Setup == nil || opts.Idempotency == nil || opts.RunBundleContext == nil {
 		return false
 	}
-	return runtimeContextManager(opts.RuntimeContexts) != nil || (opts.Source != nil && opts.BundleSource != nil)
+	return runtimeContextManager(opts.RuntimeContexts) != nil || (opts.Source != nil && opts.SourceArtifact != nil)
 }
 
 func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHandlerOptions, now time.Time) (any, error) {
@@ -78,7 +78,7 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 		scope := EventPublicationOptions{
 			RunBundleContext:          opts.RunBundleContext,
 			RuntimeContexts:           opts.RuntimeContexts,
-			BundleSource:              opts.BundleSource,
+			SourceArtifact:            opts.SourceArtifact,
 			Source:                    opts.Source,
 			ExecutionPosture:          opts.ExecutionPosture,
 			EffectiveSourceIdentity:   opts.EffectiveSourceIdentity,
@@ -281,6 +281,9 @@ func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request 
 
 func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, entity runtimepipeline.ScenarioSetupEntityRequest, i int) error {
 	flowID := strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
+	if flowID == "" {
+		flowID = "."
+	}
 	fieldPrefix := fmt.Sprintf("entities[%d]", i)
 	primary, err := bundle.ResolveTestSetupPrimaryEntity(flowID, entity.EntityType)
 	if err != nil {
@@ -356,7 +359,7 @@ func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle,
 	out := map[string]struct{}{}
 	for _, record := range bundle.ScopedNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowID(), "/") != flowID {
+		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
 			continue
 		}
 		for _, gate := range record.Entry.GateState.Gates {
@@ -366,7 +369,7 @@ func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle,
 		}
 	}
 	for _, transition := range bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowID(), "/") != flowID {
+		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
 			continue
 		}
 		if transition.SetsGate != nil {

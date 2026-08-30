@@ -524,10 +524,7 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:         "research",
-			PackageKey: "activity-boring-proof",
-			Dir:        "flows/research",
-			Mode:       runtimecontracts.FlowModeTemplate,
+			FlowPath: "research",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name:         "research",
@@ -772,9 +769,7 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-	)
+	source, err := runtimecorrelation.NewSourceArtifactFact(pipelineTestBundleHash)
 	if err != nil {
 		return err
 	}
@@ -887,7 +882,7 @@ func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRou
 }
 
 func mustActivityBoringNode(nodeID string) identity.ExecutableNode {
-	node, err := identity.AdmitExecutableNodeDeclaration("activity-boring-proof", "research", strings.TrimSpace(nodeID))
+	node, err := identity.AdmitExecutableNodeDeclaration("research", strings.TrimSpace(nodeID))
 	if err != nil {
 		panic(err)
 	}

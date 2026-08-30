@@ -580,9 +580,9 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 	runID := uuid.NewString()
 	startedAt := time.Now().UTC().Add(-time.Minute)
 	if backend.sqlite {
-		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: startedAt})
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: authorActivityTestSourceArtifact, StartedAt: startedAt})
 	} else {
-		storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: startedAt})
+		storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: authorActivityTestSourceArtifact, StartedAt: startedAt})
 	}
 	identities := make(map[string]agentidentity.Identity, 2)
 	for _, agentID := range []string{"snapshot-agent-a", "snapshot-agent-b"} {

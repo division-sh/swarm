@@ -24,7 +24,7 @@ func TestServeCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"serve"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"serve", "."}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -37,12 +37,11 @@ func TestServeCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 func TestDescribeCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := writeEnvAuthorityRepoWithMalformedDotEnv(t)
-	contractsRoot := writeEnvAuthorityContractsFixture(t, "describe-dotenv-ignored")
+	sourceRoot := writeEnvAuthorityContractsFixture(t, "describe-dotenv-ignored")
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repo, []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -59,14 +58,11 @@ func TestDoctorCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	repo := writeEnvAuthorityRepoWithMalformedDotEnv(t)
-	contractsRoot := writeEnvAuthorityContractsFixture(t, "doctor-dotenv-ignored")
-
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repo, []string{
 		"doctor",
 		"--backend", "claude_cli",
 		"--config", writeDoctorClaudeConfig(t, ""),
-		"--contracts", contractsRoot,
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -407,7 +403,7 @@ func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"serve",
+		"serve", ".",
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -661,7 +657,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"serve",
+		"serve", ".",
 		"--config", configPath,
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
@@ -717,7 +713,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromTrustedLayers(
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), repo, []string{
-				"serve",
+				"serve", ".",
 				"--api-listen-addr", "127.0.0.1:0",
 				"--mcp-listen-addr", "127.0.0.1:0",
 			}, &stdout, &stderr, opts)
@@ -832,7 +828,7 @@ func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegatio
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"serve",
+		"serve", ".",
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, opts)
@@ -863,7 +859,7 @@ func TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"serve",
+		"serve", ".",
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, opts)
@@ -878,14 +874,11 @@ func TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary(t *testing.T) {
 func TestDoctorReportsSwarmEnvFindingsWithConfigFailure(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
-	contractsRoot := writeEnvAuthorityContractsFixture(t, "doctor-env-report")
-
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"doctor",
 		"--json",
 		"--config", filepath.Join(t.TempDir(), "missing-runtime.yaml"),
-		"--contracts", contractsRoot,
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != CLIExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())
@@ -911,7 +904,6 @@ func TestDoctorTargetReportsSwarmEnvFindings(t *testing.T) {
 		"doctor",
 		"--target",
 		"--json",
-		"--contracts", filepath.Join(repo, "contracts"),
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != CLIExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())
@@ -959,7 +951,6 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 				"doctor",
 				"--target",
 				"--json",
-				"--contracts", filepath.Join(repo, "contracts"),
 			}, &stdout, &stderr, defaultRootCommandOptions())
 			if code != CLIExitRuntime {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())
@@ -1002,19 +993,10 @@ func writeEnvAuthorityRepoWithMalformedDotEnv(t *testing.T) string {
 func writeEnvAuthorityContractsFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: `+name+`
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: `+name+`
-initial_state: idle
-states:
-  - idle
-terminal_states:
-  - idle
+stages: []
 `)
 	return root
 }

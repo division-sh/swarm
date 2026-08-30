@@ -1,0 +1,4 @@
+name: test-rules-no-match
+version: 1.0.0
+description: Rules handler where no rule condition matches the payload.
+platform_version: ">=0.7.0 <0.8.0"

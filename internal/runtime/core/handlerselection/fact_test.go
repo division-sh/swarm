@@ -3,11 +3,11 @@ package handlerselection
 import (
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
-	ref, err := contractelementidentity.ParseContractElementRef("flows/scout", "d8fe3c3e-55c6-4f27-8eb4-dcd76a07982c")
+	ref, err := runtimeidentity.AdmitDeclarationIdentity("scout", "handler_rule", `nodes["scout"].handlers["task.requested"].rules[0]`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,7 +16,7 @@ func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
 		if err != nil || fact.Context() != context || fact.Disposition() != DispositionSelected || !fact.Ref().Equal(ref) {
 			t.Fatalf("Selected(%s) = %#v, %v", context, fact, err)
 		}
-		hydrated, err := Hydrate(string(context), string(DispositionSelected), "flows/scout", ref.ElementID().String(), "display only")
+		hydrated, err := Hydrate(string(context), string(DispositionSelected), ref.Flow().String(), ref.Family(), ref.SemanticPath(), "display only")
 		if err != nil || !hydrated.Equal(fact) {
 			t.Fatalf("Hydrate(%s) = %#v, %v; want %#v", context, hydrated, err, fact)
 		}
@@ -30,7 +30,7 @@ func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
 		if err != nil || failed.Disposition() != DispositionEvaluationFailed || !failed.Ref().Equal(ref) {
 			t.Fatalf("EvaluationFailed(%s) = %#v, %v", context, failed, err)
 		}
-		hydrated, err := Hydrate(string(context), string(DispositionEvaluationFailed), "flows/scout", ref.ElementID().String(), "attempted")
+		hydrated, err := Hydrate(string(context), string(DispositionEvaluationFailed), ref.Flow().String(), ref.Family(), ref.SemanticPath(), "attempted")
 		if err != nil || !hydrated.Equal(failed) {
 			t.Fatalf("Hydrate evaluation failure (%s) = %#v, %v; want %#v", context, hydrated, err, failed)
 		}
@@ -41,19 +41,19 @@ func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
 }
 
 func TestHandlerRuleSelectionFactRejectsContradictoryWireFacts(t *testing.T) {
-	const element = "d8fe3c3e-55c6-4f27-8eb4-dcd76a07982c"
-	for name, wire := range map[string][5]string{
-		"selected without ref":           {string(ContextRules), string(DispositionSelected), "", "", "label"},
-		"no match with ref":              {string(ContextRules), string(DispositionNoMatch), ".", element, ""},
-		"no match join":                  {string(ContextJoinComplete), string(DispositionNoMatch), "", "", ""},
-		"not applicable with label":      {string(ContextNone), string(DispositionNotApplicable), "", "", "label"},
-		"selected none":                  {string(ContextNone), string(DispositionSelected), ".", element, ""},
-		"evaluation failure without ref": {string(ContextRules), string(DispositionEvaluationFailed), "", "", "label"},
-		"evaluation failure join":        {string(ContextJoinComplete), string(DispositionEvaluationFailed), ".", element, "label"},
-		"unknown context":                {"handler_branch", string(DispositionSelected), ".", element, ""},
+	const semanticPath = `nodes["scout"].handlers["task.requested"].rules[0]`
+	for name, wire := range map[string][6]string{
+		"selected without ref":           {string(ContextRules), string(DispositionSelected), "", "", "", "label"},
+		"no match with ref":              {string(ContextRules), string(DispositionNoMatch), ".", "handler_rule", semanticPath, ""},
+		"no match join":                  {string(ContextJoinComplete), string(DispositionNoMatch), "", "", "", ""},
+		"not applicable with label":      {string(ContextNone), string(DispositionNotApplicable), "", "", "", "label"},
+		"selected none":                  {string(ContextNone), string(DispositionSelected), ".", "handler_rule", semanticPath, ""},
+		"evaluation failure without ref": {string(ContextRules), string(DispositionEvaluationFailed), "", "", "", "label"},
+		"evaluation failure join":        {string(ContextJoinComplete), string(DispositionEvaluationFailed), ".", "handler_rule", semanticPath, "label"},
+		"unknown context":                {"handler_branch", string(DispositionSelected), ".", "handler_rule", semanticPath, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Hydrate(wire[0], wire[1], wire[2], wire[3], wire[4]); err == nil {
+			if _, err := Hydrate(wire[0], wire[1], wire[2], wire[3], wire[4], wire[5]); err == nil {
 				t.Fatal("Hydrate succeeded")
 			}
 		})

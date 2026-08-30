@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,9 +30,11 @@ const (
 	releaseE2ENetwork          = "mas_default"
 	releaseE2EAgentWorkdir     = "/workspace"
 	releaseE2EManagedModel     = "sonnet"
-	releaseE2EAgentFingerprint = "1f16a79924a40cd1e6e42105063bd4b8d5e3332769c777508831bb193986d791"
-	releaseE2EAgentContainer   = "swarm-agent-" + releaseE2EAgentFingerprint
-	releaseE2EAgentVolume      = "workspaces_agent_" + releaseE2EAgentFingerprint
+	releaseE2EAgentFingerprint = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
+	releaseE2EFixtureScope     = "bundle-aaaaaaaaaaaa"
+	releaseE2EAgentSuffix      = "agent-" + releaseE2EAgentFingerprint
+	releaseE2EFixtureAgent     = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
+	releaseE2EFixtureAgentVol  = "workspaces_swarm_bundle_aaaaaaaaaaaa_agent_" + releaseE2EAgentFingerprint
 	releaseE2EOrphanKill       = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
@@ -346,16 +349,20 @@ func validateReleaseDockerCreate(root string, args []string) error {
 		scope         string
 		requiredMount map[string]string
 	}
+	kind, bundleScope, ok := releaseE2EContainerIdentity(create.name)
+	if !ok {
+		return fmt.Errorf("unexpected create container %q", create.name)
+	}
 	expected := map[string]expectation{
-		"swarm-scaffold": {
+		"scaffold": {
 			workdir:       "/opt/swarm/scaffold",
 			kind:          "scaffold",
 			resetEligible: "false",
 			source:        "workspace.EnsureSystemWorkspaces",
 			scope:         "scaffold",
-			requiredMount: map[string]string{"/opt/swarm/scaffold": "scaffold"},
+			requiredMount: map[string]string{"/opt/swarm/scaffold": "swarm-" + bundleScope + "-scaffold"},
 		},
-		"swarm-system": {
+		"system": {
 			workdir:       "/opt/swarm",
 			privileged:    true,
 			kind:          "system",
@@ -363,27 +370,27 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			source:        "workspace.EnsureSystemWorkspaces",
 			scope:         "system",
 			requiredMount: map[string]string{
-				"/opt/swarm/entities": "entities",
-				"/opt/swarm/nginx":    "nginx",
-				"/etc/systemd/system": "systemd",
+				"/opt/swarm/entities": "swarm-" + bundleScope + "-entities",
+				"/opt/swarm/nginx":    "swarm-" + bundleScope + "-nginx",
+				"/etc/systemd/system": "swarm-" + bundleScope + "-systemd",
 			},
 		},
-		releaseE2EAgentContainer: {
+		"agent": {
 			workdir:       releaseE2EAgentWorkdir,
 			kind:          "agent",
 			resetEligible: "true",
 			source:        "workspace.ResolveWorkspace",
 			scope:         "per-agent",
-			requiredMount: map[string]string{releaseE2EAgentWorkdir: releaseE2EAgentVolume},
+			requiredMount: map[string]string{releaseE2EAgentWorkdir: "workspaces_" + strings.ReplaceAll("swarm-"+bundleScope+"-agent_"+releaseE2EAgentFingerprint, "-", "_")},
 		},
-	}[create.name]
+	}[kind]
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
 		return fmt.Errorf("unexpected create workdir or privilege for %s", create.name)
 	}
 	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount, create.labels["dev.swarm.data_projection_id"]); err != nil {
 		return fmt.Errorf("create %s mounts: %w", create.name, err)
 	}
-	if err := validateReleaseDockerLabels(create, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
+	if err := validateReleaseDockerLabels(create, bundleScope, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
 		return err
 	}
 	return nil
@@ -449,8 +456,8 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 
 func validateReleaseDockerMounts(root string, raw []string, required map[string]string, dataProjectionID string) error {
 	releaseRoot := filepath.Dir(filepath.Clean(root))
-	requiredProjectMounts := map[string]string{
-		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
+	requiredSourceMounts := map[string]string{
+		"/opt/swarm/source": filepath.Join(releaseRoot, "contracts"),
 	}
 	seen := map[string]string{}
 	for _, mount := range raw {
@@ -467,10 +474,13 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 			return fmt.Errorf("malformed mount %q", mount)
 		}
 		switch target {
-		case "/opt/swarm/contracts":
-			wantSource := requiredProjectMounts[target]
-			if mode != "ro" || !filepath.IsAbs(source) || !releasePathsEqual(source, wantSource) {
-				return fmt.Errorf("project mount %q does not match %s:%s:ro", mount, wantSource, target)
+		case "/opt/swarm/source":
+			wantSource := requiredSourceMounts[target]
+			if mode != "ro" || !filepath.IsAbs(source) {
+				return fmt.Errorf("runtime source projection mount %q must be absolute and read-only", mount)
+			}
+			if err := validateReleaseSourceProjection(source, wantSource); err != nil {
+				return fmt.Errorf("runtime source projection mount %q: %w", mount, err)
 			}
 		case "/data":
 			if !validReleaseDataProjectionID(dataProjectionID) {
@@ -492,7 +502,7 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 		}
 		seen[target] = source
 	}
-	for target := range requiredProjectMounts {
+	for target := range requiredSourceMounts {
 		if _, ok := seen[target]; !ok {
 			return fmt.Errorf("missing required project mount target %q", target)
 		}
@@ -519,7 +529,73 @@ func releasePathsEqual(left, right string) bool {
 	return leftErr == nil && rightErr == nil && filepath.Clean(resolvedLeft) == filepath.Clean(resolvedRight)
 }
 
-func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible, source, scope string) error {
+func validateReleaseSourceProjection(projectionRoot, admittedRoot string) error {
+	if releasePathsEqual(projectionRoot, admittedRoot) {
+		return fmt.Errorf("uses ambient source directory %s", admittedRoot)
+	}
+	if filepath.Dir(filepath.Clean(projectionRoot)) != filepath.Clean(os.TempDir()) ||
+		!strings.HasPrefix(filepath.Base(filepath.Clean(projectionRoot)), "swarm-source-") {
+		return fmt.Errorf("path %s is not a typed runtime source projection", projectionRoot)
+	}
+	projected, err := releaseSourceTree(projectionRoot, false)
+	if err != nil {
+		return fmt.Errorf("read projection: %w", err)
+	}
+	expected, err := releaseSourceTree(admittedRoot, true)
+	if err != nil {
+		return fmt.Errorf("read admitted source: %w", err)
+	}
+	if len(projected) != len(expected) {
+		return fmt.Errorf("member count = %d, want %d", len(projected), len(expected))
+	}
+	for label, want := range expected {
+		got, ok := projected[label]
+		if !ok {
+			return fmt.Errorf("omits admitted member %s", label)
+		}
+		if !bytes.Equal(got, want) {
+			return fmt.Errorf("member %s differs from admitted bytes", label)
+		}
+	}
+	return nil
+}
+
+func releaseSourceTree(root string, ignoreRuntimeState bool) (map[string][]byte, error) {
+	members := map[string][]byte{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		if ignoreRuntimeState && (relative == ".swarm" || strings.HasPrefix(relative, ".swarm"+string(filepath.Separator))) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return fmt.Errorf("member %s is not a regular file", relative)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		members[filepath.ToSlash(relative)] = body
+		return nil
+	})
+	return members, err
+}
+
+func validateReleaseDockerLabels(create releaseDockerCreate, bundleScope, kind, resetEligible, source, scope string) error {
 	required := map[string]string{
 		"dev.swarm.owner":           "runtime",
 		"dev.swarm.container.kind":  kind,
@@ -541,16 +617,15 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 		"dev.swarm.container.name":  true,
 		"dev.swarm.workspace.scope": true,
 	}
-	if bundleHash := create.labels["dev.swarm.bundle_hash"]; bundleHash != "" {
-		allowed["dev.swarm.bundle_hash"] = true
-		if !validReleaseBundleHash(bundleHash) {
-			return fmt.Errorf("create %s has invalid bundle hash identity", create.name)
-		}
+	bundleHash := create.labels["dev.swarm.bundle_hash"]
+	allowed["dev.swarm.bundle_hash"] = true
+	if !validReleaseBundleHash(bundleHash) || "bundle-"+strings.TrimPrefix(bundleHash, "bundle-v2:sha256:")[:12] != bundleScope {
+		return fmt.Errorf("create %s has invalid or mismatched bundle hash identity", create.name)
 	}
-	if create.name == releaseE2EAgentContainer {
+	if kind == "agent" {
 		wantIdentityLabels := map[string]string{
 			"dev.swarm.agent_id":                 "release-worker",
-			"dev.swarm.agent_name_owner":         "claude-cli-release-lifecycle://flows/worker/release-worker",
+			"dev.swarm.agent_name_owner":         "swarm://worker/release-worker",
 			"dev.swarm.agent_name_source":        "declared",
 			"dev.swarm.agent_route_presence":     "present",
 			"dev.swarm.agent_flow_scope_key":     "worker",
@@ -600,11 +675,31 @@ func validReleaseDataProjectionID(value string) bool {
 }
 
 func releaseE2EContainerName(name string) bool {
-	switch name {
-	case "swarm-scaffold", "swarm-system":
-		return true
+	_, _, ok := releaseE2EContainerIdentity(name)
+	return ok
+}
+
+func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool) {
+	const prefix = "swarm-bundle-"
+	if !strings.HasPrefix(name, prefix) {
+		return "", "", false
+	}
+	remainder := strings.TrimPrefix(name, prefix)
+	hash, suffix, found := strings.Cut(remainder, "-")
+	if !found || len(hash) != 12 || strings.ToLower(hash) != hash {
+		return "", "", false
+	}
+	decoded, err := hex.DecodeString(hash)
+	if err != nil || len(decoded) != 6 {
+		return "", "", false
+	}
+	switch suffix {
+	case "scaffold", "system":
+		return suffix, "bundle-" + hash, true
+	case releaseE2EAgentSuffix:
+		return "agent", "bundle-" + hash, true
 	default:
-		return name == releaseE2EAgentContainer
+		return "", "", false
 	}
 }
 
@@ -795,8 +890,8 @@ target:
 	}
 	container := args[index]
 	invocation.commandArgs = append([]string(nil), args[index+1:]...)
-	if container != releaseE2EAgentContainer {
-		return invocation, fmt.Errorf("Claude Docker exec container = %q, want %q", container, releaseE2EAgentContainer)
+	if kind, _, ok := releaseE2EContainerIdentity(container); !ok || kind != "agent" {
+		return invocation, fmt.Errorf("Claude Docker exec container = %q, want exact bundle-scoped agent", container)
 	}
 	if workdir != releaseE2EAgentWorkdir {
 		return invocation, fmt.Errorf("Claude Docker exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
@@ -1277,7 +1372,7 @@ func dockerOptionValue(args []string, name string) string {
 }
 
 func validReleaseBundleHash(value string) bool {
-	const prefix = "bundle-v1:sha256:"
+	const prefix = "bundle-v2:sha256:"
 	if !strings.HasPrefix(value, prefix) {
 		return false
 	}

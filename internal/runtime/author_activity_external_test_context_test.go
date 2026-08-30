@@ -29,6 +29,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +39,8 @@ func testLiveExecutionContext(ctx context.Context) context.Context {
 	return runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 }
 
-var authorActivityTestBundleSourceFact = mustExternalTestBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+var authorActivityTestSourceArtifact = sourceartifactfixture.Artifact()
+var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
 var externalRuntimeTestEventBusOwners sync.Map
 
@@ -195,10 +197,10 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 		fields[key] = value
 	}
 	parentRoute := req.Instance.ParentRoute.Normalized()
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance, RunID: req.TriggerEvent.RunID(),
-		BundleHash: bundleHash, BundleSource: bundleSource,
+		BundleHash:      bundleHash,
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(), ExecutionMode: "live",
 	}
 	instance := runtimepipeline.WorkflowInstance{
@@ -335,8 +337,8 @@ func installExternalRuntimeTestGeneration(
 	if runtime == nil || runtime.Manager == nil || runtime.Options.WorkflowModule == nil {
 		t.Fatal("external runtime test generation requires a constructed runtime and semantic source")
 	}
-	bundleHash, bundleSource := runtime.Options.BundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := runtime.Options.SourceArtifactFact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile external runtime test source set: %v", err)
@@ -383,7 +385,7 @@ func installExternalRuntimeTestGeneration(
 		t.Fatalf("commit external runtime test source set: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: bundleHash, BundleSource: bundleSource,
+		BundleHash:        bundleHash,
 		RuntimeInstanceID: runtime.Options.RuntimeInstanceID, RuntimeGeneration: 1,
 		SourceSetRevision: plan.Revision,
 	})
@@ -419,7 +421,6 @@ func installExternalManagerTestGeneration(
 	admission, err := runtimeagenttopology.StaticAdmission(
 		evidence.SourceSetRevision,
 		evidence.BundleHash,
-		evidence.BundleSource,
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -488,10 +489,10 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash(),
+		authorActivityTestSourceArtifactFact.BundleHash(),
 	))
 }
 
@@ -500,8 +501,8 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
 		owner := newExternalTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
@@ -520,7 +521,7 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 			})
 		}
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()),
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()),
 			descriptors,
 		)
 		if err != nil {
@@ -545,14 +546,14 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.WorkOwner == nil {
 		process := worklifetime.NewProcess()
 		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
-			BundleHash:        opts.BundleSourceFact.BundleHash(),
+			BundleHash:        opts.SourceArtifactFact.BundleHash(),
 		})
 		if err != nil {
 			return nil, err
@@ -571,7 +572,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -633,17 +634,17 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	return bus, nil
 }
 
-func testBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+func testSourceArtifactFact(t testing.TB, bundleHash string) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 	if err != nil {
 		t.Fatalf("construct external test bundle source fact: %v", err)
 	}
 	return fact
 }
 
-func mustExternalTestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+func mustExternalTestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 	if err != nil {
 		panic(err)
 	}

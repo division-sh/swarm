@@ -40,7 +40,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"entity", "list",
 		"--run-id", "run-1",
-		"--flow", "flows/review",
+		"--flow", "review",
 		"--type", "vertical",
 		"--current-state", "collecting",
 		"--limit", "25",
@@ -54,7 +54,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	}
 	wantParams := map[string]any{
 		"run_id":        "run-1",
-		"flow":          "flows/review",
+		"flow":          "review",
 		"type":          "vertical",
 		"current_state": "collecting",
 		"limit":         float64(25),
@@ -63,7 +63,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"ENTITY_ID", "entity-1", "flows/review", "vertical", "collecting", "next_cursor=entity-cursor-2"} {
+	for _, want := range []string{"ENTITY_ID", "entity-1", "review", "vertical", "collecting", "next_cursor=entity-cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -209,7 +209,7 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	for _, want := range []string{
 		"Entity entity-1",
 		"run-1",
-		"flows/review",
+		"review",
 		"vertical",
 		"collecting",
 		"score",
@@ -340,7 +340,7 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 		Entity: entitySummary{
 			EntityID:     "entity-1",
 			RunID:        "run-1",
-			FlowInstance: "flows/review",
+			FlowInstance: "review",
 			EntityType:   "vertical",
 			CurrentState: "collecting",
 			Revision:     1,
@@ -762,7 +762,7 @@ func TestEntityViewVerboseShowsBookkeepingAndAbsoluteTimestamps(t *testing.T) {
 		}
 		result := validEntityFullResult("entity-1")
 		bookkeeping := result["bookkeeping"].(map[string]any)
-		bookkeeping["bundle_hash"] = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		bookkeeping["bundle_hash"] = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		bookkeeping["activation"] = "standing"
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
@@ -1069,7 +1069,7 @@ func validEntitySummary(entityID string) map[string]any {
 	return map[string]any{
 		"entity_id":     entityID,
 		"run_id":        "run-1",
-		"flow_instance": "flows/review",
+		"flow_instance": "review",
 		"entity_type":   "vertical",
 		"current_state": "collecting",
 		"slug":          "vertical-1",

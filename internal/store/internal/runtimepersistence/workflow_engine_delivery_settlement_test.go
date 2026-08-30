@@ -145,13 +145,21 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				t.Fatalf("claim workflow engine fan-out fixture: %v", err)
 			}
 
-			element := runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: uuid.NewString()}
+			element := runtimecontracts.FanOutElementRef{
+				FlowPath:     flowID,
+				Family:       "fan_out",
+				SemanticPath: `nodes["engine-fan-out"].handlers["engine.fan_out.requested"].fan_out`,
+			}
+			declaration, err := element.DeclarationIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
 			intent := fanoutobligation.IntentRequest{
 				Key: fanoutobligation.IntentKey{
 					RunID: runID, TriggeringDeliveryID: claimed.Claim.DeliveryID(), ElementRef: element,
 				},
 				PlanRef: runtimecontracts.FanOutPlanRef{
-					BundleHash: "bundle-v1:sha256:" + strings.Repeat("1", 64), ElementRef: element,
+					BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element,
 					SemanticDigest: "sha256:" + strings.Repeat("2", 64),
 				},
 				Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: event.ID(), Field: "candidate_ids"},
@@ -165,7 +173,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
 				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
-				element.PackageKey, element.ElementID, intent.PlanRef.BundleHash, intent.PlanRef.SemanticDigest,
+				declaration, intent.PlanRef.BundleHash, intent.PlanRef.SemanticDigest,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -207,11 +215,11 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			assertFanOutBarrierCount(t, ctx, db, runID, 0)
 
 			hostilePlanRef := intent.PlanRef
-			hostilePlanRef.BundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+			hostilePlanRef.BundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 			hostilePlanRef.SemanticDigest = "sha256:" + strings.Repeat("b", 64)
 			hostileJoinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
 				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
-				element.PackageKey, element.ElementID, hostilePlanRef.BundleHash, hostilePlanRef.SemanticDigest,
+				declaration, hostilePlanRef.BundleHash, hostilePlanRef.SemanticDigest,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -263,8 +271,9 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			if err := db.QueryRowContext(ctx, `
 				SELECT status,timer_handle,summary,schedule_key
 				FROM fan_out_obligation_barriers
-				WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
-			`, runID, claimed.Claim.DeliveryID(), element.PackageKey, element.ElementID).Scan(&status, &persistedHandle, &summary, &schedule); err != nil {
+				WHERE run_id=$1 AND triggering_delivery_id=$2
+				  AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
+			`, runID, claimed.Claim.DeliveryID(), element.FlowPath, element.Family, element.SemanticPath).Scan(&status, &persistedHandle, &summary, &schedule); err != nil {
 				t.Fatalf("load committed fan-out barrier: %v", err)
 			}
 			var persisted timeridentity.TimerHandle

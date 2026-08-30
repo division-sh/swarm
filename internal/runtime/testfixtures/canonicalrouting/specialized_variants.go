@@ -14,13 +14,7 @@ import (
 func CopyOutputModeVerify(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", `name: output-mode-verify
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeLegacyInstanceFlow(t, root, "child", `name: child
@@ -63,11 +57,7 @@ func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
 	}
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", `name: managed-native-lifecycle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", `name: managed-native-lifecycle
 initial_state: pending
 states: [pending, done]
@@ -102,13 +92,7 @@ pins:
 func CopyDescribeStageGraph(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", `name: stage-graph
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: stage-graph\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeLegacyInstanceFlow(t, root, "support", `name: support
@@ -159,7 +143,6 @@ line_item.requested:
     ticket.opened:
       create_entity: true
       fan_out:
-        element_id: 0a6260af-2543-447b-bd04-05cab98e6f31
         items_from: payload.line_items
         as: line_item
         identity: line_item
@@ -177,10 +160,8 @@ line_item.requested:
           by: payload.line_item_id
         output: payload.result
         on_complete:
-          element_id: 00000000-0000-4000-8000-000000000008
           advances_to: review
         timeout:
-          element_id: 00000000-0000-4000-8000-000000000009
           after: 1h
           advances_to: timed_out
 `)
@@ -192,62 +173,55 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	files := map[string]string{
-		"package.yaml": `name: inbound-admission-policy-matrix
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: matrix
-    flow: matrix
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: matrix
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-          admission:
-            pack: {id: provider.telegram}
-        - provider: intercom
-          signing_secret: webhook_signing.intercom
-          admission:
-            pack: {id: provider.intercom}
-        - provider: acme_public
-          admission:
-            kind: raw
-            acknowledge: unsigned_webhook
-            authentication: {kind: none}
-            event: inbound.acme_public
-            delivery_id: {source: body_sha256}
-            payload: json
-        - provider: partner_auth
-          signing_secret: webhook_signing.partner
-          admission:
-            kind: raw
-            authentication: {kind: hmac_sha256, header: X-Partner-Signature, encoding: hex}
-            event: inbound.partner_auth
-            delivery_id: {source: header, header: X-Partner-Delivery}
-            payload: json
-        - provider: partner_open
-          admission:
-            kind: raw
-            authentication: {kind: none}
-            event: inbound.partner_open
-            delivery_id: {source: json_path, json_path: $.delivery.id}
-            payload: raw
-        - provider: partner_ack
-          admission:
-            kind: raw
-            acknowledge: unsigned_webhook
-            authentication: {kind: none}
-            event: inbound.partner_ack
-            delivery_id: {source: body_sha256}
-            payload: raw
-`,
+
 		"schema.yaml": "name: inbound-admission-policy-matrix\n",
-		"flows/matrix/schema.yaml": `name: matrix
+		"matrix/schema.yaml": `name: matrix
 mode: singleton
+activation: standing
 initial_state: active
 states: [active]
+ingress:
+  alias: matrix
+  providers:
+    - provider: telegram
+      signing_secret: webhook_signing.telegram
+      admission:
+        pack: {id: provider.telegram}
+    - provider: intercom
+      signing_secret: webhook_signing.intercom
+      admission:
+        pack: {id: provider.intercom}
+    - provider: acme_public
+      admission:
+        kind: raw
+        acknowledge: unsigned_webhook
+        authentication: {kind: none}
+        event: inbound.acme_public
+        delivery_id: {source: body_sha256}
+        payload: json
+    - provider: partner_auth
+      signing_secret: webhook_signing.partner
+      admission:
+        kind: raw
+        authentication: {kind: hmac_sha256, header: X-Partner-Signature, encoding: hex}
+        event: inbound.partner_auth
+        delivery_id: {source: header, header: X-Partner-Delivery}
+        payload: json
+    - provider: partner_open
+      admission:
+        kind: raw
+        authentication: {kind: none}
+        event: inbound.partner_open
+        delivery_id: {source: json_path, json_path: $.delivery.id}
+        payload: raw
+    - provider: partner_ack
+      admission:
+        kind: raw
+        acknowledge: unsigned_webhook
+        authentication: {kind: none}
+        event: inbound.partner_ack
+        delivery_id: {source: body_sha256}
+        payload: raw
 pins:
   inputs:
     events:
@@ -258,9 +232,9 @@ pins:
       - {event: inbound.partner_open, source: external}
       - {event: inbound.partner_ack, source: external}
 `,
-		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
-		"flows/matrix/events.yaml":   inboundAdmissionEvents(),
-		"flows/matrix/nodes.yaml":    inboundAdmissionNodes(),
+		"matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
+		"matrix/events.yaml":   inboundAdmissionEvents(),
+		"matrix/nodes.yaml":    inboundAdmissionNodes(),
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)
@@ -294,7 +268,7 @@ func inboundAdmissionNodes() string {
 func CopyServedTestSetup(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", "name: served-test-setup\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", `name: served-test-setup
 initial_state: waiting
 terminal_states: [done]
@@ -336,13 +310,7 @@ widget.started:
 func CopyVerifyLintEvidence(t testing.TB, missingEmitSchema bool) string {
 	t.Helper()
 	root := CopyOutputModeVerify(t)
-	writeClosedVariantFile(t, root, "package.yaml", `name: verify-lint-evidence
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-lint-evidence\n")
 	writeClosedVariantFile(t, root, "entities.yaml", `case:
   untouched:
@@ -352,11 +320,11 @@ flows:
     type: integer
     _unused_reason: child read-pin coverage proof field
 `)
-	writeClosedVariantFile(t, root, "flows/child/events.yaml", `task.assigned:
+	writeClosedVariantFile(t, root, "child/events.yaml", `task.assigned:
   swarm:
     source: external (verify lint evidence test)
 `)
-	writeClosedVariantFile(t, root, "flows/child/entities.yaml", `case:
+	writeClosedVariantFile(t, root, "child/entities.yaml", `case:
   priority:
     type: integer
     _unused_reason: verify lint evidence child primary entity proof field
@@ -378,7 +346,7 @@ flows:
 func CopyFirstFlowTutorial(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", "name: ticket-flow\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: ticket-flow\ninitial_state: open\nterminal_states: [resolved]\nstates: [open, assigned, resolved]\n")
 	writeClosedVariantFile(t, root, "entities.yaml", `ticket:
   category:
@@ -436,8 +404,8 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	agentID = closedScalarLiteral(t, "agent ID", agentID, "worker")
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", "name: "+workflowName+"\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [agent.requested]\n")
+
+	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n  swarm:\n    source: external\n")
 	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")
@@ -447,7 +415,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 func CopyArtifactRepoCommitAdmission(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", "name: artifact-root-startup\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: ready\nterminal_states: [done]\nstates: [ready, done]\npins:\n  inputs:\n    events: [artifact.requested]\n")
 	writeClosedVariantFile(t, root, "entities.yaml", `core:
   repo_url: {type: text, _unused_reason: artifact startup admission proof output field}
@@ -492,13 +460,7 @@ func CopyArtifactRepoCommitAdmission(t testing.TB) string {
 func CopyVerifyMissingPin(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	writeClosedVariantFile(t, root, "package.yaml", `name: verify-missing-pin-warning
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\ntask.completed: {}\nchild/task.assigned: {}\nchild/task.result: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
@@ -534,7 +496,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", "name: cross-bundle-target\nversion: 1.0.0\ndescription: Cross-bundle target fixture for run.fork.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\n")
@@ -546,7 +508,7 @@ func CopyScenarioSetup(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", "name: scenario-setup-fixture\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: operating\n    flow: operating\n    mode: static\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\ninitial_state: new\nterminal_states: [done]\nstates: [new, done]\n")
 	writeLegacyInstanceFlow(t, root, "operating", "name: operating\nmode: static\ninitial_state: initializing\nterminal_states: [ready]\nstates: [initializing, waiting, ready]\npins:\n  inputs:\n    events: [opco.product_review_requested]\n", "opco.product_review_requested:\n  swarm:\n    source: external\n  note: text\n", "product:\n  product_id: text\n  note: text\n", `reviewer:
   id: reviewer
@@ -564,7 +526,7 @@ func CopyScenarioSetup(t testing.TB) string {
       clear_gates: [review_ready]
       advances_to: ready
 `)
-	writeClosedVariantFile(t, root, "flows/operating/tests/setup-target.yaml", `name: setup target and expectation
+	writeClosedVariantFile(t, root, "operating/tests/setup-target.yaml", `name: setup target and expectation
 setup:
   entities:
     - as: product
@@ -590,7 +552,7 @@ func CopyScenarioRootSetup(t testing.TB) string {
 	t.Helper()
 	root := CopyServedTestSetup(t)
 	removeInheritedScenarios(t, root)
-	writeClosedVariantFile(t, root, "package.yaml", "name: scenario-root-setup-fixture\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-root-setup-fixture\ninitial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events: [widget.scored]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "widget.scored:\n  swarm:\n    source: external\n  delta: integer\n")
 	writeClosedVariantFile(t, root, "tests/root-setup.yaml", `name: root setup and expectation
@@ -623,7 +585,7 @@ func CopyInputPinExternalScope(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "entities.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", "name: input-pin-external-scope\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: external_consumer\n    flow: external_consumer\n    mode: static\n  - id: plain_consumer\n    flow: plain_consumer\n    mode: static\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: input-pin-external-scope\n")
 	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - event: ticket.ready\n        source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")

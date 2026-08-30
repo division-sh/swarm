@@ -43,6 +43,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -155,9 +156,16 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 }
 
 func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
+	return eventBusTestRunContextForSource(t, db, nil)
+}
+
+func eventBusTestRunContextForSource(t *testing.T, db *sql.DB, source semanticview.Source) context.Context {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), eventBusTestRunID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+		t.Fatalf("persist exact event bus test source artifact: %v", err)
+	}
 	if err := storetest.EnsureEphemeralRun(
 		ctx, selected, eventBusTestRunID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
 	); err != nil {
@@ -565,7 +573,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := eventBusTestRunContext(t, db)
+	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -579,13 +587,14 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}
+	bundleHash := testSourceArtifactFact(source).BundleHash()
 	readinessOwner, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "account", ScopeKey: "account", InstanceID: "one", InstancePath: instanceRoute.InstancePath,
 			EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath), HasStoredPath: true,
 		},
-		RunID: eventBusTestRunID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+		RunID: eventBusTestRunID, BundleHash: bundleHash,
+		WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize account readiness owner: %v", err)
@@ -928,13 +937,13 @@ type recordedLogEntry struct {
 	Detail     any
 	Lineage    runtimecorrelation.RuntimeLineage
 	HasLineage bool
-	SourceFact runtimecorrelation.BundleSourceFact
+	SourceFact runtimecorrelation.SourceArtifactFact
 	HasSource  bool
 }
 
 func (h *recordingLoggerHook) Log(ctx context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ *runtimefailures.Envelope, _ int) error {
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
-	sourceFact, hasSource := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail, Lineage: lineage, HasLineage: ok, SourceFact: sourceFact, HasSource: hasSource})
 	return nil
 }
@@ -1320,15 +1329,15 @@ func TestEventBusPublish_RejectsPublisherRuntimeDiagnosticLineage(t *testing.T) 
 	}
 }
 
-func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
+func TestEventBusPublish_AttachesSourceArtifactFactToRuntimeLogs(t *testing.T) {
 	logger := &recordingLoggerHook{}
-	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:1111111111111111111111111111111111111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
 	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		Logger:           logger,
-		BundleSourceFact: sourceFact,
+		Logger:             logger,
+		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2173,7 +2182,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			decisionRoute := surface == "decision_periodic"
 			for i := 0; i < poolSize; i++ {
 				runIDs[i] = uuid.NewString()
-				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
 			}
 			db.SetMaxOpenConns(poolSize)
@@ -2598,16 +2607,17 @@ func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOwner(t *testing.T) {
+func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
-	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333")
+	artifact := admitEventBusPersistedSourceArtifact(t, context.Background(), pg)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		BundleSourceFact: sourceFact,
+		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2618,36 +2628,30 @@ func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOw
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	var bundleHash, bundleSource string
+	var bundleHash string
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash, &bundleSource); err != nil {
-		t.Fatalf("load run bundle source: %v", err)
+	`, runID).Scan(&bundleHash); err != nil {
+		t.Fatalf("load run source artifact: %v", err)
 	}
-	wantHash, wantSource := sourceFact.StorageValues()
-	if bundleHash != wantHash || bundleSource != wantSource {
-		t.Fatalf("bundle identity = hash:%q source:%q, want canonical ephemeral source", bundleHash, bundleSource)
+	if bundleHash != sourceFact.BundleHash() {
+		t.Fatalf("bundle identity = hash:%q, want canonical source artifact %q", bundleHash, sourceFact.BundleHash())
 	}
 }
 
-func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
+func TestEventBusPublishDirect_StampsSourceArtifactFactOnRunRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
-	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444")
+	artifact := admitEventBusPersistedSourceArtifact(t, context.Background(), pg)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: test', '{}'::jsonb)
-	`, sourceFact.BundleHash()); err != nil {
-		t.Fatalf("seed bundle row: %v", err)
-	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		BundleSourceFact: sourceFact,
+		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2677,18 +2681,35 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		[]string{"agent-a"}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
-	var bundleHash, bundleSource string
+	var bundleHash string
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash, &bundleSource); err != nil {
-		t.Fatalf("load run bundle source: %v", err)
+	`, runID).Scan(&bundleHash); err != nil {
+		t.Fatalf("load run source artifact: %v", err)
 	}
-	wantHash, wantSource := sourceFact.StorageValues()
-	if bundleHash != wantHash || bundleSource != wantSource {
-		t.Fatalf("bundle identity = hash:%q source:%q, want canonical source fact %#v", bundleHash, bundleSource, sourceFact)
+	if bundleHash != sourceFact.BundleHash() {
+		t.Fatalf("bundle identity = hash:%q, want canonical source artifact %q", bundleHash, sourceFact.BundleHash())
 	}
+}
+
+func admitEventBusPersistedSourceArtifact(t *testing.T, ctx context.Context, selected interface {
+	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+}) *sourceartifact.AdmittedSourceArtifact {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: event-bus-persisted-source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatalf("admit event bus source artifact: %v", err)
+	}
+	if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
+		t.Fatalf("persist event bus source artifact: %v", err)
+	}
+	return artifact
 }
 
 func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *testing.T) {
@@ -3084,7 +3105,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 
 func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -3093,7 +3114,7 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 		Path: "producer",
 	}
 	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
@@ -3247,13 +3268,13 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	childEntityID := runtimepipeline.FlowInstanceEntityID("child")
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild")
 	workflowStore := pc
-	ctx := eventBusTestRunContext(t, db)
+	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
 			EntityID:        rootEntityID,
-			WorkflowName:    bundle.WorkflowName(),
+			WorkflowName:    ".",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
 		},
@@ -3261,7 +3282,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			InstanceID:         "child",
 			StorageRef:         "child",
 			EntityID:           childEntityID,
-			ParentFlowID:       bundle.WorkflowName(),
+			ParentFlowID:       ".",
 			ParentFlowInstance: eventBusTestRunID,
 			ParentEntityID:     rootEntityID,
 			WorkflowName:       "child",
@@ -3272,7 +3293,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			InstanceID:      "grandchild",
 			StorageRef:      "child/grandchild",
 			EntityID:        grandchildEntityID,
-			WorkflowName:    "grandchild",
+			WorkflowName:    "child/grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "finished",
 		},
@@ -3282,7 +3303,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		}
 	}
 
-	grandchildSource := eventtest.StaticFlowRoutingSource("grandchild", "child/grandchild", grandchildEntityID)
+	grandchildSource := eventtest.StaticFlowRoutingSource("child/grandchild", "child/grandchild", grandchildEntityID)
 	completion := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("child/grandchild/micro.done"),
@@ -3310,7 +3331,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("completion routes = %#v, want child-relay", plan.DeliveryRoutes)
 	}
 	claimNode, claimEvent, claimed := childRoute.ConnectClaim.NodeHandlerOwner()
-	if !claimed || claimNode.FlowID() != "child" || claimNode.NodeID() != "child-relay" || claimEvent != "micro.done" {
+	if !claimed || claimNode.FlowPath() != "child" || claimNode.NodeID() != "child-relay" || claimEvent != "micro.done" {
 		t.Fatalf("completion connect claim = node:%s event:%q admitted:%v, want child/child-relay/micro.done", claimNode.Key(), claimEvent, claimed)
 	}
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -3406,14 +3427,14 @@ func contains(items []string, want string) bool {
 func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := eventBusTestRunContext(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	module, bundle := mixedNodeRouteWorkflowModule(t)
 	source := semanticview.Wrap(bundle)
+	ctx := eventBusTestRunContextForSource(t, db, source)
 	const eventType = "route.start"
 	const rootEntityID = "11111111-1111-1111-1111-222222222222"
 	const childEntityID = "11111111-1111-1111-1111-333333333333"
-	rootTarget := events.RouteIdentity{FlowID: "mixed-route", FlowInstance: eventBusTestRunID, EntityID: rootEntityID}
+	rootTarget := events.RouteIdentity{FlowID: ".", FlowInstance: eventBusTestRunID, EntityID: rootEntityID}
 	rootNode := testRootNode(t, "project-observer")
 	rootRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(rootNode), Target: events.MustExistingEntityTarget(rootTarget)}
 	childTarget := events.RouteIdentity{
@@ -3461,7 +3482,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
 			EntityID:        rootEntityID,
-			WorkflowName:    "mixed-route",
+			WorkflowName:    ".",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
 		},
@@ -3521,7 +3542,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}}
 	child := runtimecontracts.FlowContractView{
 		Path:  "child",
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeStatic,
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "route.start"}}}},
@@ -3540,8 +3561,8 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 	}
 	root := runtimecontracts.FlowContractView{
-		Path:  "",
-		Paths: runtimecontracts.FlowContractPaths{},
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "mixed-route",
 			Mode: runtimecontracts.FlowModeStatic,
@@ -3582,22 +3603,26 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"mixed-route": &root,
-				"child":       &root.Children[0],
+				".":     &root,
+				"child": &root.Children[0],
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"mixed-route": root.Schema,
-			"child":       child.Schema,
+			".":     root.Schema,
+			"child": child.Schema,
 		},
 	}
 	admitted := loadEventBusTempBundle(t, map[string]string{
-		"package.yaml":              "name: mixed-route\nversion: v-test\nflows:\n  - id: child\n    flow: child\n    mode: static\n",
-		"schema.yaml":               "name: mixed-route\nmode: static\ninitial_state: active\nstates: [active]\n",
-		"entities.yaml":             "test_entity: {}\n",
-		"flows/child/schema.yaml":   "name: child\nmode: static\ninitial_state: active\nstates: [active]\n",
-		"flows/child/entities.yaml": "test_entity: {}\n",
+
+		"schema.yaml":         "name: mixed-route\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"entities.yaml":       "test_entity: {}\n",
+		"child/schema.yaml":   "name: child\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"child/entities.yaml": "test_entity: {}\n",
 	})
 	admitted.Nodes = bundle.Nodes
 	admitted.Semantics = bundle.Semantics
@@ -3633,16 +3658,23 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 
 func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND status = $3
-	`, eventID, nodeID, want).Scan(&count); err != nil {
-		t.Fatalf("query delivery status for %s: %v", nodeID, err)
+	deadline := time.Now().Add(5 * time.Second)
+	count := 0
+	for {
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = $2
+			  AND status = $3
+		`, eventID, nodeID, want).Scan(&count); err != nil {
+			t.Fatalf("query delivery status for %s: %v", nodeID, err)
+		}
+		if count == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if count != 1 {
 		rows, err := db.QueryContext(context.Background(), `
@@ -3686,7 +3718,25 @@ func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want st
 				t.Fatalf("iterate dead letter dump: %v", err)
 			}
 		}
-		t.Fatalf("delivery rows for %s status %q = %d, want 1; rows=%v dead_letters=%v", nodeID, want, count, dump, deadLetters)
+		receipts := make([]string, 0)
+		receiptRows, err := db.QueryContext(context.Background(), `
+			SELECT subscriber_type || '/' || subscriber_id,
+			       outcome || ' reason=' || COALESCE(reason_code, '') || ' failure=' || COALESCE(failure::text, '')
+			FROM event_receipts
+			WHERE event_id = $1::uuid
+			ORDER BY subscriber_type, subscriber_id
+		`, eventID)
+		if err == nil {
+			defer receiptRows.Close()
+			for receiptRows.Next() {
+				var subscriber, outcome string
+				if err := receiptRows.Scan(&subscriber, &outcome); err != nil {
+					t.Fatalf("scan receipt dump: %v", err)
+				}
+				receipts = append(receipts, subscriber+" outcome="+outcome)
+			}
+		}
+		t.Fatalf("delivery rows for %s status %q = %d, want 1; rows=%v dead_letters=%v receipts=%v", nodeID, want, count, dump, deadLetters, receipts)
 	}
 }
 
@@ -3741,14 +3791,14 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
-	ctx := eventBusTestRunContext(t, db)
+	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
 			EntityID:        rootEntityID,
-			WorkflowName:    bundle.WorkflowName(),
+			WorkflowName:    ".",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
 		},
@@ -3756,7 +3806,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			InstanceID:         "child",
 			StorageRef:         "child",
 			EntityID:           runtimeflowidentity.EntityID("child"),
-			ParentFlowID:       bundle.WorkflowName(),
+			ParentFlowID:       ".",
 			ParentFlowInstance: eventBusTestRunID,
 			ParentEntityID:     rootEntityID,
 			WorkflowName:       "child",
@@ -3770,7 +3820,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			ParentFlowID:       "child",
 			ParentFlowInstance: "child",
 			ParentEntityID:     runtimeflowidentity.EntityID("child"),
-			WorkflowName:       "grandchild",
+			WorkflowName:       "child/grandchild",
 			WorkflowVersion:    bundle.WorkflowVersion(),
 			CurrentState:       "ready",
 		},
@@ -3812,7 +3862,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
 		eventBusTestRunID, previewEnvelope, rootSource, time.Now().UTC())
 	childPreviewCtx := runtimedelivery.WithRoute(ctx, rootConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testPackageNode(t, "flows/child", "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testFlowNode(t, "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
 		Stage:    "waiting",
 	}, nil); err != nil {
@@ -4065,13 +4115,13 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
-	ctx := eventBusTestRunContext(t, db)
+	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
 	workflowStore := pc
 	rootFixture := exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
 		InstanceID:      eventBusTestRunID,
 		StorageRef:      eventBusTestRunID,
 		EntityID:        rootEntityID,
-		WorkflowName:    bundle.WorkflowName(),
+		WorkflowName:    ".",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 	}})[0]
@@ -4171,13 +4221,13 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	}
 }
 
-func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T) {
+func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot, canonicalrouting.CopyNestedPackageConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		repoRoot, canonicalrouting.CopyNestedFlowConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load nested package connect fixture: %v", err)
+		t.Fatalf("load nested flow connect fixture: %v", err)
 	}
 	eb, err := newScopedTestEventBus(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -4190,7 +4240,7 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
-		FlowID: "grandchild", FlowInstance: "child/grandchild", EntityID: eventtest.UUID("ent-grandchild"),
+		FlowID: "child/grandchild", FlowInstance: "child/grandchild", EntityID: eventtest.UUID("ent-grandchild"),
 	})
 	if err != nil {
 		t.Fatalf("build nested source: %v", err)
@@ -4209,7 +4259,7 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 
 func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 		},
@@ -4228,7 +4278,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		},
 	}
 	child := runtimecontracts.FlowContractView{
-		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:     "child",
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}

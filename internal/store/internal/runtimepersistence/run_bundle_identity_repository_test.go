@@ -83,14 +83,11 @@ func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) 
 		source := readRepositoryFile(t, path)
 		for _, match := range runInsertPattern.FindAllStringSubmatch(source, -1) {
 			columns := normalizedSQLColumns(match[1])
-			if rel == "internal/store/internal/runtimepersistence/schema_compatibility_bootstrap_test.go" {
-				if columns["bundle_hash"] != columns["bundle_source"] {
-					t.Errorf("%s contains a partially specified old-store run insert", rel)
-				}
-				continue
+			if !columns["bundle_hash"] {
+				t.Errorf("%s contains a run fixture insert without explicit bundle_hash", rel)
 			}
-			if !columns["bundle_hash"] || !columns["bundle_source"] {
-				t.Errorf("%s contains a run fixture insert without explicit bundle_hash and bundle_source", rel)
+			if columns["bundle_source"] {
+				t.Errorf("%s contains retired bundle_source identity", rel)
 			}
 		}
 		return nil
@@ -106,8 +103,10 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 		"bundle_" + "ref",
 		"Bundle" + "Ref",
 		"Bundle" + "Fingerprint",
+		"Bundle" + "SourceFact",
 		"bundle_" + "fingerprint",
-		"BundleSource" + "Legacy",
+		"bundle_" + "source",
+		"SourceArtifact" + "Legacy",
 		"bundle-" + "fingerprint",
 		"legacy_bundle_" + "fingerprint",
 		"UNSUPPORTED_BUNDLE_" + "REF",
@@ -138,28 +137,28 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecResumeRecoveryRejectsLegacyBundleSourceStates(t *testing.T) {
+func TestPlatformSpecSourceArtifactRecoveryRejectsLegacySourceArtifactStates(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(readRepositoryFile(t, filepath.Join(root, "platform-spec.yaml"))), &document); err != nil {
 		t.Fatalf("parse platform spec: %v", err)
 	}
-	multiBundle, ok := document["multi_bundle_persistence"].(map[string]any)
+	sourceModel, ok := document["filesystem_source_model"].(map[string]any)
 	if !ok {
-		t.Fatal("platform spec is missing multi_bundle_persistence")
+		t.Fatal("platform spec is missing filesystem_source_model")
 	}
-	resumeRecovery, ok := multiBundle["resume_and_recovery"].(map[string]any)
+	durableLifecycle, ok := sourceModel["durable_lifecycle"].(map[string]any)
 	if !ok {
-		t.Fatal("platform spec is missing multi_bundle_persistence.resume_and_recovery")
+		t.Fatal("platform spec is missing filesystem_source_model.durable_lifecycle")
 	}
 	var legacyPaths []string
-	collectLegacyBundleSourceStatePaths(resumeRecovery, "multi_bundle_persistence.resume_and_recovery", &legacyPaths)
+	collectLegacySourceArtifactStatePaths(durableLifecycle, "filesystem_source_model.durable_lifecycle", &legacyPaths)
 	if len(legacyPaths) != 0 {
 		t.Fatalf("resume/recovery retains legacy bundle source states: %s", strings.Join(legacyPaths, ", "))
 	}
 }
 
-func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testing.T) {
+func TestRepositorySourceArtifactOwnershipHandoffsRequireExactOpaqueFacts(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	for _, check := range []struct {
 		path       string
@@ -173,7 +172,7 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"runFact.Matches(contextFact)",
 			},
 			prohibited: []string{
-				"func requireBundleSourceAvailable",
+				"func requireSourceArtifactAvailable",
 				"SELECT EXISTS (SELECT 1 FROM bundles",
 			},
 		},
@@ -181,9 +180,9 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			path: "internal/runtime/bus/eventbus.go",
 			required: []string{
 				"durable event bus requires an immutable bundle source fact",
-				"cleanupCtx, err := eb.admitBundleSourceFact(context.Background())",
-				"cleanupCtx, err := p.bus.admitBundleSourceFact(p.lifecycleCtx)",
-				"cleanupCtx, err := eb.admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))",
+				"cleanupCtx, err := eb.admitSourceArtifactFact(context.Background())",
+				"cleanupCtx, err := p.bus.admitSourceArtifactFact(p.lifecycleCtx)",
+				"cleanupCtx, err := eb.admitSourceArtifactFact(context.WithoutCancel(handle.lifecycleCtx))",
 				"operation.publicationClaim.Release(cleanupCtx)",
 			},
 			prohibited: []string{
@@ -194,22 +193,22 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "internal/runtime/bus/eventbus_publish.go",
 			required: []string{
-				"func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error)",
+				"func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Context, error)",
 				"!hasOwnedFact && !eb.ephemeral",
 				"!sourceFact.Matches(contextFact)",
-				"func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error)",
+				"func (eb *EventBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error)",
 				"func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) (context.Context, error)",
 				"prepared.publicationClaim.bus != eb",
-				"eb.admitBundleSourceFact(ctx)",
-				"eb.admitBundleSourceFact(dispatchCtx)",
+				"eb.admitSourceArtifactFact(ctx)",
+				"eb.admitSourceArtifactFact(dispatchCtx)",
 				"dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)",
 				"func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *worklifetime.Lease, error)",
-				"admittedCtx, err := eb.admitBundleSourceFact(ctx)",
+				"admittedCtx, err := eb.admitSourceArtifactFact(ctx)",
 				"lease, err := owner.Begin(admittedCtx)",
 				"return bindWorkContext(admittedCtx, lease, owner), lease, nil",
 			},
 			prohibited: []string{
-				"func (eb *EventBus) WithBundleSourceFact",
+				"func (eb *EventBus) WithSourceArtifactFact",
 			},
 		},
 		{
@@ -218,7 +217,7 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error",
 				"ctx, lease, err := d.bus.beginRuntimeWork(ctx)",
 				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
-				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
+				"ctx, err = d.bus.admitSourceArtifactFact(ctx)",
 				"func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim)",
 				"func (eb *EventBus) clearPendingOutboxOperation(ctx context.Context, eventID string) error",
 			},
@@ -226,8 +225,8 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "internal/runtime/bus/pipeline_publication_claim.go",
 			required: []string{
-				"ctx, err = eb.admitBundleSourceFact(ctx)",
-				"ctx, err = c.bus.admitBundleSourceFact(ctx)",
+				"ctx, err = eb.admitSourceArtifactFact(ctx)",
+				"ctx, err = c.bus.admitSourceArtifactFact(ctx)",
 			},
 		},
 		{
@@ -239,29 +238,29 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int)",
 				"func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int)",
 				"func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error",
-				"ctx, err = eb.admitBundleSourceFact(ctx)",
+				"ctx, err = eb.admitSourceArtifactFact(ctx)",
 			},
 		},
 		{
 			path: "internal/runtime/runforkexecution/runtime_container.go",
 			required: []string{
-				"BundleSourceFact:            req.LoadedSource.BundleSourceFact",
+				"SourceArtifactFact:          req.LoadedSource.SourceArtifactFact",
 			},
 		},
 		{
 			path: "internal/runtime/manager/types.go",
 			required: []string{
-				"AdmitBundleSourceFact(context.Context) (context.Context, error)",
+				"AdmitSourceArtifactFact(context.Context) (context.Context, error)",
 			},
 		},
 		{
 			path: "internal/runtime/manager/runtime.go",
 			required: []string{
-				"ctx, err = am.bus.AdmitBundleSourceFact(ctx)",
+				"ctx, err = am.bus.AdmitSourceArtifactFact(ctx)",
 			},
 			prohibited: []string{
-				"type bundleSourceFactContextOwner interface",
-				"am.bus.(bundleSourceFactContextOwner)",
+				"type sourceArtifactFactContextOwner interface",
+				"am.bus.(sourceArtifactFactContextOwner)",
 			},
 		},
 		{
@@ -276,14 +275,14 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "platform-spec.yaml",
 			required: []string{
-				"Every durable operation admits that fact before work-occurrence admission or local/store mutation",
-				"internal subscriptions, and agent/internal route generations remain bound to that exact fact",
+				"Local durable run/serve persists or reconciles the exact logical blob before publishing a runtime or run that references its hash",
+				"Persisted boot, recovery, replay, and fork decode the selected-store blob and compile only the reconstructed artifact",
 			},
 		},
 		{
 			path: "internal/apiv1/operator_runtime_context.go",
 			required: []string{
-				"DecodeBundleSourceFact(availability.BundleHash, availability.BundleSource.String())",
+				"DecodeSourceArtifactFact(availability.BundleHash)",
 				"!fact.Matches(runFact)",
 			},
 		},
@@ -323,7 +322,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"AbandonInboundDeliveryPlan":                 operationMutation,
 		"AddFlowInstanceRoute":                       operationAdmittedChild,
 		"AddFlowInstanceRouteContext":                operationMutation,
-		"AdmitBundleSourceFact":                      operationPureRead,
+		"AdmitSourceArtifactFact":                    operationPureRead,
 		"BeginPipelineParentTransition":              operationMutation,
 		"CheckAPIEventPublishRecipientPlan":          operationPureRead,
 		"CheckDirectRoutes":                          operationPureRead,
@@ -442,13 +441,13 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		owner    string
 		guard    string
 	}{
-		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "beginRuntimeWork", "admitBundleSourceFact(ctx)"},
-		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchPendingOutboxOperation", "admitBundleSourceFact(ctx)"},
-		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchAndRecord", "admitBundleSourceFact(ctx)"},
-		{operationMutation, "internal/runtime/bus/outbox.go", "clearPendingOutboxOperation", "admitBundleSourceFact(ctx)"},
-		{operationMutation, "internal/runtime/bus/pipeline_publication_claim.go", "claimPipelinePublication", "admitBundleSourceFact(ctx)"},
-		{operationRetained, "internal/runtime/bus/eventbus.go", "completeInternalSubscription", "admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))"},
-		{operationMutation, "internal/runtime/bus/sweeper.go", "closePipelineScanLocked", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "beginRuntimeWork", "admitSourceArtifactFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchPendingOutboxOperation", "admitSourceArtifactFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchAndRecord", "admitSourceArtifactFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "clearPendingOutboxOperation", "admitSourceArtifactFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/pipeline_publication_claim.go", "claimPipelinePublication", "admitSourceArtifactFact(ctx)"},
+		{operationRetained, "internal/runtime/bus/eventbus.go", "completeInternalSubscription", "admitSourceArtifactFact(context.WithoutCancel(handle.lifecycleCtx))"},
+		{operationMutation, "internal/runtime/bus/sweeper.go", "closePipelineScanLocked", "admitSourceArtifactFact(ctx)"},
 	} {
 		source := readRepositoryFile(t, filepath.Join(root, filepath.FromSlash(operationRoot.path)))
 		if !strings.Contains(source, "func ") || !strings.Contains(source, operationRoot.owner) || !strings.Contains(source, operationRoot.guard) {
@@ -460,7 +459,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 	}
 }
 
-func collectLegacyBundleSourceStatePaths(value any, path string, out *[]string) {
+func collectLegacySourceArtifactStatePaths(value any, path string, out *[]string) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
@@ -468,11 +467,11 @@ func collectLegacyBundleSourceStatePaths(value any, path string, out *[]string) 
 			if strings.Contains(strings.ToLower(key), "legacy") {
 				*out = append(*out, childPath)
 			}
-			collectLegacyBundleSourceStatePaths(child, childPath, out)
+			collectLegacySourceArtifactStatePaths(child, childPath, out)
 		}
 	case []any:
 		for index, child := range typed {
-			collectLegacyBundleSourceStatePaths(child, path+"["+strconv.Itoa(index)+"]", out)
+			collectLegacySourceArtifactStatePaths(child, path+"["+strconv.Itoa(index)+"]", out)
 		}
 	case string:
 		if strings.Contains(strings.ToLower(typed), "legacy") {
@@ -560,7 +559,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/store/internal/runtimepersistence/agent_lifecycle_read_surface_test.go",
 	"internal/store/internal/runtimepersistence/author_activity_receipt_parity_test.go",
 	"internal/store/internal/runtimepersistence/budget_spend_test.go",
-	"internal/store/internal/runtimepersistence/bundle_delete_test.go",
 	"internal/store/internal/runtimepersistence/completion_settlement_test.go",
 	"internal/store/internal/runtimepersistence/decision_cards_test.go",
 	"internal/store/internal/runtimepersistence/destructive_reset_cleanup_test.go",
@@ -578,7 +576,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/store/internal/runtimepersistence/postgres_helpers_test.go",
 	"internal/store/internal/runtimepersistence/postgres_smoke_test.go",
 	"internal/store/internal/runtimepersistence/postgres_store_additional_test.go",
-	"internal/store/internal/runtimepersistence/preservation_cleanup_test.go",
 	"internal/store/run_bundle_fingerprint_test.go",
 	"internal/store/internal/runtimepersistence/run_completion_test.go",
 	"internal/store/internal/runtimepersistence/run_control_test.go",

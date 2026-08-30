@@ -1,0 +1,4 @@
+name: grandchild
+version: 1.0.0
+description: Deepest level grandchild that emits task.done.
+platform_version: ">=0.7.0 <0.8.0"

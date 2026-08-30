@@ -398,11 +398,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			store.lifecycleOwner = &workflowInitialMaterializationTestOwner{}
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			occurredAt := time.Date(2026, time.July, 26, 13, 0, 0, 123456000, time.UTC)
-			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+			sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 			if !ok {
 				t.Fatal("initial readiness context is missing bundle source fact")
 			}
-			bundleHash, bundleSource := sourceFact.StorageValues()
+			bundleHash := sourceFact.BundleHash()
 			plan := DynamicFlowRuntimeReadinessPlan{
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
@@ -410,7 +410,6 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				},
 				RunID:           runID,
 				BundleHash:      bundleHash,
-				BundleSource:    bundleSource,
 				WorkflowVersion: "1.0.0",
 				ExecutionMode:   executionmode.Live,
 				Agents: []DynamicFlowRuntimeAgentExpectation{
@@ -525,15 +524,15 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			); err != nil {
 				t.Fatalf("mark creation occurrence emitted: %v", err)
 			}
-			revisedSourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-				"bundle-v1:sha256:" + strings.Repeat("c", 64),
+			revisedSourceFact, err := runtimecorrelation.NewSourceArtifactFact(
+				"bundle-v2:sha256:" + strings.Repeat("c", 64),
 			)
 			if err != nil {
 				t.Fatalf("revised bundle source fact: %v", err)
 			}
-			revisedCtx := runtimecorrelation.WithBundleSourceFact(ctx, revisedSourceFact)
+			revisedCtx := runtimecorrelation.WithSourceArtifactFact(ctx, revisedSourceFact)
 			revisedPlan := plan
-			revisedPlan.BundleHash, revisedPlan.BundleSource = revisedSourceFact.StorageValues()
+			revisedPlan.BundleHash = revisedSourceFact.BundleHash()
 			reviseWorkflowActivationRunSourceForTest(t, store, revisedCtx, runID, revisedSourceFact)
 			observed, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
@@ -549,7 +548,6 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 			if revised.Plan.WorkflowVersion != plan.WorkflowVersion ||
 				revised.Plan.BundleHash != revisedPlan.BundleHash ||
-				revised.Plan.BundleSource != revisedPlan.BundleSource ||
 				!revised.TopologyReadyAt.IsZero() ||
 				revised.CreationEventEmittedAt.IsZero() ||
 				!revised.Pending() {
@@ -570,7 +568,6 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("load readiness after stale topology completion: found=%v err=%v", found, err)
 			}
 			if stillRevised.Plan.BundleHash != revisedPlan.BundleHash ||
-				stillRevised.Plan.BundleSource != revisedPlan.BundleSource ||
 				stillRevised.Plan.WorkflowVersion != revisedPlan.WorkflowVersion ||
 				!stillRevised.TopologyReadyAt.IsZero() {
 				t.Fatalf("stale topology completion changed revised readiness: %#v", stillRevised)
@@ -584,7 +581,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-no-auto",
 				InstancePath: "review/inst-no-auto", EntityID: uuid.NewString(), HasStoredPath: true,
 			}
-			noAutoPlan.BundleHash, noAutoPlan.BundleSource = revisedSourceFact.StorageValues()
+			noAutoPlan.BundleHash = revisedSourceFact.BundleHash()
 			noAutoPlan.CreationEvent = nil
 			noAutoInstance := instance
 			noAutoInstance.InstanceID = noAutoPlan.Identity.InstanceID
@@ -629,9 +626,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				runtimerunlifecycle.StateCancelled,
 			)
 			if store.isSQLite() {
-				runlifecyclefixture.RequireSQLite(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequireSQLite(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash})
 			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequirePostgres(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash})
 			}
 			nextPlan := plan
 			nextPlan.RunID = nextRunID
@@ -739,7 +736,7 @@ func reviseWorkflowActivationRunSourceForTest(
 	store *workflowInstanceStore,
 	ctx context.Context,
 	runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) {
 	t.Helper()
 	if store == nil || store.testRuntimeMutation() == nil {
@@ -1375,20 +1372,14 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 
 func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`,
-		"flows/scoring/schema.yaml": `name: scoring
+
+		"scoring/schema.yaml": `name: scoring
 pins:
   outputs:
     events:
       - scoring.requested
 `,
-		"flows/scoring/nodes.yaml": `scoring-node:
+		"scoring/nodes.yaml": `scoring-node:
   id: scoring-node
   execution_type: system_node
   event_handlers: {}
@@ -1425,27 +1416,21 @@ pins:
 
 func TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
-		"flows/operating/entities.yaml": "test_entity: {}\n",
-		"flows/operating/schema.yaml": `name: operating
+
+		"operating/entities.yaml": "test_entity: {}\n",
+		"operating/schema.yaml": `name: operating
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string
 opco.ceo_ready:
   entity_id: string?
 `,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+		"operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
@@ -1514,24 +1499,18 @@ opco.ceo_ready:
 
 func TestTemplateInstanceRecordEvidenceUsesExactLocalHandlerEvidenceTarget(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
-		"flows/operating/entities.yaml": "test_entity: {}\n",
-		"flows/operating/schema.yaml": `name: operating
+
+		"operating/entities.yaml": "test_entity: {}\n",
+		"operating/schema.yaml": `name: operating
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 `,
-		"flows/operating/events.yaml": `build_progress:
+		"operating/events.yaml": `build_progress:
   entity_id: string
   summary: string
 `,
-		"flows/operating/nodes.yaml": `build-orchestrator:
+		"operating/nodes.yaml": `build-orchestrator:
   id: build-orchestrator
   execution_type: system_node
   subscribes_to: [build_progress]

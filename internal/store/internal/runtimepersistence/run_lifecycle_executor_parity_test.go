@@ -137,7 +137,7 @@ func TestRunLifecycleSameRevisionCommittedHandoffParity(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
@@ -205,7 +205,7 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -277,7 +277,7 @@ func TestRunLifecycleTerminalClearDuringAttemptDoesNotReviveCandidateParity(t *t
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -345,7 +345,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
@@ -395,7 +395,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 			}
 			awaitRunLifecycleSignal(t, intercept.firstStarted, "old-bundle candidate execution")
 
-			replacement, err := runtimecorrelation.NewEphemeralBundleSourceFact(runLifecycleCandidateParityReplacementHash)
+			replacement, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -564,7 +564,7 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s store does not expose candidate registration", backend)
 			}
-			baseCtx := testAuthorActivityBundleSourceContext()
+			baseCtx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, baseCtx, runID, startedAt)
@@ -683,7 +683,7 @@ func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.
 			if !ok {
 				t.Fatalf("%s store does not expose candidate registration", backend)
 			}
-			baseCtx := testAuthorActivityBundleSourceContext()
+			baseCtx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(
 				t,

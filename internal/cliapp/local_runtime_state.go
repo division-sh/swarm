@@ -18,7 +18,6 @@ const (
 )
 
 type localRuntimeStateProject struct {
-	ContractsPath        string
 	ProjectRoot          string
 	CanonicalProjectRoot string
 	ProjectLocal         bool
@@ -36,7 +35,7 @@ type LocalRuntimeStateResolution struct {
 
 type LocalRuntimeStateOptions struct {
 	RepoRoot      string
-	ResolvedPaths CLIContractPlatformSpecPaths
+	ResolvedPaths CLISourcePlatformSpecPaths
 	SwarmDir      CLISwarmDirResolution
 	Config        *config.Config
 
@@ -105,29 +104,28 @@ func ResolveDevScratch(state LocalRuntimeStateResolution) (DevScratchResolution,
 	return DevScratchResolution{Coordinate: coordinate, Selection: selection}, nil
 }
 
-func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLIContractPlatformSpecPaths) localRuntimeStateProject {
-	contractsPath := strings.TrimSpace(resolvedPaths.ContractsPath)
-	if contractsPath == "" {
-		return localRuntimeStateProject{Status: "no_project", Detail: "no resolved contracts path"}
+func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLISourcePlatformSpecPaths) localRuntimeStateProject {
+	selectedRoot := strings.TrimSpace(resolvedPaths.SourceRoot)
+	if selectedRoot == "" {
+		return localRuntimeStateProject{Status: "no_project", Detail: "no selected source root"}
 	}
-	projectRoot := inferProjectRootFromContractsPath(contractsPath)
+	projectRoot := filepath.Clean(selectedRoot)
 	canonicalProjectRoot, projectDetail := canonicalizeDoctorTargetPath(projectRoot)
 	canonicalProjectRoot = strings.TrimSpace(canonicalProjectRoot)
 	if canonicalProjectRoot == "" {
 		return localRuntimeStateProject{
-			ContractsPath: contractsPath,
-			ProjectRoot:   projectRoot,
-			Status:        "invalid_project",
-			Detail:        "project root could not be canonicalized",
+			ProjectRoot: projectRoot,
+			Status:      "invalid_project",
+			Detail:      "selected source root could not be canonicalized",
 		}
 	}
 	canonicalRepoRoot, repoDetail := canonicalizeDoctorTargetPath(RepoRoot)
 	projectLocal := localRuntimePathWithin(canonicalProjectRoot, canonicalRepoRoot)
 	status := "borrowed_project"
-	detail := "contracts project root is outside the active repo root; local store uses the Swarm directory and workspace data requires an explicit source"
+	detail := "selected source root is outside the active repo root; local store uses the Swarm directory and workspace data requires an explicit source"
 	if projectLocal {
 		status = "project_local"
-		detail = "resolved contracts project root owns local runtime state"
+		detail = "the exact selected source root owns local development state"
 	} else if repoDetail != "resolved" {
 		detail = "active repo root could not be canonicalized; local store uses the Swarm directory and workspace data requires an explicit source"
 	}
@@ -135,7 +133,6 @@ func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLIContractP
 		detail = "project root canonicalization detail: " + projectDetail
 	}
 	return localRuntimeStateProject{
-		ContractsPath:        contractsPath,
 		ProjectRoot:          projectRoot,
 		CanonicalProjectRoot: canonicalProjectRoot,
 		ProjectLocal:         projectLocal,
@@ -237,20 +234,7 @@ func ResolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bo
 	if err != nil {
 		return storebackend.Selection{}, err
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{})
-	if err != nil {
-		return storebackend.Selection{}, err
-	}
-	project := resolveLocalRuntimeStateProject(repo, resolvedPaths)
-	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
+	defaultPath := filepath.Join(swarmDir.Path, "stores", "default", "dev.db")
+	defaultSource := storebackend.SourceSwarmDirDefault
 	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, cfg, defaultPath, defaultSource)
-}
-
-func resolveWorkspaceMountSources(RepoRoot string, flagDataSource string, cfg *config.Config) (WorkspaceMountSources, error) {
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(RepoRoot, CLIContractPlatformSpecPathOptions{})
-	if err != nil {
-		return WorkspaceMountSources{}, err
-	}
-	project := resolveLocalRuntimeStateProject(RepoRoot, resolvedPaths)
-	return resolveWorkspaceMountSourcesForLocalState(RepoRoot, flagDataSource, cfg, project, true)
 }

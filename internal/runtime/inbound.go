@@ -36,8 +36,7 @@ type InboundPersistence = runtimeinbound.Runner
 type InboundTarget struct {
 	BundleHash          string
 	ServiceID           string
-	PackageKey          string
-	FlowID              string
+	FlowPath            string
 	RunID               string
 	Generation          int64
 	PublicationSequence int64
@@ -379,8 +378,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		ProviderEventType string `json:"provider_event_type"`
 		SemanticDigest    string `json:"semantic_content_digest"`
 		StableServiceID   string `json:"stable_service_id"`
-		PackageKey        string `json:"package_key"`
-		FlowID            string `json:"flow_id"`
+		FlowPath          string `json:"flow_path"`
 		InstanceID        string `json:"instance_id"`
 		TargetAlias       string `json:"target_alias"`
 		TargetFlow        string `json:"target_flow_instance"`
@@ -389,7 +387,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		ProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		Provider:          provider, EntityID: entityID, ProviderEventID: providerEventID,
 		ProviderEventType: admitted.ProviderEventType, SemanticDigest: admitted.SemanticContentDigest,
-		StableServiceID: target.ServiceID, PackageKey: target.PackageKey, FlowID: target.FlowID,
+		StableServiceID: target.ServiceID, FlowPath: target.FlowPath,
 		InstanceID: target.InstanceID, TargetAlias: target.Alias, TargetFlow: target.FlowInstance,
 		Generation: target.Generation,
 	})
@@ -405,7 +403,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	publicationRequest := runtimeinbound.Request{
 		PublicationID: publicationID, Provider: provider, EntityID: entityID, ProviderEventID: providerEventID,
 		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
-		StableServiceID: target.ServiceID, PackageKey: target.PackageKey, FlowID: target.FlowID,
+		StableServiceID: target.ServiceID, FlowPath: target.FlowPath,
 		InstanceID: target.InstanceID, TargetAlias: target.Alias, TargetFlowInstance: target.FlowInstance,
 		ExpectedPublicationSequence: target.PublicationSequence, ExpectedGeneration: target.Generation,
 		ResolvedRunID: target.RunID,
@@ -439,7 +437,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		}
 	}
 	pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
-	pubCtx, err = g.bus.AdmitBundleSourceFact(pubCtx)
+	pubCtx, err = g.bus.AdmitSourceArtifactFact(pubCtx)
 	if err != nil {
 		http.Error(w, "inbound bundle source admission failed", http.StatusConflict)
 		return
@@ -598,7 +596,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 	if delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("compiled provider projection changed admitted request identity")
 	}
-	routingSource, err := events.NewExternalIngressRoutingSource(target.FlowID, request.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routingSource, err := events.NewExternalIngressRoutingSource(target.FlowPath, request.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
 	}

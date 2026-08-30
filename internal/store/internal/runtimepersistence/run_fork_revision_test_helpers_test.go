@@ -20,13 +20,7 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id = $1::uuid`, runID).Scan(&bundleHash); err != nil {
 		t.Fatalf("load run-fork fixture bundle identity: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata)
-		VALUES ($1, 'api_version: swarm.test.bundle.v1', '{}'::jsonb, '{"source":"run-fork-test"}'::jsonb)
-		ON CONFLICT (bundle_hash) DO NOTHING
-	`, bundleHash); err != nil {
-		t.Fatalf("admit run-fork fixture bundle catalog: %v", err)
-	}
+	requireStoreTestPersistedBundle(t, db, bundleHash)
 	if len(families) == 0 {
 		families = runforkrevision.AllFamilies()
 	}

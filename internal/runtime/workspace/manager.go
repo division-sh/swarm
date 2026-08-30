@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type Target struct {
@@ -65,11 +65,51 @@ func ResolveForCapabilityAdmission(ctx context.Context, resolver Resolver, actor
 
 type Lifecycle interface {
 	CapabilityAdmissionResolver
+	SetBundleScope(bundleHash string)
 	ValidateSource(ctx context.Context, source semanticview.Source) error
 	EnsurePrereqs(ctx context.Context) error
 	EnsureSystemWorkspaces(ctx context.Context) error
 	EnsureEntityWorkspace(ctx context.Context, entityID string) error
 	StopEntityWorkspace(ctx context.Context, entityID string) error
+}
+
+// SourceProjectionRebinder creates an isolated lifecycle for a selected source
+// generation without mutating the lifecycle serving the boot generation.
+type SourceProjectionRebinder interface {
+	RebindSourceProjection(*sourceartifact.RuntimeProjection, semanticview.Source) (Lifecycle, error)
+}
+
+type SourceProjectionBinding interface {
+	SourceProjectionBundleHash() string
+}
+
+func RebindSourceProjection(lifecycle Lifecycle, projection *sourceartifact.RuntimeProjection, source semanticview.Source) (Lifecycle, error) {
+	if lifecycle == nil {
+		return nil, fmt.Errorf("workspace lifecycle is required for selected source projection")
+	}
+	rebinder, ok := lifecycle.(SourceProjectionRebinder)
+	if !ok {
+		return nil, fmt.Errorf("workspace lifecycle %T cannot bind a selected source projection", lifecycle)
+	}
+	return rebinder.RebindSourceProjection(projection, source)
+}
+
+func RequireSourceProjectionBinding(lifecycle Lifecycle, bundleHash string) error {
+	if lifecycle == nil {
+		return fmt.Errorf("workspace lifecycle is required for source projection binding")
+	}
+	binding, ok := lifecycle.(SourceProjectionBinding)
+	if !ok {
+		return fmt.Errorf("workspace lifecycle %T does not expose its source projection binding", lifecycle)
+	}
+	expected := strings.TrimSpace(bundleHash)
+	if err := sourceartifact.ValidateHash(expected); err != nil {
+		return fmt.Errorf("workspace source projection binding bundle_hash: %w", err)
+	}
+	if actual := strings.TrimSpace(binding.SourceProjectionBundleHash()); actual != expected {
+		return fmt.Errorf("workspace source projection is bound to %q, selected source requires %q", actual, expected)
+	}
+	return nil
 }
 
 type OrphanKiller interface {
@@ -107,8 +147,8 @@ type DockerConfig struct {
 	WorkspaceVolumesFrom  string
 	SharedDataSource      string
 	DataMountPoint        string
-	ContractsSource       string
-	ContractsMountPoint   string
+	SourceProjection      *sourceartifact.RuntimeProjection
+	SourceMountPoint      string
 	ScaffoldContainer     string
 	ScaffoldWorkdir       string
 	ScaffoldVolume        string
@@ -131,8 +171,7 @@ func DefaultDockerConfig() DockerConfig {
 		WorkspaceVolumesFrom:  "",
 		SharedDataSource:      "",
 		DataMountPoint:        "/data",
-		ContractsSource:       "",
-		ContractsMountPoint:   "/opt/swarm/contracts",
+		SourceMountPoint:      "/opt/swarm/source",
 		ScaffoldContainer:     "swarm-scaffold",
 		ScaffoldWorkdir:       "/opt/swarm/scaffold",
 		ScaffoldVolume:        "scaffold",
@@ -149,6 +188,7 @@ func DefaultDockerConfig() DockerConfig {
 type DockerManager struct {
 	lookup      Lookup
 	cfg         DockerConfig
+	baseCfg     DockerConfig
 	source      semanticview.Source
 	data        runtimedataaccess.Provider
 	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
@@ -193,9 +233,11 @@ else
 fi`
 
 func NewDockerManager(lookup Lookup) *DockerManager {
+	cfg := DefaultDockerConfig()
 	return &DockerManager{
-		lookup: lookup,
-		cfg:    DefaultDockerConfig(),
+		lookup:  lookup,
+		cfg:     cfg,
+		baseCfg: cfg,
 	}
 }
 
@@ -204,6 +246,7 @@ func (m *DockerManager) SetConfigForTest(cfg DockerConfig) {
 		return
 	}
 	m.cfg = cfg
+	m.baseCfg = cfg
 }
 
 func (m *DockerManager) SetConfig(cfg DockerConfig) {
@@ -211,6 +254,38 @@ func (m *DockerManager) SetConfig(cfg DockerConfig) {
 		return
 	}
 	m.cfg = cfg
+	m.baseCfg = cfg
+}
+
+func (m *DockerManager) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (Lifecycle, error) {
+	if m == nil {
+		return nil, fmt.Errorf("workspace manager is required")
+	}
+	if source == nil {
+		return nil, fmt.Errorf("workspace semantic source is required")
+	}
+	if projection == nil {
+		return nil, fmt.Errorf("workspace validation failed: runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return nil, err
+	}
+	cfg := m.baseCfg
+	cfg.SourceProjection = projection
+	clone := NewDockerManager(m.lookup)
+	clone.SetConfig(cfg)
+	clone.SetSemanticSource(source)
+	clone.SetDataProjectionProvider(m.data)
+	clone.SetRunDockerFnForTest(m.RunDockerFn)
+	clone.SetBundleScope(projection.BundleHash())
+	return clone, nil
+}
+
+func (m *DockerManager) SourceProjectionBundleHash() string {
+	if m == nil || m.cfg.SourceProjection == nil {
+		return ""
+	}
+	return m.cfg.SourceProjection.BundleHash()
 }
 
 func (m *DockerManager) DockerBin() string {
@@ -259,29 +334,35 @@ func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Conte
 }
 
 func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindScaffold), append(m.standardMountArgs(),
-		[]string{
-			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
-			"-w", m.cfg.ScaffoldWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}...)); err != nil {
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindScaffold), m.scaffoldContainerArgs()); err != nil {
 		return fmt.Errorf("ensure scaffold workspace: %w", err)
 	}
 
-	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindSystem), append(m.standardMountArgs(),
-		[]string{
-			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
-			"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
-			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
-			"-w", m.cfg.SystemWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}...)); err != nil {
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindSystem), m.systemContainerArgs()); err != nil {
 		return fmt.Errorf("ensure system workspace: %w", err)
 	}
 	return nil
+}
+
+func (m *DockerManager) scaffoldContainerArgs() []string {
+	return append(m.standardMountArgs(),
+		"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
+		"-w", m.cfg.ScaffoldWorkdir,
+		m.cfg.WorkspaceImage,
+		"sleep", "infinity",
+	)
+}
+
+func (m *DockerManager) systemContainerArgs() []string {
+	return append(m.standardMountArgs(),
+		"--privileged",
+		"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
+		"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
+		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
+		"-w", m.cfg.SystemWorkdir,
+		m.cfg.WorkspaceImage,
+		"sleep", "infinity",
+	)
 }
 
 func (m *DockerManager) SystemWorkspaceContainers() []string {
@@ -303,7 +384,7 @@ func (m *DockerManager) SetBundleScope(bundleHash string) {
 	if m == nil {
 		return
 	}
-	cfg := m.cfg
+	cfg := m.baseCfg
 	cfg.BundleHash = strings.TrimSpace(bundleHash)
 	cfg.BundleScope = bundleScopeKey(bundleHash)
 	if cfg.BundleScope != "" {
@@ -580,12 +661,7 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindScaffold), []string{
-			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
-			"-w", m.cfg.ScaffoldWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}); err != nil {
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindScaffold), m.scaffoldContainerArgs()); err != nil {
 			return nil, err
 		}
 		return &Target{
@@ -595,15 +671,7 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 			Mounts:    dockerExecutionMounts(m.cfg, false),
 		}, nil
 	case "system":
-		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), []string{
-			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
-			"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
-			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
-			"-w", m.cfg.SystemWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}); err != nil {
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), m.systemContainerArgs()); err != nil {
 			return nil, err
 		}
 		return &Target{
@@ -661,13 +729,13 @@ func dockerExecutionMounts(cfg DockerConfig, hasData bool) []ExecutionMount {
 	if dataMount == "" {
 		dataMount = LogicalDataMount
 	}
-	contractsMount := strings.TrimSpace(cfg.ContractsMountPoint)
-	if contractsMount == "" {
-		contractsMount = LogicalContractsMount
+	sourceMount := strings.TrimSpace(cfg.SourceMountPoint)
+	if sourceMount == "" {
+		sourceMount = LogicalSourceMount
 	}
 	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite},
-		{LogicalPath: contractsMount, Access: MountAccessReadOnly},
+		{LogicalPath: sourceMount, Access: MountAccessReadOnly},
 	}
 	if hasData {
 		out = append(out, ExecutionMount{LogicalPath: dataMount, Access: MountAccessReadOnly})
@@ -856,8 +924,8 @@ func (m *DockerManager) standardMountArgs() []string {
 		return nil
 	}
 	args := []string{}
-	if source := strings.TrimSpace(m.cfg.ContractsSource); source != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.ContractsMountPoint)))
+	if source, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash); err == nil {
+		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.SourceMountPoint)))
 	}
 	return args
 }
@@ -909,13 +977,8 @@ func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
 	if strings.TrimSpace(m.cfg.WorkspaceVolumesFrom) != "" || strings.TrimSpace(m.cfg.SharedDataSource) != "" {
 		return fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
 	}
-	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source"); err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(strings.TrimSpace(m.cfg.ContractsSource), "package.yaml")); err != nil {
-		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", strings.TrimSpace(m.cfg.ContractsSource))
-	}
-	return nil
+	_, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	return err
 }
 
 func workspaceClassScope(source semanticview.Source, class string) (string, bool, error) {
@@ -1379,7 +1442,7 @@ func bundleScopeKey(bundleHash string) string {
 	if bundleHash == "" {
 		return ""
 	}
-	const prefix = "bundle-v1:sha256:"
+	const prefix = "bundle-v2:sha256:"
 	hash := strings.TrimPrefix(bundleHash, prefix)
 	if len(hash) > 12 {
 		hash = hash[:12]

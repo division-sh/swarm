@@ -88,7 +88,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},
+		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},
+		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "flow", WorkflowVersion: "v1"},
+		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
 	})
 	if err != nil {
 		t.Fatal(err)

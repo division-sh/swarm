@@ -93,7 +93,7 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 				return nil, err
 			}
 			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
-			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
+			operationCtx = runtimecorrelation.WithSourceArtifactFact(operationCtx, target.Candidate.Source)
 			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, runtimeeffects.ExecutionMode(pc.executionPosture.RootMode()))
 			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
 				return nil, err
@@ -212,11 +212,11 @@ func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Conte
 	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
+func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error) {
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
-func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
+func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error) {
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 

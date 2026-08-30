@@ -131,7 +131,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				t.Fatalf("artifactRepoResultEvent: %v", err)
 			}
 			emitted := intent.Event
-			wantEventType := tc.wantFlowPath + "/" + tc.eventType
+			wantEventType := "repo-scaffold/" + tc.eventType
 			if got := string(emitted.Type()); got != wantEventType {
 				t.Fatalf("event type = %q, want %q", got, wantEventType)
 			}
@@ -187,7 +187,7 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 				FlowInstance: "repo-scaffold/inst-1",
 				EntityID:     "ent-repo",
 			},
-			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			want: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
 		},
 		{
 			source:    staticSource,
@@ -202,14 +202,14 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 		},
 		{
 			source:    templateSource,
-			name:      "already scoped event is preserved",
-			eventType: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			name:      "declaration-scoped event is preserved",
+			eventType: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
 			producerRoute: events.RouteIdentity{
 				FlowID:       "repo-scaffold",
 				FlowInstance: "repo-scaffold/inst-1",
 				EntityID:     "ent-repo",
 			},
-			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			want: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
 		},
 		{
 			source:    staticSource,
@@ -236,19 +236,13 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 func actionResultRouteSource(t *testing.T, mode string) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `name: action-result-event-type
-version: 1.0.0
-flows:
-  - id: repo-scaffold
-    flow: repo-scaffold
-    mode: ` + mode + `
-`,
-		"flows/repo-scaffold/schema.yaml": `name: repo-scaffold
+
+		"repo-scaffold/schema.yaml": `name: repo-scaffold
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]
 `,
-		"flows/repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested: {}
+		"repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested: {}
 repo_scaffold.repo_commit_succeeded: {}
 repo_scaffold.repo_commit_failed: {}
 `,

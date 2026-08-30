@@ -12,7 +12,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
@@ -703,6 +702,5 @@ func activeRunQuiescenceTerminalReasonCodes() []string {
 		runtimedestructivereset.QuiescenceReasonCode,
 		runtimerunquiescence.ServeAbandonReasonCode,
 	}
-	out = append(out, preservationcleanup.TerminalReasonCodes()...)
 	return out
 }

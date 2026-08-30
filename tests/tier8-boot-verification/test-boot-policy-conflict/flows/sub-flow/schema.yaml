@@ -1,7 +1,0 @@
-name: sub-flow
-initial_state: idle
-terminal_states: [done]
-states: [idle, done]
-pins:
-  inputs:
-    events: [sub.requested]

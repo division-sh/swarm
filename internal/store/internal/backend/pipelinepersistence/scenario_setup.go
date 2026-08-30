@@ -31,7 +31,7 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	effects := newRevisionEffects()
 	if err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
+		fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 		}
@@ -80,7 +80,7 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 			if err := effects.Add(req.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
 				return err
 			}
-			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			}), story, effects, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
@@ -108,7 +108,7 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	effects := newRevisionEffects()
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
+		fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
 		}

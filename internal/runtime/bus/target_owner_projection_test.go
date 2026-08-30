@@ -328,10 +328,6 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	if !ok || bundle.FlowTree.Root == nil {
 		t.Fatal("declared-agent source requires a root flow")
 	}
-	bundle.FlowTree.Root.Schema.Name = "authored-root"
-	if source.WorkflowName() == semanticview.RootExecutionFlowID(source) {
-		t.Fatalf("test requires authored root identity to differ from display name %q", source.WorkflowName())
-	}
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{

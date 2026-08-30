@@ -14,12 +14,13 @@ import (
 
 func checkPinTargetResolution(c *checkerContext) []Finding {
 	findings := []Finding{}
-	flowIDs := []string{""}
+	flowIDs := make([]string, 0, len(c.source.FlowSchemaEntries()))
 	for flowID := range c.source.FlowSchemaEntries() {
 		if strings.TrimSpace(flowID) != "" {
 			flowIDs = append(flowIDs, flowID)
 		}
 	}
+	sort.Strings(flowIDs)
 	for _, flowID := range flowIDs {
 		for _, pin := range c.source.FlowOutputEventPins(flowID) {
 			consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, flowID, pin.EventType())
@@ -52,14 +53,14 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		}
 	}
 	for _, site := range pinRoutingEmitSites(c.source) {
-		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID(), site.Spec.EventType()) {
+		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowPathIdentity(), site.Spec.EventType()) {
 			continue
 		}
 		eventType := site.Spec.EventType()
-		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID(), eventType) {
+		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowPathIdentity(), eventType) {
 			continue
 		}
-		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID(), eventType)
+		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowPathIdentity(), eventType)
 		if !consumer.HasRuntimeConsumer() {
 			findings = append(findings, pinTargetFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
 		}
@@ -194,10 +195,10 @@ func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitS
 }
 
 func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
-	flowID := site.FlowID()
+	flowID := site.FlowPathIdentity()
 	scope := fmt.Sprintf("flow %s", flowID)
 	location := flowID
-	if flowID == "" {
+	if flowID == "." {
 		scope = "root"
 		location = "root"
 	}
@@ -253,12 +254,12 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 		if !ok {
 			continue
 		}
-		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowID(), site.Spec.EventType()) {
+		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowPathIdentity(), site.Spec.EventType()) {
 			continue
 		}
 		producers++
 		connectedToReceiver := compiledConnectsProducerToReceiver(graph, endpoint, flowID)
-		consumer := runtimepinrouting.ClassifyOutputConsumer(source, site.FlowID(), site.Spec.EventType())
+		consumer := runtimepinrouting.ClassifyOutputConsumer(source, site.FlowPathIdentity(), site.Spec.EventType())
 		if connectedToReceiver || consumer.Has(runtimepinrouting.OutputConsumerStructuralParent) {
 			targeted++
 		}

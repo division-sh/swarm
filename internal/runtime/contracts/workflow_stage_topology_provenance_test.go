@@ -3,7 +3,6 @@ package contracts
 import (
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
@@ -95,12 +94,8 @@ func TestTopologyEdgeIdentityIncludesHandlerOrigin(t *testing.T) {
 }
 
 func TestWorkflowStageTopologyScopesDeliveryJoinCompletionToHandlerLifecycle(t *testing.T) {
-	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
-	if err != nil {
-		t.Fatal(err)
-	}
 	delivery := JoinSpec{
-		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: elementID},
+		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
 		OnComplete: HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
 	}
 	for _, tc := range []struct {
@@ -134,12 +129,8 @@ func TestWorkflowStageTopologyScopesDeliveryJoinCompletionToHandlerLifecycle(t *
 }
 
 func TestWorkflowStageTopologyKeepsDeliveryJoinCompletionInsideLoopRegion(t *testing.T) {
-	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
-	if err != nil {
-		t.Fatal(err)
-	}
 	delivery := JoinSpec{
-		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: elementID},
+		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: true, fromFanOutFound: true},
 		OnComplete: HandlerRuleEntry{AdvancesTo: "drafting"}, OnCompleteFound: true,
 	}
 	node := identitytest.FlowNode(t, "child", "dispatcher")

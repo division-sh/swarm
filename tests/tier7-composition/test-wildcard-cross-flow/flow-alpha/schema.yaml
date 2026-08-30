@@ -1,0 +1,14 @@
+name: flow-alpha
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events:
+      - event: trigger.alpha
+        source: external
+  outputs:
+    events:
+      - event: job.alpha_done
+        sink: harness
+mode: static

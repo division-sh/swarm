@@ -33,7 +33,7 @@ func TestCompileJSONLKeylessBindingVectorPreservesOrderAndMultiplicity(t *testin
 	if got, want := string(compiled.Manifest.ContentDigest), "resource-content-v1:sha256:2c83dcb78ea8e0ce6790f74a2ea861a870012e54a14194493acc574f1759b5d8"; got != want {
 		t.Fatalf("content digest = %s, want %s", got, want)
 	}
-	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:1b472fa93dd87ac43aa4d0cbcff4b9138d708cb8c895869af8a83700b3124649"; got != want {
+	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:01842395120adf1f7f5b4fa55e2ff91b93a76b3cb23c35d28284e851a12a596f"; got != want {
 		t.Fatalf("version ID = %s, want %s", got, want)
 	}
 }
@@ -68,7 +68,7 @@ func TestCompileJSONLKeyedSortsCanonicalTypedKeysAndRejectsDuplicates(t *testing
 	if got, want := string(compiled.Manifest.ContentDigest), "resource-content-v1:sha256:13042dd832ba8f99c4f9f51f1857e119f984687474e81f6e14e22aea4191e989"; got != want {
 		t.Fatalf("content digest = %s, want %s", got, want)
 	}
-	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:03f761b5d248a68772e30e819813cca57934aaba96319009a66f0626b26dca93"; got != want {
+	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:c40744e4752a4b5e536091934696618dd36a741ef035771b7cf19b3e9bc6e839"; got != want {
 		t.Fatalf("version ID = %s, want %s", got, want)
 	}
 	if _, defects := CompileJSONL(declaration, schema, "slug", []byte("{\"slug\":\"same\",\"funding_round\":1}\n{\"slug\":\"same\",\"funding_round\":2}\n")); len(defects) != 1 || defects[0].Code != "duplicate_business_key" {
@@ -134,7 +134,7 @@ func TestCompileJSONLExactJobflowCorpusBindingVector(t *testing.T) {
 	if got, want := string(compiled.Manifest.ContentDigest), "resource-content-v1:sha256:4d89fe6a170b6f41ffdd251f2d64e229db533c989cacbec139641f999adeffdd"; got != want {
 		t.Fatalf("jobflow content digest = %s, want %s", got, want)
 	}
-	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:0077c74245132050e59c013d6d00f0cbdca71b1a10a99a29553ffd1caeb594c3"; got != want {
+	if got, want := string(compiled.VersionID), "resource-version-v1:sha256:6cad3a4043e50a7a969f66c14ed9f7f827b52b498960f480b40611753d4f6807"; got != want {
 		t.Fatalf("jobflow version ID = %s, want %s", got, want)
 	}
 }
@@ -209,7 +209,7 @@ func TestCompileJSONLRejectsWholeInputAndReportsDistantRows(t *testing.T) {
 }
 
 func TestStaticAndResourcePathsAreOneWayIdentityProjections(t *testing.T) {
-	staticID, err := NewStaticDataID(StaticDataRef{BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CanonicalInputLabel: "bundle/flows/a/data/resume.md"})
+	staticID, err := NewStaticDataID(StaticDataRef{BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CanonicalInputLabel: "bundle/a/data/resume.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestStaticAndResourcePathsAreOneWayIdentityProjections(t *testing.T) {
 	if len(path) != len("/data/.swarm/static/s_")+64+len(".data") {
 		t.Fatalf("static path = %q", path)
 	}
-	declaration, _ := ParseDeclarationRef("flows/a", "company.lead")
+	declaration, _ := ParseDeclarationRef("a", "company.lead")
 	resourcePath, err := ResourceMountPath(declaration)
 	if err != nil {
 		t.Fatal(err)

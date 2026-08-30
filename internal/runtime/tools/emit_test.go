@@ -185,7 +185,7 @@ func TestEmitSchemaForEventType_UsesOnlyUniqueScopedLocalMatch(t *testing.T) {
 
 func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testing.T) {
 	reviewFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Path:  "review",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
@@ -198,7 +198,7 @@ func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testi
 		},
 	}
 	validationFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 		Path:  "validation",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
@@ -254,8 +254,7 @@ func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testi
 func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOwningFlowProof(t *testing.T) {
 	reviewFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "review",
-			Flow: "review",
+			FlowPath: "review",
 		},
 		Path: "review",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -503,36 +502,21 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 
 func TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode(t *testing.T) {
 	root := t.TempDir()
-	writeEmitFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: provider-schema-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-  - id: other
-    flow: other
-    mode: static
-`)
+
 	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
-name: support
-version: "1.0.0"
-flows: []
-`)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 initial_state: waiting
 states:
   - waiting
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 local.done:
   unsupported: NotDeclared
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+	writeEmitFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 flow-agent:
   id: flow-agent
   role: flow_agent
@@ -540,18 +524,14 @@ flow-agent:
   emit_events:
     - local.done
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "package.yaml"), `
-name: other
-version: "1.0.0"
-flows: []
-`)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), `
+
+	writeEmitFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), `
 name: other
 initial_state: waiting
 states:
   - waiting
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "events.yaml"), `
+	writeEmitFixtureFile(t, filepath.Join(root, "other", "events.yaml"), `
 local.done:
   ok: string
 `)

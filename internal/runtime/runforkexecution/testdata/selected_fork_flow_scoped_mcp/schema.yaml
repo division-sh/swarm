@@ -10,3 +10,7 @@ pins:
   outputs:
     events:
       - task.assigned
+connect:
+  - event: task.assigned
+    from: .
+    to: worker

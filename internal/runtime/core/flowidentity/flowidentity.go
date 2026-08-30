@@ -183,12 +183,8 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	}
 }
 
-func StandingServiceID(packageKey, flowID string) string {
-	material := strings.Join([]string{
-		strings.TrimSpace(packageKey),
-		strings.TrimSpace(flowID),
-	}, "\x00")
-	return uuid.NewSHA1(standingServiceNamespace, []byte(material)).String()
+func StandingServiceID(flowPath string) string {
+	return uuid.NewSHA1(standingServiceNamespace, []byte(strings.TrimSpace(flowPath))).String()
 }
 
 func StandingForService(source semanticview.Source, flowID, serviceID string) Instance {

@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -259,7 +258,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -318,16 +317,15 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	}
 }
 
-func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T) {
+func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bootHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
-	bootFact := mustAPITestBundleSourceFact(bootHash)
+	bootFact := authorActivityTestSourceArtifactFact
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		BundleSourceFact: bootFact,
-		WorkOwner:        workOwner,
+		SourceArtifactFact: bootFact,
+		WorkOwner:          workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -367,7 +365,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	if newRunID == "" {
 		t.Fatalf("new-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
+	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash())
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
 	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
@@ -378,7 +376,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
-	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
+	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash())
 }
 
 func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
@@ -580,18 +578,17 @@ func countDirectiveEvents(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash, wantSource string) {
+func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash string) {
 	t.Helper()
-	var gotHash, gotSource string
+	var gotHash string
 	if err := db.QueryRow(`
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource); err != nil {
+	`, runID).Scan(&gotHash); err != nil {
 		t.Fatalf("load run bundle identity: %v", err)
 	}
-	if gotHash != wantHash || gotSource != wantSource {
-		t.Fatalf("run %s bundle identity = hash:%q source:%q, want hash:%q source:%q",
-			runID, gotHash, gotSource, wantHash, wantSource)
+	if gotHash != wantHash {
+		t.Fatalf("run %s source artifact hash = %q, want %q", runID, gotHash, wantHash)
 	}
 }

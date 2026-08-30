@@ -14,12 +14,15 @@ import (
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
-	const bundleA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	const bundleB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	artifactA := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  mutation-log-a: {}\n"))
+	artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  mutation-log-b: {}\n"))
+	bundleA := artifactA.BundleHash()
+	bundleB := artifactB.BundleHash()
 
 	tests := []struct {
 		name         string
@@ -31,7 +34,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 		{name: "exact source", seedRun: true, contextHash: bundleA},
 		{name: "missing run", contextHash: bundleA, want: "run not found"},
 		{name: "foreign source", seedRun: true, contextHash: bundleB, want: "does not match active run"},
-		{name: "deleted persisted source", seedRun: true, deleteBundle: true, contextHash: bundleA, want: "persisted bundle source unavailable"},
+		{name: "deleted persisted source", seedRun: true, deleteBundle: true, contextHash: bundleA, want: "source artifact unavailable"},
 	}
 
 	for _, tc := range tests {
@@ -41,29 +44,29 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 			t.Cleanup(cleanup)
 			selected := admitTestPostgresStore(t, db)
 			runID := uuid.NewString()
-			seedStoreTestPersistedBundle(t, db, bundleA)
+			sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), selected, artifactA)
 			if tc.contextHash == bundleB {
-				seedStoreTestPersistedBundle(t, db, bundleB)
+				sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), selected, artifactB)
 			}
 			if tc.seedRun {
 				requireRunFixtureForTest(t, testAuthorActivityContextForBundle(bundleA), selected, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 					State: runtimerunlifecycle.StateRunning, BundleHash: bundleA,
-					BundleSource: runtimerunlifecycle.BundleSourcePersisted, StartedAt: time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
+					StartedAt: time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
 				})
 			}
 			if tc.deleteBundle {
-				if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, bundleA); err != nil {
-					t.Fatalf("delete persisted bundle: %v", err)
+				if _, err := db.ExecContext(context.Background(), `DELETE FROM source_artifacts WHERE bundle_hash = $1`, bundleA); err != nil {
+					t.Fatalf("delete persisted source artifact: %v", err)
 				}
 			}
 
-			fact, err := runtimecorrelation.NewPersistedBundleSourceFact(tc.contextHash)
+			fact, err := runtimecorrelation.NewSourceArtifactFact(tc.contextHash)
 			if err != nil {
 				t.Fatal(err)
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(tc.contextHash), runID)
-			ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 			err = insertMutationLogPrivateAdapter(ctx, selected, runtimemutationlog.Record{
 				EntityID: uuid.NewString(), Domain: runtimemutationlog.DomainLifecycleState, NewValue: "active",
 				WriterType: "system_node", WriterID: "review",

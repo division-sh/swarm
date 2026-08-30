@@ -258,13 +258,13 @@ func validateSystemJoinSchedule(c AdmissionCommand) error {
 		return errors.New("join generic schedule task does not match its typed handle")
 	}
 	route := c.RoutingSource.Route().Normalized()
-	if ref.FlowID() == "" {
+	if ref.FlowPath() == "." {
 		if c.RoutingSource.Kind() != events.RoutingSourceRoot || route.FlowID != "" || c.FlowInstance != "" {
 			return errors.New("root join generic schedule source contradicts its explicit root declaration")
 		}
 		return nil
 	}
-	if c.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl || route.FlowID != ref.FlowID() || route.FlowInstance != c.FlowInstance {
+	if c.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl || route.FlowID != ref.FlowPath() || route.FlowInstance != c.FlowInstance {
 		return errors.New("flow-owned join generic schedule source contradicts its declaration")
 	}
 	return nil

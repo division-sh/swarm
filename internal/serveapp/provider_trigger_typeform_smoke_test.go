@@ -50,7 +50,7 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 
 	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
 		PipelineObligations: sqliteStore.PipelineObligations(),
-		BundleSourceFact:    mustServeTestEphemeralBundleSourceFact(serveRuntimeTestBundleHash), ReceiverExecution: eventreceiver.NormalExecution(),
+		SourceArtifactFact:  mustServeTestEphemeralSourceArtifactFact(serveRuntimeTestBundleHash), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

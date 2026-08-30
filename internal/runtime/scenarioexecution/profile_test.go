@@ -10,7 +10,7 @@ import (
 )
 
 func TestProfileCanonicalBytesAreStableAcrossResponseOrder(t *testing.T) {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestProfileCanonicalBytesAreStableAcrossResponseOrder(t *testing.T) {
 }
 
 func TestDecodeProfileRejectsNonCanonicalOrTamperedBytes(t *testing.T) {
-	fact, _ := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
+	fact, _ := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 	identity, _ := NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("b", 64))
 	profile, err := NewProfile(identity, "empty", nil)
 	if err != nil {

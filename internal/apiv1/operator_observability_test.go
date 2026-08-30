@@ -140,7 +140,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		t.Fatalf("event.get event_id = %#v", got)
 	}
 
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	logs := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"bundle_hash":"`+bundleHash+`","run_id":"run-1","session_id":"sess-1","component":"scheduler","level":"warn","since":"2023-11-14T22:12:00Z","until":"2023-11-14T22:14:00Z","limit":5}}`)
 	if logs.Error != nil {
 		t.Fatalf("runtime.logs error = %#v", logs.Error)

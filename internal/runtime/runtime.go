@@ -82,7 +82,7 @@ type RuntimeOptions struct {
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
 	ToolGatewayBinding               toolgateway.Binding
-	BundleSourceFact                 runtimecorrelation.BundleSourceFact
+	SourceArtifactFact               runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID                string
 	ProcessWorkOwner                 *worklifetime.Process
 	WorkflowModule                   runtimepipeline.WorkflowModule
@@ -166,7 +166,7 @@ type validatedRuntimeDeps struct {
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
-	BundleSourceFact           runtimecorrelation.BundleSourceFact
+	SourceArtifactFact         runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity    scenarioexecution.EffectiveSourceIdentity
 	ScenarioProfileCatalog     *scenarioexecution.Catalog
 }
@@ -366,7 +366,7 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.GenerationG
 	if err != nil {
 		return err
 	}
-	if evidence.BundleHash != rt.Options.BundleSourceFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
+	if evidence.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return fmt.Errorf("runtime generation grant does not match runtime source coordinate")
 	}
 	plan, err := grant.SourceSetPlan(context.Background())
@@ -376,7 +376,6 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.GenerationG
 	admission, err := runtimeagenttopology.StaticAdmission(
 		evidence.SourceSetRevision,
 		evidence.BundleHash,
-		evidence.BundleSource,
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -442,7 +441,7 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 	if rt == nil || rt.Manager == nil {
 		return nil
 	}
-	projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.BundleSourceFact)
+	projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.SourceArtifactFact)
 	if err != nil {
 		return fmt.Errorf("inspect source-scoped dynamic topology startup: %w", err)
 	}
@@ -513,8 +512,8 @@ func (rt *Runtime) PrepareSourceSetGenerationRefresh(
 	if evidence.State != runtimestartupownership.GrantAdmitted {
 		return nil, fmt.Errorf("runtime source-set generation refresh requires admitted grant, got %s", evidence.State)
 	}
-	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
-	if evidence.BundleHash != bundleHash || evidence.BundleSource != bundleSource ||
+	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
+	if evidence.BundleHash != bundleHash ||
 		evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return nil, errors.New("runtime source-set generation refresh grant differs from runtime coordinate")
 	}
@@ -533,7 +532,7 @@ func (rt *Runtime) PrepareSourceSetGenerationRefresh(
 		return nil, err
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, bundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		return nil, err
@@ -620,7 +619,7 @@ func (p *PreparedSourceSetGenerationRefresh) Commit(
 	if p.currentEvidence.SourceSetRevision != p.plan.Revision {
 		var err error
 		successor, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-			BundleHash: p.currentEvidence.BundleHash, BundleSource: p.currentEvidence.BundleSource,
+			BundleHash:        p.currentEvidence.BundleHash,
 			RuntimeInstanceID: p.currentEvidence.RuntimeInstanceID,
 			RuntimeGeneration: p.currentEvidence.RuntimeGeneration + 1, SourceSetRevision: p.plan.Revision,
 		})
@@ -782,7 +781,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if cfg == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config is required")
 	}
-	if err := opts.BundleSourceFact.Validate(); err != nil {
+	if err := opts.SourceArtifactFact.Validate(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime bundle source fact: %w", err)
 	}
 	if opts.WorkflowModule == nil {
@@ -826,7 +825,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
 	}
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
-		WorkflowModule: opts.WorkflowModule, BundleSourceFact: opts.BundleSourceFact,
+		WorkflowModule: opts.WorkflowModule, SourceArtifactFact: opts.SourceArtifactFact,
 		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
@@ -875,7 +874,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
-		BundleSourceFact:           opts.BundleSourceFact,
+		SourceArtifactFact:         opts.SourceArtifactFact,
 		EffectiveSourceIdentity:    projection.Identity(),
 		ScenarioProfileCatalog:     scenarioProfileCatalog,
 	}, nil
@@ -1033,7 +1032,7 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 	}
 	ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
 	return runtimeauthoractivity.WithScope(ctx, rt.authorActivityScope)
 }
 
@@ -1063,7 +1062,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	ctx = worklifetime.WithProcess(ctx, opts.ProcessWorkOwner)
 	workOccurrence, err := opts.ProcessWorkOwner.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: opts.RuntimeInstanceID,
-		BundleHash:        boot.BundleSourceFact.BundleHash(),
+		BundleHash:        boot.SourceArtifactFact.BundleHash(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create runtime work occurrence: %w", err)
@@ -1099,7 +1098,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		Authority:                 boot.Authority,
 		EmitRegistry:              boot.EmitRegistry,
 		authorActivityDescriptors: descriptors,
-		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.BundleSourceFact.BundleHash()),
+		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.SourceArtifactFact.BundleHash()),
 		authorActivityRegistrars:  append([]AuthorActivityCatalogRegistrar(nil), runtimeDeps.AuthorActivityRegistrars...),
 		eventPayloadBinder:        runtimeDeps.EventPayloadValidationBinder,
 		inboundPayloadBinder:      runtimeDeps.InboundPayloadValidationBinder,
@@ -1118,7 +1117,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -1176,7 +1175,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		if runLifecycleRequiresGenericSchedules(source) && rt.GenericSchedules == nil {
 			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
 		}
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.BundleSourceFact.BundleHash()}
+		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.SourceArtifactFact.BundleHash()}
 		executor, err := runtimerunlifecycle.NewExecutor(
 			candidateOwner,
 			scope,
@@ -1236,7 +1235,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
 			ChannelActivations:        rt.ChannelActivations,
 			ArtifactRoot:              artifactRoot,
-			BundleSourceFact:          opts.BundleSourceFact,
+			SourceArtifactFact:        opts.SourceArtifactFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,
@@ -1401,7 +1400,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	managerOptions := runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   boot.ExecutionPosture,
 		BaseContext:        rt.authorActivityContext(context.Background()),
-		BundleSourceFact:   rt.Options.BundleSourceFact,
+		SourceArtifactFact: rt.Options.SourceArtifactFact,
 		DeliveryStore:      runtimeDeps.DeliveryStore,
 		TestLifecycleProbe: opts.TestLifecycleProbe,
 		Workspaces:         rt.Workspace,
@@ -1490,7 +1489,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
 	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
 		return err
 	}
@@ -1549,7 +1548,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 	if rt.runLifecycleExecutor != nil {
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.BundleSourceFact.BundleHash()}
+		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
 		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(
 			startCtx,
 			scope,
@@ -1697,7 +1696,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	replayAllowed := rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery
 	var startupTopology runtimemanager.DynamicFlowRuntimeStartupReadiness
 	if rt.Manager != nil {
-		startupTopology, err = rt.Manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, rt.Options.BundleSourceFact, replayAllowed)
+		startupTopology, err = rt.Manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, rt.Options.SourceArtifactFact, replayAllowed)
 		if err != nil {
 			return fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
 		}
@@ -2189,7 +2188,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"boot_started_at":              startedAt.Format(time.RFC3339Nano),
 		"boot_completed_at":            completedAt.Format(time.RFC3339Nano),
 		"duration_ms":                  durationMS,
-		"bundle_hash":                  rt.Options.BundleSourceFact.BundleHash(),
+		"bundle_hash":                  rt.Options.SourceArtifactFact.BundleHash(),
 		"recovery_decision":            report.RecoveryDecision.bootPayload(),
 		"static_agents_started":        sortedNonEmptyStrings(report.StaticAgentsStarted),
 		"flow_required_agents_started": sortedNonEmptyStrings(report.FlowRequiredAgentsStarted),

@@ -1071,7 +1071,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
 		return nil, err
 	}
-	if !rule.ElementID.Valid() && strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && rule.Activity.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && rule.Activity.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil

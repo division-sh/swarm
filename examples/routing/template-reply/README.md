@@ -3,8 +3,8 @@
 Use this when a provider response must return to the exact requester route. `replies_to` pairs the response input with the request output. With no `correlation_key`, the platform uses stable request event identity.
 
 ```sh
-swarm verify --contracts examples/routing/template-reply
-swarm serve --contracts examples/routing/template-reply
+swarm verify examples/routing/template-reply
+swarm serve examples/routing/template-reply
 swarm event publish initiator/requester.setup.requested --payload-json '{"account_id":"account-1"}'
 swarm event publish initiator/request.submitted --payload-json '{"account_id":"account-1"}'
 ```

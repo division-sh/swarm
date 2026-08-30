@@ -45,7 +45,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		const (
 			runID        = "6a000000-0000-0000-0000-000000000001"
 			entityID     = "6a000000-0000-0000-0000-000000000002"
-			flowInstance = "telegram-connector-supported-surface-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -74,7 +74,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		const (
 			runID        = "6b000000-0000-0000-0000-000000000001"
 			entityID     = "6b000000-0000-0000-0000-000000000002"
-			flowInstance = "telegram-connector-supported-surface-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -309,8 +309,9 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
@@ -340,20 +341,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 			},
 		},
 	}))
-	importSource := telegramConnectorSupportedSurfacePackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
@@ -394,15 +382,6 @@ func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string)
 		t.Fatalf("NewPackRegistry: %v", err)
 	}
 	return registry
-}
-
-type telegramConnectorSupportedSurfacePackImportSource struct {
-	semanticview.Source
-	projectScopes []semanticview.ProjectScope
-}
-
-func (s telegramConnectorSupportedSurfacePackImportSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.projectScopes...)
 }
 
 type telegramConnectorSupportedSurfaceModule struct {

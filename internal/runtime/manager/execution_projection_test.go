@@ -116,7 +116,7 @@ func newProjectionTestManager(t *testing.T, bus Bus, factory AgentFactory, store
 	return newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{WorkOwner: owner}, stores...)
 }
 
-func (*projectionTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*projectionTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 func (*projectionTestBus) Publish(context.Context, events.Event) error { return nil }
@@ -927,7 +927,7 @@ func (s projectionScriptedClaimStore) ClaimDelivery(ctx context.Context, authori
 
 func projectionDeliveryAuthorities(t *testing.T) map[string]runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("e", 64))
 	if err != nil {
 		t.Fatalf("construct projection delivery source: %v", err)
 	}
@@ -1014,7 +1014,7 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
 					admission, err := managedexecution.New(
 						managedexecution.KindSelectedContractFork, authority.ExecutionID(), authority.Generation(), authority.ForkRunID(),
-						"carrier-disposition-actors", authority.BundleSource().BundleHash(), nil,
+						"carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil,
 					)
 					if err != nil {
 						t.Fatalf("construct selected managed execution: %v", err)

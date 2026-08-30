@@ -96,7 +96,7 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		args = append(args, "--config", options.ConfigPath)
 	}
 	if options.Contracts != "" {
-		args = append(args, "--contracts", options.Contracts)
+		args = append(args, options.Contracts)
 	}
 	if options.Store != "" {
 		args = append(args, "--store", options.Store)

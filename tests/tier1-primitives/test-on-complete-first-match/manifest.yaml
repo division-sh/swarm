@@ -1,0 +1,4 @@
+name: test-on-complete-first-match
+version: 1.0.0
+description: on_complete ordered list where the first condition matches.
+platform_version: ">=0.7.0 <0.8.0"

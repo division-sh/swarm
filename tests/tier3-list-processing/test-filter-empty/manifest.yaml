@@ -1,0 +1,4 @@
+name: test-filter-empty
+version: 1.0.0
+description: filter where no items match returns an empty list.
+platform_version: ">=0.7.0 <0.8.0"

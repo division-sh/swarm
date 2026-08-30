@@ -14,24 +14,11 @@ func TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues(t *testing.
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-test\n")
-	contractsRoot := writeSecretsCommandContractsFixture(t)
 	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialsPath)
 
-	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
-	if code != CLIExitRuntime {
-		t.Fatalf("initial check code = %d stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	var missing secretsCheckResult
-	if err := json.Unmarshal([]byte(stdout), &missing); err != nil {
-		t.Fatalf("decode check json: %v\n%s", err, stdout)
-	}
-	if missing.OK || len(missing.Missing) != 1 || missing.Missing[0].Key != "sendgrid_api_key" {
-		t.Fatalf("initial check result = %+v", missing)
-	}
-
 	secretValue := "super-secret-token"
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "sendgrid_api_key", "--stdin"}, secretValue+"\n")
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "sendgrid_api_key", "--stdin"}, secretValue+"\n")
 	if code != 0 {
 		t.Fatalf("set code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -46,25 +33,17 @@ func TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues(t *testing.
 		t.Fatalf("credential file did not receive secret value: %s", string(raw))
 	}
 
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot}, "")
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list"}, "")
 	if code != 0 {
 		t.Fatalf("list code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	for _, want := range []string{"sendgrid_api_key", "file", "tool:email_api"} {
+	for _, want := range []string{"sendgrid_api_key", "file"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("list output missing %q:\n%s", want, stdout)
 		}
 	}
 	if strings.Contains(stdout+stderr, secretValue) {
 		t.Fatalf("list output leaked secret value stdout=%q stderr=%q", stdout, stderr)
-	}
-
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot}, "")
-	if code != 0 {
-		t.Fatalf("check code = %d stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "all required secrets present") {
-		t.Fatalf("check output = %s", stdout)
 	}
 
 	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "rm", "sendgrid_api_key"}, "")
@@ -74,21 +53,12 @@ func TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues(t *testing.
 	if !strings.Contains(stdout, "present=no") || strings.Contains(stdout+stderr, secretValue) {
 		t.Fatalf("rm output = stdout=%q stderr=%q", stdout, stderr)
 	}
-
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot}, "")
-	if code != CLIExitRuntime {
-		t.Fatalf("check after rm code = %d stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "missing required secrets") || !strings.Contains(stdout, "sendgrid_api_key") {
-		t.Fatalf("check after rm output = %s", stdout)
-	}
 }
 
 func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module provider-secrets-test\n")
-	contractsRoot := writeProviderSecretsCommandContractsFixture(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	t.Setenv("OPENAI_API_KEY", "env-only-openai-key")
 	withUnifiedRuntimeConfig(t, strings.Join([]string{
@@ -100,7 +70,7 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
 
-	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--json"}, "")
 	if code != CLIExitRuntime {
 		t.Fatalf("initial check code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -119,7 +89,7 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 		t.Fatalf("provider required_by = %+v, want provider:openai_responses", provider.RequiredBy)
 	}
 
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot, "--missing", "--json"}, "")
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--json"}, "")
 	if code != 0 {
 		t.Fatalf("list --missing code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -127,8 +97,8 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
 		t.Fatalf("decode list json: %v\n%s", err, stdout)
 	}
-	if len(listed.Secrets) != 1 || listed.Secrets[0].Key != "OPENAI_API_KEY" {
-		t.Fatalf("list --missing result = %+v, want missing OPENAI_API_KEY", listed)
+	if len(listed.Secrets) != 1 || listed.Secrets[0].Key != "OPENAI_API_KEY" || listed.Secrets[0].Present {
+		t.Fatalf("list result = %+v, want missing OPENAI_API_KEY", listed)
 	}
 
 	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "OPENAI_API_KEY", "--stdin"}, "stored-openai-key\n")
@@ -139,7 +109,7 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 		t.Fatalf("set provider output leaked secret stdout=%q stderr=%q", stdout, stderr)
 	}
 
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--json"}, "")
 	if code != 0 {
 		t.Fatalf("check after set code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -156,7 +126,6 @@ func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-test\n")
-	contractsRoot := writeSecretsCommandContractsFixture(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	t.Setenv("SENDGRID_API_KEY", "env-secret-token")
 
@@ -165,7 +134,7 @@ func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 		t.Fatalf("set code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot, "--json"}, "")
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--json"}, "")
 	if code != 0 {
 		t.Fatalf("list code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -173,10 +142,10 @@ func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
 		t.Fatalf("decode list json: %v\n%s", err, stdout)
 	}
-	if len(listed.Secrets) != 1 {
-		t.Fatalf("list result = %+v", listed)
+	record, ok := secretRecordByKey(listed.Secrets, "sendgrid_api_key")
+	if !ok {
+		t.Fatalf("list result missing sendgrid_api_key: %+v", listed)
 	}
-	record := listed.Secrets[0]
 	if record.Source != "env" || !record.Shadowed || record.Writable || !record.Present {
 		t.Fatalf("shadowed record = %+v", record)
 	}
@@ -201,30 +170,16 @@ func TestSecretsCommandsIgnoreRepoDotEnv(t *testing.T) {
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-test\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SENDGRID_API_KEY=repo-env-secret\nBROKEN\n")
-	contractsRoot := writeSecretsCommandContractsFixture(t)
 	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialsPath)
 
-	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
-	if code != CLIExitRuntime {
-		t.Fatalf("initial check code = %d stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	assertNoDotEnvLoadFailure(t, stdout+stderr)
-	var missing secretsCheckResult
-	if err := json.Unmarshal([]byte(stdout), &missing); err != nil {
-		t.Fatalf("decode check json: %v\n%s", err, stdout)
-	}
-	if missing.OK || len(missing.Missing) != 1 || missing.Missing[0].Key != "sendgrid_api_key" {
-		t.Fatalf("repo .env unexpectedly satisfied secret requirement: %+v", missing)
-	}
-
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "sendgrid_api_key", "--stdin"}, "file-secret-token\n")
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "sendgrid_api_key", "--stdin"}, "file-secret-token\n")
 	if code != 0 {
 		t.Fatalf("set code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	assertNoDotEnvLoadFailure(t, stdout+stderr)
 
-	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot, "--json"}, "")
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--json"}, "")
 	if code != 0 {
 		t.Fatalf("list code = %d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -233,10 +188,10 @@ func TestSecretsCommandsIgnoreRepoDotEnv(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
 		t.Fatalf("decode list json: %v\n%s", err, stdout)
 	}
-	if len(listed.Secrets) != 1 {
-		t.Fatalf("list result = %+v", listed)
+	record, ok := secretRecordByKey(listed.Secrets, "sendgrid_api_key")
+	if !ok {
+		t.Fatalf("list result missing sendgrid_api_key: %+v", listed)
 	}
-	record := listed.Secrets[0]
 	if record.Source != "file" || record.Shadowed || !record.Writable || !record.Present {
 		t.Fatalf("repo .env unexpectedly supplied or shadowed file-tier secret: %+v", record)
 	}
@@ -245,22 +200,31 @@ func TestSecretsCommandsIgnoreRepoDotEnv(t *testing.T) {
 	}
 }
 
-func TestSecretsCheckMissingContractsIsValidationExit(t *testing.T) {
+func TestSecretsCheckIsSourceFree(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-missing-contracts-test\n")
+	if err := os.WriteFile(filepath.Join(repo, "package.yaml"), []byte("invalid: ["), 0o600); err != nil {
+		t.Fatalf("write retired source canary: %v", err)
+	}
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	setCode, setOut, setErr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "ANTHROPIC_API_KEY", "--stdin"}, "provider-key\n")
+	if setCode != 0 {
+		t.Fatalf("seed provider credential code=%d stdout=%q stderr=%q", setCode, setOut, setErr)
+	}
 
 	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check"}, "")
-	if code != CLIExitValidation {
-		t.Fatalf("secrets check missing contracts code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout, stderr)
+	if code != 0 || !strings.Contains(stdout, "all configured secret requirements present") || stderr != "" {
+		t.Fatalf("source-free secrets check code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if stdout != "" {
-		t.Fatalf("secrets check missing contracts stdout = %q, want empty", stdout)
+}
+
+func secretRecordByKey(records []secretRecord, key string) (secretRecord, bool) {
+	for _, record := range records {
+		if record.Key == key {
+			return record, true
+		}
 	}
-	if !strings.Contains(stderr, "ERROR: a contracts directory is required.") || !strings.Contains(stderr, "Remediation: Pass a contracts directory") {
-		t.Fatalf("secrets check missing contracts stderr = %q", stderr)
-	}
+	return secretRecord{}, false
 }
 
 func unsetSecretEnvForTest(t *testing.T, key string) {
@@ -330,11 +294,7 @@ func executeRootCommandWithInput(ctx context.Context, repo string, args []string
 func writeSecretsCommandContractsFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: secrets-command-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: secrets-command-fixture\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 email_api:
@@ -355,11 +315,7 @@ email_api:
 func writeProviderSecretsCommandContractsFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: provider-secrets-command-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-secrets-command-fixture\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 provider-agent:

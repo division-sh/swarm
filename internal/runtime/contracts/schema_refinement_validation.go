@@ -29,8 +29,8 @@ func validateWorkflowSchemaRefinements(bundle *WorkflowContractBundle) []error {
 	for _, scopedKey := range scopedKeys {
 		source := bundle.scopedEventSources[scopedKey]
 		types := bundle.RootTypeCatalog()
-		if strings.TrimSpace(source.FlowID) != "" {
-			types = bundle.ResolvedTypeCatalogForFlow(source.FlowID)
+		if strings.TrimSpace(source.FlowPath) != "" {
+			types = bundle.ResolvedTypeCatalogForFlow(source.FlowPath)
 		}
 		entry := bundle.scopedEvents[scopedKey]
 		fields := make(map[string]schemaRefinementField, len(entry.Payload.Properties))

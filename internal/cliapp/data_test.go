@@ -42,7 +42,7 @@ func TestStreamDataJSONLAcceptsOneBasedMultiPageExport(t *testing.T) {
 			continuation = map[string]any{"state": "more", "cursor": "next"}
 		}
 		result := map[string]any{
-			"declaration": map[string]any{"package_key": ".", "event": "startup.loaded"},
+			"declaration": map[string]any{"flow_path": ".", "event": "startup.loaded"},
 			"version_id":  versionID, "content_digest": contentDigest, "total_rows": 2,
 			"first_ordinal": requests + 1, "row_count": 1,
 			"chunk_base64": base64.StdEncoding.EncodeToString(row), "chunk_bytes": len(row),
@@ -104,7 +104,7 @@ func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
 				t.Errorf("data.import content = %q", encoded)
 			}
 			imported = true
-			writeBundleInvalidParamsJSONRPCError(t, w, req.ID, "stop after operand proof")
+			writeInvalidParamsJSONRPCError(t, w, req.ID, "stop after operand proof")
 		default:
 			t.Errorf("unexpected method %q", req.Method)
 		}
@@ -115,7 +115,7 @@ func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	chdirForTest(t, t.TempDir())
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	envelope, err := buildRunDataEnvelope(context.Background(), root, client, bundleHash, "run-1", []string{"records=rows.jsonl"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +146,21 @@ func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
 	}
 }
 
+func writeInvalidParamsJSONRPCError(t *testing.T, w http.ResponseWriter, id, message string) {
+	t.Helper()
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32602,
+			"message": message,
+		},
+	}); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
 func TestStreamDataJSONLAcceptsCanonicalEmptyExport(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +171,7 @@ func TestStreamDataJSONLAcceptsCanonicalEmptyExport(t *testing.T) {
 		}
 		requests++
 		writeJSONRPCResult(t, w, request.ID, map[string]any{
-			"declaration":    map[string]any{"package_key": ".", "event": "startup.loaded"},
+			"declaration":    map[string]any{"flow_path": ".", "event": "startup.loaded"},
 			"version_id":     "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"content_digest": "resource-content-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			"total_rows":     0, "first_ordinal": 0, "row_count": 0,
@@ -201,7 +216,7 @@ func TestStreamDataJSONLRejectsContradictoryEmptyExportShapes(t *testing.T) {
 					return
 				}
 				writeJSONRPCResult(t, w, request.ID, map[string]any{
-					"declaration":    map[string]any{"package_key": ".", "event": "startup.loaded"},
+					"declaration":    map[string]any{"flow_path": ".", "event": "startup.loaded"},
 					"version_id":     "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 					"content_digest": "resource-content-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 					"total_rows":     test.totalRows, "first_ordinal": test.firstOrdinal, "row_count": test.rowCount,

@@ -479,7 +479,6 @@ type unifiedCLIYAML struct {
 	} `yaml:"serve"`
 	Paths struct {
 		SwarmDir         string `yaml:"swarm_dir"`
-		ContractsPath    string `yaml:"contracts_path"`
 		PlatformSpecPath string `yaml:"platform_spec_path"`
 	} `yaml:"paths"`
 }
@@ -505,7 +504,6 @@ func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 		Paths: cliPathsConfig{
 			SwarmDir:         decoded.Paths.SwarmDir,
 			SwarmDirSet:      yamlPathExists(node, "paths", "swarm_dir"),
-			ContractsPath:    decoded.Paths.ContractsPath,
 			PlatformSpecPath: decoded.Paths.PlatformSpecPath,
 		},
 	}, nil
@@ -791,7 +789,7 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"budget.human_tasks.categories_enabled":   {},
 		"paths":                                   section,
 		"paths.swarm_dir":                         {Elevated: true},
-		"paths.contracts_path":                    {ProjectContainedPath: true},
+		"paths.contracts_path":                    {Split: "RETIRED: authored source roots are positional command inputs; remove paths.contracts_path"},
 		"paths.platform_spec_path":                {ProjectContainedPath: true},
 		"paths.prompts_dir":                       {Split: "RETIRED: paths.prompts_dir is unsupported; declare each managed agent's intent: source explicitly in agents.yaml"},
 		"paths.artifact_root":                     {Elevated: true},
@@ -807,7 +805,7 @@ func unifiedOldFlatKeyRemediation() map[string]string {
 		"api_server":            "move to connection.api_server in swarm.yaml",
 		"api_token_file":        "move to connection.api_token_file in swarm.yaml",
 		"swarm_dir":             "move to paths.swarm_dir in swarm.yaml",
-		"contracts_path":        "move to paths.contracts_path in swarm.yaml",
+		"contracts_path":        "remove contracts_path; pass one positional directory on source-aware commands (use . explicitly for the current directory)",
 		"platform_spec_path":    "move to paths.platform_spec_path in swarm.yaml",
 		"serve_api_listen_addr": "move to serve.api_listen_addr in swarm.yaml",
 		"serve_mcp_listen_addr": "move to serve.mcp_listen_addr in swarm.yaml",

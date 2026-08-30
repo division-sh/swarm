@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/runtime"
@@ -37,12 +36,6 @@ type ConversationReadStore = operatorread.ConversationReader
 type AgentDeliveryLifecycleReadStore = operatorread.AgentDeliveryLifecycleReader
 type AgentUsageReadStore = operatorread.AgentUsageReader
 
-type BundleCatalogReadStore interface {
-	ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error)
-	LoadBundleCatalog(context.Context, string) (bundlecatalog.Detail, error)
-	ListBundleCatalogAgents(context.Context, string, bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error)
-}
-
 type healthPingResult struct {
 	OK bool   `json:"ok"`
 	TS string `json:"ts"`
@@ -58,16 +51,15 @@ type healthCheckResult struct {
 }
 
 type RuntimeIdentityResult struct {
-	RuntimeInstanceID   string                        `json:"runtime_instance_id"`
-	StartedAt           string                        `json:"started_at"`
-	APIVersion          string                        `json:"api_version"`
-	SupportedTransports []string                      `json:"supported_transports"`
-	BundleSources       []RuntimeBundleSourceIdentity `json:"bundle_sources"`
+	RuntimeInstanceID   string                          `json:"runtime_instance_id"`
+	StartedAt           string                          `json:"started_at"`
+	APIVersion          string                          `json:"api_version"`
+	SupportedTransports []string                        `json:"supported_transports"`
+	SourceArtifacts     []RuntimeSourceArtifactIdentity `json:"source_artifacts"`
 }
 
-type RuntimeBundleSourceIdentity struct {
-	BundleHash   string `json:"bundle_hash"`
-	BundleSource string `json:"bundle_source"`
+type RuntimeSourceArtifactIdentity struct {
+	BundleHash string `json:"bundle_hash"`
 }
 
 type runGetResult struct {
@@ -137,34 +129,34 @@ func OperatorRuntimeIdentityHandlers(opts RuntimeIdentityHandlerOptions) map[str
 			if err != nil {
 				return nil, fmt.Errorf("read current runtime publication: %w", err)
 			}
-			identity.BundleSources, err = runtimeBundleSourceIdentities(publication)
+			identity.SourceArtifacts, err = runtimeSourceArtifactIdentities(publication)
 			if err != nil {
 				return nil, err
 			}
 			if identity.SupportedTransports == nil {
 				identity.SupportedTransports = []string{}
 			}
-			if identity.BundleSources == nil {
-				identity.BundleSources = []RuntimeBundleSourceIdentity{}
+			if identity.SourceArtifacts == nil {
+				identity.SourceArtifacts = []RuntimeSourceArtifactIdentity{}
 			}
 			return identity, nil
 		},
 	}
 }
 
-func runtimeBundleSourceIdentities(publication runtime.RuntimeContextPublicationSnapshot) ([]RuntimeBundleSourceIdentity, error) {
-	identities := make([]RuntimeBundleSourceIdentity, 0, len(publication.BundleSourceFacts))
-	seen := make(map[string]struct{}, len(publication.BundleSourceFacts))
-	for _, fact := range publication.BundleSourceFacts {
+func runtimeSourceArtifactIdentities(publication runtime.RuntimeContextPublicationSnapshot) ([]RuntimeSourceArtifactIdentity, error) {
+	identities := make([]RuntimeSourceArtifactIdentity, 0, len(publication.SourceArtifactFacts))
+	seen := make(map[string]struct{}, len(publication.SourceArtifactFacts))
+	for _, fact := range publication.SourceArtifactFacts {
 		if err := fact.Validate(); err != nil {
-			return nil, fmt.Errorf("runtime identity bundle source: %w", err)
+			return nil, fmt.Errorf("runtime identity source artifact: %w", err)
 		}
-		bundleHash, bundleSource := fact.StorageValues()
+		bundleHash := fact.BundleHash()
 		if _, exists := seen[bundleHash]; exists {
 			return nil, fmt.Errorf("runtime identity has duplicate bundle_hash %s", bundleHash)
 		}
 		seen[bundleHash] = struct{}{}
-		identities = append(identities, RuntimeBundleSourceIdentity{BundleHash: bundleHash, BundleSource: bundleSource})
+		identities = append(identities, RuntimeSourceArtifactIdentity{BundleHash: bundleHash})
 	}
 	sort.Slice(identities, func(i, j int) bool { return identities[i].BundleHash < identities[j].BundleHash })
 	return identities, nil
@@ -309,92 +301,6 @@ func requireAgentUsageReadStore(reads AgentUsageReadStore) (AgentUsageReadStore,
 		return nil, fmt.Errorf("agent usage read store is required")
 	}
 	return reads, nil
-}
-
-func requireBundleCatalogReadStore(reads BundleCatalogReadStore) (BundleCatalogReadStore, error) {
-	if reads == nil {
-		return nil, fmt.Errorf("bundle catalog read store is required")
-	}
-	return reads, nil
-}
-
-func OperatorBundleCatalogHandlers(opts BundleCatalogHandlerOptions) map[string]MethodHandler {
-	if opts.Catalog == nil {
-		return nil
-	}
-	return map[string]MethodHandler{
-		"bundle.list": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.Catalog)
-			if err != nil {
-				return nil, err
-			}
-			listOpts, err := bundleCatalogListOptionsFromParams(req.Params)
-			if err != nil {
-				return nil, err
-			}
-			result, err := reads.ListBundleCatalog(ctx, listOpts)
-			if errors.Is(err, bundlecatalog.ErrInvalidCursor) {
-				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle catalog cursor"})
-			}
-			if err != nil {
-				return nil, err
-			}
-			return result, nil
-		},
-		"bundle.get": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.Catalog)
-			if err != nil {
-				return nil, err
-			}
-			bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
-			if err != nil {
-				return nil, err
-			}
-			result, err := reads.LoadBundleCatalog(ctx, bundleHash)
-			if errors.Is(err, bundlecatalog.ErrNotFound) {
-				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
-			}
-			if err != nil {
-				return nil, err
-			}
-			return result, nil
-		},
-		"bundle.agents": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.Catalog)
-			if err != nil {
-				return nil, err
-			}
-			bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
-			if err != nil {
-				return nil, err
-			}
-			listOpts, err := bundleCatalogAgentListOptionsFromParams(req.Params)
-			if err != nil {
-				return nil, err
-			}
-			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash, listOpts)
-			if errors.Is(err, bundlecatalog.ErrNotFound) {
-				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
-			}
-			if errors.Is(err, bundlecatalog.ErrInvalidCursor) {
-				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle agents cursor"})
-			}
-			var tooLarge *bundlecatalog.AgentDefinitionTooLargeError
-			if errors.As(err, &tooLarge) {
-				return nil, NewApplicationError(BundleAgentDefinitionTooLargeCode, false, map[string]any{
-					"bundle_hash":         tooLarge.BundleHash,
-					"agent_name_owner":    tooLarge.AgentNameOwner,
-					"agent_id":            tooLarge.AgentID,
-					"encoded_row_bytes":   tooLarge.EncodedRowBytes,
-					"result_byte_ceiling": tooLarge.ResultByteCeiling,
-				})
-			}
-			if err != nil {
-				return nil, err
-			}
-			return result, nil
-		},
-	}
 }
 
 func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map[string]MethodHandler {
@@ -1707,41 +1613,6 @@ func runHeaderListOptionsFromParams(params map[string]any) (operatorread.RunHead
 	return out, nil
 }
 
-func bundleCatalogListOptionsFromParams(params map[string]any) (bundlecatalog.ListOptions, error) {
-	out := bundlecatalog.ListOptions{}
-	var err error
-	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return bundlecatalog.ListOptions{}, err
-	}
-	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
-		return bundlecatalog.ListOptions{}, err
-	}
-	return out, nil
-}
-
-func bundleCatalogAgentListOptionsFromParams(params map[string]any) (bundlecatalog.AgentListOptions, error) {
-	out := bundlecatalog.AgentListOptions{}
-	var err error
-	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return bundlecatalog.AgentListOptions{}, err
-	}
-	if out.Limit, err = boundedIntegerParam(params, "limit", 1, bundlecatalog.MaxAgentListLimit); err != nil {
-		return bundlecatalog.AgentListOptions{}, err
-	}
-	return out, nil
-}
-
-func requiredBundleHashParam(params map[string]any, name string) (string, error) {
-	value, err := requiredStringParam(params, name)
-	if err != nil {
-		return "", err
-	}
-	if err := runtimecontracts.ValidateBundleHash(value); err != nil {
-		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
-	}
-	return value, nil
-}
-
 func optionalBundleHashParam(params map[string]any, name string) (string, error) {
 	value, _, err := optionalStringParam(params, name)
 	if err != nil {
@@ -1751,7 +1622,7 @@ func optionalBundleHashParam(params map[string]any, name string) (string, error)
 		return "", nil
 	}
 	if err := runtimecontracts.ValidateBundleHash(value); err != nil {
-		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v2:sha256:<64 lowercase hex>"})
 	}
 	return value, nil
 }

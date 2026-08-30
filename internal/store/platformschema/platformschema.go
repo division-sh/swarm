@@ -167,7 +167,7 @@ func platformTableOrder(name string) int {
 	switch strings.TrimSpace(name) {
 	case "runtime_store_metadata":
 		return 0
-	case "bundles":
+	case "source_artifacts":
 		return 3
 	case "resource_declarations":
 		return 3
@@ -216,8 +216,6 @@ func platformTableOrder(name string) int {
 	case "agent_topology_source_set_head":
 		return 13
 	case "agent_topology_source_set_operations":
-		return 13
-	case "bundle_delete_final_mutation_replays":
 		return 13
 	case "agents":
 		return 14

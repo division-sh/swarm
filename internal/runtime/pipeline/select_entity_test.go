@@ -587,17 +587,9 @@ func newNestedSelectEntityTestCoordinatorWithStore(t *testing.T, store *workflow
 func newSelectEntityTestCoordinatorFixture(t *testing.T, store *workflowInstanceStore, treasuryNodes string, nested bool) (*PipelineCoordinator, semanticview.Source) {
 	t.Helper()
 	files := map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: treasury
-    flow: treasury
-    mode: template
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/treasury/schema.yaml": `
+		"treasury/schema.yaml": `
 name: treasury
 mode: template
 initial_state: active
@@ -607,12 +599,12 @@ pins:
   inputs:
     events: [opco.spend_recorded]
 `,
-		"flows/treasury/events.yaml": `
+		"treasury/events.yaml": `
 opco.spend_recorded:
   vertical_id: string
   amount_usd: number
 `,
-		"flows/treasury/entities.yaml": `
+		"treasury/entities.yaml": `
 opco_budget:
   vertical_id:
     type: text
@@ -634,32 +626,17 @@ opco_budget:
   last_source_event_id:
     type: text
 `,
-		"flows/treasury/nodes.yaml": treasuryNodes,
+		"treasury/nodes.yaml": treasuryNodes,
 	}
 	if nested {
-		files["flows/treasury/package.yaml"] = `
-name: treasury
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: detail
-    flow: detail
-    mode: template
-`
-		files["flows/treasury/flows/detail/package.yaml"] = `
-name: detail
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`
-		files["flows/treasury/flows/detail/schema.yaml"] = `
+		files["treasury/detail/schema.yaml"] = `
 name: detail
 mode: template
 initial_state: active
 states: [active, archived]
 terminal_states: [archived]
 `
-		files["flows/treasury/flows/detail/entities.yaml"] = `
+		files["treasury/detail/entities.yaml"] = `
 detail_record:
   vertical_id:
     type: text
@@ -694,9 +671,8 @@ type selectEntityTestRunBundleAvailability struct{}
 func (a selectEntityTestRunBundleAvailability) LoadRunBundleAvailability(ctx context.Context, runID string) (runtimerunbundle.Availability, error) {
 	return runtimerunbundle.Availability{
 		RunID: runID, Status: "running",
-		BundleHash:       "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:     runtimerunbundle.AvailabilitySourcePersisted,
-		BundleRowPresent: true,
+		BundleHash:            "bundle-v2:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		SourceArtifactPresent: true,
 	}, nil
 }
 

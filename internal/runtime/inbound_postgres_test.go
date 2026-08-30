@@ -1263,12 +1263,9 @@ func seedSQLiteInboundGatewayRuntime(
 	return seedBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, flowInstance, provider)
 }
 
-func boundedInboundStandingOrigin(t *testing.T, provider string) runtimerunlifecycle.RunOrigin {
+func boundedInboundStandingOrigin(t *testing.T, _ string) runtimerunlifecycle.RunOrigin {
 	t.Helper()
-	serviceID := runtimeflowidentity.StandingServiceID(
-		"test.provider."+strings.ToLower(strings.TrimSpace(provider)),
-		"bounded-inbound",
-	)
+	serviceID := runtimeflowidentity.StandingServiceID(boundedProviderFlowID)
 	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
 	if err != nil {
 		t.Fatalf("construct bounded inbound standing origin: %v", err)
@@ -1305,7 +1302,7 @@ func installInboundStandingRecoveryOwner(
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: runID,
-		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatal(err)

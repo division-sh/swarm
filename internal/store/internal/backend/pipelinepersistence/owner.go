@@ -80,9 +80,9 @@ type GenericScheduleTxOwner interface {
 }
 
 type runLifecycleCandidateHandoffReservation = runhandoff.CandidateHandoff
-type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 
-func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return fn(ctx, runID)
 }
 

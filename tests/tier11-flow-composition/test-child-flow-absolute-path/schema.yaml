@@ -10,3 +10,7 @@ pins:
     events:
       - event: work.finished
         sink: harness
+connect:
+  - event: task.done
+    from: child
+    to: .

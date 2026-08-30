@@ -961,12 +961,11 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 	instance.CurrentState = strings.TrimSpace(instance.CurrentState)
 	instance.EntityType = strings.TrimSpace(instance.EntityType)
-	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentState == "" || instance.EntityType == "" {
+	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.CurrentState == "" || instance.EntityType == "" {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf(
-			"workflow instance requires instance_id, workflow_name, workflow_version, current_state, and entity_type (id=%q workflow=%q version=%q state=%q entity_type=%q)",
+			"workflow instance requires instance_id, workflow_name, current_state, and entity_type (id=%q workflow=%q state=%q entity_type=%q)",
 			instance.InstanceID,
 			instance.WorkflowName,
-			instance.WorkflowVersion,
 			instance.CurrentState,
 			instance.EntityType,
 		)

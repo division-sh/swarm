@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const removedManagerTestTopologyBundleHash = "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+const removedManagerTestTopologyBundleHash = "bundle-v2:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 
 type sourceSetLifecycleCensusProbe struct {
 	states []AgentLifecycleState
@@ -54,7 +54,6 @@ func (p *sourceSetTransitionAdmissionProbe) RecordPredecessorProcessBinding(bind
 	defer p.mu.Unlock()
 	key := strings.Join([]string{
 		strings.TrimSpace(binding.BundleHash),
-		strings.TrimSpace(binding.BundleSource),
 		strings.TrimSpace(binding.RuntimeInstanceID),
 	}, "\x00")
 	if current, exists := p.predecessors[key]; exists && !current.Equal(binding) {
@@ -68,7 +67,6 @@ func (p *sourceSetTransitionAdmissionProbe) PredecessorProcessBinding(current Pr
 	defer p.mu.Unlock()
 	key := strings.Join([]string{
 		strings.TrimSpace(current.BundleHash),
-		strings.TrimSpace(current.BundleSource),
 		strings.TrimSpace(current.RuntimeInstanceID),
 	}, "\x00")
 	binding, ok := p.predecessors[key]
@@ -100,14 +98,14 @@ type durableSourceSetPreparationFixture struct {
 
 func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPreparationFixture {
 	t.Helper()
-	source := loadPackageBackedStaticAgentSource(t)
+	source := loadFilesystemStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology fixture: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +115,7 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 		t.Fatal(err)
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +166,7 @@ func (p *sourceSetLifecycleCommitProbe) CommitAgentLifecycleTransition(ctx conte
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *testing.T) {
-	source := loadPackageBackedStaticAgentSource(t)
+	source := loadFilesystemStaticAgentSource(t)
 	oldStore := newLifecyclePersistenceProbe()
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
@@ -180,8 +178,8 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	if len(records) != 1 {
 		t.Fatalf("static topology records = %d, want 1", len(records))
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash, BundleSource: "persisted"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatalf("compile desired static agents: %v", err)
@@ -195,13 +193,13 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 		t.Fatalf("construct successor source set: %v", err)
 	}
 	predecessorAdmission, err := runtimeagenttopology.StaticAdmission(
-		predecessorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		predecessorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("construct predecessor admission: %v", err)
 	}
 	successorAdmission, err := runtimeagenttopology.StaticAdmission(
-		successorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		successorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("construct successor admission: %v", err)
@@ -324,15 +322,15 @@ func TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredeces
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *testing.T) {
-	source := loadPackageBackedStaticAgentSource(t)
+	source := loadFilesystemStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash, BundleSource: "persisted"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -345,11 +343,11 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	predecessorAdmission, err := runtimeagenttopology.StaticAdmission(predecessorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	predecessorAdmission, err := runtimeagenttopology.StaticAdmission(predecessorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}
-	successorAdmission, err := runtimeagenttopology.StaticAdmission(successorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	successorAdmission, err := runtimeagenttopology.StaticAdmission(successorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,15 +400,15 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t *testing.T) {
-	source := loadPackageBackedStaticAgentSource(t)
+	source := loadFilesystemStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash, BundleSource: "persisted"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -424,13 +422,13 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		t.Fatal(err)
 	}
 	predecessorAdmission, err := runtimeagenttopology.StaticAdmission(
-		predecessorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		predecessorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	successorAdmission, err := runtimeagenttopology.StaticAdmission(
-		successorPlan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		successorPlan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -703,7 +701,7 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	second.opMu.Lock()
 	prepared := &PreparedDurableTopologySourceSetRebind{
 		manager: manager, admission: admission, coordinate: runtimeagenttopology.SourceCoordinate{
-			BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral",
+			BundleHash: managerTestTopologyBundleHash,
 		}, currentBinding: lifecycleProbeProcessBinding(), currentIsSuccessor: true,
 		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
 		bindings: []durableTopologySourceSetBinding{
@@ -754,7 +752,7 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.C
 }
 
 func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T) {
-	source := loadPackageBackedStaticAgentSource(t)
+	source := loadFilesystemStaticAgentSource(t)
 	store := &staticStartupReconcileStore{}
 	manager := newTestAgentManager(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
@@ -764,7 +762,7 @@ func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -773,7 +771,7 @@ func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}

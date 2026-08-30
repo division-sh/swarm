@@ -34,8 +34,7 @@ type RegistrationTarget struct {
 	Selector                string
 	BundleHash              string
 	ServiceID               string
-	PackageKey              string
-	FlowID                  string
+	FlowPath                string
 	Alias                   string
 	Provider                string
 	Generation              int64
@@ -840,7 +839,7 @@ func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, i
 		ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
 			IntentID: strings.TrimSpace(intentID), StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
 			OnboardingOperationID: strings.TrimSpace(pair.OnboardingOperationID), OnboardingRevision: pair.OnboardingRevision,
-			BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource, BundleIdentity: coordinate.BundleIdentity,
+			BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 			PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 			ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
 			TargetGeneration: coordinate.TargetGeneration,

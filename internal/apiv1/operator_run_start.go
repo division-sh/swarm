@@ -90,10 +90,10 @@ func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error
 		hash, ok := rawHash.(string)
 		hash = strings.TrimSpace(hash)
 		if !ok || hash == "" {
-			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
+			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v2:sha256:<64 lowercase hex>"})
 		}
 		if err := runtimecontracts.ValidateBundleHash(hash); err != nil {
-			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
+			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v2:sha256:<64 lowercase hex>"})
 		}
 		return bundleIdentityParam{BundleHash: hash}, nil
 	}
@@ -120,12 +120,11 @@ func publicationApplicationError(eventName string, err error) error {
 	if errors.As(err, &dataDomain) {
 		return dataApplicationError(err)
 	}
-	var bundleUnavailable *runtimerunlifecycle.PersistedBundleUnavailableError
-	if errors.As(err, &bundleUnavailable) || errors.Is(err, runtimerunlifecycle.ErrPersistedBundleUnavailable) {
+	var bundleUnavailable *runtimerunlifecycle.SourceArtifactUnavailableError
+	if errors.As(err, &bundleUnavailable) || errors.Is(err, runtimerunlifecycle.ErrSourceArtifactUnavailable) {
 		details := map[string]any{"event_name": eventName}
 		if bundleUnavailable != nil {
 			details["bundle_hash"] = bundleUnavailable.BundleHash
-			details["bundle_source"] = bundleUnavailable.BundleSource
 			details["cause"] = bundleUnavailable.Cause
 		}
 		return NewApplicationError(BundleUnavailableCode, false, details)

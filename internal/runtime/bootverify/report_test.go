@@ -188,7 +188,7 @@ func TestScopedLiteralAgentToolResolutionMatchesRuntimeAndPermissionOwner(t *tes
 	}
 	alpha := runtimecontracts.FlowContractView{
 		Path:  "alpha",
-		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "alpha"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool"}, Permissions: []string{"alpha-permission"}},
 		},
@@ -196,7 +196,7 @@ func TestScopedLiteralAgentToolResolutionMatchesRuntimeAndPermissionOwner(t *tes
 	}
 	beta := runtimecontracts.FlowContractView{
 		Path:  "beta",
-		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "beta"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool"}, Permissions: []string{"beta-permission"}},
 		},
@@ -609,7 +609,14 @@ func TestRun_MapsPlatformToolUsageHintCoverageToBootCheck(t *testing.T) {
 func TestRun_MapsGeneratedToolSchemaClosureToBootCheck(t *testing.T) {
 	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
+			"agent-1": {
+				ID:             "agent-1",
+				Role:           "agent",
+				Model:          "regular",
+				Subscriptions:  []string{},
+				EmitEvents:     []string{"ready.event"},
+				ResolvedIntent: bootverifyTestResolvedIntent("agent-1"),
+			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"ready.event": {
@@ -675,7 +682,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if report.HasErrors() {
 		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
@@ -800,7 +807,6 @@ fanout-node:
   event_handlers:
     start:
       fan_out:
-        element_id: c7f43531-71cd-42f4-9d45-5cbece4384ac
         items_from: payload.items
         as: ticket
         identity: ticket.id
@@ -874,7 +880,7 @@ consumer-node:
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "producer/ticket.ready") {
 		t.Fatalf("retired cross-flow exact subscription incorrectly kept declaration alive: %#v", report.Warnings())
@@ -904,7 +910,7 @@ consumer-node:
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "child/ticket.ready") {
 		t.Fatalf("scoped local wildcard did not keep child declaration live: %#v", report.Warnings())
@@ -1200,7 +1206,7 @@ payload:
 	}
 	recompileBootverifySemantics(t, bundle)
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.Errors(), "platform_namespace_violation", "Event mailbox.card_decided is platform-emitted and auto-registered; remove the local redeclaration.") {
 		t.Fatalf("expected platform-emitted event redeclaration error, got %#v", report.Errors())
@@ -1228,7 +1234,7 @@ payload:
 	}
 	recompileBootverifySemantics(t, bundle)
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs.events references platform-emitted event mailbox.card_decided; platform owns this event") {
 		t.Fatalf("expected platform-emitted event output pin error, got %#v", report.Errors())
@@ -1363,15 +1369,7 @@ func TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets(t *testing.T
 func writeEvidenceLeakProofFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: evidence-leak-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-    mode: static
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: evidence-leak-proof
 initial_state: collecting
@@ -1391,18 +1389,18 @@ root-node:
     evidence.requested:
       action: record_evidence
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 mode: static
 states: [ready]
 initial_state: ready
 terminal_states: [ready]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 child.evidence:
   finding: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 child-node:
   id: child-node
   execution_type: system_node
@@ -2017,7 +2015,7 @@ func TestRun_AllowsOmittedRequiredAgentsToInferFromAgents(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",
 		Paths: runtimecontracts.FlowContractPaths{
-			ID: "analysis",
+			FlowPath: "analysis",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -2795,8 +2793,7 @@ stages:
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000401
-          condition: "true"
+        - condition: "true"
           advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -2810,8 +2807,7 @@ func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - element_id: 00000000-0000-4000-8000-000000000402
-          id: review
+        - id: review
           condition: "true"
           advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -2826,12 +2822,10 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - element_id: 00000000-0000-4000-8000-000000000403
-          id: review
+        - id: review
           condition: "true"
           advances_to: review
-        - element_id: 00000000-0000-4000-8000-000000000404
-          id: invalid
+        - id: invalid
           condition: "true"
           advances_to: bogus_state`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -2901,26 +2895,8 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "invalid_field_detection", "flow schema flow-a missing required field name") {
+	if !reportContains(report.Errors(), "invalid_field_detection", "flow schema flow-a missing required field states") {
 		t.Fatalf("expected invalid_field_detection error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsRootAgentMemory(t *testing.T) {
-	root := writeAgentMemoryValidationFixture(t, `
-root-flow:
-  id: root-flow
-  intent: {inline: "Exercise root memory validation."}
-  model: regular
-  memory: true
-  subscriptions:
-    - item.created
-`, "", "")
-
-	report := Run(context.Background(), loadAgentMemoryValidationFixture(t, root), Options{})
-
-	if !reportContains(report.Errors(), "invalid_field_detection", "memory true requires a flow-scoped declaration") {
-		t.Fatalf("expected root memory declaration error, got %#v", report.Errors())
 	}
 }
 
@@ -3462,7 +3438,6 @@ func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
-  element_id: f080f569-a621-4682-bba9-bc01240589a7
   items_from: payload.industries
   as: industry
   identity: industry
@@ -4233,13 +4208,13 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 
 func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bundle.Events["check.escalated"]
+	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
 	if entry.Payload.Properties == nil {
 		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
 	}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"reason"}
-	bundle.Events["check.escalated"] = entry
+	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4253,14 +4228,14 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 
 func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bundle.Events["check.escalated"]
+	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
 	if entry.Payload.Properties == nil {
 		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
 	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4278,14 +4253,14 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 
 func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bundle.Events["check.escalated"]
+	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
 	if entry.Payload.Properties == nil {
 		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
 	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4305,9 +4280,9 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 
 func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bundle.Events["check.escalated"]
+	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
 	entry.Payload.Required = nil
-	bundle.Events["check.escalated"] = entry
+	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4327,9 +4302,9 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
-	entry := bundle.Events["check.escalated"]
+	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
 	entry.Payload.Required = []string{"entity_id"}
-	bundle.Events["check.escalated"] = entry
+	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4365,6 +4340,28 @@ func setGuardEscalationForBootverifyTest(bundle *runtimecontracts.WorkflowContra
 		Escalation: emit,
 	}
 	writeBundleHandler(nil, bundle, owner, "check.requested", handler)
+}
+
+func bootverifyFlowEvent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, flowPath, eventType string) runtimecontracts.EventCatalogEntry {
+	t.Helper()
+	view, ok := bundle.FlowViewByID(flowPath)
+	if !ok || view == nil {
+		t.Fatalf("flow %q is missing", flowPath)
+	}
+	entry, ok := view.Events[eventType]
+	if !ok {
+		t.Fatalf("flow %q event %q is missing", flowPath, eventType)
+	}
+	return entry
+}
+
+func setBootverifyFlowEvent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, flowPath, eventType string, entry runtimecontracts.EventCatalogEntry) {
+	t.Helper()
+	view, ok := bundle.FlowViewByID(flowPath)
+	if !ok || view == nil {
+		t.Fatalf("flow %q is missing", flowPath)
+	}
+	view.Events[eventType] = entry
 }
 
 func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
@@ -4543,7 +4540,7 @@ func TestRun_MissingInputProducerListsProductionExitsBeforeTestHarness(t *testin
 		t.Fatalf("missing input producer finding absent: %#v", report.Errors())
 	}
 	harness := strings.Index(message, "For a validation fixture only, set source: harness")
-	for _, productionExit := range []string{"parent package.yaml connect", "source: external", "platform-owned event", "intra-flow topology"} {
+	for _, productionExit := range []string{"nearest common ancestor schema.yaml", "source: external", "platform-owned event", "intra-flow topology"} {
 		index := strings.Index(message, productionExit)
 		if index < 0 || harness < 0 || index > harness {
 			t.Fatalf("remediation order is not production-first for %q:\n%s", productionExit, message)
@@ -4794,30 +4791,19 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 			for _, kind := range []string{"node", "agent"} {
 				t.Run(kind, func(t *testing.T) {
 					child := runtimecontracts.FlowContractView{
-						Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+						Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 						Path:   "child",
 						Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 					}
-					root := runtimecontracts.FlowContractView{
-						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
-						Children: []runtimecontracts.FlowContractView{child},
-					}
+					root := runtimecontracts.FlowContractView{Nodes: map[string]runtimecontracts.SystemNodeContract{}, Children: []runtimecontracts.FlowContractView{child}}
 					bundle := &runtimecontracts.WorkflowContractBundle{
-						FlowTree: runtimecontracts.FlowTree{
-							Root: &root,
-							ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
-						},
-						Nodes:  map[string]runtimecontracts.SystemNodeContract{},
-						Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+						FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]}},
+						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
+						Agents:   map[string]runtimecontracts.AgentRegistryEntry{},
 					}
 					switch kind {
 					case "node":
-						listener := runtimecontracts.SystemNodeContract{
-							ID:               "listener",
-							SubscribesTo:     []string{authored},
-							EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{authored: {}},
-							ProducesDeclared: true,
-						}
+						listener := runtimecontracts.SystemNodeContract{ID: "listener", SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}, ProducesDeclared: true}
 						bundle.Nodes["listener"] = listener
 						bundle.FlowTree.Root.Nodes["listener"] = listener
 					case "agent":
@@ -4834,8 +4820,8 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 						t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
 					}
 					for _, finding := range report.HardInvalidities() {
-						if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "package.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
-							t.Fatalf("teaching remediation = %q, want connect plus local subscription", finding.Remediation)
+						if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "schema.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
+							t.Fatalf("teaching remediation = %q, want schema connect plus local subscription", finding.Remediation)
 						}
 					}
 				})
@@ -4846,12 +4832,12 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 
 func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "flows/producer"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Path:   "producer",
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "flows/consumer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
@@ -4894,7 +4880,7 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			child := runtimecontracts.FlowContractView{
-				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 				Path:   "child",
 				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 			}
@@ -5172,7 +5158,7 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.region`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   Metadata:
     region: text
@@ -5207,7 +5193,7 @@ case:
     type: text
     _unused_reason: prompt save auth proof
 `, "Use `save_entity_field` for `metadata.region`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   Metadata:
     region: text
@@ -5242,7 +5228,7 @@ case:
     type: text
     _unused_reason: prompt save auth proof
 `, "Use save_entity_field.\n- `metadata.region`\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   Metadata:
     region: text
@@ -5273,7 +5259,7 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.missing`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   Metadata:
     region: text
@@ -5303,7 +5289,7 @@ case:
   metadata:
     type: Metadata
 `, "Use `save_entity_field` for `metadata.missing`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   Metadata:
     region: text
@@ -5333,7 +5319,7 @@ case:
   validation_kit:
     type: ValidationKit
 `, "Use `save_entity_field` for `validation_kit.checklist.size`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "types.yaml"), `
 types:
   ValidationKit:
     checklist: list<text>
@@ -5369,7 +5355,7 @@ root_case:
     type: integer
     _unused_reason: child read-pin save-path validation proof
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 initial_state: idle
 terminal_states: [done]
@@ -5423,28 +5409,17 @@ case:
 
 func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplicateIDs(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: duplicate-agent-writer-coverage
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: static
-  - id: beta
-    flow: beta
-    mode: static
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-agent-writer-coverage\n")
 
 	for _, flowID := range []string{"alpha", "beta"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), `
 case:
   business_brief:
     type: text
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), `
 writer:
   id: writer
   type: factory
@@ -5457,7 +5432,7 @@ writer:
       save:
       - business_brief
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "prompts", "writer.md"), "Write the declared business brief.\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "prompts", "writer.md"), "Write the declared business brief.\n")
 	}
 
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -6507,14 +6482,17 @@ func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testin
 		t.Fatal("child task.feedback schema missing")
 	}
 	bundle.Events["task.feedback"] = feedbackSchema
-	for _, project := range bundle.RootProjectViews() {
-		project.Events["task.feedback"] = feedbackSchema
+	root, ok := bundle.FlowViewByID(".")
+	if !ok || root == nil {
+		t.Fatal("root flow missing")
 	}
+	root.Events["task.feedback"] = feedbackSchema
 	bundle.RootSchema.Pins.Outputs.EventPins = append(bundle.RootSchema.Pins.Outputs.EventPins, runtimecontracts.FlowOutputEventPin{
 		Event: "task.feedback",
 	})
-	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowPackageConnect{
-		Event: "task.feedback", From: ".", To: "child", SourceFile: "package.yaml", SourceLine: 1,
+	root.Schema.Pins.Outputs.EventPins = append(root.Schema.Pins.Outputs.EventPins, runtimecontracts.FlowOutputEventPin{Event: "task.feedback"})
+	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowConnect{
+		Event: "task.feedback", From: ".", To: "child", SourceFile: "schema.yaml", SourceLine: 1,
 	})
 	connects := bundle.CompositionConnects()
 	recompileBootverifySemantics(t, bundle)
@@ -6665,42 +6643,46 @@ func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is node projector") {
+	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is flow . node projector") {
 		t.Fatalf("expected transition_ownership_validation error, got %#v", report.Errors())
 	}
 }
 
 func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	event := bundle.Events["ticket.opened"]
+	event := bootverifyFlowEvent(t, bundle, ".", "ticket.opened")
 	event.OwningNode = "dispatcher"
-	bundle.Events["ticket.opened"] = event
+	setBootverifyFlowEvent(t, bundle, ".", "ticket.opened", event)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node node dispatcher missing semantic event_handler") {
+	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node flow . node dispatcher missing semantic event_handler") {
 		t.Fatalf("expected event_runtime_wiring_validation error, got %#v", report.Errors())
 	}
 }
 
 func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	bundle.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{ID: "idle-owner"}
-	event := bundle.Events["ticket.audit"]
+	root, ok := bundle.FlowViewByID(".")
+	if !ok || root == nil {
+		t.Fatal("root flow missing")
+	}
+	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{ID: "idle-owner"}
+	event := bootverifyFlowEvent(t, bundle, ".", "ticket.audit")
 	event.RuntimeHandling = "projection"
 	event.OwningNode = "idle-owner"
-	bundle.Events["ticket.audit"] = event
+	setBootverifyFlowEvent(t, bundle, ".", "ticket.audit", event)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node node idle-owner has no runtime executor") {
+	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node flow . node idle-owner has no runtime executor") {
 		t.Fatalf("expected handler_field_compliance runtime executor error, got %#v", report.Errors())
 	}
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 78 {
-		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
+	if got := len(bootCheckRegistry); got != 73 {
+		t.Fatalf("bootCheckRegistry count = %d, want 73", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6799,7 +6781,7 @@ func TestRun_ReportsErrorForTimerOwnerMissingFromParticipants(t *testing.T) {
 	bundle.Semantics.Timers[0].Owner = "missing-owner"
 	bundle.Semantics.Timers[0].Node = identitytest.RootNode(t, "missing-owner")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "timer_validation", "owner node missing-owner missing from executable nodes") {
+	if !reportContains(report.Errors(), "timer_validation", "owner flow . node missing-owner missing from executable nodes") {
 		t.Fatalf("expected timer_validation missing participant owner error, got %#v", report.Errors())
 	}
 }
@@ -7230,22 +7212,14 @@ func repoRootForBootverifyTest(t *testing.T) string {
 func writeSelectEntityInputPinFixture(t *testing.T, treasuryNodes string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: select-entity-fixture
-version: 1.0.0
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: treasury
-    flow: treasury
-    mode: static
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `
 name: treasury
 mode: static
 initial_state: active
@@ -7254,12 +7228,12 @@ pins:
   inputs:
     events: [opco.spend_requested]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "events.yaml"), `
 opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "entities.yaml"), `
 opco_budget:
   vertical_id:
     type: text
@@ -7267,7 +7241,7 @@ opco_budget:
     type: number
     initial: 0
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "nodes.yaml"), treasuryNodes)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "nodes.yaml"), treasuryNodes)
 	return root
 }
 
@@ -7304,16 +7278,6 @@ func loadAgentMemoryValidationFixture(t *testing.T, fixtureRoot string) semantic
 func writeAgentMemoryValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
 	t.Helper()
 	root := t.TempDir()
-	flows := " []"
-	if strings.TrimSpace(flowSchema) != "" || strings.TrimSpace(flowAgents) != "" {
-		flows = "\n  - id: support\n    flow: support\n    mode: static"
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: agent-memory-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:`+flows+`
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -7330,13 +7294,13 @@ item.created:
 		if strings.TrimSpace(flowSchema) == "" {
 			flowSchema = "name: support\n"
 		}
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), flowSchema)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support/item.created:
   entity_id: string
 `)
 		if strings.TrimSpace(flowAgents) != "" {
-			writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), flowAgents)
 		}
 	}
 	return root
@@ -7346,15 +7310,6 @@ func writePackageBackedAgentMemoryValidationFixture(t *testing.T, flowSchema, pa
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: agent-memory-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -7364,18 +7319,13 @@ item:
 item.created:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
-name: support
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), flowSchema)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support/item.created:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), packageAgents)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), packageAgents)
 	return root
 }
 
@@ -7500,21 +7450,6 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: pin-ambiguity
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer_a
-    flow: producer_a
-    mode: static
-  - id: producer_b
-    flow: producer_b
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -7522,7 +7457,7 @@ item:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pin-ambiguity\n")
 
 	for _, flowID := range []string{"producer_a", "producer_b"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), `
 name: `+flowID+`
 initial_state: idle
 terminal_states: [done]
@@ -7532,7 +7467,7 @@ pins:
     events:
       - ticket.ready
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), `
 ticket.ready:
   entity_id: string
 `)
@@ -7542,7 +7477,7 @@ ticket.ready:
 	if scoped {
 		subscription = "producer_a/ticket.ready"
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `
 name: consumer
 initial_state: waiting
 terminal_states: [done]
@@ -7555,13 +7490,13 @@ pins:
     events:
       - consumer.started
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "events.yaml"), `
 ticket.ready:
   entity_id: string
 consumer.started:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), `
 consumer-node:
   id: consumer-node
   execution_type: system_node
@@ -7595,33 +7530,24 @@ func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler 
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: state-reachability
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-reachability\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 initial_state: waiting
 terminal_states: [done]
 states: [waiting, active, review, done]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
 ticket.closed:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), fmt.Sprintf(`
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), fmt.Sprintf(`
 support-node:
   id: support-node
   execution_type: system_node
@@ -7656,28 +7582,19 @@ func writeStagedLifecycleFixture(t *testing.T, schema string) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: staged-lifecycle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), schema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), schema)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
 ticket.closed:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), `
 support-node:
   id: support-node
   execution_type: system_node
@@ -7699,17 +7616,9 @@ func writeWave1ExpressionFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: wave1-expression-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-expression-fixture\n")
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 initial_state: idle
 terminal_states: [done]
@@ -7720,7 +7629,7 @@ pins:
   outputs:
     events: [task.result]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 task:
   retry_count:
     type: integer
@@ -7750,14 +7659,14 @@ task:
     type: integer
     initial: 1
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
   score: numeric
 task.feedback:
   comment: string
 task.result: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 worker:
   id: worker
   execution_type: system_node
@@ -7786,15 +7695,6 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: wave1-root-reader-coverage
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 case:
@@ -7803,7 +7703,7 @@ case:
     _unused_reason: child read-pin coverage proof field
 `)
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 initial_state: idle
 terminal_states: [done]
@@ -7813,11 +7713,11 @@ pins:
     events: [task.assigned]
     reads: [priority]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
   entity_id: string
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 reader:
   id: reader
   execution_type: system_node
@@ -7842,28 +7742,19 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: prompt-writer-coverage
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), entitiesYAML)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), agentsYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
 	if strings.TrimSpace(promptText) == "" {
 		promptText = "Write the fields authorized by the contract.\n"
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), promptText)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "prompts", "writer.md"), promptText)
 	return root
 }
 
@@ -7907,7 +7798,7 @@ func loadFixtureBundleAt(t *testing.T, repoRoot, fixtureRoot, platformSpec strin
 }
 
 func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowContractBundle {
-	dispatcher, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", "dispatcher")
+	dispatcher, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "dispatcher")
 	if err != nil {
 		panic(err)
 	}
@@ -7936,6 +7827,14 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			OwningNode:      "projector",
 		},
 		"ticket.audit": {},
+	}
+	root := &runtimecontracts.FlowContractView{
+		Path: ".",
+		Paths: runtimecontracts.FlowContractPaths{
+			FlowPath: ".",
+		},
+		Nodes:  nodes,
+		Events: events,
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -7970,10 +7869,12 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 		},
 		Nodes:  nodes,
 		Events: events,
-		FlowTree: runtimecontracts.FlowTree{Root: &runtimecontracts.FlowContractView{
-			Nodes:  nodes,
-			Events: events,
-		}},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".": root,
+			},
+		},
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
@@ -8116,7 +8017,6 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		}
 	}
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), packageYAML)
 	rootSchema := strings.TrimSpace(opts.rootSchema)
 	if rootSchema == "" {
 		rootSchema = "name: " + name
@@ -8133,11 +8033,11 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		if schema == "" {
 			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]"
 		}
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), schema+"\n")
-		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), files.policy)
-		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), files.agents)
-		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), files.events)
-		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), files.nodes)
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schema+"\n")
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "policy.yaml"), files.policy)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), files.agents)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), files.events)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "nodes.yaml"), files.nodes)
 	}
 
 	return root
@@ -8305,54 +8205,18 @@ func writeBundleEventEntry(t testing.TB, bundle *runtimecontracts.WorkflowContra
 		}
 		view.Events[eventType] = entry
 	})
-	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
-		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		if packageKey == owner.PackageKey() && owner.FlowID() == "" {
-			scope.Events[eventType] = entry
-		}
-	}
-	for _, scope := range semanticview.Wrap(bundle).FlowScopes() {
-		packageKey := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		if packageKey == owner.PackageKey() && strings.TrimSpace(scope.ID) == owner.FlowID() {
-			scope.Events[eventType] = entry
-		}
-	}
 }
 
 func writeBundlePolicyValue(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, key string, value runtimecontracts.PolicyValue) {
 	if t != nil {
 		t.Helper()
 	}
-	var found bool
-	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
-		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
+	mutateBundleExecutableNode(t, bundle, owner, func(view *runtimecontracts.FlowContractView) {
+		if view.Policy.Values == nil {
+			view.Policy.Values = map[string]runtimecontracts.PolicyValue{}
 		}
-		if packageKey != owner.PackageKey() {
-			continue
-		}
-		if scope.Policy.Values == nil {
-			if t != nil {
-				t.Fatalf("canonical package policy map is nil for %s", owner.Key())
-			}
-			panic("canonical package policy map is nil")
-		}
-		scope.Policy.Values[key] = value
-		found = true
-	}
-	if !found {
-		if t != nil {
-			t.Fatalf("canonical package policy not found for %s", owner.Key())
-		}
-		panic("canonical package policy not found")
-	}
+		view.Policy.Values[key] = value
+	})
 }
 
 func bundleExecutableNodeByLocalID(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID string) runtimeidentity.ExecutableNode {
@@ -8389,23 +8253,12 @@ func mutateBundleExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowC
 		panic("invalid executable node mutation owner")
 	}
 	var found bool
-	var walk func(*runtimecontracts.FlowContractView, string, string)
-	walk = func(view *runtimecontracts.FlowContractView, inheritedPackage, inheritedFlow string) {
+	var walk func(*runtimecontracts.FlowContractView)
+	walk = func(view *runtimecontracts.FlowContractView) {
 		if view == nil || found {
 			return
 		}
-		packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
-		if packageKey == "" {
-			packageKey = strings.Trim(strings.TrimSpace(inheritedPackage), "/")
-		}
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		flowID := strings.TrimSpace(view.Paths.ID)
-		if flowID == "" {
-			flowID = strings.TrimSpace(inheritedFlow)
-		}
-		if packageKey == owner.PackageKey() && flowID == owner.FlowID() {
+		if strings.TrimSpace(view.Paths.FlowPath) == owner.FlowPath() {
 			if _, ok := view.Nodes[owner.NodeID()]; ok {
 				mutate(view)
 				found = true
@@ -8413,12 +8266,12 @@ func mutateBundleExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowC
 			}
 		}
 		for index := range view.Children {
-			walk(&view.Children[index], packageKey, flowID)
+			walk(&view.Children[index])
 		}
 	}
 	if bundle.FlowTree.Root != nil {
-		walk(bundle.FlowTree.Root, "", "")
-	} else if owner.PackageKey() == runtimeidentity.RootPackageKey && owner.FlowID() == "" {
+		walk(bundle.FlowTree.Root)
+	} else if owner.FlowPath() == "." {
 		if _, ok := bundle.Nodes[owner.NodeID()]; ok {
 			view := runtimecontracts.FlowContractView{Nodes: bundle.Nodes, Events: bundle.Events}
 			mutate(&view)
@@ -8440,10 +8293,10 @@ func firstFlowHandlerInFlowView(t *testing.T, bundle *runtimecontracts.WorkflowC
 	t.Helper()
 	views := bundle.FlowViews()
 	sort.Slice(views, func(i, j int) bool {
-		return strings.TrimSpace(views[i].Paths.ID) < strings.TrimSpace(views[j].Paths.ID)
+		return strings.TrimSpace(views[i].Paths.FlowPath) < strings.TrimSpace(views[j].Paths.FlowPath)
 	})
 	for _, view := range views {
-		flowID := strings.TrimSpace(view.Paths.ID)
+		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		nodeIDs := make([]string, 0, len(view.Nodes))
 		for nodeID := range view.Nodes {
 			nodeIDs = append(nodeIDs, nodeID)
@@ -8636,17 +8489,11 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 			node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
 		}
 		node.EventHandlers[eventType] = handler
-		for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
-			packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
-			if packageKey == "" {
-				packageKey = runtimeidentity.RootPackageKey
-			}
-			if packageKey == runtimeidentity.RootPackageKey && strings.TrimSpace(scope.OwningFlowID) == "" {
-				scope.Nodes[nodeID] = node
-				return
-			}
+		if bundle.Nodes == nil {
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 		}
-		t.Fatalf("root project scope missing")
+		bundle.Nodes[nodeID] = node
+		return
 	}
 	if bundle.FlowTree.Root.Nodes == nil {
 		bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{}
@@ -8660,15 +8507,6 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 	}
 	node.EventHandlers[eventType] = handler
 	bundle.FlowTree.Root.Nodes[nodeID] = node
-	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
-		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		if packageKey == runtimeidentity.RootPackageKey && strings.TrimSpace(scope.OwningFlowID) == "" {
-			scope.Nodes[nodeID] = node
-		}
-	}
 }
 
 func platformEventCatalogTestNode(t *testing.T, raw string) yaml.Node {

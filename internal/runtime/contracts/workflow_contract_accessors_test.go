@@ -9,14 +9,11 @@ import (
 
 func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	bundle := &WorkflowContractBundle{
-		Package: ProjectPackageDocument{Name: "root-workflow", Version: "1.0.0"},
 		RootSchema: &FlowSchemaDocument{
+			Name:         "root-workflow",
 			InitialState: "root-new",
 			States:       []string{"root-new", "root-done"},
 		},
-		Paths: ContractPaths{Flows: []FlowContractPaths{
-			{ID: "child", Flow: "child"},
-		}},
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"child": {
 				InitialState: "child-new",
@@ -26,11 +23,11 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	}
 	populateWorkflowSemantics(bundle)
 
-	if got, want := bundle.FlowStates(""), []string{"root-new", "root-done"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("FlowStates(\"\") = %#v, want %#v", got, want)
+	if got := bundle.FlowStates(""); got != nil {
+		t.Fatalf("FlowStates(\"\") = %#v, want no retired root alias", got)
 	}
-	if got, want := bundle.FlowStates(bundle.WorkflowName()), []string{"root-new", "root-done"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("FlowStates(workflow name) = %#v, want %#v", got, want)
+	if got, want := bundle.FlowStates("."), []string{"root-new", "root-done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlowStates(\".\") = %#v, want %#v", got, want)
 	}
 	if got, want := bundle.FlowStates("child"), []string{"child-new", "child-done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("FlowStates(child) = %#v, want %#v", got, want)
@@ -42,8 +39,8 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 
 func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 	bundle := &WorkflowContractBundle{
-		Package: ProjectPackageDocument{Name: "root-workflow", Version: "1.0.0"},
 		RootSchema: &FlowSchemaDocument{
+			Name: "root-workflow",
 			StageDeclarations: FlowStageDeclarations{
 				Declared: true,
 				Entries: []FlowStageDeclaration{
@@ -52,9 +49,6 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 				},
 			},
 		},
-		Paths: ContractPaths{Flows: []FlowContractPaths{
-			{ID: "child", Flow: "child"},
-		}},
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"child": {
 				StageDeclarations: FlowStageDeclarations{
@@ -69,10 +63,10 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 	}
 	populateWorkflowSemantics(bundle)
 
-	if got, want := bundle.FlowInitialStage(""), "ready"; got != want {
+	if got, want := bundle.FlowInitialStage("."), "ready"; got != want {
 		t.Fatalf("FlowInitialStage(root) = %q, want %q", got, want)
 	}
-	if got, want := bundle.FlowStates(""), []string{"ready", "done"}; !reflect.DeepEqual(got, want) {
+	if got, want := bundle.FlowStates("."), []string{"ready", "done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("FlowStates(root) = %#v, want %#v", got, want)
 	}
 	if got, want := bundle.FlowTerminalStages("child"), []string{"done"}; !reflect.DeepEqual(got, want) {
@@ -101,7 +95,7 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 
 func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t *testing.T) {
 	producer := FlowContractView{
-		Paths: FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: FlowContractPaths{FlowPath: "producer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
 				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -110,7 +104,7 @@ func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t
 		Path: "producer",
 	}
 	consumer := FlowContractView{
-		Paths: FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: FlowContractPaths{FlowPath: "consumer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
 				Inputs: FlowInputPins{EventPins: []FlowInputEventPin{{Event: "scan.requested"}}},
@@ -140,7 +134,7 @@ func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t
 
 func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(t *testing.T) {
 	producerA := FlowContractView{
-		Paths: FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
+		Paths: FlowContractPaths{FlowPath: "producer_a"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
 				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "ticket.ready"}}},
@@ -149,7 +143,7 @@ func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(
 		Path: "producer_a",
 	}
 	producerB := FlowContractView{
-		Paths: FlowContractPaths{ID: "producer_b", Flow: "producer_b"},
+		Paths: FlowContractPaths{FlowPath: "producer_b"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
 				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "ticket.ready"}}},
@@ -158,7 +152,7 @@ func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(
 		Path: "producer_b",
 	}
 	consumer := FlowContractView{
-		Paths: FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: FlowContractPaths{FlowPath: "consumer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
 				Inputs: FlowInputPins{EventPins: []FlowInputEventPin{{Event: "ticket.ready"}}},

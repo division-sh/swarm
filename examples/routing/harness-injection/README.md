@@ -3,15 +3,15 @@
 Use this validation-only recipe when a test harness will provide a flow input and observe a flow output, but the authored bundle must be checked before behavioral execution exists. The declarations satisfy static input-producer and output-consumer proof only. They create no route, subscriber, standing target, provider ingress, recipient manifest, or runtime delivery.
 
 ```sh
-swarm verify --contracts examples/routing/harness-injection
-swarm serve --contracts examples/routing/harness-injection
+swarm verify examples/routing/harness-injection
+swarm serve examples/routing/harness-injection
 swarm event publish work.requested --payload-json '{"work_id":"work-1"}'
 ```
 
 Expected: verify succeeds with an explicit non-production label:
 
 ```text
-verify ok: contracts=<repo>/examples/routing/harness-injection -- 1 harness-injected input at [worker.work.requested], 1 harness-observed output at [worker.work.completed]; not production-valid
+verify ok: source=<repo>/examples/routing/harness-injection -- 1 harness-injected input at [worker.work.requested], 1 harness-observed output at [worker.work.completed]; not production-valid
 ```
 
 Expected serve rejection:

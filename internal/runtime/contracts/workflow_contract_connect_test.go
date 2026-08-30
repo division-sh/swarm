@@ -7,7 +7,7 @@ import (
 )
 
 func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(t *testing.T) {
-	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "flows/collector/schema.yaml"}
+	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
 	firstDedup := []string{"payload.worker_id", "event.id"}
 	first, err := CompileFlowInputPin(context, FlowInputEventPin{
 		Event: "work.reported",
@@ -78,7 +78,7 @@ func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := CompileFlowInputPin(
-				FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "flows/collector/schema.yaml"},
+				FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"},
 				FlowInputEventPin{Event: "work.completed", Resolution: tc.resolution},
 			)
 			if err == nil || !strings.Contains(err.Error(), "may only declare") {

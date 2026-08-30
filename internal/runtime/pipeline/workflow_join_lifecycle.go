@@ -28,17 +28,17 @@ func workflowJoinPlansForStage(source semanticview.Source, route runtimeflowiden
 	ownerScope := strings.Trim(strings.TrimSpace(route.ScopeKey), "/")
 	hasFlowOwner := false
 	for _, plan := range source.WorkflowJoins() {
-		flowID := plan.Node.FlowID()
-		if flowID != "" && runtimeflowidentity.ScopeKey(source, flowID) == ownerScope {
+		flowID := plan.Node.FlowPath()
+		if flowID != semanticview.RootExecutionFlowID(source) && runtimeflowidentity.ScopeKey(source, flowID) == ownerScope {
 			hasFlowOwner = true
 			break
 		}
 	}
 	out := make([]runtimecontracts.WorkflowJoinPlan, 0, 1)
 	for _, plan := range source.WorkflowJoins() {
-		planFlowID := plan.Node.FlowID()
-		flowMatches := planFlowID == "" && !hasFlowOwner ||
-			planFlowID != "" && runtimeflowidentity.ScopeKey(source, planFlowID) == ownerScope
+		planFlowID := plan.Node.FlowPath()
+		flowMatches := planFlowID == semanticview.RootExecutionFlowID(source) && !hasFlowOwner ||
+			planFlowID != semanticview.RootExecutionFlowID(source) && runtimeflowidentity.ScopeKey(source, planFlowID) == ownerScope
 		if flowMatches && strings.TrimSpace(plan.Spec.Stage) == stage {
 			out = append(out, plan)
 		}
@@ -103,10 +103,10 @@ func joinSchedule(source semanticview.Source, entityID string, instanceRoute run
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule requires the activation's typed declaration handle")
 	}
 	payload := handle.PayloadMetadata()
-	flowID := ref.FlowID()
+	flowID := ref.FlowPath()
 	route := events.RouteIdentity{EntityID: entityID}
 	scheduleFlowInstance := ""
-	if flowID != "" {
+	if flowID != semanticview.RootExecutionFlowID(source) {
 		route.FlowID = flowID
 		route.FlowInstance = instanceRoute.InstancePath
 		scheduleFlowInstance = instanceRoute.InstancePath

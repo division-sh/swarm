@@ -37,7 +37,7 @@ func TestExecutionTargetLogicalPathAuthority(t *testing.T) {
 	target := (&Target{
 		Backend: BackendHost,
 		Workdir: t.TempDir(),
-		Mounts:  []ExecutionMount{{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite}, {LogicalPath: LogicalDataMount, Access: MountAccessReadOnly}, {LogicalPath: LogicalContractsMount, Access: MountAccessReadOnly}},
+		Mounts:  []ExecutionMount{{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite}, {LogicalPath: LogicalDataMount, Access: MountAccessReadOnly}, {LogicalPath: LogicalSourceMount, Access: MountAccessReadOnly}},
 	}).ExecutionTarget()
 
 	if got, err := target.ResolvePath("draft.txt", PathAccessWrite); err != nil || got != "/workspace/draft.txt" {
@@ -67,7 +67,7 @@ func TestExecutionTargetHostBackingPathAuthority(t *testing.T) {
 		Mounts: []ExecutionMount{
 			{LogicalPath: LogicalWorkspaceMount, HostPath: workspaceDir, Access: MountAccessReadWrite},
 			{LogicalPath: LogicalDataMount, HostPath: dataDir, Access: MountAccessReadOnly},
-			{LogicalPath: LogicalContractsMount, HostPath: contractsDir, Access: MountAccessReadOnly},
+			{LogicalPath: LogicalSourceMount, HostPath: contractsDir, Access: MountAccessReadOnly},
 		},
 	}).ExecutionTarget()
 

@@ -35,21 +35,21 @@ var (
 )
 
 type Request struct {
-	OperationID       string
-	ActorTokenID      string
-	RequestHash       string
-	DryRun            bool
-	IncludeBundles    bool
-	IncludeBundlesSet bool
-	RequestedAt       time.Time
+	OperationID               string
+	ActorTokenID              string
+	RequestHash               string
+	DryRun                    bool
+	IncludeSourceArtifacts    bool
+	IncludeSourceArtifactsSet bool
+	RequestedAt               time.Time
 }
 
 type Result struct {
-	OperationName  string    `json:"operation_name"`
-	DryRun         bool      `json:"dry_run"`
-	IncludeBundles bool      `json:"include_bundles"`
-	PlannedAt      time.Time `json:"planned_at"`
-	Plan           Plan      `json:"plan"`
+	OperationName          string    `json:"operation_name"`
+	DryRun                 bool      `json:"dry_run"`
+	IncludeSourceArtifacts bool      `json:"include_source_artifacts"`
+	PlannedAt              time.Time `json:"planned_at"`
+	Plan                   Plan      `json:"plan"`
 }
 
 type QuiescenceRequest struct {
@@ -78,12 +78,12 @@ type CleanupRequest struct {
 }
 
 type CleanupResult struct {
-	OperationName  string               `json:"operation_name"`
-	DryRun         bool                 `json:"dry_run"`
-	IncludeBundles bool                 `json:"include_bundles"`
-	AppliedAt      time.Time            `json:"applied_at"`
-	RunIDs         []string             `json:"run_ids"`
-	Tables         []CleanupTableResult `json:"tables"`
+	OperationName          string               `json:"operation_name"`
+	DryRun                 bool                 `json:"dry_run"`
+	IncludeSourceArtifacts bool                 `json:"include_source_artifacts"`
+	AppliedAt              time.Time            `json:"applied_at"`
+	RunIDs                 []string             `json:"run_ids"`
+	Tables                 []CleanupTableResult `json:"tables"`
 }
 
 type CleanupTableResult struct {
@@ -153,16 +153,16 @@ type QuiescedDelivery struct {
 }
 
 type Plan struct {
-	ActiveRuns          []RunRef             `json:"active_runs"`
-	CleanupRuns         []RunRef             `json:"cleanup_runs"`
-	CleanupRunSetKnown  bool                 `json:"cleanup_run_set_known"`
-	IncludeBundles      bool                 `json:"include_bundles"`
-	ActiveDeliveries    []DeliveryRef        `json:"active_deliveries"`
-	RunScopedTables     []TableRef           `json:"run_scoped_tables"`
-	EntityContainers    []ContainerRef       `json:"entity_containers"`
-	Preserved           PreservedResources   `json:"preserved"`
-	DownstreamContracts []DownstreamContract `json:"downstream_contracts"`
-	ResetSeams          []ResetSeam          `json:"reset_seams"`
+	ActiveRuns             []RunRef             `json:"active_runs"`
+	CleanupRuns            []RunRef             `json:"cleanup_runs"`
+	CleanupRunSetKnown     bool                 `json:"cleanup_run_set_known"`
+	IncludeSourceArtifacts bool                 `json:"include_source_artifacts"`
+	ActiveDeliveries       []DeliveryRef        `json:"active_deliveries"`
+	RunScopedTables        []TableRef           `json:"run_scoped_tables"`
+	EntityContainers       []ContainerRef       `json:"entity_containers"`
+	Preserved              PreservedResources   `json:"preserved"`
+	DownstreamContracts    []DownstreamContract `json:"downstream_contracts"`
+	ResetSeams             []ResetSeam          `json:"reset_seams"`
 }
 
 type RunRef struct {
@@ -200,7 +200,7 @@ type PreservedResources struct {
 	OperatorManagedBoundary string   `json:"operator_managed_boundary"`
 	SchemaMigrations        bool     `json:"schema_migrations"`
 	AuthTokens              bool     `json:"auth_tokens"`
-	BundleContracts         bool     `json:"bundle_contracts"`
+	SourceArtifacts         bool     `json:"bundle_contracts"`
 }
 
 type DownstreamContract struct {
@@ -306,9 +306,9 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
-	if !r.IncludeBundlesSet {
-		r.IncludeBundles = true
-		r.IncludeBundlesSet = true
+	if !r.IncludeSourceArtifactsSet {
+		r.IncludeSourceArtifacts = true
+		r.IncludeSourceArtifactsSet = true
 	}
 	if r.ActorTokenID == "" {
 		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
@@ -323,9 +323,9 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	return r, nil
 }
 
-func (r Request) includeBundles() bool {
-	if !r.IncludeBundlesSet {
+func (r Request) includeSourceArtifacts() bool {
+	if !r.IncludeSourceArtifactsSet {
 		return true
 	}
-	return r.IncludeBundles
+	return r.IncludeSourceArtifacts
 }

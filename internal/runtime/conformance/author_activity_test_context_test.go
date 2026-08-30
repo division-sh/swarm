@@ -30,15 +30,16 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+var authorActivityTestSourceArtifactFact = mustAuthorActivityTestSourceArtifactFact()
 
-func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+func mustAuthorActivityTestSourceArtifactFact() runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
 	if err != nil {
 		panic(err)
 	}
@@ -118,11 +119,11 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
-	return testAuthorActivityContextForBundle(ctx, authorActivityTestBundleSourceFact)
+	return testAuthorActivityContextForBundle(ctx, authorActivityTestSourceArtifactFact)
 }
 
-func testAuthorActivityContextForBundle(ctx context.Context, fact runtimecorrelation.BundleSourceFact) context.Context {
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+func testAuthorActivityContextForBundle(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
@@ -130,7 +131,7 @@ func testAuthorActivityContextForBundle(ctx context.Context, fact runtimecorrela
 	))
 }
 
-func conformanceBundleSourceFact(t testing.TB, source semanticview.Source) runtimecorrelation.BundleSourceFact {
+func conformanceSourceArtifactFact(t testing.TB, source semanticview.Source) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -140,7 +141,7 @@ func conformanceBundleSourceFact(t testing.TB, source semanticview.Source) runti
 	if err != nil {
 		t.Fatalf("compute conformance bundle identity: %v", err)
 	}
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(hash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
 	if err != nil {
 		t.Fatalf("admit conformance bundle source fact: %v", err)
 	}
@@ -156,8 +157,8 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if strings.TrimSpace(opts.SourceArtifactFact.BundleHash()) == "" {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.ProcessWorkOwner == nil {
 		opts.ProcessWorkOwner = worklifetime.NewProcess()
@@ -212,8 +213,8 @@ func installConformanceRuntimeStartupGeneration(
 	if rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
 		t.Fatal("conformance runtime grant requires a constructed runtime and semantic source")
 	}
-	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile conformance runtime source set: %v", err)
@@ -263,7 +264,7 @@ func installConformanceRuntimeStartupGeneration(
 		t.Fatalf("commit conformance source set: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+		BundleHash: bundleHash, RuntimeInstanceID: rt.Options.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -349,10 +350,10 @@ func completeConformanceWorkflowDeps(store conformanceDurableEventBusStore, deps
 }
 
 func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCatalogRegistrar, descriptors []runtimeauthoractivity.EventDescriptor) {
-	registerTestAuthorActivityCatalogForBundle(t, target, authorActivityTestBundleSourceFact, descriptors)
+	registerTestAuthorActivityCatalogForBundle(t, target, authorActivityTestSourceArtifactFact, descriptors)
 }
 
-func registerTestAuthorActivityCatalogForBundle(t *testing.T, target testAuthorActivityCatalogRegistrar, fact runtimecorrelation.BundleSourceFact, descriptors []runtimeauthoractivity.EventDescriptor) {
+func registerTestAuthorActivityCatalogForBundle(t *testing.T, target testAuthorActivityCatalogRegistrar, fact runtimecorrelation.SourceArtifactFact, descriptors []runtimeauthoractivity.EventDescriptor) {
 	t.Helper()
 	lease, err := target.RegisterAuthorActivityEventCatalog(
 		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()),
@@ -384,18 +385,18 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if strings.TrimSpace(opts.SourceArtifactFact.BundleHash()) == "" {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash())
+		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.SourceArtifactFact.BundleHash())
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -411,7 +412,7 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 				EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
 			})
 		}
-		registerTestAuthorActivityCatalogForBundle(t, registrar, opts.BundleSourceFact, descriptors)
+		registerTestAuthorActivityCatalogForBundle(t, registrar, opts.SourceArtifactFact, descriptors)
 	}
 	if opts.PipelineObligations != nil {
 		durable, ok := eventStore.(conformanceDurableEventBusStore)

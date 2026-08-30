@@ -70,10 +70,10 @@ evidence_matrix:
     disposition: surviving_stage1_activity_pilot_candidate
     consumer_issue: 1666
     proof_refs:
-      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:11
-      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:42
-      - external:empire/contracts/flows/repo-scaffold/agents.yaml:1
-      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:98
+      - external:empire/contracts/repo-scaffold/prompts/repo-scaffold-agent.md:11
+      - external:empire/contracts/repo-scaffold/prompts/repo-scaffold-agent.md:42
+      - external:empire/contracts/repo-scaffold/agents.yaml:1
+      - external:empire/contracts/repo-scaffold/nodes.yaml:98
     metric_evidence:
       status: unavailable
       reason: no committed trace/cost/latency artifact for repo-scaffold-agent invocations
@@ -91,9 +91,9 @@ evidence_matrix:
     disposition: insufficient_current_deterministic_proof
     consumer_issue: 1663
     proof_refs:
-      - external:empire/contracts/flows/lifecycle/prompts/lifecycle-review-agent.md:7
-      - external:empire/contracts/flows/lifecycle/prompts/lifecycle-review-agent.md:23
-      - external:empire/contracts/flows/lifecycle/agents.yaml:1
+      - external:empire/contracts/lifecycle/prompts/lifecycle-review-agent.md:7
+      - external:empire/contracts/lifecycle/prompts/lifecycle-review-agent.md:23
+      - external:empire/contracts/lifecycle/agents.yaml:1
     metric_evidence:
       status: unavailable
       reason: no committed trace/cost/latency artifact and no exact deterministic policy predicate for strong-enough marginal evidence
@@ -110,10 +110,10 @@ evidence_matrix:
     disposition: surviving_stage1_activity_candidate_with_orchestration_watch
     consumer_issue: 1666
     proof_refs:
-      - external:empire/contracts/flows/discovery/prompts/scanner-agent.md:1
-      - external:empire/contracts/flows/discovery/prompts/scanner-agent.md:5
-      - external:empire/contracts/flows/discovery/agents.yaml:65
-      - external:empire/contracts/flows/discovery/nodes.yaml:281
+      - external:empire/contracts/discovery/prompts/scanner-agent.md:1
+      - external:empire/contracts/discovery/prompts/scanner-agent.md:5
+      - external:empire/contracts/discovery/agents.yaml:65
+      - external:empire/contracts/discovery/nodes.yaml:281
     metric_evidence:
       status: unavailable
       reason: no committed trace/cost/latency artifact for scanner-agent invocations
@@ -130,8 +130,8 @@ evidence_matrix:
     disposition: planned_refactor_not_live_stage0_evidence
     consumer_issue: 1663
     proof_refs:
-      - external:empire/contracts/flows/holding-devops/agents.yaml:1
-      - external:empire/contracts/flows/holding-devops/agents.yaml:25
+      - external:empire/contracts/holding-devops/agents.yaml:1
+      - external:empire/contracts/holding-devops/agents.yaml:25
     metric_evidence:
       status: not_applicable
       reason: planned/refactor evidence is excluded from live ordering counts
@@ -146,9 +146,9 @@ evidence_matrix:
     disposition: surviving_helper_candidate
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/validation/nodes.yaml:154
-      - external:empire/contracts/flows/validation/nodes.yaml:222
-      - external:empire/contracts/flows/validation/nodes.yaml:232
+      - external:empire/contracts/validation/nodes.yaml:154
+      - external:empire/contracts/validation/nodes.yaml:222
+      - external:empire/contracts/validation/nodes.yaml:232
     metric_evidence:
       status: not_applicable
       reason: readability/helper evidence uses contract complexity, not runtime cost
@@ -164,9 +164,9 @@ evidence_matrix:
     disposition: surviving_helper_candidate
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/holding-devops/nodes.yaml:231
-      - external:empire/contracts/flows/holding-devops/nodes.yaml:251
-      - external:empire/contracts/flows/holding-devops/nodes.yaml:267
+      - external:empire/contracts/holding-devops/nodes.yaml:231
+      - external:empire/contracts/holding-devops/nodes.yaml:251
+      - external:empire/contracts/holding-devops/nodes.yaml:267
     metric_evidence:
       status: not_applicable
       reason: schema/lookup readability evidence uses contract complexity, not runtime cost
@@ -181,9 +181,9 @@ evidence_matrix:
     disposition: surviving_helper_candidate_existing_compute_covers_numeric_part
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/scoring/nodes.yaml:142
-      - external:empire/contracts/flows/scoring/nodes.yaml:145
-      - external:empire/contracts/flows/scoring/nodes.yaml:181
+      - external:empire/contracts/scoring/nodes.yaml:142
+      - external:empire/contracts/scoring/nodes.yaml:145
+      - external:empire/contracts/scoring/nodes.yaml:181
     metric_evidence:
       status: not_applicable
       reason: existing compute already owns weighted average; remaining issue is branch readability
@@ -199,9 +199,9 @@ evidence_matrix:
     disposition: surviving_helper_candidate_deduped_with_activity_pilot
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:98
-      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:100
-      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:14
+      - external:empire/contracts/repo-scaffold/nodes.yaml:98
+      - external:empire/contracts/repo-scaffold/nodes.yaml:100
+      - external:empire/contracts/repo-scaffold/prompts/repo-scaffold-agent.md:14
     metric_evidence:
       status: not_applicable
       reason: lookup readability evidence uses contract/prompt duplication, not runtime cost
@@ -217,10 +217,10 @@ evidence_matrix:
     disposition: surviving_helper_candidate
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/treasury/nodes.yaml:161
-      - external:empire/contracts/flows/treasury/nodes.yaml:162
-      - external:empire/contracts/flows/treasury/nodes.yaml:181
-      - external:empire/contracts/flows/treasury/nodes.yaml:197
+      - external:empire/contracts/treasury/nodes.yaml:161
+      - external:empire/contracts/treasury/nodes.yaml:162
+      - external:empire/contracts/treasury/nodes.yaml:181
+      - external:empire/contracts/treasury/nodes.yaml:197
     metric_evidence:
       status: not_applicable
       reason: threshold/switch readability evidence uses contract complexity, not runtime cost
@@ -235,10 +235,10 @@ evidence_matrix:
     disposition: insufficient_current_deterministic_proof
     consumer_issue: 1663
     proof_refs:
-      - external:empire/contracts/flows/validation/agents.yaml:1
-      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:11
-      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:16
-      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:26
+      - external:empire/contracts/validation/agents.yaml:1
+      - external:empire/contracts/validation/prompts/validation-coordinator.md:11
+      - external:empire/contracts/validation/prompts/validation-coordinator.md:16
+      - external:empire/contracts/validation/prompts/validation-coordinator.md:26
     metric_evidence:
       status: unavailable
       reason: no committed trace/cost/latency artifact and prompt still asks for human-readable synthesis
@@ -255,8 +255,8 @@ evidence_matrix:
     duplicate_of: 1
     consumer_issue: 1666
     proof_refs:
-      - external:empire/contracts/flows/repo-scaffold/agents.yaml:1
-      - external:empire/contracts/flows/repo-scaffold/agents.yaml:11
+      - external:empire/contracts/repo-scaffold/agents.yaml:1
+      - external:empire/contracts/repo-scaffold/agents.yaml:11
     metric_evidence:
       status: not_applicable
       reason: duplicate row collapsed into row 1
@@ -272,8 +272,8 @@ evidence_matrix:
     duplicate_of: 5
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/validation/nodes.yaml:154
-      - external:empire/contracts/flows/validation/nodes.yaml:222
+      - external:empire/contracts/validation/nodes.yaml:154
+      - external:empire/contracts/validation/nodes.yaml:222
     metric_evidence:
       status: not_applicable
       reason: duplicate domain collapsed into row 5
@@ -289,9 +289,9 @@ evidence_matrix:
     disposition: surviving_helper_candidate
     consumer_issue: 1668
     proof_refs:
-      - external:empire/contracts/flows/discovery/nodes.yaml:93
-      - external:empire/contracts/flows/discovery/nodes.yaml:127
-      - external:empire/contracts/flows/discovery/nodes.yaml:161
+      - external:empire/contracts/discovery/nodes.yaml:93
+      - external:empire/contracts/discovery/nodes.yaml:127
+      - external:empire/contracts/discovery/nodes.yaml:161
     metric_evidence:
       status: not_applicable
       reason: dispatch readability evidence uses contract duplication, not runtime cost
@@ -307,10 +307,10 @@ evidence_matrix:
     disposition: existing_primitives_adequate
     consumer_issue: 1663
     proof_refs:
-      - external:empire/contracts/flows/operating/nodes.yaml:1
-      - external:empire/contracts/flows/operating/nodes.yaml:38
-      - external:empire/contracts/flows/operating/nodes.yaml:105
-      - external:empire/contracts/flows/operating/nodes.yaml:130
+      - external:empire/contracts/operating/nodes.yaml:1
+      - external:empire/contracts/operating/nodes.yaml:38
+      - external:empire/contracts/operating/nodes.yaml:105
+      - external:empire/contracts/operating/nodes.yaml:130
     metric_evidence:
       status: not_applicable
       reason: existing state-machine handlers are readable enough for this Stage 0 inventory

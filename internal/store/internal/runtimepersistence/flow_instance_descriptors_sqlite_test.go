@@ -12,13 +12,13 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	const runID = "11111111-1111-4111-8111-111111111111"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test context is missing bundle source fact")
 	}
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	const activeEntityID = "22222222-2222-4222-8222-222222222222"
-	activeReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, bundleHash, bundleSource, "component-scaffold", "component-scaffold/active", activeEntityID)
+	activeReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, bundleHash, "1.0.0", "component-scaffold", "component-scaffold/active", activeEntityID)
 
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -68,9 +68,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
 	}
-	if got.BundleHash != source.BundleHash() ||
-		got.BundleSource != bundleSource ||
-		got.WorkflowVersion != "1.0.0" {
+	if got.BundleHash != source.BundleHash() || got.WorkflowVersion != "1.0.0" {
 		t.Fatalf("semantic source = %#v, want exact run bundle and workflow version", got)
 	}
 	if got.AddressFields["entity.vertical_id"] != "v-active" {
@@ -96,13 +94,13 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test context is missing bundle source fact")
 	}
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	const uncommittedEntityID = "22222222-2222-4222-8222-222222222222"
-	uncommittedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, bundleHash, bundleSource, "component-scaffold", "component-scaffold/uncommitted", uncommittedEntityID)
+	uncommittedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, bundleHash, "1.0.0", "component-scaffold", "component-scaffold/uncommitted", uncommittedEntityID)
 
 	tx, err := storetest.Database(sqliteStore).BeginTx(ctx, nil)
 	if err != nil {

@@ -15,7 +15,7 @@ func conformanceNode(t testing.TB, flowID, nodeID string) runtimeidentity.Execut
 	return identitytest.FlowNode(t, flowID, nodeID)
 }
 
-func conformancePackageNode(t testing.TB, packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
+func conformanceFlowPathNode(t testing.TB, flowPath, nodeID string) runtimeidentity.ExecutableNode {
 	t.Helper()
-	return identitytest.ExecutableNode(t, packageKey, flowID, nodeID)
+	return identitytest.ExecutableNode(t, flowPath, nodeID)
 }

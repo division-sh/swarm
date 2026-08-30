@@ -109,7 +109,7 @@ func selectedContractPlatformActivityWorkflowState(
 		Mode:            "static",
 	}
 	if routingSource.Kind() == events.RoutingSourceRoot {
-		state.FlowID = strings.TrimSpace(source.WorkflowName())
+		state.FlowID = strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 		if state.FlowID == "" {
 			return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract root platform activity has no workflow identity")
 		}
@@ -167,7 +167,7 @@ func selectedContractNodeWorkflowState(
 	if _, ok := source.ExecutableNode(node); !ok {
 		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract node %s has no semantic owner", node.Key())
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	if flowID == "" {
 		flowID = semanticview.RootExecutionFlowID(source)
 	}
@@ -178,7 +178,7 @@ func selectedContractNodeWorkflowState(
 		SourceEventID: eventID, EntityID: entityID, FlowID: flowID,
 		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()), Mode: "static",
 	}
-	if flowID == strings.TrimSpace(source.WorkflowName()) {
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
 		return state, nil
 	}

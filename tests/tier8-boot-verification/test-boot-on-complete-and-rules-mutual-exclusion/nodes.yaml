@@ -6,11 +6,9 @@ test-node:
   event_handlers:
     task.submitted:
       on_complete:
-        - element_id: 3f5825c7-628a-41aa-bdf9-1f9c2a21855f
-          condition: "payload.score >= 70"
+        - condition: "payload.score >= 70"
           advances_to: done
       rules:
         route_a:
-          element_id: 518d0f51-e312-47b7-8e55-eed02ef3fea6
           condition: "payload.type == \"a\""
           advances_to: routed

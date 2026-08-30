@@ -8,15 +8,11 @@ import (
 )
 
 func mustRunForkRootNode(nodeID string) runtimeidentity.ExecutableNode {
-	return mustRunForkPackageNode(runtimeidentity.RootPackageKey, "", nodeID)
+	return mustRunForkNode(".", nodeID)
 }
 
-func mustRunForkNode(flowID, nodeID string) runtimeidentity.ExecutableNode {
-	return mustRunForkPackageNode(runtimeidentity.RootPackageKey, flowID, nodeID)
-}
-
-func mustRunForkPackageNode(packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID)
+func mustRunForkNode(flowPath, nodeID string) runtimeidentity.ExecutableNode {
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowPath, nodeID)
 	if err != nil {
 		panic(err)
 	}
@@ -32,7 +28,7 @@ func runForkSourceNode(t testing.TB, source semanticview.Source, nodeID string) 
 			continue
 		}
 		if !match.Empty() {
-			t.Fatalf("selected-contract node %q is package/flow ambiguous", nodeID)
+			t.Fatalf("selected-contract node %q is flow-path ambiguous", nodeID)
 		}
 		match = node
 	}

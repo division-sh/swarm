@@ -6,7 +6,6 @@ routing-node:
   event_handlers:
     batch.submitted:
       fan_out:
-        element_id: 63028545-2c6b-4871-9195-bfa7830c33a9
         items_from: payload.items
         as: routed_item
         identity: routed_item.id

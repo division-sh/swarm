@@ -51,15 +51,16 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	t.Helper()
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
-	packageFile := filepath.Join(root, "package.yaml")
-	ownerSchema := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "schema.yaml")
-	ownerNodes := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "nodes.yaml")
-	ownerEntities := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "entities.yaml")
-	accountAgents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "agents.yaml")
-	accountEvents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "events.yaml")
-	accountSchema := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "schema.yaml")
+	manifestFile := filepath.Join(root, "manifest.yaml")
+	connectFile := filepath.Join(root, "schema.yaml")
+	ownerSchema := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "schema.yaml")
+	ownerNodes := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "nodes.yaml")
+	ownerEntities := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "entities.yaml")
+	accountAgents := filepath.Join(root, NotifyAllChildrenChildFlowID, "agents.yaml")
+	accountEvents := filepath.Join(root, NotifyAllChildrenChildFlowID, "events.yaml")
+	accountSchema := filepath.Join(root, NotifyAllChildrenChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
-		applyClosedReplacement(t, packageFile, `  - event: account.notify.requested
+		applyClosedReplacement(t, connectFile, `  - event: account.notify.requested
     from: portfolio
     to: account
 `, "")
@@ -83,7 +84,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	}
 	if opts.ObjectMembership {
 		applyClosedReplacement(t, ownerEntities, "  account_ids: \"[text]\"\n", "  account_ids: \"[AccountRef]\"\n")
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join("flows", NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
   AccountRef:
     account_id: text
 `)
@@ -122,9 +123,8 @@ auto_emit_on_create:
       join:
         id: all-account-notifications-delivered
         members:
-          from_fan_out: cf377b4f-e952-4ddb-9ecc-a1f380af032d
+          from_fan_out: true
         on_complete:
-          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
           emit:
             event: portfolio.notify.completed
             fields:
@@ -135,7 +135,7 @@ auto_emit_on_create:
               semantic_rejected: join.dispositions.semantic_rejected
               canceled: join.dispositions.canceled
 `)
-		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
   key: account_id
   account_id: text
   command: text
@@ -186,7 +186,7 @@ retired:
     - account.notify.requested
 `)
 	case 2:
-		applyClosedReplacement(t, packageFile, `version: "1.0.0"`, `version: "2.0.0"`)
+		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "2.0.0"`)
 		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
   id: account-reader
   type: generic
@@ -206,7 +206,7 @@ writer:
     - account.notify.requested
 `)
 	case 3:
-		applyClosedReplacement(t, packageFile, `version: "1.0.0"`, `version: "3.0.0"`)
+		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "3.0.0"`)
 		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
   id: account-reader
   type: generic

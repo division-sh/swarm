@@ -1,0 +1,4 @@
+name: test-boot-create-entity-plus-accumulate
+version: 1.0.0
+description: "Boot verification: handler declares both create_entity and accumulate. This is prohibited because create_entity materializes the receiving-flow lifecycle entity in the same handler, while accumulate waits across multiple arrivals.\n"
+platform_version: ">=0.7.0 <0.8.0"

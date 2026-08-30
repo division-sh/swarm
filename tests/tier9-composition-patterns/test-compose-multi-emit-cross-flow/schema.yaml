@@ -7,3 +7,7 @@ pins:
     events: [task.completed]
   outputs:
     events: [task.logged, task.record]
+connect:
+  - event: task.record
+    from: .
+    to: tracker

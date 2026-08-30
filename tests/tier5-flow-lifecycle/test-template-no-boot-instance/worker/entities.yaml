@@ -1,0 +1,5 @@
+task:
+  task_id:
+    type: text
+    indexed: true
+    _unused_reason: stable template identity supplied by create_flow_instance

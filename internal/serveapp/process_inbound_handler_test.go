@@ -69,7 +69,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		persistence.store = eventsStore
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
-			BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(hash),
+			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(hash),
 			ProviderOutputVerifier: catalog,
 			WorkOwner:              workOwner,
 			ReceiverExecution:      eventreceiver.NormalExecution(),
@@ -94,19 +94,19 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			t.Fatalf("InstalledCapabilitySubjects(%s): %v", alias, err)
 		}
 		contextDef := runtimepkg.BundleContext{
-			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source,
+			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), Source: source,
 			Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
+				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"), InstanceID: alias, EntityID: entityID,
 				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
 		}
 		return contextDef, persistence, eventsStore, credentialStore
 	}
-	hashA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	hashA := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	hashB := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	contextA, persistenceA, eventsA, _ := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
 	contextB, persistenceB, eventsB, credentialsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB)

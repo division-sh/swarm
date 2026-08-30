@@ -6,12 +6,12 @@ historical_removal_commit: 8629f242491f569e6facdd5a0cff8959263f03ef
 historical_merge_commit: 0bd15742df7367bbfba7ca5f5639fcfb3b71ba4c
 rows:
 - id: B001
-  path: internal/runtime/testdata/generic-swarm-bundle/flows/delivery/nodes.yaml
+  path: internal/runtime/testdata/generic-swarm-bundle/delivery/nodes.yaml
   event: item.completed
   disposition: same_flow
   proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B001
 - id: B002
-  path: internal/runtime/testdata/generic-swarm-bundle/flows/intake/nodes.yaml
+  path: internal/runtime/testdata/generic-swarm-bundle/intake/nodes.yaml
   event: item.processed
   disposition: same_flow
   proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B002
@@ -221,7 +221,7 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-policy-timeout-elapsed
 - id: B044
-  path: tests/tier11-flow-composition/test-child-flow-absolute-path/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-absolute-path/child/nodes.yaml
   event: task.done
   disposition: historical_connect
   proof: TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge/test-child-flow-absolute-path
@@ -231,7 +231,7 @@ rows:
   disposition: harness
   proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B045
 - id: B046
-  path: tests/tier11-flow-composition/test-child-flow-loads/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-loads/child/nodes.yaml
   event: child.done
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-loads
@@ -241,7 +241,7 @@ rows:
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-loads
 - id: B048
-  path: tests/tier11-flow-composition/test-child-flow-local-events/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-local-events/child/nodes.yaml
   event: child.done
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-local-events
@@ -251,7 +251,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-local-events
 - id: B050
-  path: tests/tier11-flow-composition/test-child-flow-pin-wiring/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-pin-wiring/child/nodes.yaml
   event: work.completed
   disposition: historical_connect
   proof: TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery
@@ -261,7 +261,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-pin-wiring
 - id: B052
-  path: tests/tier11-flow-composition/test-child-flow-policy-inherit/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-policy-inherit/child/nodes.yaml
   event: check.passed
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-policy-inherit
@@ -271,12 +271,12 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-policy-inherit
 - id: B054
-  path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flows/flow-a/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-a/nodes.yaml
   event: alpha.complete
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-sibling-isolation
 - id: B055
-  path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flows/flow-b/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-b/nodes.yaml
   event: beta.complete
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-sibling-isolation
@@ -286,7 +286,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-sibling-isolation
 - id: B057
-  path: tests/tier11-flow-composition/test-child-flow-tool-inherit/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-child-flow-tool-inherit/child/nodes.yaml
   event: child.result
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-tool-inherit
@@ -296,7 +296,7 @@ rows:
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-child-flow-tool-inherit
 - id: B059
-  path: tests/tier11-flow-composition/test-data-pin-wiring/flows/processor/nodes.yaml
+  path: tests/tier11-flow-composition/test-data-pin-wiring/processor/nodes.yaml
   event: process.done
   disposition: historical_connect
   proof: TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge/test-data-pin-wiring
@@ -306,12 +306,12 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-data-pin-wiring
 - id: B061
-  path: tests/tier11-flow-composition/test-data-pin-write-conflict/flows/flow-a/nodes.yaml
+  path: tests/tier11-flow-composition/test-data-pin-write-conflict/flow-a/nodes.yaml
   event: a.done
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-data-pin-write-conflict
 - id: B062
-  path: tests/tier11-flow-composition/test-data-pin-write-conflict/flows/flow-b/nodes.yaml
+  path: tests/tier11-flow-composition/test-data-pin-write-conflict/flow-b/nodes.yaml
   event: b.done
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-data-pin-write-conflict
@@ -321,7 +321,7 @@ rows:
   disposition: negative_removal
   proof: TestCatalogReplayClean_SelectedStores/test-data-pin-write-conflict
 - id: B064
-  path: tests/tier11-flow-composition/test-dynamic-flow-instance/flows/worker/nodes.yaml
+  path: tests/tier11-flow-composition/test-dynamic-flow-instance/worker/nodes.yaml
   event: work.done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-dynamic-flow-instance
@@ -331,7 +331,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-dynamic-flow-instance
 - id: B066
-  path: tests/tier11-flow-composition/test-gates-in-child-flow/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-gates-in-child-flow/child/nodes.yaml
   event: validation.done
   disposition: historical_connect
   proof: TestRun_AcceptsParentCompositionConnectToRootInput
@@ -341,12 +341,12 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-gates-in-child-flow
 - id: B068
-  path: tests/tier11-flow-composition/test-multi-level-policy-inherit/flows/child/flows/grandchild/nodes.yaml
+  path: tests/tier11-flow-composition/test-multi-level-policy-inherit/child/grandchild/nodes.yaml
   event: grandchild.passed
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-multi-level-policy-inherit
 - id: B069
-  path: tests/tier11-flow-composition/test-multi-level-policy-inherit/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-multi-level-policy-inherit/child/nodes.yaml
   event: child.done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-multi-level-policy-inherit
@@ -356,7 +356,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-multi-level-policy-inherit
 - id: B071
-  path: tests/tier11-flow-composition/test-nested-three-levels/flows/child/flows/grandchild/nodes.yaml
+  path: tests/tier11-flow-composition/test-nested-three-levels/child/grandchild/nodes.yaml
   event: micro.done
   disposition: historical_connect
   proof: TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd
@@ -366,27 +366,27 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-nested-three-levels
 - id: B073
-  path: tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flows/flow-a/nodes.yaml
+  path: tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flow-a/nodes.yaml
   event: alpha.done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-sibling-both-instantiated-isolated
 - id: B074
-  path: tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flows/flow-b/nodes.yaml
+  path: tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flow-b/nodes.yaml
   event: beta.done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-sibling-both-instantiated-isolated
 - id: B075
-  path: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/flows/scoring/nodes.yaml
+  path: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/scoring/nodes.yaml
   event: score.done
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-subject-id-cross-flow-inherit
 - id: B076
-  path: tests/tier11-flow-composition/test-subject-id-first-flow-seeds/flows/intake/nodes.yaml
+  path: tests/tier11-flow-composition/test-subject-id-first-flow-seeds/intake/nodes.yaml
   event: item.processed
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-subject-id-first-flow-seeds
 - id: B077
-  path: tests/tier11-flow-composition/test-tool-override/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-tool-override/child/nodes.yaml
   event: child.done
   disposition: historical_connect
   proof: TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge/test-tool-override
@@ -396,12 +396,12 @@ rows:
   disposition: harness
   proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B078
 - id: B079
-  path: tests/tier11-flow-composition/test-wildcard-deep-subscription/flows/child/flows/grandchild/nodes.yaml
+  path: tests/tier11-flow-composition/test-wildcard-deep-subscription/child/grandchild/nodes.yaml
   event: task.done
   disposition: historical_connect
   proof: TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects
 - id: B080
-  path: tests/tier11-flow-composition/test-wildcard-deep-subscription/flows/child/nodes.yaml
+  path: tests/tier11-flow-composition/test-wildcard-deep-subscription/child/nodes.yaml
   event: work.finished
   disposition: dead_removal
   proof: TestProducerRoutingRetirementExcludedDeadOutputs/B080
@@ -496,7 +496,7 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-clear-state
 - id: B099
-  path: tests/tier4-cross-entity/test-create-entity/flows/child-flow/nodes.yaml
+  path: tests/tier4-cross-entity/test-create-entity/child-flow/nodes.yaml
   event: child.done
   disposition: dead_removal
   proof: TestProducerRoutingRetirementExcludedDeadOutputs/B099
@@ -516,7 +516,7 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-query-group-by
 - id: B103
-  path: tests/tier5-flow-lifecycle/test-auto-emit-on-create/flows/worker/nodes.yaml
+  path: tests/tier5-flow-lifecycle/test-auto-emit-on-create/worker/nodes.yaml
   event: auto.processed
   disposition: same_flow
   proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B103
@@ -676,12 +676,12 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-two-node-chain
 - id: B135
-  path: tests/tier7-composition/test-wildcard-cross-flow/flows/flow-alpha/nodes.yaml
+  path: tests/tier7-composition/test-wildcard-cross-flow/flow-alpha/nodes.yaml
   event: job.alpha_done
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-wildcard-cross-flow
 - id: B136
-  path: tests/tier7-composition/test-wildcard-cross-flow/flows/flow-beta/nodes.yaml
+  path: tests/tier7-composition/test-wildcard-cross-flow/flow-beta/nodes.yaml
   event: job.beta_done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-wildcard-cross-flow
@@ -781,7 +781,7 @@ rows:
   disposition: negative_removal
   proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-handler-field-undefined
 - id: B156
-  path: tests/tier8-boot-verification/test-boot-missing-pin/flows/child/nodes.yaml
+  path: tests/tier8-boot-verification/test-boot-missing-pin/child/nodes.yaml
   event: task.result
   disposition: historical_connect
   proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-missing-pin
@@ -826,7 +826,7 @@ rows:
   disposition: same_flow
   proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B164
 - id: B165
-  path: tests/tier8-boot-verification/test-boot-policy-conflict/flows/sub-flow/nodes.yaml
+  path: tests/tier8-boot-verification/test-boot-policy-conflict/sub-flow/nodes.yaml
   event: sub.completed
   disposition: negative_removal
   proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-policy-conflict
@@ -911,7 +911,7 @@ rows:
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-compose-clear-gates-reenter
 - id: B182
-  path: tests/tier9-composition-patterns/test-compose-create-instance-config/flows/worker/nodes.yaml
+  path: tests/tier9-composition-patterns/test-compose-create-instance-config/worker/nodes.yaml
   event: task.done
   disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-compose-create-instance-config
@@ -956,7 +956,7 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-compose-lifecycle-seven-states
 - id: B191
-  path: tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/flows/tracker/nodes.yaml
+  path: tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/tracker/nodes.yaml
   event: task.recorded
   disposition: dead_removal
   proof: TestProducerRoutingRetirementExcludedDeadOutputs/B191

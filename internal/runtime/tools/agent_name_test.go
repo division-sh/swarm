@@ -19,15 +19,22 @@ func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.Work
 	if bundle.FlowSchemas == nil {
 		bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
 	}
+	if bundle.FlowSources == nil {
+		bundle.FlowSources = map[string]runtimecontracts.FlowSource{}
+	}
 	for id, view := range bundle.FlowTree.ByID {
 		if view != nil {
 			bundle.FlowSchemas[id] = view.Schema
+			bundle.FlowSources[id] = runtimecontracts.FlowSource{
+				FlowPath: id,
+				Schema:   "swarm-test/" + id + "/schema.yaml",
+			}
 		}
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile tool-test workflow semantics: %v", err)
 	}
-	return wrapRootAgentBundle(bundle)
+	return semanticview.Wrap(bundle)
 }
 
 func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string) {
@@ -41,13 +48,7 @@ func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContrac
 		t.Fatal("tool test agent declaration requires agent id")
 	}
 	if flowID == "" {
-		if bundle.Agents == nil {
-			bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-		}
-		if _, ok := bundle.Agents[agentID]; !ok {
-			bundle.Agents[agentID] = runtimecontracts.EffectiveAgentRegistryEntry(agentID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID})
-		}
-		return
+		t.Fatal("tool test agent declaration requires canonical flow path")
 	}
 	view := toolTestAttachFlowView(bundle, flowID)
 	if view == nil {
@@ -67,8 +68,8 @@ func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContrac
 	if _, ok := view.Agents[localID]; !ok {
 		view.Agents[localID] = runtimecontracts.EffectiveAgentRegistryEntry(localID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID})
 	}
-	if strings.TrimSpace(view.Paths.PackageKey) == "" {
-		view.Paths.PackageKey = "."
+	if strings.TrimSpace(view.Paths.FlowPath) == "" {
+		view.Paths.FlowPath = flowID
 	}
 	if strings.TrimSpace(view.Paths.AgentsFile) == "" {
 		view.Paths.AgentsFile = "swarm-test/" + flowID + "/agents.yaml"
@@ -77,6 +78,9 @@ func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContrac
 		view.AgentURIs = map[string]string{}
 	}
 	owner := "swarm-test://" + flowID + "/" + agentID
+	if flowID == "." {
+		owner = "swarm-test://root/agents/" + agentID
+	}
 	view.AgentURIs[localID] = owner
 	if bundle.URIRegistry.Agents == nil {
 		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
@@ -90,12 +94,25 @@ func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContrac
 }
 
 func toolTestAttachFlowView(bundle *runtimecontracts.WorkflowContractBundle, flowID string) *runtimecontracts.FlowContractView {
+	if flowID == "." && bundle.FlowTree.Root == nil {
+		rootSchema := runtimecontracts.FlowSchemaDocument{}
+		if bundle.RootSchema != nil {
+			rootSchema = *bundle.RootSchema
+		}
+		bundle.FlowTree.Root = &runtimecontracts.FlowContractView{
+			Path:   ".",
+			Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
+			Schema: rootSchema,
+			Events: bundle.Events,
+		}
+		bundle.Events = nil
+	}
 	var find func(*runtimecontracts.FlowContractView) *runtimecontracts.FlowContractView
 	find = func(view *runtimecontracts.FlowContractView) *runtimecontracts.FlowContractView {
 		if view == nil {
 			return nil
 		}
-		if strings.TrimSpace(view.Paths.ID) == flowID {
+		if strings.TrimSpace(view.Paths.FlowPath) == flowID {
 			return view
 		}
 		for index := range view.Children {
@@ -134,7 +151,7 @@ func toolTestReindexFlowTree(bundle *runtimecontracts.WorkflowContractBundle) {
 		if view == nil {
 			return
 		}
-		if id := strings.TrimSpace(view.Paths.ID); id != "" {
+		if id := strings.TrimSpace(view.Paths.FlowPath); id != "" {
 			bundle.FlowTree.ByID[id] = view
 		}
 		if path := strings.TrimSpace(view.Path); path != "" {

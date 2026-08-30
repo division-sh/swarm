@@ -30,17 +30,15 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-const mailboxWriteSupportedSurfaceBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
 func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				probe := runtimelifecycleprobe.New()
@@ -50,7 +48,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
@@ -65,7 +63,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			bundle := mailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
 			reviewerNodeID := identitytest.RootNode(t, "reviewer").Key()
-			fact := bundleSourceFactForTestBundle(t, bundle)
+			fact := sourceArtifactFactForTestBundle(t, bundle)
 			handler, db, bus, probe := tc.setup(t, ctx, source, fact)
 
 			published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-"+tc.name))
@@ -110,11 +108,11 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				probe := runtimelifecycleprobe.New()
@@ -124,7 +122,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
@@ -138,7 +136,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := conditionalRuleMailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
-			fact := bundleSourceFactForTestBundle(t, bundle)
+			fact := sourceArtifactFactForTestBundle(t, bundle)
 			handler, db, bus, probe := tc.setup(t, ctx, source, fact)
 
 			auto := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":50,"who":"alice"}`, "", "idem-rule-mailbox-write-auto-"+tc.name))
@@ -170,7 +168,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	ctx := context.Background()
 	bundle := mailboxWriteSupportedSurfaceBundle(t)
 	source := semanticview.Wrap(bundle)
-	fact := bundleSourceFactForTestBundle(t, bundle)
+	fact := sourceArtifactFactForTestBundle(t, bundle)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	probe := runtimelifecycleprobe.New()
 	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, storetest.DatabaseForTest(sqliteStore), source, fact, nil, probe)
@@ -190,7 +188,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 	persistence any,
 	db *sql.DB,
 	source semanticview.Source,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 	materializer runtimepipeline.MailboxWriteMaterializationStore,
 	probe *runtimelifecycleprobe.Probe,
 ) (*Handler, *runtimebus.EventBus) {
@@ -199,7 +197,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, fact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:     source,
-		BundleSourceFact:   fact,
+		SourceArtifactFact: fact,
 		WorkOwner:          workOwner,
 		TestLifecycleProbe: probe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
@@ -230,7 +228,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		PipelineObligations: obligationOwner,
 		RunLifecycle:        runLifecycle,
 		MailboxMaterializer: materializer,
-		BundleSourceFact:    fact,
+		SourceArtifactFact:  fact,
 		TestLifecycleProbe:  probe,
 	}))
 
@@ -862,12 +860,12 @@ func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, probe *runti
 	}
 }
 
-func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.BundleSourceFact {
+func sourceArtifactFactForTestBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	if bundle == nil {
-		t.Fatal("test bundle is nil")
+	if bundle == nil || bundle.SourceArtifact == nil {
+		t.Fatal("test bundle has no admitted source artifact")
 	}
-	return mustAPITestBundleSourceFact(mailboxWriteSupportedSurfaceBundleHash)
+	return mustAPITestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 }
 
 func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
@@ -919,11 +917,9 @@ func loadMailboxWriteSupportedSurfaceBundle(t *testing.T, conditional bool) *run
             target_field: who
       rules:
         auto_approve:
-          element_id: 00000000-0000-4000-8000-000000005101
           condition: payload.amount < 100
           advances_to: approved
         needs_human:
-          element_id: 00000000-0000-4000-8000-000000005102
           condition: payload.amount >= 100
           advances_to: awaiting_human
           action:
@@ -938,7 +934,7 @@ func loadMailboxWriteSupportedSurfaceBundle(t *testing.T, conditional bool) *run
                 amount: {ref: payload.amount}
 `
 	}
-	writeRunCompletionFixtureFile(t, root+"/package.yaml", "name: "+name+"\nversion: 1.0.0\n")
+
 	writeRunCompletionFixtureFile(t, root+"/schema.yaml", "name: "+name+"\ninitial_state: new\nterminal_states:\n"+terminal+"states:\n"+states+"pins:\n  inputs:\n    events: [thing.created]\n")
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", "thing.created:\n  amount: integer\n  who: string\n")
 	writeRunCompletionFixtureFile(t, root+"/entities.yaml", "review:\n  amount: integer\n  who: string\n")

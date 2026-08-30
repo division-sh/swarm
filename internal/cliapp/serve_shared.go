@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,7 +25,7 @@ func ServeBundleHashes(opts ServeOptions) ([]string, error) {
 			return nil, fmt.Errorf("--bundle-hash must be non-empty")
 		}
 		if err := runtimecontracts.ValidateBundleHash(hash); err != nil {
-			return nil, fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+			return nil, fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 		if _, ok := seen[hash]; ok {
 			return nil, fmt.Errorf("--bundle-hash values must be unique")
@@ -35,19 +36,20 @@ func ServeBundleHashes(opts ServeOptions) ([]string, error) {
 	return out, nil
 }
 
-func NormalizeContractsRoot(path string) (string, error) {
+func NormalizeSourceRoot(path string) (string, error) {
 	root := strings.TrimSpace(path)
 	if root == "" {
-		return "", runtimecontracts.NewContractsPathRequiredDiagnostic()
+		return "", fmt.Errorf("source directory is unavailable after source-root selection")
 	}
 	root = filepath.Clean(root)
-	if regularFileExists(filepath.Join(root, "package.yaml")) {
-		return root, nil
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", fmt.Errorf("source directory %q: %w", path, err)
 	}
-	if filepath.Base(root) == "package.yaml" && regularFileExists(root) {
-		return filepath.Dir(root), nil
+	if !info.IsDir() {
+		return "", fmt.Errorf("source root %q must be a directory", path)
 	}
-	return "", runtimecontracts.NewMissingPackageDiagnostic(path)
+	return root, nil
 }
 
 func ResolvePath(RepoRoot, path string) string {

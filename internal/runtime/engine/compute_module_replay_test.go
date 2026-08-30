@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -37,8 +38,8 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	sqliteStore := newComputeModuleReplaySQLiteStore(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash})
 
 	source := computeModuleReplaySource(t)
 	exec := newComputeModuleReplayExecutor(t, source)
@@ -183,13 +184,20 @@ func computeModuleReplaySource(t *testing.T) semanticview.Source {
 		},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
 		}},
 	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: compute-module-replay\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		SourceArtifact: artifact,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{

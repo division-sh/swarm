@@ -1,0 +1,6 @@
+name: test-boot-on-complete-state-invalid
+version: 1.0.0
+description: >
+  Boot verification: on_complete branch references a state not declared in schema.yaml states list. Platform must catch STATE-MACHINE error.
+
+platform_version: ">=0.7.0 <0.8.0"

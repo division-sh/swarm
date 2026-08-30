@@ -72,11 +72,11 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						exactKey = "different-exact-key"
 					}
 					createdAt := time.Now().UTC()
-					sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+					sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 					if !ok {
 						t.Fatal("declared-key execution context is missing bundle source fact")
 					}
-					bundleHash, bundleSource := sourceFact.StorageValues()
+					bundleHash := sourceFact.BundleHash()
 					for _, instance := range []runtimepipeline.WorkflowInstance{
 						{
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
@@ -96,7 +96,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 								TemplateID: "review", ScopeKey: "review", InstanceID: instance.InstanceID,
 								InstancePath: instance.StorageRef, EntityID: instance.EntityID, HasStoredPath: true,
 							},
-							RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+							RunID: runID, BundleHash: bundleHash,
 							WorkflowVersion: "1", ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
@@ -203,7 +203,7 @@ func targetedDeclaredKeyExecutionSource(t *testing.T, acquisition string) (seman
 		handler.SelectOrCreateEntity = &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}
 	}
 	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeTemplate},
+		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "review", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
 			States: []string{"active", "done"}, TerminalStates: []string{"done"},
@@ -237,10 +237,10 @@ func admitTargetedDeclaredKeyContract(t *testing.T, base *runtimecontracts.Workf
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"package.yaml":               "name: declared-key-execution\nversion: \"1\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: review\n    flow: review\n    mode: template\n",
-		"schema.yaml":                "name: declared-key-execution\n",
-		"flows/review/schema.yaml":   "name: review\nmode: template\ninitial_state: active\nstates: [active, done]\n",
-		"flows/review/entities.yaml": "review_entity: {}\n",
+
+		"schema.yaml":          "name: declared-key-execution\n",
+		"review/schema.yaml":   "name: review\nmode: template\ninitial_state: active\nstates: [active, done]\n",
+		"review/entities.yaml": "review_entity: {}\n",
 	}
 	for relative, body := range files {
 		path := filepath.Join(root, relative)

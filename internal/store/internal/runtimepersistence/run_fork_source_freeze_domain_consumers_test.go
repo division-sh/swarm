@@ -37,7 +37,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
 			var surface forkedDomainConsumerSurface
 			if fixture.postgres != nil {
 				surface = fixture.postgres
@@ -188,7 +188,7 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			now := fixture.forkedAt.Add(time.Minute)
 			seedTestAgentRow(
 				t, ctx, fixture.db, fixture.postgres != nil,
@@ -327,7 +327,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				AgentID: token.AgentID, AgentIdentity: identity, SessionID: uuid.NewString(),
 				Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
 			}
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen external authority current=%v err=%v", current, err)
 			}

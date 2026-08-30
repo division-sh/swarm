@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -15,10 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
-
-type BundleDeleteExecutor interface {
-	Execute(context.Context, bundledelete.Request) (bundledelete.Result, error)
-}
 
 type TestSetupStore interface {
 	SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
@@ -63,10 +57,6 @@ type RunReadHandlerOptions struct {
 	Runs RunReadStore
 }
 
-type BundleCatalogHandlerOptions struct {
-	Catalog BundleCatalogReadStore
-}
-
 type DataHandlerOptions struct {
 	Store DurableDataStore
 }
@@ -99,7 +89,7 @@ type EventPublicationOptions struct {
 	Events                    EventPublisher
 	Acknowledged              AcknowledgedEventPublisher
 	RecipientPlans            EventRecipientPlanChecker
-	BundleSource              BundleSourceAdmitter
+	SourceArtifact            SourceArtifactAdmitter
 	Runs                      RunReadStore
 	Entities                  EntityReadStore
 	Observability             ObservabilityReadStore
@@ -130,22 +120,6 @@ type EventReplayHandlerOptions struct {
 	RuntimeContexts  *runtime.RuntimeContextManager
 }
 
-type BundleRegisterHandlerOptions struct {
-	Now                func() time.Time
-	RepoRoot           string
-	PlatformSpecPath   string
-	PlatformPackBases  packartifact.PlatformPackBaseResolver
-	AdmitPackInventory func(*packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)
-	Register           BundleCatalogRegisterStore
-	Idempotency        APIIdempotencyStore
-}
-
-type BundleDeleteHandlerOptions struct {
-	Now         func() time.Time
-	Executor    BundleDeleteExecutor
-	Idempotency APIIdempotencyStore
-}
-
 type ConversationForkHandlerOptions struct {
 	Now              func() time.Time
 	Reads            ConversationForkReadStore
@@ -162,7 +136,7 @@ type DecisionCardHandlerOptions struct {
 	Mailbox              MailboxAPIStore
 	NoticeAcknowledgment MailboxNoticeAcknowledgmentStore
 	Authority            DecisionCardAuthority
-	BundleSource         BundleSourceAdmitter
+	SourceArtifact       SourceArtifactAdmitter
 	Idempotency          APIIdempotencyStore
 	RuntimeContexts      *runtime.RuntimeContextManager
 }
@@ -214,7 +188,7 @@ type TestSetupHandlerOptions struct {
 	Idempotency               APIIdempotencyStore
 	RunBundleContext          RunBundleContextStore
 	RuntimeContexts           *runtime.RuntimeContextManager
-	BundleSource              BundleSourceAdmitter
+	SourceArtifact            SourceArtifactAdmitter
 	Source                    semanticview.Source
 	ExecutionPosture          executionposture.Posture
 	EffectiveSourceIdentity   scenarioexecution.EffectiveSourceIdentity

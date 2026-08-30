@@ -320,7 +320,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
@@ -522,7 +522,7 @@ printf '{"result":"ok"}'
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
@@ -1022,11 +1022,11 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		TimerObligationReader:       pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
-			LLMRuntime:        conformanceNoopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			SelfCheck:          false,
+			WorkflowModule:     loadConformanceRuntimeWorkflowModule(t),
+			LLMRuntime:         conformanceNoopLLMRuntime{},
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: authorActivityTestSourceArtifactFact,
 		})}))
 
 	if err != nil {
@@ -1080,13 +1080,18 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 }
 
 func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-
-	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceRuntimeWorkflowModule(t)
+	bundle, ok := runtimesemanticview.Bundle(module.source)
+	if !ok || bundle == nil {
+		t.Fatal("recovery failure runtime requires a bundle-backed source")
+	}
+	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
+	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	storetest.RequireBundleDataCatalog(t, ctx, pg, bundle)
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	eventStore := conformanceRecoveryFailureEventStore{
 		store:    pg,
 		claimErr: errors.New("claim failed"),
@@ -1112,11 +1117,11 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		DeliveryStore:               pg,
 		PipelineObligations:         eventStore.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    module,
-			LLMRuntime:        conformanceNoopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         conformanceNoopLLMRuntime{},
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: sourceArtifactFact,
 		})}))
 
 	if err != nil {
@@ -1198,7 +1203,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
 		WorkOwner: workOwner,
@@ -1381,11 +1386,11 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		DeliveryStore:               pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    module,
-			LLMRuntime:        conformanceNoopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         conformanceNoopLLMRuntime{},
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: authorActivityTestSourceArtifactFact,
 		})}))
 
 	if err != nil {
@@ -1440,7 +1445,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
 		WorkOwner: workOwner,
@@ -2104,6 +2109,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:         "review",
 				InitialStage: "queued",
+				FlowInitial:  map[string]string{"review": "queued"},
 			},
 		}),
 	})

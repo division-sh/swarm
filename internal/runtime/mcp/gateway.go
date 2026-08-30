@@ -878,8 +878,8 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	if turn.HasAuthorActivityScope {
 		ctx = runtimeauthoractivity.WithScope(ctx, turn.AuthorActivityScope)
 	}
-	if turn.HasBundleSourceFact {
-		ctx = runtimecorrelation.WithBundleSourceFact(ctx, turn.BundleSourceFact)
+	if turn.HasSourceArtifactFact {
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, turn.SourceArtifactFact)
 	}
 	if turn.HasExecutionMode {
 		ctx = runtimeeffects.WithExecutionMode(ctx, turn.ExecutionMode)

@@ -1,7 +1,0 @@
-name: test-compose-guard-query-capacity
-version: 1.0.0
-description: >
-  Composition: guard uses query_entities count check against policy
-  capacity limit. Tests cross-entity query in guard context.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

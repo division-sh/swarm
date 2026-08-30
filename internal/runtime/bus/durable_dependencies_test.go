@@ -47,7 +47,7 @@ func (unexpectedDurableTestRoles) MarkTerminalRun(context.Context, runtimerunlif
 func (unexpectedDurableTestRoles) ActivateDeliveryAuthority(context.Context, runtimedelivery.ExecutionAuthority) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) InspectDeliveryRecovery(context.Context, runtimecorrelation.BundleSourceFact) (runtimedelivery.RecoveryInventory, error) {
+func (unexpectedDurableTestRoles) InspectDeliveryRecovery(context.Context, runtimecorrelation.SourceArtifactFact) (runtimedelivery.RecoveryInventory, error) {
 	return runtimedelivery.RecoveryInventory{}, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
@@ -266,7 +266,7 @@ func TestDurableDependenciesRequireWorkflowInstanceStateReaderAtConstruction(t *
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
 	}
 	opts := EventBusOptions{
-		BundleSourceFact:    authorActivityTestBundleSourceFact,
+		SourceArtifactFact:  authorActivityTestSourceArtifactFact,
 		Durable:             deps,
 		ExecutionPosture:    executionposture.Live,
 		PipelineObligations: store.PipelineObligations(),

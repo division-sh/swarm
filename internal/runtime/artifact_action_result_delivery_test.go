@@ -486,20 +486,16 @@ func asRuntimeTestString(value any) string {
 
 func artifactActionResultDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
-		"package.yaml": `name: artifact-action-result-delivery
-version: 1.0.0
-flows:
-  - id: repo-scaffold
-    flow: repo-scaffold
-    mode: template
-`,
-		"flows/repo-scaffold/schema.yaml": `name: repo-scaffold
+		"schema.yaml": "name: artifact-action-result-delivery\n",
+		"repo-scaffold/schema.yaml": `name: repo-scaffold
+mode: template
+instance: request_id
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]
 `,
-		"flows/repo-scaffold/entities.yaml": "test_entity: {}\n",
-		"flows/repo-scaffold/types.yaml": `types:
+		"repo-scaffold/entities.yaml": "test_entity: {}\n",
+		"repo-scaffold/types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text
     source_record_id: text
@@ -522,7 +518,7 @@ states: [ready, done]
     files: [ArtifactManifestFile]
     provenance: ArtifactProvenance
 `,
-		"flows/repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested:
+		"repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested:
   request_id: string
   mvp_yaml: string
 repo_scaffold.repo_commit_succeeded:
@@ -549,7 +545,7 @@ repo_scaffold.repo_commit_failed:
   result_kind: string
   request_copy: string?
 `,
-		"flows/repo-scaffold/nodes.yaml": `repo-scaffold-node:
+		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
   id: repo-scaffold-node
   execution_type: system_node
   subscribes_to:
@@ -626,6 +622,6 @@ repo_scaffold.repo_commit_failed:
 
 func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 	files := artifactActionResultDeliveryFixtureFiles()
-	files["package.yaml"] = strings.Replace(files["package.yaml"], "mode: template", "mode: static", 1)
+	files["repo-scaffold/schema.yaml"] = strings.Replace(files["repo-scaffold/schema.yaml"], "mode: template", "mode: static", 1)
 	return files
 }

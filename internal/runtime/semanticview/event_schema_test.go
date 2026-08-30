@@ -24,7 +24,7 @@ func TestSemanticSourceEventProofConsumesEffectiveReceiverCarries(t *testing.T) 
 	if !flowProof.HasSchema || flowProof.Entry.Payload.Properties["validation_case_id"].Type != "uuid" {
 		t.Fatalf("flow proof omitted effective receiver carry: %#v", flowProof)
 	}
-	node := identitytest.ExecutableNode(t, ".", "validator", "validator-node")
+	node := identitytest.ExecutableNode(t, "validator", "validator-node")
 	nodeProof := ResolveExecutableNodeEventProof(source, node, "validation.requested")
 	if !nodeProof.HasSchema || nodeProof.Entry.Payload.Properties["validation_case_id"].Type != "uuid" {
 		t.Fatalf("executable-node proof omitted effective receiver carry: %#v", nodeProof)
@@ -100,7 +100,7 @@ required:
 func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *testing.T) {
 	root := runtimecontracts.FlowContractView{}
 	root.Children = []runtimecontracts.FlowContractView{{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", Mode: "template"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
@@ -160,15 +160,15 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 func TestResolveFlowEventProof_TemplateDescendantPathDoesNotBecomeInstanceLocalEvent(t *testing.T) {
 	root := runtimecontracts.FlowContractView{}
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", Mode: "template"},
-		Path:  "child",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}, Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Path: "child",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"micro.done": {},
 		},
 	}
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", Mode: "static"},
-		Path:  "child/grandchild",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"}, Schema: runtimecontracts.FlowSchemaDocument{Mode: "static"},
+		Path: "child/grandchild",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"micro.done": {},
 		},

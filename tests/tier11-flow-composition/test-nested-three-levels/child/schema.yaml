@@ -1,0 +1,21 @@
+name: child
+initial_state: waiting
+terminal_states: [completed]
+states: [waiting, delegated, completed]
+pins:
+  inputs:
+    events:
+      - step.begin
+      - micro.done
+  outputs:
+    events:
+      - micro.start
+      - micro.relayed
+connect:
+  - event: micro.start
+    from: .
+    to: grandchild
+  - event: micro.done
+    from: grandchild
+    to: .
+mode: static

@@ -128,15 +128,15 @@ func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
 	awaiting := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
 	reviewing := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "reviewing", "shared", "window-1", attemptgeneration.Generation{})
 	foreignFlow := mustJoinHandle(t, TimerHandleJoinTimeout, "returns", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
-	foreignPackage := mustJoinHandleForNode(t, TimerHandleJoinTimeout, identitytest.ExecutableNode(t, "dependency", "orders", "join-node"), "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
+	foreignPath := mustJoinHandleForNode(t, TimerHandleJoinTimeout, identitytest.ExecutableNode(t, "dependency/orders", "join-node"), "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
 	if awaiting.TaskID() == reviewing.TaskID() {
 		t.Fatalf("join task ids collide across stages: %q", awaiting.TaskID())
 	}
 	if awaiting.TaskID() == foreignFlow.TaskID() {
 		t.Fatalf("join task ids collide across owning flows: %q", awaiting.TaskID())
 	}
-	if awaiting.TaskID() == foreignPackage.TaskID() {
-		t.Fatalf("join task ids collide across owning packages: %q", awaiting.TaskID())
+	if awaiting.TaskID() == foreignPath.TaskID() {
+		t.Fatalf("join task ids collide across owning flow paths: %q", awaiting.TaskID())
 	}
 	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
 	ref, refOK := parsed.JoinRef()
@@ -161,13 +161,16 @@ func TestJoinHandleGenerationHasOneCanonicalOwner(t *testing.T) {
 
 func TestFanOutDeliveryJoinHandleRoundTripPreservesExactDeclarationIntentAndGeneration(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
+	fanOutDeclaration, err := runtimeidentity.AdmitDeclarationIdentity("worker", "fan_out", `nodes["producer"].handlers["batch.requested"].fan_out`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	declaration, err := NewFanOutDeliveryJoinRef(
-		identitytest.ExecutableNode(t, "dependency", "worker", "producer"),
+		identitytest.ExecutableNode(t, "worker", "producer"),
 		"batch.requested",
 		"all-items-delivered",
-		"dependency",
-		"a1111111-1111-4111-8111-111111111111",
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		fanOutDeclaration,
+		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	)
 	if err != nil {
@@ -185,7 +188,7 @@ func TestFanOutDeliveryJoinHandleRoundTripPreservesExactDeclarationIntentAndGene
 	ref, refOK := parsed.JoinRef()
 	fanOut, fanOutOK := ref.FanOutDelivery()
 	if !ok || !refOK || !fanOutOK || !ref.Equal(bound) || ref.Stage() != "" ||
-		fanOut.PackageKey() != "dependency" || fanOut.ElementID() != "a1111111-1111-4111-8111-111111111111" ||
+		!fanOut.DeclarationIdentity().Equal(fanOutDeclaration) ||
 		fanOut.TriggeringDeliveryID() != "c1111111-1111-4111-8111-111111111111" || !ref.Generation().Equal(generation) {
 		t.Fatalf("fan-out delivery handle round trip = parsed:%#v ref:%#v fan-out:%#v", parsed, ref, fanOut)
 	}
@@ -194,14 +197,14 @@ func TestFanOutDeliveryJoinHandleRoundTripPreservesExactDeclarationIntentAndGene
 	}
 }
 
-func TestFanOutDeliveryJoinHandleSeparatesPackageElementIntentAndGeneration(t *testing.T) {
-	base := mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{})
+func TestFanOutDeliveryJoinHandleSeparatesDeclarationIntentAndGeneration(t *testing.T) {
+	base := mustFanOutDeliveryJoinHandle(t, "worker", "producer", `nodes["producer"].handlers["batch.requested"].fan_out`, "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{})
 	tests := map[string]TimerHandle{
-		"declaration package": mustFanOutDeliveryJoinHandle(t, "dependency", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
-		"fan-out package":     mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "dependency", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
-		"element":             mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a2222222-2222-4222-8222-222222222222", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
-		"intent":              mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c2222222-2222-4222-8222-222222222222", attemptgeneration.Generation{}),
-		"generation":          mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{LoopID: "loop", ActivationID: "activation", RevisionField: "revision", RevisionID: "2", Attempt: 1}),
+		"flow path":     mustFanOutDeliveryJoinHandle(t, "dependency", "producer", `nodes["producer"].handlers["batch.requested"].fan_out`, "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"node":          mustFanOutDeliveryJoinHandle(t, "worker", "other", `nodes["other"].handlers["batch.requested"].fan_out`, "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"semantic path": mustFanOutDeliveryJoinHandle(t, "worker", "producer", `nodes["producer"].handlers["batch.requested"].fan_out.other`, "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"intent":        mustFanOutDeliveryJoinHandle(t, "worker", "producer", `nodes["producer"].handlers["batch.requested"].fan_out`, "c2222222-2222-4222-8222-222222222222", attemptgeneration.Generation{}),
+		"generation":    mustFanOutDeliveryJoinHandle(t, "worker", "producer", `nodes["producer"].handlers["batch.requested"].fan_out`, "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{LoopID: "loop", ActivationID: "activation", RevisionField: "revision", RevisionID: "2", Attempt: 1}),
 	}
 	for name, other := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -212,12 +215,16 @@ func TestFanOutDeliveryJoinHandleSeparatesPackageElementIntentAndGeneration(t *t
 	}
 }
 
-func mustFanOutDeliveryJoinHandle(t *testing.T, declarationPackage, flowID, nodeID, fanOutPackage, elementID, deliveryID string, generation attemptgeneration.Generation) TimerHandle {
+func mustFanOutDeliveryJoinHandle(t *testing.T, flowPath, nodeID, semanticPath, deliveryID string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
+	declaration, err := runtimeidentity.AdmitDeclarationIdentity(flowPath, "fan_out", semanticPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ref, err := NewFanOutDeliveryJoinRef(
-		identitytest.ExecutableNode(t, declarationPackage, flowID, nodeID), "batch.requested", "all-items-delivered",
-		fanOutPackage, elementID,
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		identitytest.ExecutableNode(t, flowPath, nodeID), "batch.requested", "all-items-delivered",
+		declaration,
+		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	)
 	if err != nil {
@@ -237,7 +244,7 @@ func mustFanOutDeliveryJoinHandle(t *testing.T, declarationPackage, flowID, node
 func TestJoinHandleCodecRejectsMissingOrContradictoryDeclarationIdentity(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 	root := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
-	if _, ref, ok := ParseJoinHandle(root.PayloadMetadata()); !ok || ref.FlowID() != "" || !ref.Generation().Equal(generation) {
+	if _, ref, ok := ParseJoinHandle(root.PayloadMetadata()); !ok || ref.FlowPath() != "." || !ref.Generation().Equal(generation) {
 		t.Fatalf("explicit root handle failed strict round trip: ref=%#v ok=%v", ref, ok)
 	}
 
@@ -245,11 +252,8 @@ func TestJoinHandleCodecRejectsMissingOrContradictoryDeclarationIdentity(t *test
 		name   string
 		mutate func(map[string]any)
 	}{
-		{name: "missing package coordinate", mutate: func(payload map[string]any) {
-			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "package_key")
-		}},
-		{name: "missing flow coordinate", mutate: func(payload map[string]any) {
-			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "flow_id")
+		{name: "missing flow path", mutate: func(payload map[string]any) {
+			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "flow_path")
 		}},
 		{name: "missing local coordinate", mutate: func(payload map[string]any) {
 			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "node_id")
@@ -289,7 +293,11 @@ func cloneTimerPayload(t *testing.T, payload map[string]any) map[string]any {
 
 func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", flowID, nodeID)
+	flowPath := flowID
+	if flowPath == "" {
+		flowPath = "."
+	}
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowPath, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}

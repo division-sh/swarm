@@ -162,7 +162,7 @@ func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) 
 }
 
 func TestPlanChangedUnownedFileFallsBackToFullSuite(t *testing.T) {
-	plan, err := PlanChanged(".", nil, []ChangedFile{{Path: ".github/workflows/ci.yml", Status: "M"}})
+	plan, err := PlanChanged(".", nil, []ChangedFile{{Path: ".github/workci.yml", Status: "M"}})
 	if err != nil {
 		t.Fatalf("plan changed: %v", err)
 	}

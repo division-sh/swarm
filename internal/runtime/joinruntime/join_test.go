@@ -87,7 +87,8 @@ func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
 	join, joinOK := handle["join"].(map[string]any)
 	persistedGeneration, generationOK := join[attemptgeneration.PayloadKey].(map[string]any)
 	persistedNode, nodeOK := join["node"].(map[string]any)
-	if !ok || !joinOK || !nodeOK || !generationOK || persistedNode["package_key"] != "." || persistedNode["flow_id"] != "" || persistedNode["node_id"] != "join-node" || persistedGeneration["revision_id"] != "rev-2" {
+	_, hasRetiredFlowID := persistedNode["flow_id"]
+	if !ok || !joinOK || !nodeOK || !generationOK || persistedNode["flow_path"] != "." || hasRetiredFlowID || persistedNode["node_id"] != "join-node" || persistedGeneration["revision_id"] != "rev-2" {
 		t.Fatalf("persisted typed handle = %#v", raw["timer_handle"])
 	}
 	loaded, found, err := Load(buckets, identitytest.RootNode(t, "join-node"), activation.Key())

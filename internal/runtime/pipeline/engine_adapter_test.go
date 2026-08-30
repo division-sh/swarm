@@ -206,27 +206,19 @@ func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-    mode: static
-`,
+
 		"schema.yaml": `
 name: runtime-test
 initial_state: ready
 states: [ready]
 `,
-		"flows/child/schema.yaml": `
+		"child/schema.yaml": `
 name: child
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/child/entities.yaml": `
+		"child/entities.yaml": `
 child_entity:
   request_id: text
 `,
@@ -404,8 +396,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 func mutationParentRoutePinOutputSource() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "child",
-			Flow: "child",
+			FlowPath: "child",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -571,7 +562,7 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 
-	got := workflowStateGatesForScope(source, "grandchild", map[string]bool{
+	got := workflowStateGatesForScope(source, "child/grandchild", map[string]bool{
 		"child/grandchild/g_ready": true,
 	})
 
@@ -708,8 +699,9 @@ func TestPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOnBo
 				ctx = testPipelineRunContext(t, db)
 			}
 			entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
-			address := testEngineStateAddress("review", wrongRunID, entityID)
+			address := testEngineStateAddress(".", wrongRunID, entityID)
 			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation.StateCarrier.Control.EntityType = "test_entity"
 			mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
 
 			_, err := (pipelineEngineMutationOwner{
@@ -748,7 +740,7 @@ func TestWorkflowEngineMutationRejectsEntityContractDriftOnBothStores(t *testing
 			entityID := eventtest.UUID("entity-contract-drift-" + backend)
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-				WorkflowName: "review", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
+				WorkflowName: ".", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
 				CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "wrong_entity",
 			})
 			if err := store.upsert(ctx, instance); err != nil {
@@ -760,7 +752,7 @@ func TestWorkflowEngineMutationRejectsEntityContractDriftOnBothStores(t *testing
 			_, err := (pipelineEngineMutationOwner{
 				store: store, state: pipelineEngineStateRepo{coordinator: coordinator},
 			}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
-				Address: testEngineStateAddress("review", testPipelineRunID, entityID), State: mutation,
+				Address: testEngineStateAddress(".", testPipelineRunID, entityID), State: mutation,
 			})
 			if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "test_entity"`) {
 				t.Fatalf("entity contract drift mutation error = %v", err)
@@ -804,7 +796,7 @@ func TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityCo
 				_, err := (pipelineEngineMutationOwner{
 					store: store, state: pipelineEngineStateRepo{coordinator: coordinator},
 				}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
-					Address: testEngineStateAddress("review", testPipelineRunID, entityID), State: mutation,
+					Address: testEngineStateAddress(".", testPipelineRunID, entityID), State: mutation,
 				})
 				if err == nil || !strings.Contains(err.Error(), "workflow initial materialization carried entity_type") {
 					t.Fatalf("%s entity contract materialization error = %v", label, err)
@@ -822,23 +814,15 @@ func TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityCo
 
 func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: review
-    flow: review
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/review/schema.yaml": `
+		"review/schema.yaml": `
 name: review
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/review/entities.yaml": `
+		"review/entities.yaml": `
 review_entity:
   status:
     type: text
@@ -875,10 +859,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	repo := pipelineEngineStateRepo{
 		coordinator: &PipelineCoordinator{
 			workflowStore: store,
-			module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Semantics:    runtimecontracts.WorkflowSemanticView{Name: "root"},
-				RootEntities: testEntityContractsForType("test_entity"),
-			})},
+			module:        &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("root", "test_entity")},
 		},
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
@@ -886,7 +867,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 		InstanceID:      entityID.String(),
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID.String(),
-		WorkflowName:    "root",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
@@ -901,7 +882,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 		map[string]map[string]any{"evidence": {"count": 2}},
 	)
 
-	address := testEngineStateAddress("root", testPipelineRunID, entityID.String())
+	address := testEngineStateAddress(".", testPipelineRunID, entityID.String())
 	if _, err := (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(
 		testWorkflowStoreRunContext(t, repo.coordinator.workflowStore),
 		runtimeengine.EngineMutation{Address: address, State: mutation},
@@ -1395,7 +1376,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "working",
 		Fields:          cloneStringAnyMap(initial),
@@ -1600,7 +1581,7 @@ func TestResolveArtifactRepoRootRejectsUnsafeRoots(t *testing.T) {
 		{name: "relative", root: "artifacts", want: "absolute runtime-private host path"},
 		{name: "data", root: "/data/swarm/artifacts", want: "agent-visible mount /data"},
 		{name: "workspace", root: "/workspace/artifacts", want: "agent-visible mount /workspace"},
-		{name: "contracts", root: "/opt/swarm/contracts/artifacts", want: "agent-visible mount /opt/swarm/contracts"},
+		{name: "contracts", root: "/opt/swarm/source/artifacts", want: "agent-visible mount /opt/swarm/source"},
 		{name: "prefix", root: "/database/swarm/artifacts", want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1733,7 +1714,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -1808,7 +1789,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 				InstanceID:      artifactRepoFixtureRoute(initial),
 				EntityID:        entityID,
 				StorageRef:      artifactRepoFixtureRoute(initial),
-				WorkflowName:    "artifact-repo",
+				WorkflowName:    ".",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "ready",
 				Fields:          cloneStringAnyMap(initial),
@@ -1863,7 +1844,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -1921,7 +1902,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -1967,7 +1948,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -1983,11 +1964,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
-	result, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), "artifact-repo", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), ".", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
 		Action: action,
 	}, workflowTriggerContext{
 		Event: execCtx.Request.Event,
-		State: WorkflowState{Stage: "working", Metadata: cloneStringAnyMap(initial)},
+		State: WorkflowState{EntityID: entityID, Stage: "working", Metadata: cloneStringAnyMap(initial)},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -1998,7 +1979,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	if got := bus.outboxCount(); got != 1 {
 		t.Fatalf("outbox result event count = %d, want 1 (published=%d actions=%v)", got, bus.publishedCount(), result.Outcome.ActionsExecuted)
 	}
-	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact-repo/artifact_repo.commit_completed" {
+	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact_repo.commit_completed" {
 		t.Fatalf("outbox result event type = %q", got)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -2037,7 +2018,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2050,11 +2031,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
-	result, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), "artifact-repo", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), ".", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
 		Action: action,
 	}, workflowTriggerContext{
 		Event: execCtx.Request.Event,
-		State: WorkflowState{Stage: "working", Metadata: cloneStringAnyMap(initial)},
+		State: WorkflowState{EntityID: entityID, Stage: "working", Metadata: cloneStringAnyMap(initial)},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2065,7 +2046,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if got := bus.outboxCount(); got != 1 {
 		t.Fatalf("outbox result event count = %d, want 1 (published=%d actions=%v)", got, bus.publishedCount(), result.Outcome.ActionsExecuted)
 	}
-	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact-repo/artifact_repo.commit_failed" {
+	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("outbox result event type = %q", got)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -2111,7 +2092,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2124,11 +2105,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
-	_, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), "artifact-repo", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), ".", "artifact-node"), runtimecontracts.SystemNodeEventHandler{
 		Action: action,
 	}, workflowTriggerContext{
 		Event: execCtx.Request.Event,
-		State: WorkflowState{Stage: "working", Metadata: cloneStringAnyMap(initial)},
+		State: WorkflowState{EntityID: entityID, Stage: "working", Metadata: cloneStringAnyMap(initial)},
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "outbox unavailable") {
 		t.Fatalf("executeNodeContractHandler error = %v, want outbox unavailable", err)
@@ -2174,7 +2155,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2235,7 +2216,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2281,7 +2262,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2345,7 +2326,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2386,7 +2367,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2436,7 +2417,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2511,7 +2492,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2532,7 +2513,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2570,7 +2551,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 		InstanceID:      artifactRepoFixtureRoute(initial),
 		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
-		WorkflowName:    "artifact-repo",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Fields:          cloneStringAnyMap(initial),
@@ -2662,7 +2643,7 @@ func assertArtifactRepoQueuedIntent(t *testing.T, intents []runtimeengine.EmitIn
 func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":  "name: artifact-repo\nversion: 1.0.0\ndescription: artifact result event fixture\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
+
 		"schema.yaml":   "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "artifact-node:\n  id: artifact-node\n  execution_type: system_node\n",
@@ -2728,15 +2709,15 @@ func testArtifactRepoEntityFields(entityIDs ...string) map[string]any {
 	}
 	if len(entityIDs) > 0 {
 		fields["entity_id"] = strings.TrimSpace(entityIDs[0])
-		fields["flow_path"] = "artifact-repo"
-		fields["instance_id"] = "artifact-repo"
+		fields["flow_path"] = testPipelineRunID
+		fields["instance_id"] = testPipelineRunID
 	}
 	return fields
 }
 
 func testArtifactRepoEntityFieldsForSource(source semanticview.Source, entityID string) map[string]any {
 	fields := testArtifactRepoEntityFields(entityID)
-	if source != nil && strings.TrimSpace(source.WorkflowName()) == "artifact-repo" {
+	if source != nil && semanticview.RootExecutionFlowID(source) == "." {
 		fields["flow_path"] = testPipelineRunID
 		fields["instance_id"] = testPipelineRunID
 	}
@@ -2786,7 +2767,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		0,
 		testPipelineRunID,
 		"",
-		handlerTestWorkflowEnvelope("artifact-repo", route, entityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route),
 		time.Unix(1_700_000_000, 0).UTC(),
 		mode,
 	)
@@ -2842,18 +2823,14 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		}, runtimeengine.ExecutionContext{
 			Base: base,
 			Request: runtimeengine.ExecutionRequest{
-				EntityID: identity.NormalizeEntityID(entityID),
-				Node:     mustPipelineNode("", "artifact-node"),
-				Route:    runtimeflowidentity.RouteForInstancePath(route),
-				Event:    evt,
-				ProducerSource: mustStaticExecutionRoutingSource(events.RouteIdentity{
-					FlowID:       "artifact-repo",
-					FlowInstance: route,
-					EntityID:     entityID,
-				}),
+				EntityID:       identity.NormalizeEntityID(entityID),
+				Node:           mustPipelineNode("", "artifact-node"),
+				Route:          runtimeflowidentity.RouteForInstancePath(route),
+				Event:          evt,
+				ProducerSource: mustRootExecutionRoutingSource(entityID),
 				State: runtimeengine.StateSnapshot{
 					EntityID:        identity.NormalizeEntityID(entityID),
-					WorkflowName:    "artifact-repo",
+					WorkflowName:    ".",
 					WorkflowVersion: "1.0.0",
 					CurrentState:    "ready",
 					StateCarrier:    runtimeengine.NewStateCarrier(stateMetadata, nil, nil),
@@ -2864,6 +2841,14 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 
 func mustStaticExecutionRoutingSource(route events.RouteIdentity) events.RoutingSource {
 	source, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		panic(err)
+	}
+	return source
+}
+
+func mustRootExecutionRoutingSource(entityID string) events.RoutingSource {
+	source, err := events.NewRootRoutingSource(entityID)
 	if err != nil {
 		panic(err)
 	}
@@ -3066,12 +3051,12 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":             "name: action-emit-required\nversion: 1.0.0\ndescription: Action emit required-field proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
-		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
-		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
+
+		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+
+		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3121,12 +3106,12 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 
 func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":             "name: template-output-required\nversion: 1.0.0\ndescription: Template output required-field proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: template\n",
-		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n",
-		"events.yaml":              "parent.trigger:\n  entity_id: string\n",
-		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"flows/child/schema.yaml":  "name: child\nmode: template\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
+
+		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n",
+		"events.yaml": "parent.trigger:\n  entity_id: string\n",
+
+		"child/schema.yaml": "name: child\nmode: template\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3177,12 +3162,12 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":             "name: action-emit-envelope-required\nversion: 1.0.0\ndescription: Action emit envelope-required proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
-		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
-		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
+
+		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+
+		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3230,13 +3215,13 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":             "name: action-emit-enum\nversion: 1.0.0\ndescription: Action emit enum proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
-		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
-		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"types.yaml":               "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
-		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
+
+		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"events.yaml": "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+		"types.yaml":  "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
+
+		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
 	})
 
 	err := validatePipelineEmitPayload(source, "child", "child.internal", map[string]any{
@@ -3255,12 +3240,12 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 
 func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml":             "name: child-output-named-type\nversion: 1.0.0\ndescription: child output named type proof\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
-		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
-		"types.yaml":               "types:\n  Evidence:\n    root_field: text\n",
-		"events.yaml":              "handoff.completed:\n  evidence: Evidence\n",
-		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+
+		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+		"types.yaml":  "types:\n  Evidence:\n    root_field: text\n",
+		"events.yaml": "handoff.completed:\n  evidence: Evidence\n",
+
+		"child/schema.yaml": "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  outputs:\n    events: [handoff.completed]\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {

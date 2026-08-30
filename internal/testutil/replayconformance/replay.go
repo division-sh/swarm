@@ -27,7 +27,6 @@ type Identity struct {
 	Version            string
 	PlatformSpecDigest string
 	BundleHash         string
-	BundleSource       string
 	RunID              string
 }
 
@@ -40,9 +39,6 @@ func ValidateIdentity(actual, expected Identity) error {
 	}
 	if actual.BundleHash != expected.BundleHash {
 		return fmt.Errorf("transcript bundle hash %q does not match %q", actual.BundleHash, expected.BundleHash)
-	}
-	if actual.BundleSource != expected.BundleSource {
-		return fmt.Errorf("transcript bundle source %q does not match %q", actual.BundleSource, expected.BundleSource)
 	}
 	if actual.RunID != expected.RunID || strings.TrimSpace(actual.RunID) == "" {
 		return fmt.Errorf("transcript run_id %q does not match fixed run identity %q", actual.RunID, expected.RunID)

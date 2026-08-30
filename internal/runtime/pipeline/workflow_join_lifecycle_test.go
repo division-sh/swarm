@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -44,7 +43,7 @@ type workflowJoinLifecycleSemanticSource struct {
 func (s workflowJoinLifecycleSemanticSource) ExecutableNodeSource(node identity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
 	switch node.NodeID() {
 	case "join-node", "dispatcher":
-		return runtimecontracts.ContractItemSource{FlowID: "orders", Layer: "flow"}, true
+		return runtimecontracts.ContractItemSource{FlowPath: node.FlowPath(), Family: "nodes"}, true
 	default:
 		return s.Source.ExecutableNodeSource(node)
 	}
@@ -1080,10 +1079,13 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 	t.Helper()
 	orders := runtimecontracts.FlowContractView{
 		Path:   "orders",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "orders", Flow: "orders"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "orders"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{orders}}
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Children: []runtimecontracts.FlowContractView{orders},
+	}
 	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 	spec := runtimecontracts.JoinSpec{
 		ID: "awaiting", Stage: "awaiting",
@@ -1092,15 +1094,15 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
 	}
 	fanOut := runtimecontracts.FanOutSpec{
-		ElementID: contractelementidentity.MintContractElementID(),
 		ItemsFrom: "payload.line_items", ItemsPath: runtimepaths.Parse("payload.line_items"), As: "line_item", Identity: "line_item.id",
 		Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{"line_item_id": runtimecontracts.CELExpression("line_item.id")}},
 	}
 	joinNode := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 		"item.completed": {Join: &spec},
 	}}
-	dispatchHandler, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(
+	dispatchHandler, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(
 		mustPipelineNode("orders", "dispatcher"),
+		"order.accepted",
 		runtimecontracts.SystemNodeEventHandler{FanOut: &fanOut, AdvancesTo: "awaiting"},
 	)
 	if err != nil {
@@ -1122,7 +1124,7 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 	base := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]},
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "orders": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"orders": orders.Schema,

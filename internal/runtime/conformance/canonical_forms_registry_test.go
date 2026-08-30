@@ -72,10 +72,9 @@ type canonicalFormsSpelling struct {
 }
 
 type canonicalFormsWave1 struct {
-	Issue                  int                           `yaml:"issue"`
-	Rows                   []string                      `yaml:"rows"`
-	CheckedInPackageCorpus canonicalFormsPackageCorpus   `yaml:"checked_in_package_corpus"`
-	GoConnectCorpus        canonicalFormsGoConnectCorpus `yaml:"go_connect_corpus"`
+	Issue           int                           `yaml:"issue"`
+	Rows            []string                      `yaml:"rows"`
+	GoConnectCorpus canonicalFormsGoConnectCorpus `yaml:"go_connect_corpus"`
 }
 
 type canonicalFormsWave3 struct {
@@ -94,17 +93,6 @@ type canonicalFormsWave2 struct {
 	CanonicalOwners []string `yaml:"canonical_owners"`
 }
 
-type canonicalFormsPackageCorpus struct {
-	Examples         canonicalFormsCorpusCount `yaml:"examples"`
-	TestsAndTestdata canonicalFormsCorpusCount `yaml:"tests_and_testdata"`
-	Total            canonicalFormsCorpusCount `yaml:"total"`
-}
-
-type canonicalFormsCorpusCount struct {
-	Files int `yaml:"files"`
-	Rows  int `yaml:"rows"`
-}
-
 type canonicalFormsGoConnectCorpus struct {
 	TotalFiles                  int               `yaml:"total_files"`
 	CanonicalRoutingOccurrences int               `yaml:"canonicalrouting_occurrences"`
@@ -117,7 +105,7 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if record.Kind != "canonical_forms_registry" || record.RegistryVersion != 1 {
 		t.Fatalf("registry identity = %q/v%d", record.Kind, record.RegistryVersion)
 	}
-	if got, want := len(record.Rows), 51; got != want {
+	if got, want := len(record.Rows), 45; got != want {
 		t.Fatalf("registry rows = %d, want %d", got, want)
 	}
 
@@ -136,7 +124,7 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 			t.Fatalf("wave 1 row %q is not in the registry", id)
 		}
 	}
-	if record.Wave1.Issue != 2309 || !reflect.DeepEqual(record.Wave1.Rows, []string{"package.child_collection", "package.child_reference", "package.connect"}) {
+	if record.Wave1.Issue != 2320 || !reflect.DeepEqual(record.Wave1.Rows, []string{"schema.connect", "schema.imports", "schema.ingress"}) {
 		t.Fatalf("wave 1 registry = %#v", record.Wave1)
 	}
 
@@ -177,8 +165,8 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 101 || record.Inventory.CustomUnmarshalReachable != 100 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 100 || len(expectedExcluded) != 1 || len(actual) != 101 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 101/100/1/100/1/101", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 97 || record.Inventory.CustomUnmarshalReachable != 96 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 96 || len(expectedExcluded) != 1 || len(actual) != 97 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 97/96/1/96/1/97", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
 	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
@@ -192,7 +180,7 @@ func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
 		"workflow_contract_yaml_handlers.go:EventCatalogEntry",
 		"workflow_contract_yaml_schema.go:EventFieldSpec",
 	}
-	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 99 {
+	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 95 {
 		t.Fatalf("wave 3 registry = %#v", record.Wave3)
 	}
 
@@ -233,8 +221,8 @@ func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := bytes.Count(treeSource, []byte("loadOptionalEventCatalog(")); got != 2 {
-		t.Fatalf("event catalog loader call count = %d, want project + flow admission calls", got)
+	if got := bytes.Count(treeSource, []byte("loadOptionalEventCatalogFromSource(")); got != 1 {
+		t.Fatalf("event catalog artifact loader call count = %d, want one flow-source admission call", got)
 	}
 }
 
@@ -295,21 +283,19 @@ func TestCanonicalFormsRegistryPinsCurrentConnectFailureCodes(t *testing.T) {
 	}
 	var spec struct {
 		FlowModel struct {
-			FlowPackage struct {
-				CompositionRouting struct {
-					RoutePlanLowering struct {
-						ImplementationSlice1545 struct {
-							FailureReasons []string `yaml:"failure_reasons"`
-						} `yaml:"implementation_slice_1545"`
-					} `yaml:"route_plan_lowering"`
-				} `yaml:"composition_routing"`
-			} `yaml:"flow_package"`
+			CompositionRouting struct {
+				RoutePlanLowering struct {
+					ImplementationSlice1545 struct {
+						FailureReasons []string `yaml:"failure_reasons"`
+					} `yaml:"implementation_slice_1545"`
+				} `yaml:"route_plan_lowering"`
+			} `yaml:"composition_routing"`
 		} `yaml:"flow_model"`
 	}
 	if err := yaml.Unmarshal(raw, &spec); err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
-	got := append([]string(nil), spec.FlowModel.FlowPackage.CompositionRouting.RoutePlanLowering.ImplementationSlice1545.FailureReasons...)
+	got := append([]string(nil), spec.FlowModel.CompositionRouting.RoutePlanLowering.ImplementationSlice1545.FailureReasons...)
 	want := make([]string, 0, int(runtimepinrouting.ConnectFailureLifecycleUnavailable))
 	for failure := runtimepinrouting.ConnectFailureSourceMissing; failure <= runtimepinrouting.ConnectFailureLifecycleUnavailable; failure++ {
 		want = append(want, failure.Code())
@@ -324,36 +310,23 @@ func TestCanonicalFormsRegistryPinsCurrentConnectFailureCodes(t *testing.T) {
 	}
 }
 
-func TestCanonicalFormsRegistryPinsWave1RetirementsAndEffectiveStructs(t *testing.T) {
+func TestCanonicalFormsRegistryPinsFilesystemTopologyRetirementAndEffectiveConnect(t *testing.T) {
 	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
 	rows := make(map[string]canonicalFormsRow, len(record.Rows))
 	for _, row := range record.Rows {
 		rows[row.ID] = row
 	}
-	for id, want := range map[string][]string{
-		"package.child_collection": {"children", "subpackages"},
-		"package.child_reference":  {"package", "dir"},
-	} {
-		got := append([]string(nil), rows[id].Spelling.RetiredDuplicates...)
-		sort.Strings(got)
-		sort.Strings(want)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s retired spellings = %v, want %v", id, got, want)
-		}
-	}
-	connectRetirements := strings.Join(rows["package.connect"].Spelling.RetiredDuplicates, " ")
+	connectRetirements := strings.Join(rows["schema.connect"].Spelling.RetiredDuplicates, " ")
 	if !strings.Contains(connectRetirements, "flow.pin") {
-		t.Fatalf("package.connect retirements = %q, want endpoint-centric form", connectRetirements)
+		t.Fatalf("schema.connect retirements = %q, want endpoint-centric form", connectRetirements)
 	}
 
-	assertNoYAMLFields(t, reflect.TypeOf(runtimecontracts.ProjectPackageDocument{}), "children", "subpackages")
-	assertNoYAMLFields(t, reflect.TypeOf(runtimecontracts.ProjectPackageRef{}), "package", "dir")
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowPackageConnect{}), []string{"event", "from", "rename", "to"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), []string{"event", "from", "rename", "to"})
 }
 
 func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
-	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "package.connect"}
+	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "schema.connect"}
 	wantRetired := []string{"pin.name", "input.carries", "carry.type", "carry.optional", "carry.convert", "output.key", "output.carries", "qualified_or_wildcard_flow_pin_event", "connect.adapter"}
 	wantOwners := []string{"CompiledFlowInputPin", "CompiledFlowOutputPin", "CompiledFlowEntityPermissions", "CompiledEventSchema", "ConnectRoutePlan"}
 	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
@@ -459,87 +432,6 @@ func canonicalSelectorPath(expr ast.Expr) []string {
 		return canonicalSelectorPath(value.X)
 	default:
 		return nil
-	}
-}
-
-func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	record := loadCanonicalFormsRegistry(t, root)
-	counts := canonicalFormsPackageCorpus{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || entry.Name() != "package.yaml" {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		var packageDocument struct {
-			Flows []struct {
-				ID string `yaml:"id"`
-			} `yaml:"flows"`
-			Connect []struct {
-				Event string `yaml:"event"`
-				From  string `yaml:"from"`
-				To    string `yaml:"to"`
-			} `yaml:"connect"`
-		}
-		if err := yaml.Unmarshal(raw, &packageDocument); err != nil {
-			return fmt.Errorf("decode %s: %w", path, err)
-		}
-		if len(packageDocument.Connect) == 0 {
-			return nil
-		}
-		visibleFlows := map[string]struct{}{".": {}}
-		for _, flow := range packageDocument.Flows {
-			if id := strings.TrimSpace(flow.ID); id != "" {
-				visibleFlows[id] = struct{}{}
-			}
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		for _, connect := range packageDocument.Connect {
-			if strings.TrimSpace(connect.Event) == "" || strings.TrimSpace(connect.From) == "" || strings.TrimSpace(connect.To) == "" {
-				return fmt.Errorf("%s retains a non-canonical connect row: %#v", relative, connect)
-			}
-			if _, ok := visibleFlows[connect.From]; !ok {
-				return fmt.Errorf("%s connect source is not an exact package-visible flow: %#v", relative, connect)
-			}
-			if _, ok := visibleFlows[connect.To]; !ok {
-				return fmt.Errorf("%s connect receiver is not an exact package-visible flow: %#v", relative, connect)
-			}
-		}
-		count := &counts.TestsAndTestdata
-		if strings.HasPrefix(filepath.ToSlash(relative), "examples/") {
-			count = &counts.Examples
-		}
-		count.Files++
-		count.Rows += len(packageDocument.Connect)
-		counts.Total.Files++
-		counts.Total.Rows += len(packageDocument.Connect)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scan checked-in package corpus: %v", err)
-	}
-	if !reflect.DeepEqual(counts, record.Wave1.CheckedInPackageCorpus) {
-		t.Fatalf("checked-in package corpus = %#v, registry = %#v", counts, record.Wave1.CheckedInPackageCorpus)
-	}
-
-	goFiles, canonicalRoutingOccurrences, err := collectGoConnectCorpus(root, record.Wave1.GoConnectCorpus.Files)
-	if err != nil {
-		t.Fatalf("scan connect-shaped Go corpus: %v", err)
-	}
-	if len(goFiles) != record.Wave1.GoConnectCorpus.TotalFiles || !reflect.DeepEqual(goFiles, record.Wave1.GoConnectCorpus.Files) {
-		t.Fatalf("classified connect-shaped Go corpus = %d files, registry = %d; unregistered=%v stale=%v", len(goFiles), record.Wave1.GoConnectCorpus.TotalFiles, mapKeyDifference(goFiles, record.Wave1.GoConnectCorpus.Files), mapKeyDifference(record.Wave1.GoConnectCorpus.Files, goFiles))
-	}
-	if canonicalRoutingOccurrences != record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences {
-		t.Fatalf("canonicalrouting connect occurrences = %d, want %d", canonicalRoutingOccurrences, record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences)
 	}
 }
 

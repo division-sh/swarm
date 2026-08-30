@@ -43,10 +43,11 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -55,6 +56,36 @@ type channelActivityDispatchFenceProbe struct {
 	armed   atomic.Bool
 	started chan struct{}
 	release chan struct{}
+}
+
+func configuredChannelAgentBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadRuntimeTempBundle(t, map[string]string{
+		"schema.yaml": "name: channel-runtime\n",
+		"global/schema.yaml": `name: global
+mode: static
+initial_state: active
+states: [active]
+`,
+		"global/entities.yaml": "channel_state: {}\n",
+		"global/agents.yaml": `channel-sender:
+  type: generic
+  role: worker
+  intent: {inline: "Deliver provider-neutral channel operations."}
+  model: regular
+`,
+	})
+}
+
+func configuredChannelAgentOwner(t *testing.T, source semanticview.Source) string {
+	t.Helper()
+	for _, declaration := range semanticview.AgentDeclarationsForOwner(source, "global") {
+		if declaration.LocalID == "channel-sender" && declaration.OwnerURI != "" {
+			return declaration.OwnerURI
+		}
+	}
+	t.Fatal("configured channel source omitted the global/channel-sender declaration owner")
+	return ""
 }
 
 func newChannelActivityDispatchFenceProbe() *channelActivityDispatchFenceProbe {
@@ -73,15 +104,14 @@ func (p *channelActivityDispatchFenceProbe) NotifyLifecycle(ctx context.Context,
 }
 
 func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores(t *testing.T) {
-	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, selected := range []string{"postgres", "sqlite"} {
 		t.Run(selected, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			entityID := uuid.NewString()
-			flowInstanceID := "channel-runtime-" + selected
-			flowPath := "gateway/global"
-			flowInstance := flowPath + "/" + flowInstanceID
+			flowPath := "global"
+			flowInstanceID := flowPath
+			flowInstance := flowPath
 			var (
 				db                  *sql.DB
 				eventStore          runtimebus.EventStore
@@ -93,16 +123,13 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
-				seedPostgresInboundGatewayRuntime(t, ctx, postgresDB, pg, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
 				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
 				db, eventStore = storetest.Database(sqliteStore), sqliteStore
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
-			seedConfiguredChannelBundleIdentity(t, ctx, db, selected, runID, bundleHash)
 			obligationProvider, ok := eventStore.(interface {
 				PipelineObligations() runtimepipelineobligation.Store
 			})
@@ -136,42 +163,33 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if err != nil {
 				t.Fatalf("RuntimeTools: %v", err)
 			}
-			agentOwner := "test://channel-runtime/global/channel-sender"
-			agentRef := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "global", LocalID: "channel-sender", Full: agentOwner}
-			global := runtimecontracts.FlowContractView{
-				Paths: runtimecontracts.FlowContractPaths{
-					ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate,
-					PackageKey: "channel-runtime", AgentsFile: "/contracts/channel-runtime/flows/global/agents.yaml",
-				},
-				Path:   flowPath,
-				Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-				Agents: map[string]runtimecontracts.AgentRegistryEntry{
-					"channel-sender": runtimecontracts.EffectiveAgentRegistryEntry("channel-sender", runtimecontracts.AgentRegistryEntry{ID: "channel-sender", Role: "worker"}),
-				},
-				AgentURIs: map[string]string{"channel-sender": agentOwner},
-			}
-			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}}
-			base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Semantics: runtimecontracts.WorkflowSemanticView{Name: "channel_runtime", Version: "1.0.0"},
-				FlowTree: runtimecontracts.FlowTree{
-					Root: &root,
-					ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"global": global.Schema},
-				URIRegistry: runtimecontracts.ContractURIRegistry{
-					Agents: map[string]runtimecontracts.ContractURIRef{"global/channel-sender": agentRef},
-					ByURI:  map[string]runtimecontracts.ContractURIRef{agentOwner: agentRef},
-				},
-			})
+			bundle := configuredChannelAgentBundle(t)
+			base := semanticview.Wrap(bundle)
 			source, err := semanticview.WithRuntimeTools(base, publicTools)
 			if err != nil {
 				t.Fatalf("WithRuntimeTools: %v", err)
 			}
+			writer, ok := eventStore.(sourceartifactfixture.Writer)
+			if !ok {
+				t.Fatalf("selected channel store %T does not own source artifacts", eventStore)
+			}
+			sourceFact := sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+			switch typed := eventStore.(type) {
+			case *store.PostgresStore:
+				storetest.RequireRun(t, ctx, typed, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+			case *store.SQLiteRuntimeStore:
+				storetest.RequireRun(t, ctx, typed, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+			default:
+				t.Fatalf("unsupported selected channel store %T", eventStore)
+			}
+			agentOwner := configuredChannelAgentOwner(t, source)
 			var coordinator *runtimepipeline.PipelineCoordinator
 			dispatchFence := newChannelActivityDispatchFenceProbe()
 			bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
 				ContractBundle:     source,
-				BundleSourceFact:   testBundleSourceFact(t, bundleHash),
+				SourceArtifactFact: sourceFact,
 				TestLifecycleProbe: dispatchFence,
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if coordinator == nil {
@@ -201,6 +219,13 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  activationOwner,
 				FlowRoutes:          bus,
 			})
+			if _, err := coordinator.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimepipeline.WorkflowInstance{
+				InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
+				EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
+				Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Config: map[string]any{}, Fields: map[string]any{},
+			}, time.Now().UTC()); err != nil {
+				t.Fatalf("materialize configured channel flow instance: %v", err)
+			}
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator)
@@ -422,34 +447,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 func TestChannelActivationReplacementUpdatesExecutorToolProjection(t *testing.T) {
 	predecessor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", false)
 	successor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", true)
-	agentOwner := "test://channel-runtime/global/channel-sender"
-	agentRef := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "global", LocalID: "channel-sender", Full: agentOwner}
-	global := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate,
-			PackageKey: "channel-runtime", AgentsFile: "/contracts/channel-runtime/flows/global/agents.yaml",
-		},
-		Path:   "gateway/global",
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"channel-sender": runtimecontracts.EffectiveAgentRegistryEntry("channel-sender", runtimecontracts.AgentRegistryEntry{ID: "channel-sender", Role: "worker"}),
-		},
-		AgentURIs: map[string]string{"channel-sender": agentOwner},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "channel_runtime", Version: "1.0.0"},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"global": global.Schema},
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{"global/channel-sender": agentRef},
-			ByURI:  map[string]runtimecontracts.ContractURIRef{agentOwner: agentRef},
-		},
-	})
-	source := base
+	source := semanticview.Wrap(configuredChannelAgentBundle(t))
 	owner := testChannelActivationOwner(t, predecessor)
 	executor := configuredChannelExecutor(source, owner, nil, nil)
 	actor := models.AgentConfig{ID: "channel-sender", Role: "worker", FlowID: "global", Tools: []string{"channel.ops.deliver"}}
@@ -478,7 +476,7 @@ func TestChannelActivationReplacementUpdatesExecutorToolProjection(t *testing.T)
 func TestChannelModelToolPresentationPinsOneActivationGeneration(t *testing.T) {
 	predecessor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", false)
 	successor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", true)
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	source := semanticview.Wrap(configuredChannelAgentBundle(t))
 	owner := testChannelActivationOwner(t, predecessor)
 	executor := configuredChannelExecutor(source, owner, nil, unusedChannelRuntimeActivityExecutor{})
 	actor := models.AgentConfig{ID: "channel-sender", Role: "worker", FlowID: "global", Tools: []string{"channel.ops.deliver"}, ExecutionMode: runtimeeffects.ExecutionModeLive}
@@ -642,8 +640,8 @@ func testChannelActivationOwner(t *testing.T, bindings ...packs.OutboundBindingP
 
 func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBindingPlan) channelonboarding.ChannelActivationPublication {
 	t.Helper()
-	fact := testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	bundleHash, bundleSource := fact.StorageValues()
+	fact := sourceartifactfixture.FactFor(configuredChannelAgentBundle(t).SourceArtifact)
+	bundleHash := fact.BundleHash()
 	activations := make([]channelonboarding.CompiledActivation, 0, len(bindings))
 	for _, binding := range bindings {
 		generation, err := binding.PlanGeneration()
@@ -651,7 +649,7 @@ func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBi
 			t.Fatal(err)
 		}
 		coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "channel-runtime@1.0.0#test",
+			BundleHash: bundleHash, BundleIdentity: "channel-runtime@1.0.0#test",
 			PackInventoryGeneration: "sha256:test-inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
 			ContextPublicationGeneration: 1,
 			PlanGeneration:               generation,
@@ -680,12 +678,14 @@ func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBi
 
 func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
 	t.Helper()
-	sourceFact := testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok || sourceFact.Validate() != nil {
+		t.Fatal("configured channel call requires the admitted source artifact fact")
+	}
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok || scope.RuntimeInstanceID == "" {
 		t.Fatal("configured channel call context requires a runtime author-activity scope")
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, sourceFact.BundleHash()))
 	inbound := eventtest.ExistingRunRootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte(runID+"\x00"+operationID)).String(),
@@ -696,20 +696,6 @@ func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedSto
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, operationID)
 	return runtimetools.WithActor(ctx, actor)
-}
-
-func seedConfiguredChannelBundleIdentity(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, bundleHash string) {
-	t.Helper()
-	source := testBundleSourceFact(t, bundleHash)
-	if selected == "sqlite" {
-		if err := runlifecyclefixture.ReviseSQLiteSource(ctx, db, runID, source); err != nil {
-			t.Fatalf("seed configured SQLite channel bundle identity: %v", err)
-		}
-		return
-	}
-	if err := runlifecyclefixture.RevisePostgresSource(ctx, db, runID, source); err != nil {
-		t.Fatalf("seed configured PostgreSQL channel bundle identity: %v", err)
-	}
 }
 
 func configuredTelegramChannelBinding(t *testing.T, serverURL string) packs.OutboundBindingPlan {
@@ -832,7 +818,7 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 func projectImportedTelegramChannelInventory(t *testing.T, serverURL string) *packartifact.EffectivePackInventory {
 	t.Helper()
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: imported-channel-proof\nversion: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: imported-channel-proof\nversion: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	base := packfixture.EmbeddedBase(t)

@@ -461,15 +461,15 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	bundle := sqliteFlowActivationBundle(t)
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
-		SemanticSource:    semanticview.Wrap(bundle),
-		WorkflowInstances: workflowStore,
-		LLMBackend:        "anthropic",
-		LifecycleStore:    agentfixture.Lifecycle(t, sqliteStore),
-		DeliveryStore:     sqliteStore,
-		WorkOwner:         storeTestWorkOwner(t),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: mustStoreTestSourceArtifactFact(authorActivityTestBundleHash),
+		SemanticSource:     semanticview.Wrap(bundle),
+		WorkflowInstances:  workflowStore,
+		LLMBackend:         "anthropic",
+		LifecycleStore:     agentfixture.Lifecycle(t, sqliteStore),
+		DeliveryStore:      sqliteStore,
+		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
 			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
@@ -515,15 +515,15 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	bundle := sqliteFlowActivationBundle(t)
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
-		SemanticSource:    semanticview.Wrap(bundle),
-		WorkflowInstances: workflowStore,
-		LLMBackend:        "anthropic",
-		LifecycleStore:    agentfixture.Lifecycle(t, sqliteStore),
-		DeliveryStore:     sqliteStore,
-		WorkOwner:         storeTestWorkOwner(t),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: mustStoreTestSourceArtifactFact(authorActivityTestBundleHash),
+		SemanticSource:     semanticview.Wrap(bundle),
+		WorkflowInstances:  workflowStore,
+		LLMBackend:         "anthropic",
+		LifecycleStore:     agentfixture.Lifecycle(t, sqliteStore),
+		DeliveryStore:      sqliteStore,
+		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
 			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
@@ -625,7 +625,7 @@ func (p *sqliteFlowActivationRoutePreparation) Deliveries() <-chan *worklifetime
 func (*sqliteFlowActivationRoutePreparation) Publish() error { return nil }
 func (*sqliteFlowActivationRoutePreparation) Discard() error { return nil }
 
-func (*sqliteFlowActivationBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*sqliteFlowActivationBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return ctx, nil
 }
 
@@ -837,7 +837,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	const owner = "test://review/reviewer"
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Path:  "review",
-		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
 				ID:            "reviewer",

@@ -96,8 +96,6 @@ type doctorTargetPath struct {
 }
 
 type doctorTargetProject struct {
-	ContractsPath          string `json:"contracts_path,omitempty"`
-	ContractsSource        string `json:"contracts_source,omitempty"`
 	ProjectRoot            string `json:"project_root,omitempty"`
 	CanonicalProjectRoot   string `json:"canonical_project_root,omitempty"`
 	CanonicalizationStatus string `json:"canonicalization_status"`
@@ -448,51 +446,11 @@ func doctorTargetAPIReason(source string) string {
 }
 
 func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliCommandConfig) doctorTargetProject {
-	contractsPath, source := firstDoctorTargetContractsPath(repo, opts, cfg)
-	if strings.TrimSpace(contractsPath) == "" {
-		return doctorTargetProject{
-			CanonicalizationStatus: "not_applicable",
-			Status:                 "no_contract_source",
-			Detail:                 "no --contracts, SWARM_CONTRACTS_PATH, config paths.contracts_path, or invocation-root contracts/package.yaml source was resolved",
-		}
-	}
-	projectRoot := inferProjectRootFromContractsPath(contractsPath)
-	canonical, canonicalStatus := canonicalizeDoctorTargetPath(projectRoot)
 	return doctorTargetProject{
-		ContractsPath:          filepath.Clean(contractsPath),
-		ContractsSource:        source,
-		ProjectRoot:            filepath.Clean(projectRoot),
-		CanonicalProjectRoot:   canonical,
-		CanonicalizationStatus: canonicalStatus,
-		Status:                 "resolved",
+		CanonicalizationStatus: "not_applicable",
+		Status:                 "source_free",
+		Detail:                 "doctor does not inspect authored source; use verify <directory> for source conformance",
 	}
-}
-
-func firstDoctorTargetContractsPath(repo string, opts doctorOptions, cfg cliCommandConfig) (string, string) {
-	if path := strings.TrimSpace(opts.contractsPath); path != "" {
-		return ResolvePath(repo, path), "--contracts"
-	}
-	if path := strings.TrimSpace(os.Getenv(cliContractsPathEnv)); path != "" {
-		return ResolvePath(repo, path), cliContractsPathEnv
-	}
-	if path := strings.TrimSpace(cfg.Paths.ContractsPath); path != "" {
-		return ResolvePath(repo, path), "config paths.contracts_path"
-	}
-	if path := discoverInvocationRootContractsPath(repo); path != "" {
-		return path, "invocation-root contracts/package.yaml"
-	}
-	return "", ""
-}
-
-func inferProjectRootFromContractsPath(contractsPath string) string {
-	contractsPath = filepath.Clean(contractsPath)
-	if filepath.Base(contractsPath) == "package.yaml" {
-		contractsPath = filepath.Dir(contractsPath)
-	}
-	if filepath.Base(contractsPath) == "contracts" {
-		return filepath.Dir(contractsPath)
-	}
-	return contractsPath
 }
 
 func canonicalizeDoctorTargetPath(path string) (string, string) {
@@ -522,7 +480,6 @@ func doctorTargetLocalRuntimeProject(repo string, project doctorTargetProject) l
 		status = "project_local"
 	}
 	return localRuntimeStateProject{
-		ContractsPath:        project.ContractsPath,
 		ProjectRoot:          project.ProjectRoot,
 		CanonicalProjectRoot: canonicalProjectRoot,
 		ProjectLocal:         projectLocal,
@@ -604,9 +561,6 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 				"swarm event list",
 				"swarm event follow",
 				"swarm event view",
-				"swarm bundle list",
-				"swarm bundle show",
-				"swarm bundle agents",
 				"swarm agent list",
 				"swarm agent deliveries",
 				"swarm agent diagnose",
@@ -633,8 +587,6 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 				"swarm agent restart",
 				"swarm agent replay",
 				"swarm agent directive",
-				"swarm bundle register",
-				"swarm bundle delete",
 				"swarm mailbox defer",
 				"swarm run fork",
 				"swarm forkchat new",
@@ -698,7 +650,7 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	}
 	fmt.Fprintf(out, "swarm_dir: %s (source: %s)\n", report.SwarmDir.Path, report.SwarmDir.Source)
 	if report.Project.Status == "resolved" {
-		fmt.Fprintf(out, "project_root: %s (source: %s; canonical: %s; canonicalization: %s)\n", report.Project.ProjectRoot, report.Project.ContractsSource, report.Project.CanonicalProjectRoot, report.Project.CanonicalizationStatus)
+		fmt.Fprintf(out, "project_root: %s (canonical: %s; canonicalization: %s)\n", report.Project.ProjectRoot, report.Project.CanonicalProjectRoot, report.Project.CanonicalizationStatus)
 	} else {
 		fmt.Fprintf(out, "project_root: %s (%s)\n", report.Project.Status, report.Project.Detail)
 	}

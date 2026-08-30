@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +35,7 @@ type connectionsConnectOptions struct {
 }
 
 type connectionsStatusOptions struct {
-	contractsPath    string
-	platformSpecPath string
-	asJSON           bool
+	asJSON bool
 }
 
 type connectionRecord struct {
@@ -57,17 +53,6 @@ type connectionRecord struct {
 	ExpiresAt      string                                     `json:"expires_at,omitempty"`
 	UpdatedAt      string                                     `json:"updated_at,omitempty"`
 	Present        bool                                       `json:"present"`
-	RequiredBy     []connectionRequirement                    `json:"required_by,omitempty"`
-}
-
-type connectionRequirement struct {
-	Kind                string                                     `json:"kind"`
-	Name                string                                     `json:"name"`
-	GrantType           string                                     `json:"grant_type,omitempty"`
-	Scopes              []string                                   `json:"scopes,omitempty"`
-	GrantModel          string                                     `json:"grant_model,omitempty"`
-	TokenRequest        managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
-	InstallationIDInput string                                     `json:"installation_id_input,omitempty"`
 }
 
 type connectionsStatusResult struct {
@@ -158,7 +143,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 				}
 				output := connectionsConnectResult{
-					Connection:   connectionRecordFromDescriptor(record.Descriptor(), ok, nil),
+					Connection:   connectionRecordFromDescriptor(record.Descriptor(), ok),
 					AuthorizeURL: result.AuthorizeURL,
 					State:        result.State,
 				}
@@ -190,7 +175,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 				}
 				output := connectionsConnectResult{
-					Connection:   connectionRecordFromDescriptor(record.Descriptor(), ok, nil),
+					Connection:   connectionRecordFromDescriptor(record.Descriptor(), ok),
 					AuthorizeURL: result.AuthorizeURL,
 					State:        result.State,
 				}
@@ -215,7 +200,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 				if err != nil {
 					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 				}
-				output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true, nil)}
+				output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true)}
 				if opts.asJSON {
 					return encodeSecretsJSON(cmd.OutOrStdout(), output)
 				}
@@ -234,7 +219,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 				if err != nil {
 					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 				}
-				output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true, nil)}
+				output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true)}
 				if opts.asJSON {
 					return encodeSecretsJSON(cmd.OutOrStdout(), output)
 				}
@@ -291,7 +276,7 @@ func newConnectionsCallbackCommand(ctx context.Context, repo string) *cobra.Comm
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
-			output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true, nil)}
+			output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true)}
 			if asJSON {
 				return encodeSecretsJSON(cmd.OutOrStdout(), output)
 			}
@@ -312,18 +297,11 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 		Short: "Show managed credential connection status.",
 		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
 			store, err := BuildManagedCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure managed credential store: %w", err))
 			}
-			source, err := loadConnectionsSource(cmd, repo, opts.contractsPath, opts.platformSpecPath)
-			if err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
-			}
-			records, err := connectionRecords(ctx, store, source, args)
+			records, err := connectionRecords(ctx, store, args)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -335,8 +313,6 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root for required_by metadata")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
 	argcount.SetDiscoveryHint(cmd, "List connection keys with `swarm connections status`.")
 	return cmd
@@ -433,14 +409,7 @@ func parseConnectionTokenHeaders(items []string) (map[string]string, error) {
 	return headers, nil
 }
 
-func loadConnectionsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath string) (semanticview.Source, error) {
-	if strings.TrimSpace(contractsPath) == "" {
-		return nil, nil
-	}
-	return loadSecretsSource(cmd, repo, contractsPath, platformSpecPath, true)
-}
-
-func connectionRecords(ctx context.Context, store runtimemanagedcredentials.Store, source semanticview.Source, args []string) ([]connectionRecord, error) {
+func connectionRecords(ctx context.Context, store runtimemanagedcredentials.Store, args []string) ([]connectionRecord, error) {
 	if len(args) == 1 {
 		key := strings.TrimSpace(args[0])
 		record, ok, err := store.Get(ctx, key)
@@ -451,20 +420,20 @@ func connectionRecords(ctx context.Context, store runtimemanagedcredentials.Stor
 		if !ok {
 			desc = runtimemanagedcredentials.Descriptor{Key: key, Status: runtimemanagedcredentials.StatusUnconnected}
 		}
-		return []connectionRecord{connectionRecordFromDescriptor(desc, ok, nil)}, nil
+		return []connectionRecord{connectionRecordFromDescriptor(desc, ok)}, nil
 	}
-	descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, store, source)
+	descriptors, err := store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]connectionRecord, 0, len(descriptors))
 	for _, desc := range descriptors {
-		out = append(out, connectionRecordFromDescriptor(desc.Descriptor, desc.Present, desc.RequiredBy))
+		out = append(out, connectionRecordFromDescriptor(desc, true))
 	}
 	return out, nil
 }
 
-func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, present bool, requiredBy []runtimemanagedcredentials.Requirement) connectionRecord {
+func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, present bool) connectionRecord {
 	record := connectionRecord{
 		Key:            strings.TrimSpace(desc.Key),
 		Provider:       strings.TrimSpace(desc.Provider),
@@ -485,17 +454,6 @@ func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, p
 	if !desc.UpdatedAt.IsZero() {
 		record.UpdatedAt = desc.UpdatedAt.Format(time.RFC3339)
 	}
-	for _, item := range requiredBy {
-		record.RequiredBy = append(record.RequiredBy, connectionRequirement{
-			Kind:                strings.TrimSpace(item.Kind),
-			Name:                strings.TrimSpace(item.Name),
-			GrantType:           strings.TrimSpace(item.GrantType),
-			Scopes:              append([]string{}, item.Scopes...),
-			GrantModel:          strings.TrimSpace(item.GrantModel),
-			TokenRequest:        managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest),
-			InstallationIDInput: strings.TrimSpace(item.InstallationIDInput),
-		})
-	}
 	return record
 }
 
@@ -514,7 +472,6 @@ func writeConnectionsTable(out io.Writer, records []connectionRecord) {
 			dash(managedcredentialmodel.TokenRequestProfileSummary(record.TokenRequest)),
 			dash(record.Status),
 			dash(record.ExpiresAt),
-			dash(formatConnectionRequirements(record.RequiredBy)),
 		})
 	}
 	writeCLITable(out, cliTable{
@@ -527,46 +484,8 @@ func writeConnectionsTable(out io.Writer, records []connectionRecord) {
 			{Header: "TOKEN_REQUEST"},
 			{Header: "STATUS"},
 			{Header: "EXPIRES_AT"},
-			{Header: "REQUIRED_BY"},
 		},
 		Rows:         rows,
 		EmptyMessage: "No managed connections match the current filters. Add one: swarm connections connect <key>",
 	})
-}
-
-func formatConnectionRequirements(items []connectionRequirement) string {
-	if len(items) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(items))
-	for _, item := range items {
-		item.Kind = strings.TrimSpace(item.Kind)
-		item.Name = strings.TrimSpace(item.Name)
-		if item.Kind == "" || item.Name == "" {
-			continue
-		}
-		details := make([]string, 0, 5)
-		if grantType := strings.TrimSpace(item.GrantType); grantType != "" {
-			details = append(details, "grant_type="+grantType)
-		}
-		if len(item.Scopes) > 0 {
-			details = append(details, "scopes="+strings.Join(item.Scopes, ","))
-		}
-		if grantModel := strings.TrimSpace(item.GrantModel); grantModel != "" {
-			details = append(details, "grant_model="+grantModel)
-		}
-		if summary := managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest); summary != managedcredentialmodel.TokenRequestProfileSummary(managedcredentialmodel.DefaultTokenRequestProfile()) {
-			details = append(details, "token_request="+summary)
-		}
-		if input := strings.TrimSpace(item.InstallationIDInput); input != "" {
-			details = append(details, "installation_id_input="+input)
-		}
-		if len(details) > 0 {
-			parts = append(parts, item.Kind+":"+item.Name+"("+strings.Join(details, ";")+")")
-			continue
-		}
-		parts = append(parts, item.Kind+":"+item.Name)
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, ",")
 }

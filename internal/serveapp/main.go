@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -27,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -55,6 +53,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/devscratch"
@@ -81,51 +80,6 @@ type serveReadiness interface {
 	Store(bool)
 }
 
-type serveStartupRecoveryContainers struct {
-	lifecycle cliapp.ServeWorkspaceLifecycle
-}
-
-type noWorkspaceStartupRecoveryContainers struct{}
-
-func (s serveStartupRecoveryContainers) ManagedContainers(ctx context.Context) ([]runtimestartuprecovery.ManagedContainer, error) {
-	if s.lifecycle == nil {
-		return nil, fmt.Errorf("workspace lifecycle is not configured")
-	}
-	refs, err := s.lifecycle.ManagedResetContainerInventory(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]runtimestartuprecovery.ManagedContainer, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, runtimestartuprecovery.ManagedContainer{
-			Name:  strings.TrimSpace(ref.Name),
-			RunID: strings.TrimSpace(ref.RunID),
-			Kind:  strings.TrimSpace(ref.Kind),
-		})
-	}
-	return out, nil
-}
-
-func (s serveStartupRecoveryContainers) StopManagedContainer(ctx context.Context, name string) error {
-	if s.lifecycle == nil {
-		return fmt.Errorf("workspace lifecycle is not configured")
-	}
-	return s.lifecycle.StopManagedContainer(ctx, name)
-}
-
-func (noWorkspaceStartupRecoveryContainers) ManagedContainers(context.Context) ([]runtimestartuprecovery.ManagedContainer, error) {
-	return nil, nil
-}
-
-func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context, string) error {
-	return fmt.Errorf("workspace lifecycle is not configured")
-}
-
-type processOwnedBundleDeleteFinalizer struct {
-	capability runtimestartupownership.ProcessCapability
-	supervisor *processLifecycleSupervisor
-}
-
 type processOwnedDestructiveResetStore struct {
 	capability runtimestartupownership.ProcessCapability
 }
@@ -134,7 +88,7 @@ func (s processOwnedDestructiveResetStore) ApplyDestructiveResetCleanup(ctx cont
 	if s.capability == nil {
 		return runtimedestructivereset.CleanupResult{}, errors.New("destructive reset requires the process topology capability")
 	}
-	if req.Result.DryRun || !req.Result.IncludeBundles {
+	if req.Result.DryRun || !req.Result.IncludeSourceArtifacts {
 		return s.capability.ApplyDestructiveResetCleanup(ctx, req, nil)
 	}
 	current, exists, err := s.capability.CurrentSourceSet(ctx)
@@ -156,162 +110,24 @@ func (s processOwnedDestructiveResetStore) ApplyDestructiveResetCleanup(ctx cont
 	return s.capability.ApplyDestructiveResetCleanup(ctx, req, topology)
 }
 
-func (f processOwnedBundleDeleteFinalizer) ApplyBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.FinalMutationResult, error) {
-	if f.capability == nil {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete requires the process topology capability")
-	}
-	current, exists, err := f.capability.CurrentSourceSet(ctx)
-	if err != nil {
-		return runtimebundledelete.FinalMutationResult{}, err
-	}
-	if !exists {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete requires an installed source set")
-	}
-	var removed *runtimeagenttopology.SourceCoordinate
-	for _, source := range current.Sources {
-		if source.BundleHash != strings.TrimSpace(req.BundleHash) {
-			continue
-		}
-		if removed != nil {
-			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete source-set identity is ambiguous")
-		}
-		copy := source
-		removed = &copy
-	}
-	if removed == nil {
-		return f.capability.ApplyBundleDeleteFinalMutation(ctx, req, nil)
-	}
-	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(current.Sources)-1)
-	for _, source := range current.Sources {
-		if source.Normalize() != removed.Normalize() {
-			sources = append(sources, source)
-		}
-	}
-	agents := make([]runtimeagenttopology.DesiredAgent, 0, len(current.Agents))
-	for _, agent := range current.Agents {
-		if agent.Source.Normalize() != removed.Normalize() {
-			agents = append(agents, agent)
-		}
-	}
-	next, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
-	if err != nil {
-		return runtimebundledelete.FinalMutationResult{}, err
-	}
-	topology := &runtimeagenttopology.SourceSetCommitRequest{
-		OperationID:      req.OperationID,
-		ExpectedRevision: current.Revision,
-		Plan:             next,
-		RemovedSource:    removed,
-	}
-	var transition *runtime.PreparedRuntimeSourceSetTransition
-	if len(next.Sources) > 0 {
-		if f.supervisor == nil {
-			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete with surviving sources requires runtime context ownership")
-		}
-		f.supervisor.mu.RLock()
-		manager := f.supervisor.runtimeContexts
-		f.supervisor.mu.RUnlock()
-		if manager == nil {
-			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete with surviving sources requires runtime context ownership")
-		}
-		transition, err = manager.PrepareSourceSetTransition(ctx, next)
-		if err != nil {
-			return runtimebundledelete.FinalMutationResult{}, err
-		}
-	}
-	result, commitErr := f.capability.ApplyBundleDeleteFinalMutation(ctx, req, topology)
-	if commitErr != nil {
-		if transition != nil {
-			commitErr = errors.Join(commitErr, transition.Abort())
-		}
-		return runtimebundledelete.FinalMutationResult{}, commitErr
-	}
-	if transition != nil {
-		if err := transition.Commit(ctx, f.capability); err != nil {
-			return result, err
-		}
-	}
-	return result, nil
-}
-
-func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	if f.capability == nil {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires the process topology capability")
-	}
-	if f.supervisor == nil {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires process lifecycle ownership")
-	}
-	f.supervisor.operationMu.Lock()
-	defer f.supervisor.operationMu.Unlock()
-
-	current, exists, err := f.capability.CurrentSourceSet(ctx)
-	if err != nil {
-		return runtimebundledelete.Result{}, err
-	}
-	if !exists {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires an installed source set")
-	}
-	for _, source := range current.Sources {
-		if source.BundleHash == strings.TrimSpace(req.BundleHash) {
-			return runtimebundledelete.Result{}, errors.New("bundle delete replay source is still current")
-		}
-	}
-	result, err := f.capability.ReplayBundleDeleteResult(ctx, req)
-	if err != nil {
-		return runtimebundledelete.Result{}, err
-	}
-	if len(current.Sources) == 0 {
-		f.supervisor.mu.Lock()
-		defer f.supervisor.mu.Unlock()
-		if f.supervisor.currentRT != nil {
-			return runtimebundledelete.Result{}, errors.New("bundle delete replay found a process runtime attached to an empty source set")
-		}
-		f.supervisor.currentBundleSourceFact = runtimecorrelation.BundleSourceFact{}
-		if f.supervisor.ready != nil {
-			f.supervisor.ready.Store(false)
-		}
-		return result, nil
-	}
-
-	f.supervisor.mu.RLock()
-	manager := f.supervisor.runtimeContexts
-	f.supervisor.mu.RUnlock()
-	if manager == nil {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
-	}
-	var transition *runtime.PreparedRuntimeSourceSetTransition
-	transition, err = manager.PreparePendingSourceSetTransition(ctx, current)
-	if err != nil {
-		return runtimebundledelete.Result{}, err
-	}
-	if transition != nil {
-		if err := transition.Commit(ctx, f.capability); err != nil {
-			return runtimebundledelete.Result{}, err
-		}
-	}
-	if err := f.supervisor.attachPrimaryRuntime(ctx, manager); err != nil {
-		return runtimebundledelete.Result{}, fmt.Errorf("publish bundle delete replay process runtime: %w", err)
-	}
-	return result, nil
-}
-
 type serveRuntimeBundle struct {
-	module           runtimepipeline.WorkflowModule
-	bundle           *runtimecontracts.WorkflowContractBundle
-	source           semanticview.Source
-	contractsRoot    string
-	platformSpecPath string
-	runningSpecPath  string
-	bootIdentity     runtimecontracts.BundleIdentity
-	bundleSourceFact runtimecorrelation.BundleSourceFact
-	dbLoaded         bool
-	cleanup          func() error
+	module             runtimepipeline.WorkflowModule
+	bundle             *runtimecontracts.WorkflowContractBundle
+	source             semanticview.Source
+	sourceProjection   *sourceartifact.RuntimeProjection
+	sourceRoot         string
+	platformSpecPath   string
+	runningSpecPath    string
+	bootIdentity       runtimecontracts.BundleIdentity
+	sourceArtifactFact runtimecorrelation.SourceArtifactFact
+	dbLoaded           bool
+	cleanup            func() error
 }
 
 type serveRuntimeBundleContext struct {
 	loaded                     serveRuntimeBundle
 	stateStoreSummary          string
-	bundleSourceFact           runtimecorrelation.BundleSourceFact
+	sourceArtifactFact         runtimecorrelation.SourceArtifactFact
 	bootIdentity               runtimecontracts.BundleIdentity
 	workspaceBackend           cliapp.WorkspaceBackendSelection
 	workspaces                 cliapp.ServeWorkspaceLifecycle
@@ -344,15 +160,14 @@ type serveRuntimeBundleContextRequest struct {
 	EnableToolGateway      bool
 	ToolGatewayBinding     toolgateway.Binding
 	UseStartupRecovery     bool
-	RequireBundleScopeName bool
 	RuntimeInstanceID      string
 	ProcessWorkOwner       *worklifetime.Process
 	NoticePresentation     runtimetools.InformationalNoticePresentationSink
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
-	if b.dbLoaded && b.bundleSourceFact.BundleHash() != "" {
-		return b.bundleSourceFact.BundleHash()
+	if b.dbLoaded && b.sourceArtifactFact.BundleHash() != "" {
+		return b.sourceArtifactFact.BundleHash()
 	}
 	return strings.TrimSpace(b.bootIdentity.BundleHash)
 }
@@ -375,7 +190,7 @@ func servePinnedBundleHashes(bundles []serveRuntimeBundle) []string {
 	out := []string{}
 	for _, bundle := range bundles {
 		if bundle.dbLoaded {
-			if hash := bundle.bundleSourceFact.BundleHash(); hash != "" {
+			if hash := bundle.sourceArtifactFact.BundleHash(); hash != "" {
 				out = append(out, hash)
 			}
 		}
@@ -388,8 +203,8 @@ func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeage
 	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(contexts))
 	agents := []runtimeagenttopology.DesiredAgent{}
 	for _, contextDef := range contexts {
-		bundleHash, bundleSource := contextDef.bundleSourceFact.StorageValues()
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+		bundleHash := contextDef.sourceArtifactFact.BundleHash()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 		if contextDef.runtime == nil || contextDef.runtime.Manager == nil {
 			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("compile source topology %s: runtime manager is required", bundleHash)
 		}
@@ -444,7 +259,7 @@ func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string 
 	return strings.Join(parts, "; ")
 }
 
-func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions) string {
+func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) string {
 	parts := []string{"config=" + strings.TrimSpace(configDetail)}
 	hashes, _ := cliapp.ServeBundleHashes(opts)
 	if len(hashes) == 1 {
@@ -452,12 +267,12 @@ func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLIContract
 	} else if len(hashes) > 1 {
 		parts = append(parts, "bundle_hashes="+strings.Join(hashes, ","))
 	} else {
-		parts = append(parts, "contracts="+filepath.Clean(resolvedPaths.ContractsPath))
+		parts = append(parts, "source="+filepath.Clean(resolvedPaths.SourceRoot))
 	}
 	return strings.Join(parts, " ")
 }
 
-func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions) (string, error) {
+func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) (string, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return "", err
@@ -468,7 +283,11 @@ func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLIContractPlatformSpe
 	return resolvedPaths.PlatformSpecPath, nil
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
+type sourceArtifactReader interface {
+	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+}
+
+func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return nil, err
@@ -477,10 +296,10 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, catalog runbundle
 		out := make([]serveRuntimeBundle, 0, len(hashes))
 		runningPlatformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
 		if err != nil {
-			return nil, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
+			return nil, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
 		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, catalog, hash, runningPlatformSpecPath, packBases)
+			loaded, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hash, runningPlatformSpecPath, packBases)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -493,14 +312,14 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, catalog runbundle
 		}
 		return out, nil
 	}
-	loaded, err := loadServeRuntimeBundle(ctx, repo, catalog, resolvedPaths, opts, packBases)
+	loaded, err := loadServeRuntimeBundle(ctx, repo, artifacts, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
 	}
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -511,11 +330,11 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, catalog runbundle.
 	if len(hashes) == 1 {
 		runningPlatformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
 		if err != nil {
-			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
+			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
 		}
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, catalog, hashes[0], runningPlatformSpecPath, packBases)
+		return loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hashes[0], runningPlatformSpecPath, packBases)
 	}
-	contractsRoot, err := cliapp.NormalizeContractsRoot(resolvedPaths.ContractsPath)
+	sourceRoot, err := cliapp.NormalizeSourceRoot(resolvedPaths.SourceRoot)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
@@ -523,7 +342,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, catalog runbundle.
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, contractsRoot, resolvedPaths.PlatformSpecPath, packBase)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, resolvedPaths.PlatformSpecPath, packBase)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
@@ -531,93 +350,98 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, catalog runbundle.
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
 	}
+	sourceProjection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("materialize runtime source projection: %w", err)
+	}
 	return serveRuntimeBundle{
 		module:           module,
 		bundle:           bundle,
 		source:           semanticview.Wrap(bundle),
-		contractsRoot:    contractsRoot,
+		sourceProjection: sourceProjection,
+		sourceRoot:       sourceRoot,
 		platformSpecPath: resolvedPaths.PlatformSpecPath,
 		runningSpecPath:  resolvedPaths.PlatformSpecPath,
 		bootIdentity:     bootIdentity,
+		cleanup:          sourceProjection.Release,
 	}, nil
 }
 
-func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
-	if catalog == nil {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+	if artifacts == nil {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected source artifact store")
 	}
 	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	record, err := catalog.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
-	if errors.Is(err, runbundle.ErrBundleNotFound) {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in bundles", bundleHash)
+	record, err := artifacts.GetSourceArtifact(ctx, bundleHash)
+	if errors.Is(err, sourceartifact.ErrNotFound) {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in source_artifacts", bundleHash)
 	}
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	runtimeSource, err := runtimecontracts.LoadBundleCatalogRuntimeSource(repo, runtimecontracts.BundleCatalogRuntimeLoadRequest{
-		BundleHash:              record.BundleHash,
-		ContentYAML:             record.ContentYAML,
-		DataBlob:                record.DataBlob,
-		RunningPlatformSpecPath: strings.TrimSpace(runningPlatformSpecPath),
-		PlatformPackBases:       packBases,
-		AdmitPackInventory:      packadmission.AdmitInventory,
+	artifact, err := record.Decode()
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: decode source artifact %s: %w", bundleHash, err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, strings.TrimSpace(runningPlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBases:  packBases,
+		AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	cleanupOnError := true
-	defer func() {
-		if cleanupOnError {
-			_ = runtimeSource.Cleanup()
-		}
-	}()
-	module, source, err := cliapp.NewSwarmWorkflowModuleForBundle(runtimeSource.Bundle)
+	module, source, err := cliapp.NewSwarmWorkflowModuleForBundle(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	bootIdentity, err := runtimecontracts.BootBundleIdentity(runtimeSource.Bundle)
+	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute DB-loaded boot bundle identity: %w", err)
 	}
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(runtimeSource.BundleHash)
+	sourceProjection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
 	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("materialize DB-loaded runtime source projection: %w", err)
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		_ = sourceProjection.Release()
 		return serveRuntimeBundle{}, fmt.Errorf("construct DB-loaded bundle source fact: %w", err)
 	}
-	cleanupOnError = false
 	return serveRuntimeBundle{
-		module:           module,
-		bundle:           runtimeSource.Bundle,
-		source:           source,
-		contractsRoot:    runtimeSource.ContractsRoot,
-		platformSpecPath: runtimeSource.PlatformSpecPath,
-		runningSpecPath:  strings.TrimSpace(runningPlatformSpecPath),
-		bootIdentity:     bootIdentity,
-		bundleSourceFact: fact,
-		dbLoaded:         true,
-		cleanup:          runtimeSource.Cleanup,
+		module:             module,
+		bundle:             bundle,
+		source:             source,
+		sourceProjection:   sourceProjection,
+		sourceRoot:         ".",
+		platformSpecPath:   strings.TrimSpace(runningPlatformSpecPath),
+		runningSpecPath:    strings.TrimSpace(runningPlatformSpecPath),
+		bootIdentity:       bootIdentity,
+		sourceArtifactFact: fact,
+		dbLoaded:           true,
+		cleanup:            sourceProjection.Release,
 	}, nil
 }
 
-func prepareLoadedServeBundleSource(ctx context.Context, persistence serveRuntimePersistence, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
+func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRuntimePersistence, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.SourceArtifactFact, error) {
 	if loaded.dbLoaded {
 		if dev {
-			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
 		}
-		fact := loaded.bundleSourceFact
-		if err := fact.Validate(); err != nil || !fact.IsPersisted() {
-			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("DB-loaded serve bundle source fact must be persisted with bundle_hash")
+		fact := loaded.sourceArtifactFact
+		if err := fact.Validate(); err != nil {
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("DB-loaded serve source artifact fact requires a canonical bundle_hash")
 		}
 		return fact, nil
 	}
-	if prepared := loaded.bundleSourceFact; prepared.BundleHash() != "" {
+	if prepared := loaded.sourceArtifactFact; prepared.BundleHash() != "" {
 		if err := prepared.Validate(); err != nil {
-			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("validate prepared serve bundle source fact: %w", err)
+			return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("validate prepared serve bundle source fact: %w", err)
 		}
 		return prepared, nil
 	}
-	return prepareServeBundleSource(ctx, persistence.bundleWriter, loaded.bundle)
+	return prepareServeSourceArtifact(ctx, persistence.sourceWriter, loaded.bundle)
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
@@ -630,12 +454,12 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			return serveRuntimeBundleContext{}, err
 		}
 	}
-	bundleSourceFact, err := prepareLoadedServeBundleSource(req.Ctx, req.Stores, loaded, req.Options.Dev)
+	sourceArtifactFact, err := prepareLoadedServeSourceArtifact(req.Ctx, req.Stores, loaded, req.Options.Dev)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("prepare bundle source: %w", err)
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
-		WorkflowModule: loaded.module, BundleSourceFact: bundleSourceFact,
+		WorkflowModule: loaded.module, SourceArtifactFact: sourceArtifactFact,
 		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
 		ChannelPlans:           req.ChannelPlans,
 	})
@@ -644,18 +468,16 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	loaded.source = projection.Source()
 	bootIdentity := loaded.bootIdentity
-	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
-	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.workspace, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
+	bootIdentity.BundleHash = sourceArtifactFact.BundleHash()
+	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.workspace, req.Config, loaded.sourceProjection, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
 	if workspaces == nil && !req.WorkspaceBackend.NoWorkspace {
 		return serveRuntimeBundleContext{}, fmt.Errorf("workspace lifecycle is not configured")
 	}
-	if req.RequireBundleScopeName {
-		if scoper, ok := workspaces.(interface{ SetBundleScope(string) }); ok && scoper != nil {
-			scoper.SetBundleScope(bundleSourceFact.BundleHash())
-		}
+	if workspaces != nil {
+		workspaces.SetBundleScope(sourceArtifactFact.BundleHash())
 	}
 	if workspaces != nil {
 		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores); err != nil {
@@ -701,7 +523,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
-	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.contractsRoot)
+	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("load scenario derivation profiles: %w", err)
 	}
@@ -715,7 +537,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		WorkspaceLifecycle:               workspaces,
 		EnableToolGateway:                req.EnableToolGateway,
 		ToolGatewayBinding:               req.ToolGatewayBinding,
-		BundleSourceFact:                 bundleSourceFact,
+		SourceArtifactFact:               sourceArtifactFact,
 		RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
 		ProcessWorkOwner:                 req.ProcessWorkOwner,
 		Credentials:                      req.Credentials,
@@ -767,7 +589,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	return serveRuntimeBundleContext{
 		loaded:                    loaded,
 		stateStoreSummary:         stateStoreSummary,
-		bundleSourceFact:          bundleSourceFact,
+		sourceArtifactFact:        sourceArtifactFact,
 		bootIdentity:              bootIdentity,
 		workspaceBackend:          req.WorkspaceBackend,
 		workspaces:                workspaces,
@@ -898,8 +720,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if apiAuth.UsesDefaultLoopbackToken() {
 		presenter.recordDefaultAPITokenWarning()
 	}
-	resolvedPaths, err := cliapp.ResolveCLIContractPlatformSpecPaths(repo, cliapp.CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.ContractsPath,
+	resolvedPaths, err := cliapp.ResolveCLISourcePlatformSpecPaths(repo, cliapp.CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.SourceRoot,
 		PlatformSpecPath: opts.PlatformSpecPath,
 		ConfigPath:       opts.ConfigPath,
 	})
@@ -1039,8 +861,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	channelOnboardingStore := stores.ChannelOnboarding()
-	bundleRuntimeCatalog, _ := stores.BundleRuntimeCatalog()
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, bundleRuntimeCatalog, resolvedPaths, opts, platformPackBases)
+	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
 	if err != nil {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
@@ -1054,7 +875,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	bundleSourcesCleaned := false
-	cleanupLoadedBundleSources := func() error {
+	cleanupLoadedSourceArtifacts := func() error {
 		var cleanupErr error
 		for _, loaded := range loadedBundles {
 			if loaded.cleanup != nil {
@@ -1067,7 +888,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		if bundleSourcesCleaned {
 			return
 		}
-		if err := cleanupLoadedBundleSources(); err != nil {
+		if err := cleanupLoadedSourceArtifacts(); err != nil {
 			presenter.cleanupFailure("bundle source cleanup", err)
 		}
 	}()
@@ -1130,12 +951,12 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 	stateStoreSummaries = summaries
 	for i := range loadedBundles {
-		fact, err := prepareLoadedServeBundleSource(ctx, runtimePersistence, loadedBundles[i], opts.Dev)
+		fact, err := prepareLoadedServeSourceArtifact(ctx, runtimePersistence, loadedBundles[i], opts.Dev)
 		if err != nil {
-			presenter.fail(4, "bundle_source", err)
+			presenter.fail(4, "source_artifact", err)
 			return 1
 		}
-		loadedBundles[i].bundleSourceFact = fact
+		loadedBundles[i].sourceArtifactFact = fact
 	}
 	loadedBundle = loadedBundles[0]
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
@@ -1207,7 +1028,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 				shutdownErr = errors.Join(shutdownErr, cleanupErr)
 			}
 		}
-		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
+		shutdownErr = errors.Join(shutdownErr, cleanupLoadedSourceArtifacts())
 		bundleSourcesCleaned = true
 		cancelOwnershipWatch()
 		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
@@ -1252,7 +1073,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			EnableToolGateway:      i == 0,
 			ToolGatewayBinding:     contextToolGatewayBinding,
 			UseStartupRecovery:     len(loadedBundles) == 1,
-			RequireBundleScopeName: len(loadedBundles) > 1,
 			RuntimeInstanceID:      runtimeInstanceID,
 			ProcessWorkOwner:       processWorkOwner,
 			NoticePresentation:     noticePresentation,
@@ -1302,9 +1122,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 3
 	}
 	for i := range runtimeContexts {
-		_, bundleSource := runtimeContexts[i].bundleSourceFact.StorageValues()
 		grant, grantErr := processCapability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-			BundleHash: runtimeContexts[i].bundleSourceFact.BundleHash(), BundleSource: bundleSource,
+			BundleHash:        runtimeContexts[i].sourceArtifactFact.BundleHash(),
 			RuntimeInstanceID: runtimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: processSourceSet.Revision,
 		})
 		if grantErr == nil {
@@ -1316,7 +1135,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	source = primaryContext.loaded.source
-	contractsRoot := primaryContext.loaded.contractsRoot
 	bootBundleIdentity := primaryContext.bootIdentity
 	workspaces = primaryContext.workspaces
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
@@ -1364,12 +1182,12 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recovery, available := stores.StartupRecovery(); available {
-		if exitCode := runServeUnavailableBundleStartupRecovery(ctx, recovery, stores.WorkspaceLookup(), cfg, loadedBundle, source, mountSources, primaryWorkspaceBackend, presenter); exitCode != 0 {
+		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, presenter); exitCode != 0 {
 			return exitCode
 		}
 	}
-	if err := enforceServeBundleMatchAdmissionForHashes(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
-		presenter.fail(5, "bundle_match_admission", err)
+	if err := enforceServePinnedBundleAdmissionForHashes(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
+		presenter.fail(5, "pinned_bundle_admission", err)
 		return 3
 	}
 	standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
@@ -1399,18 +1217,16 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor = newProcessLifecycleSupervisor(runtimePersistence, ready, rt)
+	supervisor = newProcessLifecycleSupervisor(ready, rt)
 	supervisor.SetProcessCapability(processCapability)
 	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
-	supervisor.runtimeLifetime = ctx
-	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact)
+	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.sourceArtifactFact)
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
 		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
 		LoadedBundle:            loadedBundle,
 		Source:                  source,
-		ContractsRoot:           contractsRoot,
 		Config:                  cfg,
 		Workspaces:              workspaces,
 		Credentials:             credentialStore,
@@ -1432,7 +1248,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	readyFn := func() bool { return ready.Load() }
 	publication := apiv1.EventPublicationOptions{
 		ExecutionPosture: rt.ExecutionPosture,
-		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
+		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
 		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
 		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
@@ -1502,22 +1318,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),
-		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: apiStoreCaps.Data}),
-		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
-		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{
-			RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath,
-			PlatformPackBases: platformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
-			Register: apiStoreCaps.BundleRegister, Idempotency: idempotency,
-		}),
-		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: idempotency}),
+		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPI()}),
-		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: idempotency, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
+		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: idempotency, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, SourceArtifact: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
 		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: idempotency}),
@@ -1810,7 +1619,7 @@ func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecy
 		}
 		inventory := contextDef.loaded.bundle.PackInventory
 		fact := serveLifecyclePackFact{
-			BundleHash:      contextDef.bundleSourceFact.BundleHash(),
+			BundleHash:      contextDef.sourceArtifactFact.BundleHash(),
 			BaseMode:        inventory.BaseSelectionMode(),
 			BaseDigest:      inventory.BaseDigest(),
 			BaseDirectories: inventory.BaseDirectories(),
@@ -1978,8 +1787,7 @@ func reconcileServeRuntimeStandingTargets(
 		activations = append(activations, runtime.StandingActivation{
 			BundleHash:          targets[i].BundleHash,
 			ServiceID:           reconciliation.ServiceID,
-			PackageKey:          reconciliation.PackageKey,
-			FlowID:              reconciliation.FlowID,
+			FlowPath:            reconciliation.FlowPath,
 			RunID:               reconciliation.RunID,
 			Generation:          reconciliation.Generation,
 			PublicationSequence: reconciliation.PublicationSequence,
@@ -2288,10 +2096,9 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			return nil, err
 		}
 		planned = append(planned, runtime.BundleContext{
-			BundleSourceFact:           contextDef.bundleSourceFact,
+			SourceArtifactFact:         contextDef.sourceArtifactFact,
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
-			ContractsRoot:              contextDef.loaded.contractsRoot,
 			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 			Runtime:                    contextDef.runtime,
 			WorkOwner:                  contextDef.runtime.WorkOccurrence(),
@@ -2409,31 +2216,13 @@ func closeServeRuntime(ctx context.Context, supervisor *processLifecycleSupervis
 	return errors.Join(shutdownErr, cleanupErr)
 }
 
-func runServeUnavailableBundleStartupRecovery(
+func runServeSourceArtifactStartupRecovery(
 	ctx context.Context,
 	recoveryStore storeselected.StartupRecovery,
-	workspaceLookup workspace.Lookup,
-	cfg *config.Config,
-	loaded serveRuntimeBundle,
-	source semanticview.Source,
-	mountSources cliapp.WorkspaceMountSources,
-	workspaceBackend cliapp.WorkspaceBackendSelection,
 	presenter *serveLifecyclePresenter,
 ) int {
-	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(workspaceLookup, cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
-	if err != nil {
-		presenter.fail(5, "recovery_workspace", err)
-		return 1
-	}
-	recoveryContainers := runtimestartuprecovery.ManagedContainerOwner(serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces})
-	if recoveryWorkspaces == nil {
-		recoveryContainers = noWorkspaceStartupRecoveryContainers{}
-	}
-	recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
+	_, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
 		AvailabilityReader: recoveryStore.Availability(),
-		CleanupStore:       recoveryStore.Cleanup(),
-		Containers:         recoveryContainers,
-		RequestedAt:        time.Now().UTC(),
 	})
 	if err != nil {
 		presenter.fail(5, "startup_recovery", err)
@@ -2441,17 +2230,6 @@ func runServeUnavailableBundleStartupRecovery(
 			return serveExitDataIntegrity
 		}
 		return 3
-	}
-	if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
-		presenter.recordClosedUnavailableWork()
-		log.Printf("unavailable bundle startup recovery complete: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
-			len(recovery.Cleanup.Runs),
-			len(recovery.Cleanup.Deliveries),
-			len(recovery.Cleanup.Sessions),
-			len(recovery.Cleanup.Timers),
-			len(recovery.StoppedContainers),
-			recovery.Cleanup.PipelineReceiptCount,
-		)
 	}
 	return 0
 }
@@ -2549,10 +2327,9 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				}
 			}
 			if err := manager.Register(runtime.BundleContext{
-				BundleSourceFact:           contextDef.bundleSourceFact,
+				SourceArtifactFact:         contextDef.sourceArtifactFact,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
-				ContractsRoot:              contextDef.loaded.contractsRoot,
 				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 				Runtime:                    contextDef.runtime,
 				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
@@ -2570,7 +2347,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				hash    string
 				runtime *runtime.Runtime
 			}{
-				hash:    contextDef.bundleSourceFact.BundleHash(),
+				hash:    contextDef.sourceArtifactFact.BundleHash(),
 				runtime: contextDef.runtime,
 			})
 		} else if len(targets) > 0 {
@@ -2646,7 +2423,7 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 			continue
 		}
 		if manager != nil {
-			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash(), runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
+			result := manager.DeactivateBundleHashWithOptions(contextDef.sourceArtifactFact.BundleHash(), runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 			continue
 		}
@@ -2691,38 +2468,16 @@ func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (stri
 	return store.DSNFromConfig(cfg, password), nil
 }
 
-func enforceServeBundleMatchAdmission(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
-	var pinned []string
-	if hash := strings.TrimSpace(pinnedBundleHash); hash != "" {
-		pinned = []string{hash}
-	}
-	return enforceServeBundleMatchAdmissionForHashes(ctx, availability, bootIdentity, requireMatch, pinned)
-}
-
-func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
+func enforceServePinnedBundleAdmissionForHashes(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, pinnedBundleHashes []string) error {
 	bootIdentity = strings.TrimSpace(bootIdentity)
 	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
-	enforceActiveAvailability := requireMatch || len(pinnedBundleHashes) > 0
-	if enforceActiveAvailability && bootIdentity == "" {
+	if len(pinnedBundleHashes) == 0 {
+		return nil
+	}
+	if bootIdentity == "" {
 		return fmt.Errorf("boot bundle identity is required")
 	}
 	if availability == nil {
-		return nil
-	}
-	if enforceActiveAvailability {
-		conflicts, err := availability.ActiveNonStandingRunBundleAvailabilityConflicts(ctx)
-		if err != nil {
-			return err
-		}
-		if len(conflicts) > 0 {
-			details := make([]string, 0, len(conflicts))
-			for _, conflict := range conflicts {
-				details = append(details, conflict.DetailString())
-			}
-			return fmt.Errorf("active non-standing run bundle availability conflict: boot bundle %s cannot resume %d active non-standing run(s): %s", bootIdentity, len(conflicts), strings.Join(details, "; "))
-		}
-	}
-	if len(pinnedBundleHashes) == 0 {
 		return nil
 	}
 	mismatches, err := activeNonStandingRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)

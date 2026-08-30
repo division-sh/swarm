@@ -14,16 +14,18 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const genericScheduleConsumerTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const genericScheduleConsumerTestBundleHash = sourceartifactfixture.BundleHash
 
 type genericScheduleLifecycleConsumerStore interface {
 	runtimegenericschedule.Store
@@ -205,14 +207,22 @@ type runControlTimerWorkflowModule struct {
 func (m runControlTimerWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 
 func runControlTimerBundle() *runtimecontracts.WorkflowContractBundle {
+	timers := []runtimecontracts.WorkflowTimerContract{{
+		ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
+		FlowID: ".",
+		Owner:  "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+		StartOn: "state:waiting", Delay: "1h",
+	}}
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "run-stop-timer-proof", Mode: runtimecontracts.FlowModeStatic},
+	}
 	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "run-stop-timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
-		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: "1h",
-		}},
-	}}
+		Timers: timers,
+	}, FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+	}, FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema}}
 }
 
 func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *testing.T) {
@@ -271,7 +281,7 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			}
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "run-stop-timer-proof", WorkflowVersion: "1",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				EntityType: "test_entity",
 			}, enteredAt); err != nil {
@@ -279,6 +289,14 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, runtimeflowidentity.RouteForInstancePath(runID)); err != nil {
 				t.Fatal(err)
+			}
+			activeQuery := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND task_type = 'workflow_timer' AND status = 'active'`
+			if _, postgres := selected.(*PostgresStore); postgres {
+				activeQuery = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'`
+			}
+			var activeWorkflowTimers int
+			if err := db.QueryRowContext(ctx, activeQuery, runID).Scan(&activeWorkflowTimers); err != nil || activeWorkflowTimers != 1 {
+				t.Fatalf("armed workflow timers=%d err=%v, want one exact run timer", activeWorkflowTimers, err)
 			}
 
 			controller := runtimeruncontrol.NewController(selected.(runtimeruncontrol.Store), nil, runtimeruncontrol.Options{

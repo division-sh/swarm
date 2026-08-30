@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -36,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,6 +63,15 @@ func fanOutPayloadSource(t testing.TB, eventTypes ...string) semanticview.Source
 	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{Events: events})
 }
 
+func mustFanOutDeclaration(t testing.TB, ref runtimecontracts.FanOutElementRef) identity.DeclarationIdentity {
+	t.Helper()
+	declaration, err := ref.DeclarationIdentity()
+	if err != nil {
+		t.Fatalf("fan-out declaration identity: %v", err)
+	}
+	return declaration
+}
+
 func fanOutEntitySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
@@ -86,20 +95,27 @@ func fanOutEntitySource(t testing.TB) semanticview.Source {
 func fanOutSourceWithBundleIdentity(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	packageFile := filepath.Join(root, "package.yaml")
-	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(packageFile, []byte("name: engine-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: engine-fan-out-test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
 		t.Fatal(err)
 	}
-	bundle.Paths = runtimecontracts.ContractPaths{
-		ContractsRoot:      root,
-		ProjectPackageFile: packageFile,
-		PlatformSpecFile:   platformFile,
-	}
+	bundle.SourceArtifact = artifact
 	return semanticview.Wrap(bundle)
+}
+
+func mustEngineSourceArtifact(t testing.TB, root string) *sourceartifact.AdmittedSourceArtifact {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: engine-test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }
 
 func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runtimecontracts.PolicyModule) {
@@ -153,13 +169,13 @@ func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runt
 		},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
 		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		SourceArtifact: mustEngineSourceArtifact(t, root),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -238,13 +254,13 @@ func sourceWithPythonRendererSource(t *testing.T, source []byte) (semanticview.S
 		},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "render"},
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"python_renderer": module,
 		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		SourceArtifact: mustEngineSourceArtifact(t, root),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -349,7 +365,7 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 
 func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 	component := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold", Mode: "template", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Path:  "component-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeTemplate,
@@ -363,7 +379,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		},
 	}
 	repo := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "repo-scaffold"},
 		Path:  "repo-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -379,10 +395,10 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		},
 	}
 	operating := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Path:  "operating",
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{component, repo, operating}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{component, repo, operating}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffolded":          component.Events["component.scaffolded"],
@@ -836,8 +852,8 @@ func TestExecutionRequestStateAddressUsesExplicitExecutionFlowForRootDeclaration
 	if got := address.FlowID.String(); got != "root-workflow" {
 		t.Fatalf("state address flow_id = %q, want explicit root execution flow", got)
 	}
-	if req.Node.FlowID() != "" {
-		t.Fatalf("root declaration flow_id = %q, want empty declaration coordinate", req.Node.FlowID())
+	if req.Node.FlowPath() != "." {
+		t.Fatalf("root declaration flow_path = %q, want root declaration coordinate", req.Node.FlowPath())
 	}
 }
 
@@ -1620,14 +1636,13 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`rules:
-  - element_id: 00000000-0000-4000-8000-000000000425
-    id: attempted-rule
+  - id: attempted-rule
     condition: evaluator.failure
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
 	node := testRootExecutableNode(t, "scoring-node")
-	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "score.dimension_complete", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1650,33 +1665,32 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 	if fact.Context() != handlerselection.ContextRules || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "attempted-rule" {
 		t.Fatalf("failed evaluation fact = %#v", fact)
 	}
-	if got := fact.Ref().ElementID().String(); got != "00000000-0000-4000-8000-000000000425" {
-		t.Fatalf("attempted element ID = %q", got)
+	if got := fact.Ref().SemanticPath(); got != `nodes["scoring-node"].handlers["score.dimension_complete"].rules[0]` {
+		t.Fatalf("attempted declaration path = %q", got)
 	}
 }
 
 func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		field       string
-		elementID   string
-		wantContext handlerselection.Context
+		name         string
+		field        string
+		semanticPath string
+		wantContext  handlerselection.Context
 	}{
-		{name: "rules", field: "rules", elementID: "00000000-0000-4000-8000-000000000427", wantContext: handlerselection.ContextRules},
-		{name: "on_complete", field: "on_complete", elementID: "00000000-0000-4000-8000-000000000428", wantContext: handlerselection.ContextOnComplete},
+		{name: "rules", field: "rules", semanticPath: `nodes["unsupported-condition-node"].handlers["score.dimension_complete"].rules[0]`, wantContext: handlerselection.ContextRules},
+		{name: "on_complete", field: "on_complete", semanticPath: `nodes["unsupported-condition-node"].handlers["score.dimension_complete"].on_complete[0]`, wantContext: handlerselection.ContextOnComplete},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler runtimecontracts.SystemNodeEventHandler
 			raw := fmt.Sprintf(`%s:
-  - element_id: %s
-    id: unsupported-condition
+  - id: unsupported-condition
     condition: unsupported.condition
-`, tc.field, tc.elementID)
+`, tc.field)
 			if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
 				t.Fatal(err)
 			}
 			node := testRootExecutableNode(t, "unsupported-condition-node")
-			qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+			qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "score.dimension_complete", handler)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1698,8 +1712,8 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 			if fact.Context() != tc.wantContext || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "unsupported-condition" {
 				t.Fatalf("unsupported evaluation fact = %#v", fact)
 			}
-			if got := fact.Ref().ElementID().String(); got != tc.elementID {
-				t.Fatalf("attempted element ID = %q, want %q", got, tc.elementID)
+			if got := fact.Ref().SemanticPath(); got != tc.semanticPath {
+				t.Fatalf("attempted declaration path = %q, want %q", got, tc.semanticPath)
 			}
 		})
 	}
@@ -1786,7 +1800,7 @@ func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t 
 		},
 	}
 	node := testRootExecutableNode(t, "scoring-node")
-	qualified, err := completeSemanticFixtureHandlerRuleIdentity(node, handler)
+	qualified, err := completeSemanticFixtureHandlerRuleIdentity(node, "score.dimension_complete", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2140,8 +2154,8 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
 		t.Fatalf("join completion selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := result.HandlerRuleSelection.Ref().ElementID().String(); got != "445e8fbd-e8f7-4b4b-81f0-08ebec2e1b70" {
-		t.Fatalf("join completion element ID = %q", got)
+	if got := result.HandlerRuleSelection.Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_complete[0]` {
+		t.Fatalf("join completion declaration path = %q", got)
 	}
 }
 
@@ -2202,8 +2216,8 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
 	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinTimeout || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
 		t.Fatalf("join timeout selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := result.HandlerRuleSelection.Ref().ElementID().String(); got != "cc68292e-a6af-47bc-8785-472465db0d81" {
-		t.Fatalf("join timeout element ID = %q", got)
+	if got := result.HandlerRuleSelection.Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.timeout[0]` {
+		t.Fatalf("join timeout declaration path = %q", got)
 	}
 }
 
@@ -4492,7 +4506,6 @@ func TestExecutor_FanOutDeliveryBarrierTriggerAndCompletionUseDisjointExecutionP
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
-  element_id: a1111111-1111-4111-8111-111111111111
   items_from: payload.items
   as: fan_item
   identity: fan_item
@@ -4503,9 +4516,8 @@ fan_out:
 join:
   id: all-items-delivered
   members:
-    from_fan_out: a1111111-1111-4111-8111-111111111111
+    from_fan_out: true
   on_complete:
-    element_id: b1111111-1111-4111-8111-111111111111
     emit:
       event: batch.completed
       fields:
@@ -4514,7 +4526,7 @@ join:
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
-	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.requested", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4543,7 +4555,7 @@ join:
 	}}
 	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
 		node, "batch.requested", qualified.Join.EffectiveID(),
-		plans[0].Ref.ElementRef.PackageKey, plans[0].Ref.ElementRef.ElementID,
+		mustFanOutDeclaration(t, plans[0].Ref.ElementRef),
 		plans[0].Ref.BundleHash, plans[0].Ref.SemanticDigest,
 	)
 	if err != nil {
@@ -4625,7 +4637,6 @@ func TestExecutor_FanOutDeliveryBarrierStaleGenerationIsMutationFreeDiscard(t *t
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
-  element_id: a1111111-1111-4111-8111-111111111111
   items_from: payload.items
   as: fan_item
   identity: fan_item
@@ -4634,16 +4645,15 @@ fan_out:
 join:
   id: all-items-delivered
   members:
-    from_fan_out: a1111111-1111-4111-8111-111111111111
+    from_fan_out: true
   on_complete:
-    element_id: b1111111-1111-4111-8111-111111111111
     advances_to: complete
     emit:
       event: batch.completed
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
-	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.requested", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4668,8 +4678,8 @@ join:
 		Spec: *qualified.Join, FanOut: runtimecontracts.WorkflowFanOutDeliveryJoinPlan{FanOut: plan.Ref},
 	}}
 	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
-		node, "batch.requested", qualified.Join.EffectiveID(), plan.Ref.ElementRef.PackageKey,
-		plan.Ref.ElementRef.ElementID, plan.Ref.BundleHash, plan.Ref.SemanticDigest,
+		node, "batch.requested", qualified.Join.EffectiveID(), mustFanOutDeclaration(t, plan.Ref.ElementRef),
+		plan.Ref.BundleHash, plan.Ref.SemanticDigest,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -4732,19 +4742,14 @@ join:
 
 func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	node := testRootExecutableNode(t, "fan-out-node")
-	elementID, err := contractelementidentity.ParseContractElementID("418dadf9-0ebd-418d-a904-53d3a849b7df")
-	if err != nil {
-		t.Fatal(err)
-	}
 	handler := runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-		ElementID: elementID,
 		ItemsFrom: "payload.items", As: "fan_item", Identity: "fan_item.label",
 		Emit: runtimecontracts.EmitSpec{Event: "item.emitted", Fields: map[string]runtimecontracts.ExpressionValue{
 			"label": runtimecontracts.CELExpression("fan_item.label"),
 			"extra": runtimecontracts.CELExpression(`"not-declared"`),
 		}},
 	}}
-	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5787,9 +5792,7 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 func sourceWithChildOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:         "child",
-			Flow:       "child",
-			PackageKey: ".",
+			FlowPath: "child",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -5808,7 +5811,7 @@ func sourceWithChildOutputPin() semanticview.Source {
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &runtimecontracts.FlowContractView{
-				Paths:    runtimecontracts.FlowContractPaths{PackageKey: "."},
+				Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
 				Children: []runtimecontracts.FlowContractView{child},
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -5821,7 +5824,7 @@ func sourceWithChildOutputPin() semanticview.Source {
 
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
@@ -5832,7 +5835,7 @@ func sourceWithNestedStaticOutputPin() semanticview.Source {
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{child}},
+			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}},
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
 		},
 	}
@@ -5841,7 +5844,7 @@ func sourceWithNestedStaticOutputPin() semanticview.Source {
 
 func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
@@ -5849,16 +5852,19 @@ func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 		Path:   "child",
 	}
 	rootInput := runtimecontracts.FlowInputEventPin{Event: "child.done"}
-	connect := runtimecontracts.FlowPackageConnect{Event: "child.done", From: "child", To: ".", SourceFile: "package.yaml", SourceLine: 1}
+	connect := runtimecontracts.FlowConnect{Event: "child.done", From: "child", To: ".", SourceFile: "schema.yaml", SourceLine: 1}
+	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}, Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Schema: rootSchema, Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package:     runtimecontracts.ProjectPackageDocument{Name: "engine-test", Version: "1.0.0", Connect: []runtimecontracts.FlowPackageConnect{connect}},
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
-		RootSchema:  &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
+		RootSchema:  &rootSchema,
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".": {FlowPath: ".", Schema: "schema.yaml"}, "child": {FlowPath: "child", Schema: "child/schema.yaml"},
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{child}},
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "child": &root.Children[0]},
 		},
 	}
 	return mustCompileEngineSource(bundle)
@@ -6483,7 +6489,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
@@ -7113,17 +7119,9 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: projection-flow
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
+
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 initial_state: pending
 states: [pending, scored]
@@ -7137,27 +7135,27 @@ pins:
       - event: vertical.scored
         sink: harness
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "types.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
 types:
   DimensionScore:
     dimension: text
     score: integer
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 vertical:
   scores:
     type: "[DimensionScore]"
     initial: []
     materialize_from: scoring-node.dimensions_received
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 score.dimension_complete:
   dimension: text
   score: integer
 vertical.scored:
   scores: "[DimensionScore]"
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
   id: scoring-node
   execution_type: system_node
@@ -7186,17 +7184,9 @@ scoring-node:
 func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: singleton-coordinator-runtime
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: coordinator
-    flow: coordinator
-    mode: singleton
-`)
+
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `
 name: coordinator
 mode: singleton
 initial_state: active
@@ -7206,7 +7196,7 @@ pins:
     events:
       - job.received
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `
 types:
   VerticalState:
     status: text
@@ -7215,16 +7205,16 @@ types:
     id: text
     title: text
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "entities.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), `
 coordinator_state:
   verticals: map[text]VerticalState
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "events.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:
   vertical_id: text
   job: Job
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "nodes.yaml"), `
 coordinator-node:
   id: coordinator-node
   execution_type: system_node

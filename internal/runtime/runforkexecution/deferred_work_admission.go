@@ -44,9 +44,6 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 	}
 	workflowName := strings.TrimSpace(source.WorkflowName())
 	workflowVersion := strings.TrimSpace(source.WorkflowVersion())
-	if workflowName == "" || workflowVersion == "" {
-		return selectedContractDeferredWorkAdmission{}, fmt.Errorf("selected-contract deferred-work admission requires workflow name and version")
-	}
 	fanOutPlanRefs, err := admitSelectedContractFanOutPlans(plan, source)
 	if err != nil {
 		return selectedContractDeferredWorkAdmission{}, err
@@ -125,10 +122,10 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 		sourceRef := obligation.Intent.Request.PlanRef
 		selectedRef, ok := compiled[sourceRef.ElementRef]
 		if !ok {
-			return nil, fmt.Errorf("selected contract is missing pending fan_out element %s/%s", sourceRef.ElementRef.PackageKey, sourceRef.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected contract is missing pending fan_out declaration %s", fanOutElementLabel(sourceRef.ElementRef))
 		}
 		if selectedRef.SemanticDigest != sourceRef.SemanticDigest {
-			return nil, fmt.Errorf("selected contract fan_out element %s/%s changed semantic digest", sourceRef.ElementRef.PackageKey, sourceRef.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected contract fan_out declaration %s changed semantic digest", fanOutElementLabel(sourceRef.ElementRef))
 		}
 		if obligation.Barrier != nil {
 			if err := obligation.Barrier.Validate(); err != nil {
@@ -138,9 +135,13 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 				return nil, fmt.Errorf("selected contract fan_out barrier disagrees with fixed intent")
 			}
 			sourceJoin, _ := obligation.Barrier.Registration.Handle.JoinRef()
+			fanOutDeclaration, identityErr := selectedRef.ElementRef.DeclarationIdentity()
+			if identityErr != nil {
+				return nil, fmt.Errorf("selected contract fan_out declaration: %w", identityErr)
+			}
 			selectedJoin, err := timeridentity.NewFanOutDeliveryJoinRef(
 				sourceJoin.Node(), sourceJoin.HandlerEvent(), sourceJoin.JoinID(),
-				selectedRef.ElementRef.PackageKey, selectedRef.ElementRef.ElementID,
+				fanOutDeclaration,
 				selectedRef.BundleHash, selectedRef.SemanticDigest,
 			)
 			if err != nil {
@@ -170,11 +171,19 @@ func selectedContractCompiledFanOutPlans(source semanticview.Source) (map[runtim
 	out := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef)
 	for _, plan := range source.FanOutPlans() {
 		if prior, duplicate := out[plan.Ref.ElementRef]; duplicate && prior != plan.Ref {
-			return nil, fmt.Errorf("selected contract has contradictory fan_out plan for %s/%s", plan.Ref.ElementRef.PackageKey, plan.Ref.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected contract has contradictory fan_out plan for %s", fanOutElementLabel(plan.Ref.ElementRef))
 		}
 		out[plan.Ref.ElementRef] = plan.Ref
 	}
 	return out, nil
+}
+
+func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
+	identity, err := ref.DeclarationIdentity()
+	if err != nil {
+		return "<invalid>"
+	}
+	return identity.Key()
 }
 
 func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source semanticview.Source) ([]string, bool) {

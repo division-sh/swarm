@@ -491,19 +491,19 @@ func (p FlowOutputEventPin) EventType() string {
 	return p.Event
 }
 
-func (c FlowPackageConnect) WithPackageKey(packageKey string) FlowPackageConnect {
+func (c FlowConnect) WithOwnerFlowPath(flowPath string) FlowConnect {
 	out := c.normalized()
-	out.PackageKey = strings.TrimSpace(packageKey)
+	out.OwnerFlowPath = strings.TrimSpace(flowPath)
 	return out
 }
 
-func (c FlowPackageConnect) WithPackageSource(packageKey, sourceFile string) FlowPackageConnect {
-	out := c.WithPackageKey(packageKey)
+func (c FlowConnect) WithOwnerSource(flowPath, sourceFile string) FlowConnect {
+	out := c.WithOwnerFlowPath(flowPath)
 	out.SourceFile = strings.TrimSpace(sourceFile)
 	return out
 }
 
-func (c FlowPackageConnect) AuthoredLocation() string {
+func (c FlowConnect) AuthoredLocation() string {
 	file := strings.TrimSpace(c.SourceFile)
 	if file == "" || c.SourceLine <= 0 {
 		return ""
@@ -511,15 +511,15 @@ func (c FlowPackageConnect) AuthoredLocation() string {
 	return fmt.Sprintf("%s:%d", file, c.SourceLine)
 }
 
-func (c FlowPackageConnect) normalized() FlowPackageConnect {
-	return FlowPackageConnect{
-		PackageKey: strings.TrimSpace(c.PackageKey),
-		SourceFile: strings.TrimSpace(c.SourceFile),
-		SourceLine: c.SourceLine,
-		Event:      c.Event,
-		From:       c.From,
-		To:         c.To,
-		Rename:     c.Rename,
+func (c FlowConnect) normalized() FlowConnect {
+	return FlowConnect{
+		OwnerFlowPath: strings.TrimSpace(c.OwnerFlowPath),
+		SourceFile:    strings.TrimSpace(c.SourceFile),
+		SourceLine:    c.SourceLine,
+		Event:         c.Event,
+		From:          c.From,
+		To:            c.To,
+		Rename:        c.Rename,
 	}
 }
 
@@ -671,8 +671,8 @@ func cloneCompiledFlowOutputPins(in []CompiledFlowOutputPin) []CompiledFlowOutpu
 	return append([]CompiledFlowOutputPin(nil), in...)
 }
 
-func cloneFlowPackageConnects(in []FlowPackageConnect) []FlowPackageConnect {
-	out := make([]FlowPackageConnect, 0, len(in))
+func cloneFlowConnects(in []FlowConnect) []FlowConnect {
+	out := make([]FlowConnect, 0, len(in))
 	for _, connect := range in {
 		normalized := connect.normalized()
 		out = append(out, normalized)

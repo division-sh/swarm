@@ -157,11 +157,11 @@ func selectedContractWorkflowStates(
 		workflowName := strings.TrimSpace(state.FlowID)
 		workflowVersion := strings.TrimSpace(state.WorkflowVersion)
 		mode := strings.TrimSpace(state.Mode)
-		if workflowName == "" || workflowVersion == "" || (mode != "static" && mode != "template") {
+		if workflowName == "" || (mode != "static" && mode != "template") {
 			return nil, fmt.Errorf("selected-contract workflow state requires exact workflow descriptor")
 		}
 		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateRunScope &&
-			(workflowName != strings.TrimSpace(selection.WorkflowName) || mode != "static") {
+			(workflowName != "." || mode != "static") {
 			return nil, fmt.Errorf("selected-contract run-scope state disagrees with selected root workflow")
 		}
 		route, err := selectedContractProjectedWorkflowStateRoute(forkRunID, state)

@@ -41,7 +41,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 
 			for _, engine := range []string{"bridge", "declarative"} {
 				t.Run(engine+"/accumulator", func(t *testing.T) {
-					nodeKey := pipelineNode(t, "review", "node-a").Key()
+					nodeKey := pipelineNode(t, ".", "node-a").Key()
 					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-accumulator", runtimecontracts.SystemNodeEventHandler{
 						Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 					}, json.RawMessage(`{"item_id":"a"}`), nil, nil)
@@ -58,7 +58,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 				})
 
 				t.Run(engine+"/clear", func(t *testing.T) {
-					nodeKey := pipelineNode(t, "review", "node-a").Key()
+					nodeKey := pipelineNode(t, ".", "node-a").Key()
 					initialMetadata := map[string]any{
 						"revision_count":    3,
 						"dedup_key":         "pending-a",
@@ -115,18 +115,18 @@ func TestEntitylessDeclarativeEmissionDoesNotMaterializeWorkflowStateOnSQLiteAnd
 			instancePath := runID
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
-				handlerTestWorkflowEnvelope("review", instancePath, ""), time.Now().UTC(),
+				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			node := pipelineNode(t, "review", "node-a")
+			node := pipelineNode(t, ".", "node-a")
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-					FlowID: "review", FlowInstance: instancePath,
+					FlowID: ".", FlowInstance: instancePath,
 				}),
 			})
 
@@ -200,7 +200,7 @@ func executeExistingOwnerBehavior(
 		InstanceID:      runID,
 		StorageRef:      flowInstance,
 		EntityID:        entityID,
-		WorkflowName:    "review",
+		WorkflowName:    ".",
 		WorkflowVersion: "1",
 		CurrentState:    "active",
 		Fields:          seedMetadata,
@@ -212,12 +212,12 @@ func executeExistingOwnerBehavior(
 
 	sourceEvent := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", payload, 0, runID, "",
-		handlerTestWorkflowEnvelope("review", flowInstance, entityID), time.Now().UTC(),
+		handlerTestWorkflowEnvelope(".", flowInstance, entityID), time.Now().UTC(),
 	)
-	target := events.RouteIdentity{FlowID: "review", FlowInstance: flowInstance, EntityID: entityID}
+	target := events.RouteIdentity{FlowID: ".", FlowInstance: flowInstance, EntityID: entityID}
 	seedExactOnceEvent(t, pc.workflowStore, ctx, sourceEvent)
 	evt := eventtest.TargetRouted(sourceEvent, target)
-	node := pipelineNode(t, "review", "node-a")
+	node := pipelineNode(t, ".", "node-a")
 	deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(target),
@@ -259,8 +259,8 @@ type existingOwnerExecutionResult struct {
 
 func handlerEntityRequirementExecutionSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
-		Path:   "review",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeStatic},
+		Path:   ".",
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.emitted": {}},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "review", Mode: runtimecontracts.FlowModeStatic, InitialState: "active",
@@ -275,9 +275,9 @@ func handlerEntityRequirementExecutionSource() semanticview.Source {
 		RootSchema:   &flow.Schema,
 		RootEntities: testEntityContractsForType("test_entity"),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{"review": &flow},
+			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{".": &flow},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": flow.Schema},
 	}
 	return handlerEntityRequirementSemanticSource{Source: semanticview.Wrap(bundle)}
 }
@@ -287,8 +287,8 @@ type handlerEntityRequirementSemanticSource struct {
 }
 
 func (s handlerEntityRequirementSemanticSource) ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
-	if node.Equal(mustPipelineNode("review", "node-a")) {
-		return runtimecontracts.ContractItemSource{FlowID: "review", Layer: "flow"}, true
+	if node.Equal(mustPipelineNode(".", "node-a")) {
+		return runtimecontracts.ContractItemSource{FlowPath: ".", Family: "nodes"}, true
 	}
 	return s.Source.ExecutableNodeSource(node)
 }

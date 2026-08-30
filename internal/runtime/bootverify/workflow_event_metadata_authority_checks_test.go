@@ -164,12 +164,13 @@ func TestEventMetadataAuthorityNarrowReadbackExplainsDerivedAndExternalProof(t *
 		t.Fatalf("derived handler roles should keep event schema alive, got warnings %#v", report.Warnings())
 	}
 
-	entry, _, ok := source.ResolveFlowEventCatalogEntry("", "task.done")
+	entry, _, ok := source.ResolveFlowEventCatalogEntry(".", "task.done")
 	if !ok {
 		t.Fatalf("task.done event entry missing")
 	}
 	producers, consumers := eventMetadataRoleNames(source, deadEventDeclaration{
 		Canonical: "task.done",
+		FlowID:    ".",
 		Entry:     entry,
 	})
 	if label, ok := producers.match("worker"); !ok || !strings.Contains(label, "handler emits") {

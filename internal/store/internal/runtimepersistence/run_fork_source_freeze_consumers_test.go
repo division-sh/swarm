@@ -39,20 +39,20 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 		_, db, _ := testutil.StartPostgres(t)
 		out.db = db
 		out.postgres = admitTestPostgresStore(t, db)
-		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
 		})
-		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.continued, State: storerunlifecycle.StatePaused,
 			BundleHash: authorActivityTestBundleHash, StartedAt: now,
 		})
 	case "sqlite":
 		out.sqlite = newBootstrappedSQLiteRuntimeStoreForTest(t)
 		out.db = out.sqlite.backend.ConstructionHandle()
-		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
 		})
-		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.continued, State: storerunlifecycle.StatePaused,
 			BundleHash: authorActivityTestBundleHash, StartedAt: now,
 		})
@@ -64,7 +64,7 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 
 func (b *forkedConsumerTestBackend) freeze(t *testing.T) {
 	t.Helper()
-	ctx := testAuthorActivityBundleSourceContext()
+	ctx := testAuthorActivitySourceArtifactContext()
 	if b.postgres != nil {
 		lineage := runForkActivationLineage{
 			SourceRunID: b.sourceRun, ForkRunID: b.continued, ForkEventID: uuid.NewString(),
@@ -99,7 +99,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			eventID := uuid.NewString()
 			event := eventtest.PersistedProjectionForProducer(
 				eventID, events.EventType("freeze.pending"), eventtest.Producer(events.EventProducerPlatform, "test"),
@@ -155,7 +155,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 
 func assertForkedEventConsumerRefusals(t *testing.T, store any, event events.Event, route events.DeliveryRoute, claim runtimedelivery.Claim) {
 	t.Helper()
-	ctx := testAuthorActivityBundleSourceContext()
+	ctx := testAuthorActivitySourceArtifactContext()
 	s, ok := store.(forkedEventSelectorSurface)
 	if !ok {
 		t.Fatalf("unsupported event store %T", store)
@@ -187,7 +187,7 @@ type forkedEventSelectorSurface interface {
 
 func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, runID, eventID string) {
 	t.Helper()
-	ctx := testAuthorActivityBundleSourceContext()
+	ctx := testAuthorActivitySourceArtifactContext()
 	work, ok, err := claimNextPipelineWorkForTest(t, ctx, store.PipelineObligations(), runtimepipelineobligation.RunRecoveryQuery(runID))
 	if err != nil || ok {
 		t.Fatalf("pipeline selector returned frozen event: work=%#v ok=%t err=%v", work, ok, err)
@@ -206,7 +206,7 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)
-			ctx := runtimeeffects.WithExecutionMode(testAuthorActivityBundleSourceContext(), runtimeeffects.ExecutionModeLive)
+			ctx := runtimeeffects.WithExecutionMode(testAuthorActivitySourceArtifactContext(), runtimeeffects.ExecutionModeLive)
 			identity := testAgentMemoryIdentity(t, fixture.sourceRun, "freeze-agent", "freeze/flow")
 			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", ExpiresAt: time.Now().Add(time.Minute)}
 			conversation := runtimellm.ConversationRecord{

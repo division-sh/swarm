@@ -3,22 +3,14 @@ package runbundle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 )
-
-// RuntimeCatalogReader loads the persisted source required to boot a selected
-// bundle without exposing the selected backend.
-type RuntimeCatalogReader interface {
-	LoadBundleCatalogRuntimeRecord(context.Context, string) (BundleCatalogRuntimeRecord, error)
-}
 
 // AvailabilityStore separates exact run diagnosis from the generic
 // non-standing active-run projection used by startup and admission owners.
 type AvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (Availability, error)
 	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]Availability, error)
-	ActiveNonStandingRunBundleAvailabilityConflicts(context.Context) ([]Availability, error)
 }
 
 const (
@@ -31,70 +23,19 @@ var (
 	ErrBundleNotFound = errors.New("run bundle: bundle not found")
 )
 
-type AvailabilitySource uint8
-
-const (
-	AvailabilitySourcePersisted AvailabilitySource = iota + 1
-	AvailabilitySourceEphemeral
-	AvailabilitySourceDeleted
-)
-
-func DecodeAvailabilitySource(raw string) (AvailabilitySource, error) {
-	if raw != strings.TrimSpace(raw) {
-		return 0, fmt.Errorf("bundle_source must not contain surrounding whitespace")
-	}
-	switch raw {
-	case "persisted":
-		return AvailabilitySourcePersisted, nil
-	case "ephemeral":
-		return AvailabilitySourceEphemeral, nil
-	case "deleted":
-		return AvailabilitySourceDeleted, nil
-	default:
-		return 0, fmt.Errorf("bundle_source must be persisted, ephemeral, or deleted")
-	}
-}
-
-func (s AvailabilitySource) String() string {
-	switch s {
-	case AvailabilitySourcePersisted:
-		return "persisted"
-	case AvailabilitySourceEphemeral:
-		return "ephemeral"
-	case AvailabilitySourceDeleted:
-		return "deleted"
-	default:
-		return ""
-	}
-}
-
-func (s AvailabilitySource) IsPersisted() bool {
-	return s == AvailabilitySourcePersisted
-}
-
-func (s AvailabilitySource) IsEphemeral() bool {
-	return s == AvailabilitySourceEphemeral
-}
-
-func (s AvailabilitySource) IsDeleted() bool {
-	return s == AvailabilitySourceDeleted
-}
-
 type Availability struct {
-	RunID            string
-	Status           string
-	BundleHash       string
-	BundleSource     AvailabilitySource
-	BundleRowPresent bool
-	ErrorCode        string
-	Cause            string
+	RunID                 string
+	Status                string
+	BundleHash            string
+	SourceArtifactPresent bool
+	ErrorCode             string
+	Cause                 string
 }
 
 func (a Availability) Available() bool {
 	return a.ErrorCode == "" &&
-		a.BundleSource.IsPersisted() &&
 		a.BundleHash != "" &&
-		a.BundleRowPresent
+		a.SourceArtifactPresent
 }
 
 func (a Availability) Unavailable() bool {
@@ -109,7 +50,6 @@ func (a Availability) DetailString() string {
 	parts := []string{
 		"run_id=" + strings.TrimSpace(a.RunID),
 		"status=" + strings.TrimSpace(a.Status),
-		"bundle_source=" + a.BundleSource.String(),
 	}
 	if a.BundleHash != "" {
 		parts = append(parts, "bundle_hash="+a.BundleHash)
@@ -121,10 +61,4 @@ func (a Availability) DetailString() string {
 		parts = append(parts, "cause="+a.Cause)
 	}
 	return strings.Join(parts, " ")
-}
-
-type BundleCatalogRuntimeRecord struct {
-	BundleHash  string
-	ContentYAML string
-	DataBlob    []byte
 }

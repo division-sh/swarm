@@ -263,7 +263,6 @@ SELECT
 	r.run_id,
 	lower(COALESCE(r.status, '')),
 	COALESCE(r.bundle_hash, ''),
-	COALESCE(r.bundle_source, ''),
 	COALESCE(r.origin_kind, ''),
 	COALESCE(r.trigger_event_id, ''),
 	COALESCE(r.trigger_event_type, ''),
@@ -295,7 +294,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
-	var bundleHash, bundleSource string
+	var bundleHash string
 	var originKind, eventID, eventType, serviceID, sourceRunID, sourceEventID string
 	var generation int64
 	var standingRelationCount, matchingStandingRelationCount int
@@ -303,7 +302,6 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		&header.RunID,
 		&header.Status,
 		&bundleHash,
-		&bundleSource,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -354,7 +352,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		return operatorread.RunHeader{}, err
 	}
 	header.Failure = failure
-	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
+	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
 		return operatorread.RunHeader{}, err
 	}
 	return header, nil

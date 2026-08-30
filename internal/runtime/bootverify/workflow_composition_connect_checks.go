@@ -213,7 +213,7 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 	candidates := make([]string, 0, 2)
 	findings := make([]Finding, 0)
 	for _, plan := range source.WorkflowJoins() {
-		if plan.Node.FlowID() != strings.TrimSpace(flowID) {
+		if plan.Node.FlowPath() != strings.TrimSpace(flowID) {
 			continue
 		}
 		association := census.ResolveFanInInputForHandler(plan.Node, plan.HandlerEvent)
@@ -221,7 +221,7 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.EventType()) {
 			continue
 		}
-		label := plan.Node.PackageKey() + ":" + plan.Node.FlowID() + ":" + plan.Node.NodeID()
+		label := plan.Node.FlowPath() + ":" + plan.Node.NodeID()
 		candidates = append(candidates, label+"."+plan.HandlerEvent+" join "+plan.Spec.EffectiveID())
 		handler, ok := source.ExecutableNodeEventHandler(plan.Node, plan.HandlerEvent)
 		if !ok || handler.Join == nil {
@@ -268,7 +268,7 @@ func validateFanInAccumulatorConsistency(source semanticview.Source, flowID stri
 		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" {
 			continue
 		}
-		node, err := runtimeidentity.ParseExecutableNode(endpoint.PackageKey, endpoint.FlowID, endpoint.NodeID)
+		node, err := runtimeidentity.ParseExecutableNode(endpoint.FlowID, endpoint.NodeID)
 		if err != nil {
 			continue
 		}

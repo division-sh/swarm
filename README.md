@@ -44,10 +44,10 @@ The tradeoff: a Swarm flow cannot be re-wired by an LLM at runtime. That rigidit
 
 ```bash
 # run the static analyzer against the platform spec
-swarm verify --contracts ./my-flow
+swarm verify ./my-flow
 
 # start a run from a triggering event, stream its trace as it executes
-swarm run start --contracts ./my-flow --event order.created --payload ./payload.json
+swarm run start ./my-flow --event order.created --payload ./payload.json
 
 # follow the full causal trace of any run, live or historical
 swarm run trace <run-id> -f
@@ -253,7 +253,7 @@ relative paths for workspace files, and absolute paths follow the host
 deployment namespace and OS permissions. It is not command-limited or
 Docker-equivalent isolation, and Claude/provider host execution remains
 unsupported.
-Plain local `swarm run start --contracts ...` uses SQLite at `.swarm/stores/dev.db` unless
+Plain local `swarm run start <source-root> ...` uses SQLite at `.swarm/stores/dev.db` unless
 you explicitly opt into Postgres with `store.backend: postgres` in runtime
 config. Build or pull the configured workspace image (`swarm-workspace:latest`
 by default), or configure a compatible image before commands that start the
@@ -264,7 +264,7 @@ config files and put contract-required credentials in the local secrets store:
 
 ```bash
 swarm secrets set sendgrid_api_key --stdin
-swarm secrets check --contracts ./contracts
+swarm secrets check
 ```
 
 If a flow uses `artifact_repo_commit`, the runtime artifact root must resolve to

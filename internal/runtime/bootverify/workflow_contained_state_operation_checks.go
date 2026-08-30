@@ -62,7 +62,7 @@ type wave1ContainedStateOperationRef struct {
 	Write      runtimecontracts.WorkflowDataWrite
 }
 
-func (r wave1ContainedStateOperationRef) flowID() string { return r.Node.FlowID() }
+func (r wave1ContainedStateOperationRef) flowID() string { return r.Node.FlowPath() }
 func (r wave1ContainedStateOperationRef) nodeID() string { return r.Node.Key() }
 
 func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedStateOperationRef {

@@ -10,6 +10,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -123,7 +124,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 				bundle.Nodes["join-node"].EventHandlers["item.completed"] = h
 			}
 			rebuildJoinValidationTopology(bundle)
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 			if tc.wantError == "" {
 				if reportContains(report.HardInvalidities(), joinValidationCheckID, "") {
 					t.Fatalf("unexpected join invalidity: %#v", report.HardInvalidities())
@@ -144,7 +145,7 @@ func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
 	t.Run("same-leaf sibling cannot replace root", func(t *testing.T) {
 		bundle := joinValidationBundle()
 		bundle.Semantics.Joins[0].Node = identitytest.FlowNode(t, "orders", "join-node")
-		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 		if !reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
 			t.Fatalf("hard invalidities = %#v", report.HardInvalidities())
 		}
@@ -155,7 +156,7 @@ func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
 		sibling := bundle.Semantics.Joins[0]
 		sibling.Node = identitytest.FlowNode(t, "orders", "join-node")
 		bundle.Semantics.Joins = append(bundle.Semantics.Joins, sibling)
-		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 		if reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
 			t.Fatalf("root declaration was shadowed by sibling: %#v", report.HardInvalidities())
 		}
@@ -164,7 +165,7 @@ func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
 
 func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	bundle := joinValidationBundle()
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 	handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 	var memberReference *expressionReference
 	joinNode := identitytest.RootNode(t, "join-node")
@@ -178,15 +179,15 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	if memberReference == nil {
 		t.Fatal("join.members.from missing from canonical handler expression inventory")
 	}
-	if _, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, "", memberReference.Expression); err != nil || ownerFlowID != "" {
+	if _, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, ".", memberReference.Expression); err != nil || ownerFlowID != "." {
 		t.Fatalf("join.members.from direct resolution = owner:%q err:%v", ownerFlowID, err)
 	}
-	resolved := wave1ResolvedExpressionRefs(source, "", "join-node", "item.completed", *memberReference)
-	if len(resolved) != 1 || resolved[0].OwnerFlowID != "" || resolved[0].Field != "expected" {
+	resolved := wave1ResolvedExpressionRefs(source, ".", "join-node", "item.completed", *memberReference)
+	if len(resolved) != 1 || resolved[0].OwnerFlowID != "." || resolved[0].Field != "expected" {
 		t.Fatalf("join.members.from resolved refs = %#v", resolved)
 	}
 	readers := wave1EntityReaderCoverageByFlow(source)
-	if _, ok := readers[""]["expected"]; !ok {
+	if _, ok := readers["."]["expected"]; !ok {
 		t.Fatalf("join.members.from reader coverage = %#v", readers)
 	}
 }
@@ -194,7 +195,7 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "schema.yaml"), `
 name: a
 mode: singleton
 initial_state: active
@@ -204,18 +205,18 @@ pins:
     events:
       - {event: item.received, source: harness}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
 state:
   expected:
     type: '[text]'
     initial: []
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "events.yaml"), `
 item.received:
   member_id: text
   result: text
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
   id: shared-node
   execution_type: system_node
@@ -226,8 +227,8 @@ shared-node:
         stage: missing
         members: {from: entity.expected, by: payload.member_id}
         output: payload.result
-        on_complete: {element_id: 00000000-0000-4000-8000-000000000405, advances_to: done}
-        timeout: {element_id: 00000000-0000-4000-8000-000000000406, after: 1h, advances_to: failed}
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -243,12 +244,12 @@ shared-node:
 	}
 }
 
-func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(t *testing.T) {
-	validNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "", "shared")
+func TestRun_JoinValidationAttributesDistinctFlowFailureExactlyInEitherOrder(t *testing.T) {
+	validNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("a", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}
-	invalidNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "", "shared")
+	invalidNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("b", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,11 +259,11 @@ func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(
 		invalidSpec := validSpec
 		invalidSpec.Stage = "missing"
 		validView := runtimecontracts.FlowContractView{
-			Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "a", NodesFile: "a/nodes.yaml"},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &validSpec}}}},
 		}
 		invalidView := runtimecontracts.FlowContractView{
-			Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/b", NodesFile: "packages/b/nodes.yaml"},
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "b", NodesFile: "b/nodes.yaml"},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &invalidSpec}}}},
 		}
 		children := []runtimecontracts.FlowContractView{validView, invalidView}
@@ -274,7 +275,7 @@ func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(
 			children[0], children[1] = children[1], children[0]
 			plans[0], plans[1] = plans[1], plans[0]
 		}
-		root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "root"}, Children: children}
+		root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: children}
 		bundle.FlowTree = runtimecontracts.FlowTree{Root: &root}
 		bundle.Nodes = nil
 		bundle.Semantics.Joins = plans
@@ -286,11 +287,11 @@ func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(
 				matched = true
 			}
 			if finding.CheckID == joinValidationCheckID && finding.Location == validNode.Key() && strings.Contains(finding.Message, `unknown stage "missing"`) {
-				t.Fatalf("invalid package finding attributed to valid sibling: %#v", finding)
+				t.Fatalf("invalid flow finding attributed to valid sibling: %#v", finding)
 			}
 		}
 		if !matched {
-			t.Fatalf("reverse=%v findings = %#v, want exact package-qualified invalid location %q", reverse, report.HardInvalidities(), invalidNode.Key())
+			t.Fatalf("reverse=%v findings = %#v, want exact flow-qualified invalid location %q", reverse, report.HardInvalidities(), invalidNode.Key())
 		}
 	}
 }
@@ -326,7 +327,7 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	transitions := []runtimecontracts.HandlerTransitionSemantic{}
 	joins := []runtimecontracts.WorkflowJoinPlan{}
 	for nodeID, node := range bundle.Nodes {
-		nodeRef, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", nodeID)
+		nodeRef, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", nodeID)
 		if err != nil {
 			continue
 		}
@@ -343,7 +344,7 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 				Loop:         handler.Loop,
 			})
 			if handler.Join != nil {
-				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, "", eventType, "result")
+				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, ".", eventType, "result")
 				joins = append(joins, runtimecontracts.WorkflowJoinPlan{Node: nodeRef, HandlerEvent: eventType, Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: *handler.Join, ResultType: resultType})
 			}
 		}
@@ -351,8 +352,8 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	bundle.Semantics.HandlerTransitions = transitions
 	bundle.Semantics.Joins = joins
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
-		"": runtimecontracts.BuildWorkflowStageTopology(
-			"",
+		".": runtimecontracts.BuildWorkflowStageTopology(
+			".",
 			"awaiting",
 			[]string{"awaiting", "ready", "attention"},
 			[]string{"attention"},

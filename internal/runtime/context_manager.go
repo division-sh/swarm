@@ -36,12 +36,11 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	BundleIdentity              runtimecontracts.BundleIdentity
 	RuntimeInstanceID           string
 	PublicationGeneration       uint64
 	Source                      semanticview.Source
-	ContractsRoot               string
 	PlatformSpecPath            string
 	Runtime                     *Runtime
 	WorkOwner                   *worklifetime.RuntimeOccurrence
@@ -73,7 +72,6 @@ const (
 
 func (c BundleContext) normalized() BundleContext {
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
-	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
@@ -90,7 +88,7 @@ func (c BundleContext) normalized() BundleContext {
 }
 
 func (c BundleContext) BundleHash() string {
-	return c.BundleSourceFact.BundleHash()
+	return c.SourceArtifactFact.BundleHash()
 }
 
 type runtimeContextEntry struct {
@@ -199,7 +197,6 @@ func (a *runtimeSourceSetTransitionAdmission) PredecessorProcessBinding(current 
 func sourceSetTransitionRuntimeKey(binding runtimemanager.ProcessExecutionBinding) string {
 	return strings.Join([]string{
 		strings.TrimSpace(binding.BundleHash),
-		strings.TrimSpace(binding.BundleSource),
 		strings.TrimSpace(binding.RuntimeInstanceID),
 	}, "\x00")
 }
@@ -528,10 +525,10 @@ type RuntimeContextManager struct {
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
 // manager-owned loaded context set. PrimaryBundle identifies the semantic
-// primary slot; BundleSourceFacts contains every currently selectable source.
+// primary slot; SourceArtifactFacts contains every currently selectable source.
 type RuntimeContextPublicationSnapshot struct {
-	PrimaryBundle     runtimecontracts.BundleIdentity
-	BundleSourceFacts []runtimecorrelation.BundleSourceFact
+	PrimaryBundle       runtimecontracts.BundleIdentity
+	SourceArtifactFacts []runtimecorrelation.SourceArtifactFact
 }
 
 type runtimeContextVisibilityUpdate struct {
@@ -758,7 +755,7 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 
 func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
 	contextDef = contextDef.normalized()
-	if err := contextDef.BundleSourceFact.Validate(); err != nil {
+	if err := contextDef.SourceArtifactFact.Validate(); err != nil {
 		return BundleContext{}, fmt.Errorf("runtime context bundle source fact: %w", err)
 	}
 	bundleHash := contextDef.BundleHash()
@@ -876,8 +873,8 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 		if target.BundleHash != bundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
-		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
-			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and compiled admission plan", bundleHash)
+		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
+			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_path, flow_instance, entity_id, and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
 			return fmt.Errorf("runtime context %s standing target %q/%q signing_secret presence contradicts compiled %s request authentication", bundleHash, target.Alias, target.Provider, target.AdmissionPlan.RequestAuthentication())
@@ -1055,7 +1052,7 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
 				continue
 			}
-			selector := fmt.Sprintf("ingress:%s:%s:%s", target.PackageKey, target.FlowID, target.Provider)
+			selector := fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider)
 			if signingKey, found := activationSigning[selector]; found {
 				target.SigningSecret = signingKey
 			}
@@ -1116,7 +1113,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 	}
 	lease, available := entry.runtime.ChannelActivations.AcquirePresentation()
 	if !available {
-		return nil, fmt.Errorf("runtime context %s channel activation publication is unavailable", entry.context.BundleSourceFact.BundleHash())
+		return nil, fmt.Errorf("runtime context %s channel activation publication is unavailable", entry.context.SourceArtifactFact.BundleHash())
 	}
 	defer lease.Release()
 	for _, activation := range lease.Activations() {
@@ -1124,7 +1121,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 		if selector == "" {
 			continue
 		}
-		if activation.Coordinate.BundleHash != entry.context.BundleSourceFact.BundleHash() ||
+		if activation.Coordinate.BundleHash != entry.context.SourceArtifactFact.BundleHash() ||
 			activation.Coordinate.RuntimeInstanceID != entry.context.RuntimeInstanceID ||
 			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
 			return nil, fmt.Errorf("channel activation registration target %q contradicts its runtime context", selector)
@@ -1135,7 +1132,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 		}
 		matched := false
 		for _, standing := range entry.context.StandingTargets {
-			if standing.PackageKey == target.PackageKey && standing.FlowID == target.FlowID && standing.Provider == target.Provider {
+			if standing.FlowPath == target.FlowPath && standing.Provider == target.Provider {
 				if uint64(standing.Generation) != activation.Coordinate.TargetGeneration {
 					return nil, fmt.Errorf("channel activation registration target %q has a contradictory target generation", selector)
 				}
@@ -1249,10 +1246,6 @@ func runtimeContextBundleLabel(contextDef BundleContext) string {
 	parts := []string{}
 	if bundleHash := contextDef.BundleHash(); bundleHash != "" {
 		parts = append(parts, "bundle_hash="+bundleHash)
-	}
-	_, source := contextDef.BundleSourceFact.StorageValues()
-	if source != "" {
-		parts = append(parts, "bundle_source="+source)
 	}
 	workflowName := strings.TrimSpace(contextDef.BundleIdentity.WorkflowName)
 	workflowVersion := strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion)
@@ -1495,19 +1488,19 @@ func (m *RuntimeContextManager) CurrentPublication() (RuntimeContextPublicationS
 	identity := primary.context.BundleIdentity
 	identity.BundleHash = primary.context.BundleHash()
 	snapshot := RuntimeContextPublicationSnapshot{
-		PrimaryBundle:     identity,
-		BundleSourceFacts: make([]runtimecorrelation.BundleSourceFact, 0, len(m.order)),
+		PrimaryBundle:       identity,
+		SourceArtifactFacts: make([]runtimecorrelation.SourceArtifactFact, 0, len(m.order)),
 	}
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
-		fact := entry.context.BundleSourceFact
+		fact := entry.context.SourceArtifactFact
 		if err := fact.Validate(); err != nil {
 			return RuntimeContextPublicationSnapshot{}, fmt.Errorf("loaded runtime context %s source fact: %w", bundleHash, err)
 		}
-		snapshot.BundleSourceFacts = append(snapshot.BundleSourceFacts, fact)
+		snapshot.SourceArtifactFacts = append(snapshot.SourceArtifactFacts, fact)
 	}
 	return snapshot, nil
 }
@@ -2435,8 +2428,7 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		if (!loaded && !pending) || (pendingOnly && !pending) {
 			continue
 		}
-		bundle, source := entry.context.BundleSourceFact.StorageValues()
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundle, BundleSource: source}.Normalize()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: entry.context.SourceArtifactFact.BundleHash()}.Normalize()
 		if _, survives := wanted[coordinate.Key()]; !survives {
 			m.mu.Unlock()
 			return nil, fmt.Errorf("loaded runtime context %s is absent from successor source set", bundleHash)

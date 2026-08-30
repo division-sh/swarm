@@ -13,12 +13,12 @@ import (
 // legacy spellings are evidence only; every executable proof below comes from
 // the platform's checked-in canonical artifacts.
 const (
-	empireValidationNodes        = "contracts/flows/validation/nodes.yaml"
-	empireTreasuryNodes          = "contracts/flows/treasury/nodes.yaml"
-	empireOperatingNodes         = "contracts/flows/operating/nodes.yaml"
-	empireComponentScaffoldNodes = "contracts/flows/component-scaffold/nodes.yaml"
-	empireSpecRepoNodes          = "contracts/flows/spec-repo/nodes.yaml"
-	empireRepoScaffoldNodes      = "contracts/flows/repo-scaffold/nodes.yaml"
+	empireValidationNodes        = "contracts/validation/nodes.yaml"
+	empireTreasuryNodes          = "contracts/treasury/nodes.yaml"
+	empireOperatingNodes         = "contracts/operating/nodes.yaml"
+	empireComponentScaffoldNodes = "contracts/component-scaffold/nodes.yaml"
+	empireSpecRepoNodes          = "contracts/spec-repo/nodes.yaml"
+	empireRepoScaffoldNodes      = "contracts/repo-scaffold/nodes.yaml"
 )
 
 func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {

@@ -51,19 +51,19 @@ func commitFanOutIntentTx(
 	args := fanOutIntentSQLArgs(request, persistedSource, capsule, status, createdAt)
 	query := `
 		INSERT INTO fan_out_intents (
-			run_id, triggering_delivery_id, package_key, element_id,
+			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, source_kind, source_event_id,
 			source_run_id, source_entity_id, source_field, source_mutation_id,
-			source_resource_package_key, source_resource_event_name, source_resource_version_id,
+			source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 			cardinality, cursor, status, next_chunk_size, capsule, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-			$15, $16, 0, $17, $18, $19, $20, $20
+			$15, $16, $17, 0, $18, $19, $20, $21, $21
 		)`
 	if postgres {
-		query = strings.ReplaceAll(query, "$19", "$19::jsonb")
+		query = strings.ReplaceAll(query, "$20", "$20::jsonb")
 	} else {
-		query = postgresPlaceholdersToSQLite(query, 20)
+		query = postgresPlaceholdersToSQLite(query, 21)
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert fan-out intent: %w", err)
@@ -75,8 +75,9 @@ func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutob
 	return []any{
 		request.Key.RunID,
 		request.Key.TriggeringDeliveryID,
-		request.Key.ElementRef.PackageKey,
-		request.Key.ElementRef.ElementID,
+		request.Key.ElementRef.FlowPath,
+		request.Key.ElementRef.Family,
+		request.Key.ElementRef.SemanticPath,
 		request.PlanRef.BundleHash,
 		request.PlanRef.SemanticDigest,
 		string(source.Kind),
@@ -85,7 +86,7 @@ func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutob
 		fanOutNullable(source.EntityID),
 		fanOutNullable(source.Field),
 		fanOutNullable(source.MutationID),
-		fanOutNullable(source.Declaration.PackageKey),
+		fanOutNullable(source.Declaration.FlowPath),
 		fanOutNullable(source.Declaration.EventName),
 		fanOutNullable(string(source.VersionID)),
 		request.Cardinality,
@@ -150,7 +151,7 @@ func bindFanOutSourceTx(
 		source.MutationID = mutationID
 	case fanoutobligation.SourceResourceVersion:
 		var present int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM resource_version_pins WHERE run_id=$1 AND package_key=$2 AND event_name=$3 AND version_id=$4`, request.Key.RunID, source.Declaration.PackageKey, source.Declaration.EventName, source.VersionID).Scan(&present); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3 AND version_id=$4`, request.Key.RunID, source.Declaration.FlowPath, source.Declaration.EventName, source.VersionID).Scan(&present); err != nil {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source requires exact run pin: %w", err)
 		}
 	default:

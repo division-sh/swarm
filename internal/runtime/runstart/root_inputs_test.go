@@ -108,7 +108,7 @@ func TestValidateInputEventsTreatsAbsentRootSchemaAsEmptyDomain(t *testing.T) {
 func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{

@@ -42,7 +42,7 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	}
 }
 
-func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(t *testing.T) {
+func TestStaticConnectReceiverAgentPreservesExactFilesystemScopeAndLocalCoordinate(t *testing.T) {
 	omittedOwner := "test://connect/packages/first/worker"
 	literalOwner := "test://connect/packages/second/worker"
 	omittedEntry := runtimecontracts.AgentRegistryEntry{}
@@ -53,7 +53,7 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 	first := runtimecontracts.FlowContractView{
 		Path: "first-support",
 		Paths: runtimecontracts.FlowContractPaths{
-			ID: "first-support", PackageKey: "packages/first",
+			FlowPath: "first-support",
 		},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": omittedEntry},
 		AgentURIs: map[string]string{"worker": omittedOwner},
@@ -61,12 +61,12 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 	second := runtimecontracts.FlowContractView{
 		Path: "second-support",
 		Paths: runtimecontracts.FlowContractPaths{
-			ID: "second-support", PackageKey: "packages/second",
+			FlowPath: "second-support",
 		},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": literalEntry},
 		AgentURIs: map[string]string{"worker": literalOwner},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{first, second}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{first, second}}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,
@@ -82,19 +82,19 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 	})
 
 	for _, tc := range []struct {
-		name       string
-		packageKey string
-		flowID     string
-		publicID   string
-		owner      string
+		name     string
+		flowPath string
+		flowID   string
+		publicID string
+		owner    string
 	}{
-		{name: "omitted id", packageKey: "packages/first", flowID: "first-support", publicID: "worker", owner: omittedOwner},
-		{name: "literal override", packageKey: "packages/second", flowID: "second-support", publicID: "public-worker", owner: literalOwner},
+		{name: "omitted id", flowPath: "first-support", flowID: "first-support", publicID: "worker", owner: omittedOwner},
+		{name: "literal override", flowPath: "second-support", flowID: "second-support", publicID: "public-worker", owner: literalOwner},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			endpoint := semanticview.AuthoredEventEndpoint{
 				Kind:         semanticview.EventEndpointAgent,
-				PackageKey:   tc.packageKey,
+				FlowPath:     tc.flowPath,
 				FlowID:       tc.flowID,
 				AgentLocalID: "worker",
 				AgentID:      tc.publicID,
@@ -128,7 +128,7 @@ func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
 				event,
 				"consumer/"+event,
 			),
-			authoredLocation: "package.yaml:10",
+			authoredLocation: "schema.yaml:10",
 		}
 	}
 	consumerNode := identitytest.FlowNode(t, "consumer", "consumer-node")
@@ -323,7 +323,7 @@ func TestW2CanonicalConnectPlanIdentityIgnoresTargetSetAuthorOrderAndReadbackIsI
 		{FlowID: "worker", FlowInstance: "worker/b", EntityID: "entity-b"},
 		{FlowID: "worker", FlowInstance: "worker/a", EntityID: "entity-a"},
 	}
-	evidence := &connectProducerEventEvidence{packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "schema-digest"}
+	evidence := &connectProducerEventEvidence{ownerFlowPath: ".", eventName: "work.ready", acceptanceSchemaDigest: "schema-digest"}
 	first, err := newConnectRoutePlan(connectRoutePlanSpec{
 		source: source, receiver: receiver, targetKind: ConnectTargetKindTargetSet,
 		resolutionKind: ConnectResolutionStatic, targetSet: append([]events.RouteIdentity(nil), firstTargets...),
@@ -408,11 +408,11 @@ func TestW2ConnectExecutionClaimIgnoresDiagnosticEventSchemaProvenance(t *testin
 func testW2ConnectPlanWithEventSchemaProvenance(t testing.TB, producerFlowID, producerFile, receiverFlowID, receiverFile string) ConnectRoutePlan {
 	t.Helper()
 	producerEvent := &connectProducerEventEvidence{
-		packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "producer-schema-digest",
+		ownerFlowPath: ".", eventName: "work.ready", acceptanceSchemaDigest: "producer-schema-digest",
 		businessKeyField: "work_id", businessKeyType: "string", sourceFlowID: producerFlowID, sourceFile: producerFile,
 	}
 	receiverEvent := &connectProducerEventEvidence{
-		packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "receiver-schema-digest",
+		ownerFlowPath: ".", eventName: "work.ready", acceptanceSchemaDigest: "receiver-schema-digest",
 		businessKeyField: "work_id", businessKeyType: "string", sourceFlowID: receiverFlowID, sourceFile: receiverFile,
 	}
 	plan, err := newConnectRoutePlan(connectRoutePlanSpec{
@@ -442,7 +442,7 @@ func TestW2CompiledEdgeClosedOwner(t *testing.T) {
 		ConnectEndpointRoleConsumer, false, "worker", "worker", runtimecontracts.FlowModeStatic,
 		"work.ready", "work.ready", "worker/work.ready",
 	).withCompiledPinDigest("receiver-pin-digest")
-	evidence := &connectProducerEventEvidence{packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "schema-digest"}
+	evidence := &connectProducerEventEvidence{ownerFlowPath: ".", eventName: "work.ready", acceptanceSchemaDigest: "schema-digest"}
 	targets := []events.RouteIdentity{{FlowID: "worker", FlowInstance: "worker", EntityID: "entity-a"}}
 	plan, err := newConnectRoutePlan(connectRoutePlanSpec{
 		source: source, receiver: receiver, producerEvent: evidence, receiverEvent: evidence,
@@ -665,7 +665,7 @@ func TestAdmitRuntimeControlSourceEventResolvesOnceAgainstExactSource(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err = AdmitRuntimeControlSourceEvent(source, "", "root.ready", rootSource)
+	got, err = AdmitRuntimeControlSourceEvent(source, ".", "root.ready", rootSource)
 	if err != nil || got != "root.ready" {
 		t.Fatalf("admit root event = %q, %v, want root.ready", got, err)
 	}
@@ -794,8 +794,8 @@ func TestCompileConnectPlansFromLoadedPackageFixture(t *testing.T) {
 		t.Fatalf("plans = %#v, want one", plans)
 	}
 	plan := plans[0]
-	if !strings.HasPrefix(plan.Readback().AuthoredLocation, filepath.Join(root, "package.yaml")+":") {
-		t.Fatalf("AuthoredLocation = %q, want exact root package.yaml:line", plan.Readback().AuthoredLocation)
+	if !strings.HasPrefix(plan.Readback().AuthoredLocation, "schema.yaml:") {
+		t.Fatalf("AuthoredLocation = %q, want exact root-relative schema.yaml:line", plan.Readback().AuthoredLocation)
 	}
 	if got, want := plan.source.resolvedEvent.value, events.EventType("producer/work.ready"); got != want {
 		t.Fatalf("Source.ResolvedEvent = %q, want %q", got, want)
@@ -830,7 +830,7 @@ func TestCompileConnectPlansLoadedPackagePinsExactCanonicalEventIdentity(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeConnectRoutePlanPackageFixture(t)
-			replaceFixtureText(t, filepath.Join(root, "package.yaml"), "  - event: work.ready", tc.connectLine)
+			replaceFixtureText(t, filepath.Join(root, "schema.yaml"), "  - event: work.ready", tc.connectLine)
 			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.want)
 			}
@@ -838,7 +838,7 @@ func TestCompileConnectPlansLoadedPackagePinsExactCanonicalEventIdentity(t *test
 	}
 
 	root := writeConnectRoutePlanPackageFixture(t)
-	replaceFixtureText(t, filepath.Join(root, "flows/consumer/schema.yaml"), "work.ready", "work/ready")
+	replaceFixtureText(t, filepath.Join(root, "consumer/schema.yaml"), "work.ready", "work/ready")
 	if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "exact local canonical event identity") {
 		t.Fatalf("slash-qualified flow pin load error = %v, want exact local identity rejection", err)
 	}
@@ -931,8 +931,8 @@ func TestCompileConnectPlansFailsClosedForInvalidFanInStream(t *testing.T) {
 			if issues[0].Failure != tc.failure || !strings.Contains(issues[0].Detail, tc.detail) {
 				t.Fatalf("issue = %#v, want failure %s containing %q", issues[0], tc.failure.Code(), tc.detail)
 			}
-			if issues[0].AuthoredLocation == "" || !strings.Contains(issues[0].AuthoredLocation, "package.yaml:") {
-				t.Fatalf("issue location = %q, want exact package.yaml:line", issues[0].AuthoredLocation)
+			if issues[0].AuthoredLocation == "" || !strings.Contains(issues[0].AuthoredLocation, "schema.yaml:") {
+				t.Fatalf("issue location = %q, want exact schema.yaml:line", issues[0].AuthoredLocation)
 			}
 		})
 	}
@@ -1623,7 +1623,7 @@ func TestCompileConnectPlansOneToOneStatic(t *testing.T) {
 				Event: "deploy.completed",
 			}},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1693,8 +1693,8 @@ func TestCompileConnectPlansRootProducerToStaticReceiver(t *testing.T) {
 	if !plan.source.IsRoot() {
 		t.Fatalf("Source.Root = false, want true: %#v", plan.source)
 	}
-	if got, want := plan.source.flowID.value, ""; got != want {
-		t.Fatalf("Source.FlowID = %q, want root empty flow id", got)
+	if got, want := plan.source.flowID.value, "."; got != want {
+		t.Fatalf("Source.FlowID = %q, want canonical root flow id", got)
 	}
 	if got, want := plan.source.pin.value, "root.ready"; got != want {
 		t.Fatalf("Source.Pin = %q, want %q", got, want)
@@ -1727,7 +1727,7 @@ func TestCompileConnectPlansSupportsRootReceiverEndpoint(t *testing.T) {
 		t.Fatalf("plans = %#v, want one", plans)
 	}
 	plan := plans[0]
-	if !plan.receiver.IsRoot() || plan.receiver.flowID.value != "" || plan.receiver.pin.value != "scout.completed" {
+	if !plan.receiver.IsRoot() || plan.receiver.flowID.value != "." || plan.receiver.pin.value != "scout.completed" {
 		t.Fatalf("Receiver = %#v, want root input scout.completed", plan.receiver)
 	}
 	if plan.target.FlowInstance != "" || plan.target.EntityID != "" || !plan.RequiresRuntimeResolution() {
@@ -1744,7 +1744,7 @@ func TestCompiledConnectProducerEvidenceOwnsConnectedRootInput(t *testing.T) {
 	}
 	source := semanticview.Wrap(bundle)
 
-	resolution := ResolveFlowInputProducer(source, "", "scout.completed")
+	resolution := ResolveFlowInputProducer(source, ".", "scout.completed")
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
 		t.Fatalf("evidence = %#v, want compiled parent-connect evidence", resolution.Evidence)
 	}
@@ -1757,7 +1757,7 @@ func TestCompiledConnectProducerEvidenceOwnsConnectedChildInput(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.requested"}}},
 		{id: "worker", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}},
-	}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: "producer", To: "worker"}})
+	}, []runtimecontracts.FlowConnect{{Event: "work.requested", From: "producer", To: "worker"}})
 
 	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
@@ -1784,7 +1784,7 @@ func TestLowerCompositionConnectRoutePlanUsesExactEventPinIdentity(t *testing.T)
 				Event: "external.completed",
 			}},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "internal.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1816,12 +1816,12 @@ func TestLowerCompositionConnectRoutePlanUsesExactEventPinIdentity(t *testing.T)
 func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name    string
-		connect runtimecontracts.FlowPackageConnect
+		connect runtimecontracts.FlowConnect
 		want    ConnectRoutePlanFailure
 	}{
 		{
 			name:    "missing output pin",
-			connect: runtimecontracts.FlowPackageConnect{Event: "missing.event", From: "producer", To: "consumer", Rename: "deploy.completed"},
+			connect: runtimecontracts.FlowConnect{Event: "missing.event", From: "producer", To: "consumer", Rename: "deploy.completed"},
 			want:    ConnectFailureProducerOutputPinMissing,
 		},
 	}
@@ -1856,7 +1856,7 @@ func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T)
 		name       string
 		outputs    []runtimecontracts.FlowOutputEventPin
 		inputs     []runtimecontracts.FlowInputEventPin
-		connect    runtimecontracts.FlowPackageConnect
+		connect    runtimecontracts.FlowConnect
 		want       ConnectRoutePlanFailure
 		wantDetail []string
 	}{
@@ -1864,25 +1864,25 @@ func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T)
 			name:       "zero source candidates",
 			outputs:    []runtimecontracts.FlowOutputEventPin{{Event: "other.event"}},
 			inputs:     []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}},
-			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			connect:    runtimecontracts.FlowConnect{Event: "work.ready", From: "producer", To: "consumer"},
 			want:       ConnectFailureProducerOutputPinMissing,
-			wantDetail: []string{"source endpoint \"producer\"", "visible event \"work.ready\"", "matched 0 pins", "candidate pins: other.event"},
+			wantDetail: []string{"source endpoint \"producer\"", "event \"work.ready\"", "matched 0 pins", "candidate pins: other.event"},
 		},
 		{
 			name:       "zero receiver candidates",
 			outputs:    []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 			inputs:     []runtimecontracts.FlowInputEventPin{{Event: "other.event"}},
-			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			connect:    runtimecontracts.FlowConnect{Event: "work.ready", From: "producer", To: "consumer"},
 			want:       ConnectFailureReceiverInputPinMissing,
-			wantDetail: []string{"receiver endpoint \"consumer\"", "visible event \"work.ready\"", "matched 0 pins", "candidate pins: other.event"},
+			wantDetail: []string{"receiver endpoint \"consumer\"", "event \"work.ready\"", "matched 0 pins", "candidate pins: other.event"},
 		},
 		{
 			name:       "connect without rename cannot select a different receiver event",
 			outputs:    []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 			inputs:     []runtimecontracts.FlowInputEventPin{{Event: "work.accepted"}},
-			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			connect:    runtimecontracts.FlowConnect{Event: "work.ready", From: "producer", To: "consumer"},
 			want:       ConnectFailureReceiverInputPinMissing,
-			wantDetail: []string{"visible event \"work.ready\"", "matched 0 pins", "candidate pins: work.accepted"},
+			wantDetail: []string{"event \"work.ready\"", "matched 0 pins", "candidate pins: work.accepted"},
 		},
 	}
 	for _, tc := range tests {
@@ -1890,7 +1890,7 @@ func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T)
 			source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 				{id: "producer", mode: "static", outputs: tc.outputs},
 				{id: "consumer", mode: "static", inputs: tc.inputs},
-			}, []runtimecontracts.FlowPackageConnect{tc.connect})
+			}, []runtimecontracts.FlowConnect{tc.connect})
 			plans, issues := compileConnectPlans(source)
 			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != tc.want {
 				t.Fatalf("plans/issues = %#v/%#v, want no plan and %s", plans, issues, tc.want.Code())
@@ -1904,17 +1904,17 @@ func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T)
 	}
 }
 
-func TestCompileConnectGraphRejectsFlowOutsideAuthoringPackage(t *testing.T) {
+func TestCompileConnectGraphRejectsFlowOutsideAuthoringSubtree(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
-		{id: "unrelated", packageKey: "packages/other", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
-	}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer", To: "unrelated"}})
+		{id: "unrelated", flowPath: "other/unrelated", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
+	}, []runtimecontracts.FlowConnect{{Event: "work.ready", From: "producer", To: "unrelated"}})
 
 	plans, issues := compileConnectPlans(source)
 	if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverFlowMissing {
 		t.Fatalf("plans/issues = %#v/%#v, want package-visible receiver rejection", plans, issues)
 	}
-	for _, want := range []string{`package "."`, `endpoint "unrelated"`, "does not name a visible flow"} {
+	for _, want := range []string{`schema owner "."`, `endpoint "unrelated"`, "does not name itself or an exact descendant flow"} {
 		if !strings.Contains(issues[0].Detail, want) {
 			t.Fatalf("issue detail = %q, want %q", issues[0].Detail, want)
 		}
@@ -1926,7 +1926,7 @@ func TestCompileConnectGraphTreatsEndpointsAsExactFlowIDs(t *testing.T) {
 		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 			{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
 			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
-		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer.work_output", To: "consumer"}})
+		}, []runtimecontracts.FlowConnect{{Event: "work.ready", From: "producer.work_output", To: "consumer"}})
 		plans, issues := compileConnectPlans(source)
 		if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureProducerFlowMissing {
 			t.Fatalf("plans/issues = %#v/%#v, want exact source-flow rejection", plans, issues)
@@ -1937,67 +1937,69 @@ func TestCompileConnectGraphTreatsEndpointsAsExactFlowIDs(t *testing.T) {
 		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 			{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
 			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
-		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer", To: "consumer.work_input"}})
+		}, []runtimecontracts.FlowConnect{{Event: "work.ready", From: "producer", To: "consumer.work_input"}})
 		plans, issues := compileConnectPlans(source)
 		if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverFlowMissing {
 			t.Fatalf("plans/issues = %#v/%#v, want exact receiver-flow rejection", plans, issues)
 		}
 	})
 
-	t.Run("declared dotted flow ID remains exact", func(t *testing.T) {
+	t.Run("slash-qualified descendant flow path remains exact", func(t *testing.T) {
 		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
-			{id: "producer.v2", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
+			{id: "v2", flowPath: "producer/v2", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
 			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
-		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer.v2", To: "consumer"}})
+		}, []runtimecontracts.FlowConnect{{Event: "work.ready", From: "producer/v2", To: "consumer"}})
 		plans, issues := compileConnectPlans(source)
 		if len(plans) != 1 || len(issues) != 0 {
-			t.Fatalf("plans/issues = %#v/%#v, want exact dotted flow ID accepted", plans, issues)
+			t.Fatalf("plans/issues = %#v/%#v, want exact slash-qualified flow path accepted", plans, issues)
 		}
 	})
 }
 
 type connectRoutePlanFlow struct {
-	id         string
-	packageKey string
-	mode       string
-	inputs     []runtimecontracts.FlowInputEventPin
-	outputs    []runtimecontracts.FlowOutputEventPin
+	id       string
+	flowPath string
+	mode     string
+	inputs   []runtimecontracts.FlowInputEventPin
+	outputs  []runtimecontracts.FlowOutputEventPin
 }
 
-func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
 	return testRootConnectRoutePlanSource(nil, flows, connects)
 }
 
-func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
 	return testRootInputOutputConnectRoutePlanSource(nil, rootOutputs, flows, connects)
 }
 
-func testRootReceiverConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+func testRootReceiverConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
 	return testRootInputOutputConnectRoutePlanSource(rootInputs, nil, flows, connects)
 }
 
-func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
-	connects = append([]runtimecontracts.FlowPackageConnect(nil), connects...)
+func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.FlowInputEventPin, rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowConnect) semanticview.Source {
+	connects = append([]runtimecontracts.FlowConnect(nil), connects...)
 	for i := range connects {
-		connects[i].SourceFile = "package.yaml"
+		connects[i].SourceFile = "schema.yaml"
 		connects[i].SourceLine = i + 1
 	}
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
+	byPath := make(map[string]*runtimecontracts.FlowContractView, len(flows)+1)
 	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))
+	flowSources := map[string]runtimecontracts.FlowSource{
+		".": {FlowPath: ".", Schema: "schema.yaml"},
+	}
 	eventsCatalog := make(map[string]runtimecontracts.EventCatalogEntry)
 	for _, flow := range flows {
-		packageKey := strings.TrimSpace(flow.packageKey)
-		if packageKey == "" {
-			packageKey = "."
+		flowPath := strings.Trim(strings.TrimSpace(flow.flowPath), "/")
+		if flowPath == "" {
+			flowPath = strings.Trim(strings.TrimSpace(flow.id), "/")
 		}
 		view := runtimecontracts.FlowContractView{
 			Paths: runtimecontracts.FlowContractPaths{
-				ID:         flow.id,
-				Flow:       flow.id,
-				PackageKey: packageKey,
-				SchemaFile: filepath.Join("flows", flow.id, "schema.yaml"),
-				EventsFile: filepath.Join("flows", flow.id, "events.yaml"),
+				FlowPath:   flowPath,
+				SchemaFile: filepath.Join(flowPath, "schema.yaml"),
+				EventsFile: filepath.Join(flowPath, "events.yaml"),
 			},
 			Schema: runtimecontracts.FlowSchemaDocument{
 				Mode: flow.mode,
@@ -2006,43 +2008,46 @@ func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.Flo
 					Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
 				},
 			},
-			Path:   flow.id,
+			Path:   flowPath,
 			Events: map[string]runtimecontracts.EventCatalogEntry{},
 		}
 		children = append(children, view)
-		viewCopy := view
-		byID[flow.id] = &viewCopy
+		flowSources[flowPath] = runtimecontracts.FlowSource{FlowPath: flowPath, Schema: view.Paths.SchemaFile, Events: view.Paths.EventsFile}
 		for _, pin := range flow.outputs {
 			entry := runtimecontracts.EventCatalogEntry{}
 			eventsCatalog[pin.EventType()] = entry
-			viewCopy.Events[pin.EventType()] = entry
+			children[len(children)-1].Events[pin.EventType()] = entry
 		}
-		flowSchemas[flow.id] = view.Schema
+		flowSchemas[flowPath] = view.Schema
 	}
 	for _, pin := range rootOutputs {
 		eventsCatalog[pin.EventType()] = runtimecontracts.EventCatalogEntry{}
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key:   ".",
-			Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
-			Manifest: runtimecontracts.ProjectPackageDocument{
-				Connect: connects,
-			},
-		}},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: rootInputs},
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: rootOutputs},
-			},
+	rootSchema := runtimecontracts.FlowSchemaDocument{
+		Connect: connects,
+		Pins: runtimecontracts.FlowPins{
+			Inputs:  runtimecontracts.FlowInputPins{EventPins: rootInputs},
+			Outputs: runtimecontracts.FlowOutputPins{EventPins: rootOutputs},
 		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
+		Schema:   rootSchema,
+		Children: children,
+	}
+	byPath["."] = &root
+	for index := range root.Children {
+		flowPath := root.Children[index].Paths.FlowPath
+		byID[flowPath] = &root.Children[index]
+		byPath[flowPath] = &root.Children[index]
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema:  &rootSchema,
+		FlowSources: flowSources,
 		Events:      eventsCatalog,
 		FlowSchemas: flowSchemas,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{
-				Children: children,
-			},
-			ByID: byID,
+			Root: &root, ByID: byID, ByPath: byPath,
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {

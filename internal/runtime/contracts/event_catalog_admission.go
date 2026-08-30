@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -46,6 +47,18 @@ func loadOptionalEventCatalog(path string) (map[string]EventCatalogEntry, error)
 	entries, err := admitEventCatalogDocument(admission.document)
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
+	}
+	return entries, admission.RequireLive(len(entries))
+}
+
+func loadOptionalEventCatalogFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]EventCatalogEntry, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationEvents)
+	if err != nil || !present {
+		return map[string]EventCatalogEntry{}, err
+	}
+	entries, err := admitEventCatalogDocument(admission.document)
+	if err != nil {
+		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
 	return entries, admission.RequireLive(len(entries))
 }

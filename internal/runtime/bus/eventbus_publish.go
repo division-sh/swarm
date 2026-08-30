@@ -787,7 +787,7 @@ func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedP
 	if eb == nil || prepared.publicationClaim.bus != eb {
 		return nil, errors.New("prepared publication belongs to a different event bus")
 	}
-	if _, err := eb.admitBundleSourceFact(ctx); err != nil {
+	if _, err := eb.admitSourceArtifactFact(ctx); err != nil {
 		return nil, fmt.Errorf("admit prepared publication caller: %w", err)
 	}
 	if prepared.requiresReceiver() {
@@ -795,7 +795,7 @@ func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedP
 			return nil, fmt.Errorf("admit prepared publication receiver: %w", err)
 		}
 	}
-	return eb.admitBundleSourceFact(ctx)
+	return eb.admitSourceArtifactFact(ctx)
 }
 
 func (prepared PreparedPublish) requiresReceiver() bool {
@@ -811,7 +811,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return PreparedPublish{}, err
 	}
-	ctx, err := eb.admitBundleSourceFact(ctx)
+	ctx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
@@ -900,7 +900,7 @@ func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (co
 		return ctx, events.AdmittedEvent{}, err
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
@@ -1220,7 +1220,7 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		_ = lease.Done()
 		return releaseOnFailure(err)
 	}
-	dispatchCtx, err = eb.admitBundleSourceFact(dispatchCtx)
+	dispatchCtx, err = eb.admitSourceArtifactFact(dispatchCtx)
 	if err != nil {
 		closeDispatchContext()
 		_ = lease.Done()
@@ -1554,7 +1554,7 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 	return projected, nil
 }
 
-func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	if eb == nil {
 		return ctx, errors.New("event bus is required")
 	}
@@ -1563,7 +1563,7 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
-	sourceFact := eb.bundleSourceFact
+	sourceFact := eb.sourceArtifactFact
 	eb.mu.RUnlock()
 
 	contextRuntimeInstanceID, hasContextRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
@@ -1580,7 +1580,7 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 	} else if hasContextRuntimeInstanceID && contextRuntimeInstanceID != runtimeInstanceID {
 		return ctx, errors.New("event bus runtime instance conflicts with publication context")
 	}
-	contextFact, hasContextFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	contextFact, hasContextFact := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	hasOwnedFact := sourceFact.Validate() == nil
 	if !hasOwnedFact && !eb.ephemeral {
 		return ctx, errors.New("event bus bundle source fact is required")
@@ -1596,7 +1596,7 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 	if hasOwnedFact {
 		admittedFact = sourceFact
 		if !hasContextFact {
-			ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 		}
 	}
 	if hasContextScope && contextScope.Kind == runtimeauthoractivity.ScopeBundle && admittedFact.Validate() == nil && contextScope.BundleHash != admittedFact.BundleHash() {
@@ -1634,8 +1634,8 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 	})
 }
 
-func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
-	return eb.admitBundleSourceFact(ctx)
+func (eb *EventBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	return eb.admitSourceArtifactFact(ctx)
 }
 
 func (eb *EventBus) interceptorsSnapshot() []EventInterceptor {
@@ -2045,7 +2045,7 @@ func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *wor
 	if eb == nil {
 		return ctx, nil, errors.New("event bus is required")
 	}
-	admittedCtx, err := eb.admitBundleSourceFact(ctx)
+	admittedCtx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -2078,8 +2078,8 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); ok {
 		workCtx = runtimeauthoractivity.WithScope(workCtx, scope)
 	}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		workCtx = runtimecorrelation.WithBundleSourceFact(workCtx, fact)
+	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		workCtx = runtimecorrelation.WithSourceArtifactFact(workCtx, fact)
 	}
 	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
@@ -2246,7 +2246,7 @@ func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepi
 
 func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, dispatchRecipients bool) (runtimepipelineobligation.ExecutionOutcome, error) {
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}

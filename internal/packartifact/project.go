@@ -74,6 +74,103 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 	return set, nil
 }
 
+// LoadProjectPackSetFS admits project-owned packs from an already admitted
+// source artifact. It never reopens an authored root or consults local state.
+func LoadProjectPackSetFS(source fs.FS) (ProjectPackSet, error) {
+	if source == nil {
+		return ProjectPackSet{}, nil
+	}
+	manifestBody, err := fs.ReadFile(source, ProjectPackManifestLabel)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, statErr := fs.Stat(source, ProjectPackDirectory); errors.Is(statErr, fs.ErrNotExist) {
+			return ProjectPackSet{}, nil
+		} else if statErr != nil {
+			return ProjectPackSet{}, fmt.Errorf("inspect project pack directory: %w", statErr)
+		}
+		return ProjectPackSet{}, fmt.Errorf("project pack directory requires %s", ProjectPackManifestLabel)
+	}
+	if err != nil {
+		return ProjectPackSet{}, fmt.Errorf("read project pack manifest: %w", err)
+	}
+	manifest, err := ParseProjectPackManifest(manifestBody)
+	if err != nil {
+		return ProjectPackSet{}, err
+	}
+	set := ProjectPackSet{
+		ManifestBody: append([]byte(nil), manifestBody...),
+		Files:        []ProjectPackFile{{RelativePath: ProjectPackManifestLabel, Body: append([]byte(nil), manifestBody...)}},
+	}
+	expected := map[string]struct{}{ProjectPackManifestLabel: {}}
+	seenIDs := make(map[string]string, len(manifest.Imports))
+	seenPaths := make(map[string]string, len(manifest.Imports))
+	for index, declared := range manifest.Imports {
+		declared.ID = strings.TrimSpace(declared.ID)
+		declared.Type = strings.TrimSpace(declared.Type)
+		declared.Path = cleanRelativePath(declared.Path)
+		manifestFile := packmodel.ManifestFileNameForType(declared.Type)
+		if declared.ID == "" || declared.Path == "" || manifestFile == "" {
+			return ProjectPackSet{}, fmt.Errorf("project pack imports[%d] requires valid id, type, and canonical relative path", index)
+		}
+		if previous, duplicate := seenIDs[declared.ID]; duplicate {
+			return ProjectPackSet{}, fmt.Errorf("duplicate project pack id %q at %q and %q", declared.ID, previous, declared.Path)
+		}
+		if previous, duplicate := seenPaths[declared.Path]; duplicate {
+			return ProjectPackSet{}, fmt.Errorf("project pack path %q is shared by %q and %q", declared.Path, previous, declared.ID)
+		}
+		if !declared.Origin.Valid() {
+			return ProjectPackSet{}, fmt.Errorf("project pack %q import origin is invalid", declared.ID)
+		}
+		seenIDs[declared.ID], seenPaths[declared.Path] = declared.Path, declared.ID
+		directory := path.Join(ProjectPackDirectory, declared.Path)
+		envelopeLabel := path.Join(directory, EnvelopeFileName)
+		manifestLabel := path.Join(directory, manifestFile)
+		envelopeBody, err := fs.ReadFile(source, envelopeLabel)
+		if err != nil {
+			return ProjectPackSet{}, fmt.Errorf("read project pack %q envelope: %w", declared.ID, err)
+		}
+		body, err := fs.ReadFile(source, manifestLabel)
+		if err != nil {
+			return ProjectPackSet{}, fmt.Errorf("read project pack %q body: %w", declared.ID, err)
+		}
+		envelope, err := packmodel.ParseEnvelope(envelopeBody)
+		if err != nil {
+			return ProjectPackSet{}, fmt.Errorf("parse project pack %q envelope: %w", declared.ID, err)
+		}
+		if envelope.ID != declared.ID || envelope.Type != declared.Type {
+			return ProjectPackSet{}, fmt.Errorf("project pack manifest declares %q type %q but envelope owns %q type %q", declared.ID, declared.Type, envelope.ID, envelope.Type)
+		}
+		if envelope.Provenance.Source != ProvenanceProject || strings.TrimSpace(envelope.ManifestHash) != ManifestHashDerived {
+			return ProjectPackSet{}, fmt.Errorf("project pack %q must declare provenance.source %q and manifest_hash %q", declared.ID, ProvenanceProject, ManifestHashDerived)
+		}
+		if envelope.ID != declared.Origin.ID {
+			return ProjectPackSet{}, fmt.Errorf("project pack %q contradicts imported origin id %q", envelope.ID, declared.Origin.ID)
+		}
+		expected[envelopeLabel], expected[manifestLabel] = struct{}{}, struct{}{}
+		set.Sources = append(set.Sources, ProjectPackSource{Path: directory, EnvelopeBody: append([]byte(nil), envelopeBody...), ManifestBody: append([]byte(nil), body...), Origin: declared.Origin})
+		set.Files = append(set.Files,
+			ProjectPackFile{RelativePath: envelopeLabel, Body: append([]byte(nil), envelopeBody...)},
+			ProjectPackFile{RelativePath: manifestLabel, Body: append([]byte(nil), body...)},
+		)
+	}
+	if err := fs.WalkDir(source, ProjectPackDirectory, func(label string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := expected[label]; !ok {
+			return fmt.Errorf("project pack directory contains unexpected file %q", label)
+		}
+		return nil
+	}); err != nil {
+		return ProjectPackSet{}, err
+	}
+	sort.Slice(set.Sources, func(i, j int) bool { return set.Sources[i].Path < set.Sources[j].Path })
+	sort.Slice(set.Files, func(i, j int) bool { return set.Files[i].RelativePath < set.Files[j].RelativePath })
+	return set, nil
+}
+
 func loadProjectPackSetLocked(transaction *projectPackTransaction) (ProjectPackSet, error) {
 	if transaction == nil || transaction.root == nil || strings.TrimSpace(transaction.stateRoot) == "" {
 		return ProjectPackSet{}, fmt.Errorf("project pack transaction is required")
@@ -234,7 +331,7 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	}
 	transaction, err := acquireProjectPackTransaction(root, true)
 	if err != nil {
-		return false, fmt.Errorf("selected project %q has no admissible package.yaml: %w", root, err)
+		return false, fmt.Errorf("open selected source root %q for pack import: %w", root, err)
 	}
 	changed, importErr := importEmbeddedPackLocked(root, id, entry, transaction)
 	closeErr := transaction.close()

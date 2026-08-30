@@ -18,7 +18,7 @@ func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *test
 	}{
 		{name: "missing bundle", mutate: func(r *IntentRequest) { r.PlanRef.BundleHash = "" }},
 		{name: "missing plan digest", mutate: func(r *IntentRequest) { r.PlanRef.SemanticDigest = "" }},
-		{name: "different plan element", mutate: func(r *IntentRequest) { r.PlanRef.ElementRef.ElementID = uuid.NewString() }},
+		{name: "different plan element", mutate: func(r *IntentRequest) { r.PlanRef.ElementRef.SemanticPath = "handlers/items.ready/fan_out/1" }},
 		{name: "different triggering event", mutate: func(r *IntentRequest) { r.Source.EventID = uuid.NewString() }},
 		{name: "different entity source", mutate: func(r *IntentRequest) {
 			r.Source = SourceRef{Kind: SourceEntityField, RunID: r.Key.RunID, EntityID: uuid.NewString(), Field: "items"}
@@ -69,7 +69,7 @@ func validIntentRequest(t *testing.T) IntentRequest {
 	t.Helper()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	element := runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: uuid.NewString()}
+	element := runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: "handlers/items.ready/fan_out/0"}
 	producer, err := events.NewRootRoutingSource(uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func validIntentRequest(t *testing.T) IntentRequest {
 	return IntentRequest{
 		Key: IntentKey{RunID: runID, TriggeringDeliveryID: uuid.NewString(), ElementRef: element},
 		PlanRef: runtimecontracts.FanOutPlanRef{
-			BundleHash: "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
 			ElementRef: element, SemanticDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		},
 		Source:      SourceRef{Kind: SourceEventPayloadField, EventID: eventID, Field: "items"},

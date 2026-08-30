@@ -23,7 +23,7 @@ const admittedEffectiveSourceProjectionVersion = "admitted-effective-source-proj
 type EffectiveSourceProjectionRequest struct {
 	Source                 semanticview.Source
 	WorkflowModule         runtimepipeline.WorkflowModule
-	BundleSourceFact       runtimecorrelation.BundleSourceFact
+	SourceArtifactFact     runtimecorrelation.SourceArtifactFact
 	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
 	ChannelPlans           []packs.SatisfactionPlan
 }
@@ -45,7 +45,7 @@ func (p AdmittedEffectiveSourceProjection) Identity() scenarioexecution.Effectiv
 }
 
 func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (AdmittedEffectiveSourceProjection, error) {
-	if err := request.BundleSourceFact.Validate(); err != nil {
+	if err := request.SourceArtifactFact.Validate(); err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("effective source bundle fact: %w", err)
 	}
 	source := request.Source
@@ -71,7 +71,7 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
 	}
-	identityValue, err := effectiveSourceIdentityValue(source, request.BundleSourceFact, request.ChannelPlans)
+	identityValue, err := effectiveSourceIdentityValue(source, request.SourceArtifactFact, request.ChannelPlans)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, err
 	}
@@ -79,7 +79,7 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("hash effective source projection: %w", err)
 	}
-	identity, err := scenarioexecution.NewEffectiveSourceIdentity(request.BundleSourceFact, digest)
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(request.SourceArtifactFact, digest)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, err
 	}
@@ -108,8 +108,8 @@ func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTrigg
 	return connectors, triggers, nil
 }
 
-func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
-	bundleHash, bundleSource := sourceFact.StorageValues()
+func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
+	bundleHash := sourceFact.BundleHash()
 	inputs := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
 	inputValues := make([]map[string]any, 0, len(inputs))
 	for _, endpoint := range inputs {
@@ -193,7 +193,7 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 			if !item.Valid() {
 				return nil, fmt.Errorf("effective provider-trigger event %q has invalid provenance", item.Event)
 			}
-			scopes := append([]string(nil), item.ProjectScopes...)
+			scopes := append([]string(nil), item.FlowScopes...)
 			sort.Strings(scopes)
 			provenanceValues = append(provenanceValues, map[string]any{
 				"provider": item.Provider, "event": item.Event, "kind": item.Kind,
@@ -227,7 +227,7 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 
 	return map[string]any{
 		"version":             admittedEffectiveSourceProjectionVersion,
-		"base_source":         map[string]any{"bundle_hash": bundleHash, "bundle_source": bundleSource},
+		"base_source":         map[string]any{"bundle_hash": bundleHash},
 		"public_inputs":       inputValues,
 		"provider_connectors": connectorValues,
 		"provider_triggers":   triggerValue,

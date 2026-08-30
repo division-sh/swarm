@@ -23,9 +23,9 @@ func RequirePostgresActiveTx(ctx context.Context, tx *sql.Tx, runID string) erro
 	return err
 }
 
-func RequirePostgresActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func RequirePostgresActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	if tx == nil {
-		return runtimecorrelation.BundleSourceFact{}, errors.New("PostgreSQL run lifecycle transaction is required")
+		return runtimecorrelation.SourceArtifactFact{}, errors.New("PostgreSQL run lifecycle transaction is required")
 	}
 	return requireActiveSource(ctx, tx.QueryRowContext, runID, true, true)
 }
@@ -50,9 +50,9 @@ func RequireSQLiteActiveTx(ctx context.Context, tx *sql.Tx, runID string) error 
 	return err
 }
 
-func RequireSQLiteActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func RequireSQLiteActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	if tx == nil {
-		return runtimecorrelation.BundleSourceFact{}, errors.New("SQLite run lifecycle transaction is required")
+		return runtimecorrelation.SourceArtifactFact{}, errors.New("SQLite run lifecycle transaction is required")
 	}
 	return requireActiveSource(ctx, tx.QueryRowContext, runID, false, false)
 }
@@ -65,48 +65,45 @@ func RequireSQLiteActiveQuery(ctx context.Context, queryer RowQueryer, runID str
 	return err
 }
 
-func requireActiveSource(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row, runID string, postgres, lock bool) (runtimecorrelation.BundleSourceFact, error) {
+func requireActiveSource(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row, runID string, postgres, lock bool) (runtimecorrelation.SourceArtifactFact, error) {
 	runID = strings.TrimSpace(runID)
-	query := `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = ?`
+	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
 	if postgres {
-		query = `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid`
+		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid`
 		if lock {
 			query += ` FOR UPDATE`
 		}
 	}
-	var state, bundleHash, bundleSource string
-	if err := queryRow(ctx, query, runID).Scan(&state, &bundleHash, &bundleSource); err != nil {
+	var state, bundleHash string
+	if err := queryRow(ctx, query, runID).Scan(&state, &bundleHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+			return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 		}
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("read active run lifecycle: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("read active run lifecycle: %w", err)
 	}
 	parsed, err := runtimerunlifecycle.ParseState(state)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	if !parsed.Active() {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
 	}
-	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("decode active run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode active run lifecycle source: %w", err)
 	}
-	if !source.IsPersisted() {
-		return source, nil
-	}
-	existsQuery := `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)`
+	existsQuery := `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)`
 	if postgres {
-		existsQuery = `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`
+		existsQuery = `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`
 	}
 	var exists bool
 	if err := queryRow(ctx, existsQuery, source.BundleHash()).Scan(&exists); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("validate active run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("validate active run lifecycle source: %w", err)
 	}
 	if !exists {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.PersistedBundleUnavailableError{
-			BundleHash: source.BundleHash(), BundleSource: runtimerunlifecycle.BundleSourcePersisted,
-			Cause: "persisted_missing_bundle_row",
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.SourceArtifactUnavailableError{
+			BundleHash: source.BundleHash(),
+			Cause:      "missing_source_artifact",
 		}
 	}
 	return source, nil

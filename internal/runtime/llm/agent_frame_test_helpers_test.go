@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	testAgentFrameBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testAgentFrameBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testManagedModelAlias    = "frame-alias"
 )
 
@@ -111,11 +111,11 @@ func testManagedConversationContext(t testing.TB, harness *effecttest.Harness, a
 		Memory:        testMemory(),
 	})
 	ctx = withTestMemory(ctx, agentID, flowInstance)
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(testAgentFrameBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(testAgentFrameBundleHash)
 	if err != nil {
 		t.Fatalf("test bundle source: %v", err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, testManagedEvent(agentID))
 	return llmTestWorkContext(t, ctx)
 }

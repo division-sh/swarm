@@ -2,324 +2,39 @@ package contracts
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/platform"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-const maxDiscoveredPackageDepth = 99
-
 func contractScopeKey(source ContractItemSource, localID string) string {
-	localID = strings.TrimSpace(localID)
-	parts := make([]string, 0, 3)
-	if pkg := strings.TrimSpace(source.PackageKey); pkg != "" {
-		parts = append(parts, pkg)
+	identity, err := runtimeidentity.AdmitDeclarationIdentity(
+		strings.TrimSpace(source.FlowPath),
+		strings.TrimSpace(source.Family),
+		strings.TrimSpace(localID),
+	)
+	if err != nil {
+		return ""
 	}
-	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
-		parts = append(parts, flowID)
-	}
-	if localID != "" {
-		parts = append(parts, localID)
-	}
-	return strings.Join(parts, "::")
+	return identity.Key()
 }
+
 func contractSameScope(a, b ContractItemSource) bool {
-	return strings.TrimSpace(a.PackageKey) == strings.TrimSpace(b.PackageKey) &&
-		strings.TrimSpace(a.FlowID) == strings.TrimSpace(b.FlowID) &&
-		strings.TrimSpace(a.Layer) == strings.TrimSpace(b.Layer)
+	return strings.TrimSpace(a.FlowPath) == strings.TrimSpace(b.FlowPath) &&
+		strings.TrimSpace(a.Family) == strings.TrimSpace(b.Family)
 }
-func ResolveWorkflowContractPaths(repoRoot string) ContractPaths {
-	return ResolveWorkflowContractPathsWithOverrides(repoRoot, "", "")
-}
+
 func DefaultPlatformSpecFile(repoRoot string) string {
 	return platform.DefaultPlatformSpecFile(repoRoot)
 }
-func defaultAuxFile(repoRoot, envKey string, pathParts ...string) string {
-	if env := strings.TrimSpace(os.Getenv(envKey)); env != "" {
-		return env
-	}
-	return filepath.Join(append([]string{repoRoot}, pathParts...)...)
-}
-func DefaultWorkflowContractsDir(repoRoot string) string {
-	if env := strings.TrimSpace(os.Getenv("SWARM_CONTRACTS_DIR")); env != "" {
-		return env
-	}
-	dir := filepath.Join(repoRoot, "contracts")
-	if existingFile(filepath.Join(dir, "package.yaml")) != "" {
-		return dir
-	}
-	return ""
-}
-func RepoRootHasSwarmContracts(repoRoot string) bool {
-	return existingFile(filepath.Join(DefaultWorkflowContractsDir(repoRoot), "package.yaml")) != ""
-}
-func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) ContractPaths {
-	workflowDir := DefaultWorkflowContractsDir(repoRoot)
-	overrideActive := strings.TrimSpace(workflowDirOverride) != ""
-	if overrideActive {
-		workflowDir = workflowDirOverride
-	}
-	platformSpecFile := DefaultPlatformSpecFile(repoRoot)
-	if strings.TrimSpace(platformSpecFileOverride) != "" {
-		platformSpecFile = platformSpecFileOverride
-	}
-	paths := ContractPaths{
-		ContractsRoot:         workflowDir,
-		WorkflowDir:           workflowDir,
-		RootSchemaFile:        existingFile(filepath.Join(workflowDir, "schema.yaml")),
-		RootTypesFile:         existingFile(filepath.Join(workflowDir, "types.yaml")),
-		RootEntitiesFile:      existingFile(filepath.Join(workflowDir, "entities.yaml")),
-		ProjectPackageFile:    existingFile(filepath.Join(workflowDir, "package.yaml")),
-		ProjectNodesFile:      existingFile(filepath.Join(workflowDir, "nodes.yaml")),
-		ProjectEventsFile:     existingFile(filepath.Join(workflowDir, "events.yaml")),
-		ProjectAgentsFile:     existingFile(filepath.Join(workflowDir, "agents.yaml")),
-		ProjectToolsFile:      existingFile(filepath.Join(workflowDir, "tools.yaml")),
-		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
-		PlatformSpecFile:      platformSpecFile,
-		VerificationGatesFile: defaultAuxFile(repoRoot, "SWARM_VERIFICATION_GATES_FILE", "docs", "specs", "swarm-platform", "verification-gates.yaml"),
-		ToolingLockFile:       defaultAuxFile(repoRoot, "SWARM_TOOLING_LOCK_FILE", "docs", "specs", "swarm-platform", "tooling.lock"),
-		DDLFile:               "",
-		AgentConfigMapFile:    defaultAuxFile(repoRoot, "SWARM_AGENT_CONFIG_MAP_FILE", "docs", "specs", "swarm-platform", "agent-config-map.yaml"),
-	}
-	if paths.ProjectPackageFile != "" {
-		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)
-		for _, pkg := range paths.ProjectPackages {
-			paths.Flows = append(paths.Flows, pkg.Flows...)
-		}
-		sort.Slice(paths.Flows, func(i, j int) bool {
-			if paths.Flows[i].ID == paths.Flows[j].ID {
-				if paths.Flows[i].PackageKey == paths.Flows[j].PackageKey {
-					return strings.Compare(paths.Flows[i].Flow, paths.Flows[j].Flow) < 0
-				}
-				return strings.Compare(paths.Flows[i].PackageKey, paths.Flows[j].PackageKey) < 0
-			}
-			return strings.Compare(paths.Flows[i].ID, paths.Flows[j].ID) < 0
-		})
-	}
-	return paths
-}
-func ContractFilesExist(repoRoot string) []string {
-	paths := ResolveWorkflowContractPaths(repoRoot)
-	files := []string{
-		paths.PlatformSpecFile,
-		paths.VerificationGatesFile,
-		paths.ToolingLockFile,
-		paths.DDLFile,
-		paths.RootSchemaFile,
-	}
-	if paths.ProjectPackageFile != "" {
-		files = append(files,
-			paths.ProjectPackageFile,
-			paths.RootTypesFile,
-			paths.RootEntitiesFile,
-			paths.ProjectNodesFile,
-			paths.ProjectEventsFile,
-			paths.ProjectAgentsFile,
-		)
-		for _, pkg := range paths.ProjectPackages {
-			files = append(files,
-				pkg.PackageFile,
-				pkg.DataFile,
-				pkg.ProjectNodesFile,
-				pkg.ProjectEventsFile,
-				pkg.ProjectAgentsFile,
-				pkg.ProjectToolsFile,
-				pkg.ProjectPolicyFile,
-			)
-		}
-		for _, flow := range paths.Flows {
-			files = append(files, flow.SchemaFile, flow.TypesFile, flow.EntitiesFile, flow.NodesFile, flow.EventsFile, flow.AgentsFile)
-		}
-	}
-	missing := make([]string, 0)
-	for _, path := range files {
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		if _, err := os.Stat(path); err != nil {
-			missing = append(missing, path)
-		}
-	}
-	sort.Strings(missing)
-	return missing
-}
-func existingFile(path string) string {
-	if path == "" {
-		return ""
-	}
-	if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-		return path
-	}
-	return ""
-}
-func existingDir(path string) string {
-	if path == "" {
-		return ""
-	}
-	if stat, err := os.Stat(path); err == nil && stat.IsDir() {
-		return path
-	}
-	return ""
-}
-func (p ProjectPackageDocument) ChildPackages() []ProjectPackageRef {
-	return append([]ProjectPackageRef(nil), p.Packages...)
-}
-func (p ProjectPackageRef) ResolveLocation() string {
-	return strings.TrimSpace(p.Path)
-}
-func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPackagePaths {
-	rootFile := existingFile(packageFile)
-	rootDir := filepath.Dir(rootFile)
-	if strings.TrimSpace(rootFile) == "" || strings.TrimSpace(workflowDir) == "" {
-		return nil
-	}
-	visited := map[string]bool{}
-	var out []ProjectPackagePaths
-	var walk func(packageFile, parentKey, owningFlowID string, depth int)
-	walk = func(packageFile, parentKey, owningFlowID string, depth int) {
-		packageFile = existingFile(packageFile)
-		if packageFile == "" || visited[packageFile] {
-			return
-		}
-		visited[packageFile] = true
 
-		var manifest ProjectPackageDocument
-		manifestErr := loadYAMLFile(packageFile, &manifest)
-
-		packageDir := filepath.Dir(packageFile)
-		key := "."
-		if rel, err := filepath.Rel(rootDir, packageDir); err == nil && strings.TrimSpace(rel) != "" {
-			key = filepath.ToSlash(filepath.Clean(rel))
-		}
-		pkg := ProjectPackagePaths{
-			Key:               key,
-			ParentKey:         parentKey,
-			OwningFlowID:      strings.TrimSpace(owningFlowID),
-			Depth:             depth,
-			Dir:               packageDir,
-			PackageFile:       packageFile,
-			ProjectNodesFile:  existingFile(filepath.Join(packageDir, "nodes.yaml")),
-			ProjectEventsFile: existingFile(filepath.Join(packageDir, "events.yaml")),
-			ProjectAgentsFile: existingFile(filepath.Join(packageDir, "agents.yaml")),
-			ProjectToolsFile:  existingFile(filepath.Join(packageDir, "tools.yaml")),
-			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
-			DataFile:          existingFile(filepath.Join(packageDir, "data.yaml")),
-		}
-		if manifestErr != nil {
-			out = append(out, pkg)
-			return
-		}
-		for _, flow := range manifest.Flows {
-			flowDirName := strings.TrimSpace(flow.Flow)
-			if flowDirName == "" {
-				continue
-			}
-			dir := filepath.Join(packageDir, "flows", flowDirName)
-			pkg.Flows = append(pkg.Flows, FlowContractPaths{
-				ID:           strings.TrimSpace(flow.ID),
-				Flow:         flowDirName,
-				Mode:         strings.TrimSpace(flow.Mode),
-				Namespace:    strings.TrimSpace(flow.Namespace),
-				PackageKey:   pkg.Key,
-				PackageDir:   packageDir,
-				Dir:          dir,
-				DataDir:      existingDir(filepath.Join(dir, "data")),
-				SchemaFile:   existingFile(filepath.Join(dir, "schema.yaml")),
-				TypesFile:    existingFile(filepath.Join(dir, "types.yaml")),
-				EntitiesFile: existingFile(filepath.Join(dir, "entities.yaml")),
-				NodesFile:    existingFile(filepath.Join(dir, "nodes.yaml")),
-				EventsFile:   existingFile(filepath.Join(dir, "events.yaml")),
-				AgentsFile:   existingFile(filepath.Join(dir, "agents.yaml")),
-				ToolsFile:    existingFile(filepath.Join(dir, "tools.yaml")),
-				PolicyFile:   existingFile(filepath.Join(dir, "policy.yaml")),
-			})
-		}
-		sort.Slice(pkg.Flows, func(i, j int) bool {
-			return strings.Compare(pkg.Flows[i].ID, pkg.Flows[j].ID) < 0
-		})
-		out = append(out, pkg)
-
-		type flowPackagePath struct {
-			file   string
-			flowID string
-		}
-		var flowPackages []flowPackagePath
-		for _, flow := range pkg.Flows {
-			if packageFile := existingFile(filepath.Join(flow.Dir, "package.yaml")); packageFile != "" {
-				flowPackages = append(flowPackages, flowPackagePath{file: packageFile, flowID: strings.TrimSpace(flow.ID)})
-			}
-		}
-		sort.Slice(flowPackages, func(i, j int) bool { return flowPackages[i].file < flowPackages[j].file })
-		for _, child := range flowPackages {
-			walk(child.file, pkg.Key, child.flowID, depth+1)
-		}
-
-		for _, child := range manifest.ChildPackages() {
-			location := child.ResolveLocation()
-			if strings.TrimSpace(location) == "" {
-				continue
-			}
-			childPath := filepath.Join(packageDir, location)
-			if strings.HasSuffix(strings.ToLower(location), ".yaml") {
-				walk(childPath, pkg.Key, projectChildOwningFlowID(pkg, childPath), depth+1)
-				continue
-			}
-			childPackageFile := filepath.Join(childPath, "package.yaml")
-			walk(childPackageFile, pkg.Key, projectChildOwningFlowID(pkg, childPackageFile), depth+1)
-		}
-	}
-	walk(rootFile, "", "", 0)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Depth == out[j].Depth {
-			return strings.Compare(out[i].Key, out[j].Key) < 0
-		}
-		return out[i].Depth < out[j].Depth
-	})
-	return out
-}
-
-func projectChildOwningFlowID(parent ProjectPackagePaths, childPackageFile string) string {
-	childDir := filepath.Clean(filepath.Dir(childPackageFile))
-	for _, flow := range parent.Flows {
-		flowID := strings.TrimSpace(flow.ID)
-		flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
-		if flowID != "" && flowDir != "" && flowDir != "." && (childDir == flowDir || strings.HasPrefix(childDir, flowDir+string(filepath.Separator))) {
-			return flowID
-		}
-	}
-	return strings.TrimSpace(parent.OwningFlowID)
-}
-func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {
-	seenPackages := map[string]struct{}{}
-	seenFlows := map[string]string{}
-	for _, pkg := range pkgs {
-		if pkg.Depth > maxDiscoveredPackageDepth {
-			return fmt.Errorf("package tree depth %d exceeds max depth %d at %s", pkg.Depth, maxDiscoveredPackageDepth, pkg.Key)
-		}
-		if _, exists := seenPackages[pkg.Key]; exists {
-			return fmt.Errorf("duplicate package key %q discovered in package tree", pkg.Key)
-		}
-		seenPackages[pkg.Key] = struct{}{}
-		for _, flow := range pkg.Paths.Flows {
-			flowID := strings.TrimSpace(flow.ID)
-			if flowID == "" {
-				continue
-			}
-			if existing, exists := seenFlows[flowID]; exists {
-				return fmt.Errorf("duplicate flow id %q discovered in package tree (%s, %s)", flowID, existing, pkg.Key)
-			}
-			seenFlows[flowID] = pkg.Key
-		}
-	}
-	return nil
-}
 func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]EventCatalogEntry {
 	return cloneEventCatalogEntries(in)
 }
+
 func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out := in
 	out.Mock.Source = append([]byte(nil), in.Mock.Source...)
@@ -339,35 +54,18 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 			out.NativeTools[key] = cloneEventSchemaValue(value)
 		}
 	}
-	if len(in.Permissions) > 0 {
-		out.Permissions = append([]string{}, in.Permissions...)
-	}
-	if len(in.Subscriptions) > 0 {
-		out.Subscriptions = append([]string{}, in.Subscriptions...)
-	}
-	if len(in.SubscriptionsBootstrap) > 0 {
-		out.SubscriptionsBootstrap = append([]string{}, in.SubscriptionsBootstrap...)
-	}
-	if len(in.SubscribesTo) > 0 {
-		out.SubscribesTo = append([]string{}, in.SubscribesTo...)
-	}
-	if len(in.Tools) > 0 {
-		out.Tools = append([]string{}, in.Tools...)
-	}
-	if len(in.ToolsTier2) > 0 {
-		out.ToolsTier2 = append([]string{}, in.ToolsTier2...)
-	}
-	if len(in.FlowDataAccess) > 0 {
-		out.FlowDataAccess = append([]string{}, in.FlowDataAccess...)
-	}
-	if len(in.Criteria) > 0 {
-		out.Criteria = append([]string{}, in.Criteria...)
-	}
-	if len(in.EmitEvents) > 0 {
-		out.EmitEvents = append([]string{}, in.EmitEvents...)
-	}
+	out.Permissions = append([]string(nil), in.Permissions...)
+	out.Subscriptions = append([]string(nil), in.Subscriptions...)
+	out.SubscriptionsBootstrap = append([]string(nil), in.SubscriptionsBootstrap...)
+	out.SubscribesTo = append([]string(nil), in.SubscribesTo...)
+	out.Tools = append([]string(nil), in.Tools...)
+	out.ToolsTier2 = append([]string(nil), in.ToolsTier2...)
+	out.FlowDataAccess = append([]string(nil), in.FlowDataAccess...)
+	out.Criteria = append([]string(nil), in.Criteria...)
+	out.EmitEvents = append([]string(nil), in.EmitEvents...)
 	return out
 }
+
 func cloneToolSchemaEntryMap(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
 	out := make(map[string]ToolSchemaEntry, len(in))
 	for name, entry := range in {
@@ -375,6 +73,7 @@ func cloneToolSchemaEntryMap(in map[string]ToolSchemaEntry) map[string]ToolSchem
 	}
 	return out
 }
+
 func normalizeStrings(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -394,6 +93,7 @@ func normalizeStrings(in []string) []string {
 	}
 	return out
 }
+
 func appendIfMissingString(items []string, value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -406,6 +106,17 @@ func appendIfMissingString(items []string, value string) []string {
 	}
 	return append(items, value)
 }
+
+func asciiFoldContractLabel(value string) string {
+	raw := []byte(value)
+	for index, char := range raw {
+		if char >= 'A' && char <= 'Z' {
+			raw[index] = char + ('a' - 'A')
+		}
+	}
+	return string(raw)
+}
+
 func sortedContractKeys[T any](m map[string]T) []string {
 	if len(m) == 0 {
 		return nil
@@ -417,6 +128,9 @@ func sortedContractKeys[T any](m map[string]T) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// loadYAMLFile is reserved for the platform-owned specification. Authored
+// source is decoded exclusively from AdmittedSourceArtifact snapshots.
 func loadYAMLFile(path string, target any) error {
 	source, err := yamlsource.LoadFile(path)
 	if err != nil {

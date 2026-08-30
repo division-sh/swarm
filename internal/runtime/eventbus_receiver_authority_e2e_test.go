@@ -63,12 +63,12 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			if backend == "postgres" {
 				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-					BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral",
+					BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 				})
 			} else {
 				storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-					BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral",
+					BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 				})
 			}
 
@@ -108,7 +108,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				PipelineObligations:      selected.PipelineObligations(),
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: newRuntimeTestWorkflowModule(t, source), LLMRuntime: modelRuntime,
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: authorActivityTestBundleSourceFact,
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: authorActivityTestSourceArtifactFact,
 					ProcessWorkOwner: processOwner,
 				},
 			}))
@@ -533,11 +533,7 @@ func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, 
 
 func closedReceiverAuthorityFixtureFiles() map[string]string {
 	return map[string]string{
-		"package.yaml": `name: closed-receiver-authority
-version: 1.0.0
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`,
+
 		"schema.yaml": `name: closed-receiver-authority
 initial_state: pending
 terminal_states: [done]

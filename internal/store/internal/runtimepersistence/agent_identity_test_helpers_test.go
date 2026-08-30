@@ -15,14 +15,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-const testAgentTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const testAgentTopologyBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func testAgentTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()
 	admission, err := runtimeagenttopology.StaticAdmission(
 		"store-test-source-set-v1",
 		testAgentTopologyBundleHash,
-		"ephemeral",
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -143,17 +142,17 @@ func seedTestAgentRow(
 			lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 			lifecycle_process_authority_id, lifecycle_process_owner_id,
 			lifecycle_process_boot_id, lifecycle_generation_grant_id,
-			lifecycle_bundle_hash, lifecycle_bundle_source,
+			lifecycle_bundle_hash,
 			lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 			topology_authority_kind, topology_admission, execution_lifetime
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed')
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed')
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now,
 		processAuthorityID, "store-test-seed", processBootID, generationGrantID,
-		testAgentTopologyBundleHash, "ephemeral", runtimeInstanceID, testAgentTopologyJSON(t),
+		testAgentTopologyBundleHash, runtimeInstanceID, testAgentTopologyJSON(t),
 	}
 	if postgres {
 		query = `
@@ -165,10 +164,10 @@ func seedTestAgentRow(
 				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 				lifecycle_process_authority_id, lifecycle_process_owner_id,
 				lifecycle_process_boot_id, lifecycle_generation_grant_id,
-				lifecycle_bundle_hash, lifecycle_bundle_source,
+				lifecycle_bundle_hash,
 				lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 				topology_authority_kind, topology_admission, execution_lifetime
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18, $19::uuid, 1, 'static_declaration_plan', $20::jsonb, 'durable_managed')
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18::uuid, 1, 'static_declaration_plan', $19::jsonb, 'durable_managed')
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

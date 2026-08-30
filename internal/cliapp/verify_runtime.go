@@ -19,7 +19,7 @@ import (
 
 type verifyCommandResult struct {
 	OK                      bool                  `json:"ok"`
-	Contracts               string                `json:"contracts"`
+	SourceRoot              string                `json:"source_root"`
 	WorkspaceBackend        string                `json:"workspace_backend"`
 	HarnessInjectedInputs   int                   `json:"harness_injected_inputs"`
 	HarnessObservedOutputs  int                   `json:"harness_observed_outputs"`
@@ -43,7 +43,7 @@ type verifyFindingOutput struct {
 }
 
 type verifyCommandOptions struct {
-	contractsPath    string
+	sourceRoot       string
 	platformSpecPath string
 	configPath       string
 	output           cliOutputOptions
@@ -69,8 +69,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 2
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.contractsPath,
+	resolvedPaths, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.sourceRoot,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
 	})
@@ -80,9 +80,9 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
 	}
-	resolvedContractsPath := resolvedPaths.ContractsPath
+	resolvedContractsPath := resolvedPaths.SourceRoot
 	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
-	contractsRoot, err := NormalizeContractsRoot(resolvedContractsPath)
+	sourceRoot, err := NormalizeSourceRoot(resolvedContractsPath)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
@@ -92,7 +92,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	if _, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, contractsRoot, resolvedPlatformSpecPath, configResult); err != nil {
+	if _, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, sourceRoot, resolvedPlatformSpecPath, configResult); err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	} else {
@@ -120,7 +120,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			}
 			return 1
 		}
-		sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+		sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: source identity: %v\n", err)
@@ -128,7 +128,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			return 1
 		}
 		projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
-			Source: source, BundleSourceFact: sourceFact,
+			Source: source, SourceArtifactFact: sourceFact,
 			ProviderTriggerCatalog: validationOpts.ProviderTriggerCatalog,
 			ChannelPlans:           validationOpts.ChannelPlans,
 		})
@@ -141,7 +141,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		result, err := verifyBundleResultWithOptions(ctx, projection.Source(), validationOpts)
 		if err != nil {
 			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
-				output := verifyCommandOutput(false, contractsRoot, workspaceBackendDetail, result, packReadback)
+				output := verifyCommandOutput(false, sourceRoot, workspaceBackendDetail, result, packReadback)
 				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
 					return 2
 				}
@@ -152,15 +152,15 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			}
 			return 1
 		}
-		output := verifyCommandOutput(true, contractsRoot, workspaceBackendDetail, result, packReadback)
+		output := verifyCommandOutput(true, sourceRoot, workspaceBackendDetail, result, packReadback)
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
 				if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
-					fmt.Fprintf(out, "verify ok: contracts=%s -- %s; not production-valid\n", contractsRoot, harnessValidationSummary(result))
+					fmt.Fprintf(out, "verify ok: source=%s -- %s; not production-valid\n", sourceRoot, harnessValidationSummary(result))
 				} else {
-					fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+					fmt.Fprintf(out, "verify ok: source=%s\n", sourceRoot)
 				}
 				fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
 				writePackInventory(out, packReadback)
@@ -188,10 +188,10 @@ func harnessValidationSummary(result runtime.WorkflowContractValidationResult) s
 	return strings.Join(parts, ", ")
 }
 
-func verifyCommandOutput(ok bool, contractsRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback) verifyCommandResult {
+func verifyCommandOutput(ok bool, sourceRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback) verifyCommandResult {
 	return verifyCommandResult{
 		OK:                      ok,
-		Contracts:               contractsRoot,
+		SourceRoot:              sourceRoot,
 		WorkspaceBackend:        workspaceBackend,
 		HarnessInjectedInputs:   result.HarnessInjectedInputCount,
 		HarnessObservedOutputs:  result.HarnessObservedOutputCount,

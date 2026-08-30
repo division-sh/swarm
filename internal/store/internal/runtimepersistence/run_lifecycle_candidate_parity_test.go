@@ -15,13 +15,17 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const runLifecycleCandidateParityBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-const runLifecycleCandidateParityReplacementHash = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+const runLifecycleCandidateParityBundleHash = sourceartifactfixture.BundleHash
+
+var runLifecycleCandidateParityReplacementArtifact = sourceartifactfixture.New("agents.yaml", []byte("agents:\n  replacement: {}\n"))
+var runLifecycleCandidateParityReplacementHash = runLifecycleCandidateParityReplacementArtifact.BundleHash()
 
 type runLifecycleCandidateParityStore interface {
+	sourceartifactfixture.Writer
 	runtimerunlifecycle.CandidateStore
 	runtimerunlifecycle.OperationOwner
 	LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error)
@@ -38,7 +42,7 @@ func TestRunLifecycleTerminalAbsorbsCandidateParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			for _, state := range []runtimerunlifecycle.State{
 				runtimerunlifecycle.StateCompleted,
 				runtimerunlifecycle.StateFailed,
@@ -90,7 +94,7 @@ func TestRunLifecycleTimestampAdmissionParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.FixedZone("offset", -4*60*60))
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -124,7 +128,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			if store, ok := fixture.store.(*SQLiteRuntimeStore); ok {
 				store.nowFn = func() time.Time {
 					return time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.UTC)
@@ -248,7 +252,7 @@ func TestRunLifecycleCompletionRetriesBeforeRunStartParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			startedAt := time.Now().UTC().Add(time.Hour)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -289,7 +293,7 @@ func TestRunLifecycleTerminalCandidateDuplicateConflictAndRollbackParity(t *test
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			startedAt := time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC)
 
 			t.Run("exact_duplicate_and_conflict", func(t *testing.T) {
@@ -345,7 +349,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			startedAt := time.Date(2026, 7, 29, 13, 30, 0, 0, time.UTC)
 
 			t.Run("current_revision", func(t *testing.T) {
@@ -407,7 +411,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 
 func TestRunLifecycleTerminalAbsorbsCandidatePostgres(t *testing.T) {
 	fixture := openRunLifecycleCandidateParityFixture(t, "postgres")
-	ctx := testAuthorActivityBundleSourceContext()
+	ctx := testAuthorActivitySourceArtifactContext()
 	startedAt := time.Date(2026, 7, 29, 13, 45, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	childRunID := uuid.NewString()
@@ -451,8 +455,9 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
-			source, err := runtimecorrelation.NewEphemeralBundleSourceFact(runLifecycleCandidateParityBundleHash)
+			ctx := testAuthorActivitySourceArtifactContext()
+			sourceartifactfixture.Require(t, ctx, fixture.store)
+			source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -512,7 +517,7 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			at := time.Date(2026, 7, 29, 15, 0, 0, 0, time.UTC)
 
 			t.Run("operator_continue_and_duplicate_resume", func(t *testing.T) {
@@ -606,7 +611,8 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 				runID := uuid.NewString()
 				ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, at)
 				stale := requestRunLifecycleCandidateParity(t, fixture, ctx, runID).Candidate
-				replacement, err := runtimecorrelation.NewEphemeralBundleSourceFact(runLifecycleCandidateParityReplacementHash)
+				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
+				replacement, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -667,11 +673,12 @@ func ensureRunLifecycleCandidateParityRun(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(runLifecycleCandidateParityBundleHash)
+	sourceartifactfixture.Require(t, ctx, fixture.store)
+	source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	if _, ok := runtimeauthoractivity.ScopeFromContext(ctx); !ok {
 		ctx = runtimeauthoractivity.WithScope(
 			ctx,
@@ -709,8 +716,13 @@ func reviseRunLifecycleSourceParity(
 	fixture runLifecycleCandidateParityFixture,
 	ctx context.Context,
 	runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimerunlifecycle.MutationDisposition, error) {
+	if source.BundleHash() == runLifecycleCandidateParityReplacementHash {
+		if err := sourceartifactfixture.EnsureArtifact(ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact); err != nil {
+			return "", err
+		}
+	}
 	return fixture.store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
 		RunID: runID, Source: source,
 	})

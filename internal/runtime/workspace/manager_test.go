@@ -84,13 +84,10 @@ func TestWorkspaceClassesForSource(t *testing.T) {
 }
 
 func TestValidateSource_RejectsUndefinedWorkspaceClass(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -120,18 +117,10 @@ func TestValidateAgentWorkspaceClassesCensusesAmbiguousScopedDeclarations(t *tes
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
-	writeWorkspaceValidationFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-workspace-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-`)
 	writeWorkspaceValidationFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-validation\n")
 	for _, project := range []string{"project-a", "project-b"} {
-		dir := filepath.Join(root, "packages", project)
-		writeWorkspaceValidationFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		dir := filepath.Join(root, project)
+		writeWorkspaceValidationFile(t, filepath.Join(dir, "schema.yaml"), "name: "+project+"\n")
 		writeWorkspaceValidationFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise scoped workspace-class validation.\n  workspace_class: missing\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -140,7 +129,7 @@ packages:
 	}
 	source := semanticview.Wrap(bundle)
 	err = validateAgentWorkspaceClasses(source, map[string]string{"dedicated": "per-agent"})
-	if err == nil || !strings.Contains(err.Error(), `project packages/project-a agent shared-worker references undefined workspace_class "missing"`) {
+	if err == nil || !strings.Contains(err.Error(), `project-a agent shared-worker references undefined workspace_class "missing"`) {
 		t.Fatalf("validateAgentWorkspaceClasses error = %v, want qualified scoped-agent failure", err)
 	}
 }
@@ -157,13 +146,10 @@ func writeWorkspaceValidationFile(t *testing.T, path, content string) {
 
 func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	dataDir := t.TempDir()
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, contractsDir := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -213,7 +199,7 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	joined := strings.Join(created, " ")
 	for _, expected := range []string{
 		dataDir + ":/data:ro",
-		contractsDir + ":/opt/swarm/contracts:ro",
+		contractsDir + ":/opt/swarm/source:ro",
 		"workspaces_agent_" + fingerprint + ":/workspace",
 		"--label dev.swarm.container.kind=agent",
 		"--label dev.swarm.reset.eligible=true",
@@ -356,15 +342,12 @@ func TestEnsureWorkspaceContainerRejectsUnownedNameCollision(t *testing.T) {
 }
 
 func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *testing.T) {
-	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const entityID = "22222222-2222-2222-2222-222222222222"
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -440,13 +423,10 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 }
 
 func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -512,15 +492,12 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 }
 
 func TestResolveWorkspace_PerFlowInstanceIsolatesActorDataAndSharesWorkspaceVolume(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	rootA := filepath.Clean(t.TempDir())
 	rootB := filepath.Clean(t.TempDir())
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -623,13 +600,10 @@ func TestResolveWorkspaceRejectsMalformedProjectionBeforeDockerMutation(t *testi
 }
 
 func TestResolveWorkspaceForCapabilityAdmissionDoesNotMaterializeRunBoundData(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceImage = "test-image"
 	cfg.WorkspaceNetwork = ""
 	manager.SetConfig(cfg)
@@ -770,13 +744,10 @@ func (s workspaceLookupStub) ListRuntimeWorkspaceContainers(context.Context, str
 
 func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
 	const owner = "test://workspace/ops/worker"
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.ContractsSource = contractsDir
+	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
@@ -802,7 +773,7 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{{
-				Paths: runtimecontracts.FlowContractPaths{ID: "ops", Flow: "ops"},
+				Paths: runtimecontracts.FlowContractPaths{FlowPath: "ops"},
 				Path:  "ops",
 				Agents: map[string]runtimecontracts.AgentRegistryEntry{
 					"worker": {ID: "worker-1", Role: "worker", WorkspaceClass: "shared_flow"},
@@ -865,8 +836,8 @@ func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
 	if cfg.SharedDataSource != "" {
 		t.Fatalf("SharedDataSource = %q, want no source-root default", cfg.SharedDataSource)
 	}
-	if cfg.ContractsSource != "" {
-		t.Fatalf("ContractsSource = %q, want no source-root default", cfg.ContractsSource)
+	if cfg.SourceProjection != nil {
+		t.Fatal("SourceProjection default must be empty")
 	}
 }
 
@@ -875,8 +846,8 @@ func TestDefaultDockerConfigHasNoAmbientDataSource(t *testing.T) {
 	if cfg.SharedDataSource != "" {
 		t.Fatalf("SharedDataSource = %q, want retired ambient authority to remain absent", cfg.SharedDataSource)
 	}
-	if cfg.ContractsSource != "" {
-		t.Fatalf("ContractsSource = %q, want command-level resolver to own contracts source", cfg.ContractsSource)
+	if cfg.SourceProjection != nil {
+		t.Fatal("SourceProjection default must be empty")
 	}
 }
 

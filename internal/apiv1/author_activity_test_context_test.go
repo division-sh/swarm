@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -25,24 +24,25 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = mustAPITestBundleSourceFact(
-	"bundle-v1:sha256:" + strings.Repeat("a", 64),
-)
+var authorActivityTestSourceArtifact = sourceartifactfixture.Artifact()
+var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func mustAPITestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+func mustAPITestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
 	return fact
 }
 
-func mustAPITestPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+func mustAPITestPersistedSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
@@ -59,7 +59,7 @@ type authorActivityTestCatalogRegistrar interface {
 }
 
 type apiTestBundleDataCatalogRegistrar interface {
-	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 }
 
 type apiTestRuntimeMutationOwner interface {
@@ -91,10 +91,10 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
-	return testAuthorActivityContextForSource(ctx, authorActivityTestBundleSourceFact)
+	return testAuthorActivityContextForSource(ctx, authorActivityTestSourceArtifactFact)
 }
 
-func testAuthorActivityContextForSource(ctx context.Context, fact runtimecorrelation.BundleSourceFact) context.Context {
+func testAuthorActivityContextForSource(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -102,7 +102,7 @@ func testAuthorActivityContextForSource(ctx context.Context, fact runtimecorrela
 		panic(err)
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID, fact.BundleHash(),
 	))
@@ -127,11 +127,11 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if opts.BundleSourceFact.BundleHash() == "" {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if opts.SourceArtifactFact.BundleHash() == "" {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
-	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok && opts.BundleSourceFact.IsEphemeral() {
-		catalog := durabledata.Catalog{BundleHash: opts.BundleSourceFact.BundleHash()}
+	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok {
+		catalog := durabledata.Catalog{BundleHash: opts.SourceArtifactFact.BundleHash()}
 		if opts.ContractBundle != nil {
 			for _, declaration := range opts.ContractBundle.DurableDataDeclarations() {
 				catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
@@ -141,16 +141,19 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 				})
 			}
 		}
-		if _, err := registrar.UpsertBundleCatalogWithData(context.Background(), bundlecatalog.Upsert{
-			BundleHash: opts.BundleSourceFact.BundleHash(), ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
-			ParsedJSON: map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
-			Metadata:   map[string]any{"source": "api-test"},
-		}, catalog); err != nil {
-			return nil, fmt.Errorf("register API test bundle/data catalog: %w", err)
+		artifact := authorActivityTestSourceArtifact
+		if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle.SourceArtifact != nil {
+			artifact = bundle.SourceArtifact
+		}
+		if artifact.BundleHash() != opts.SourceArtifactFact.BundleHash() {
+			return nil, fmt.Errorf("API test source artifact %s does not match selected source %s", artifact.BundleHash(), opts.SourceArtifactFact.BundleHash())
+		}
+		if _, err := registrar.EnsureSourceArtifactWithData(context.Background(), artifact, catalog); err != nil {
+			return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
 		}
 	}
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash())
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash())
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
@@ -189,7 +192,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)
 	if hasDeliveryStore && opts.PipelineObligations != nil && opts.DeliveryAuthority.Kind() == "" {
 		authority, err := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -197,7 +200,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			return nil, err
 		}
 		if err := deliveryStore.ActivateDeliveryAuthority(
-			testAuthorActivityContextForSource(context.Background(), opts.BundleSourceFact),
+			testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact),
 			authority,
 		); err != nil {
 			return nil, err
@@ -210,7 +213,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			return nil, err
 		}
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()), descriptors,
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()), descriptors,
 		)
 		if err != nil {
 			return nil, err
@@ -249,7 +252,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 		if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 			return nil, err
 		}
-		if err := coordinator.Start(testAuthorActivityContextForSource(context.Background(), opts.BundleSourceFact)); err != nil {
+		if err := coordinator.Start(testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact)); err != nil {
 			return nil, err
 		}
 		t.Cleanup(func() {
@@ -261,6 +264,14 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 		})
 	}
 	return bus, nil
+}
+
+func mustAPITestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
+	return sourceartifactfixture.Artifact()
+}
+
+func mustAPITestSourceArtifactNamed(name string) *sourceartifact.AdmittedSourceArtifact {
+	return sourceartifactfixture.New("schema.yaml", []byte("name: "+name+"\n"))
 }
 
 func newAPITestRuntimeWorkOccurrence(t *testing.T, runtimeInstanceID, bundleHash string) *worklifetime.RuntimeOccurrence {
@@ -294,7 +305,7 @@ func registerScopedAPITestCatalog(t *testing.T, target authorActivityTestCatalog
 		t.Fatalf("project API test author activity catalog: %v", err)
 	}
 	lease, err := target.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash()), descriptors,
 	)
 	if err != nil {
 		t.Fatalf("register API test author activity catalog: %v", err)

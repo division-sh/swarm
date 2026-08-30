@@ -79,7 +79,7 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 	if !present {
 		return nil
 	}
-	if desired.Source.BundleHash != authority.BundleHash || desired.Source.BundleSource != authority.BundleSource {
+	if desired.Source.BundleHash != authority.BundleHash {
 		return topologyConflict(req, "static_source_coordinate_mismatch")
 	}
 	if strings.TrimSpace(desired.ConfigRevision) != strings.TrimSpace(req.ConfigRevision) {

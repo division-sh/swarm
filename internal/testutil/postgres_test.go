@@ -75,7 +75,7 @@ func assertStartPostgresSchema(t *testing.T, db *sql.DB, wantVersion string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	for _, table := range []string{"runtime_store_metadata", "bundles", "runs", "events", "event_receipts", "timers"} {
+	for _, table := range []string{"runtime_store_metadata", "source_artifacts", "runs", "events", "event_receipts", "timers"} {
 		var exists bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
 			t.Fatalf("check table %s: %v", table, err)

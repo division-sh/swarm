@@ -71,8 +71,7 @@ type StaticAccessItem struct {
 	Kind          string        `json:"kind"`
 	StaticID      StaticDataID  `json:"static_id"`
 	StaticRef     StaticDataRef `json:"static_ref"`
-	PackageKey    string        `json:"package_key"`
-	OwnerFlowID   string        `json:"owner_flow_id"`
+	FlowPath      string        `json:"flow_path"`
 	RelativePath  string        `json:"relative_path"`
 	ContentDigest string        `json:"content_digest"`
 	SizeBytes     int           `json:"size_bytes"`

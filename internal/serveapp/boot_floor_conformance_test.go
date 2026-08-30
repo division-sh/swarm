@@ -26,18 +26,16 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 			fmt.Sprintf("  host_root: %q", hostRoot),
 		}),
-		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
-		WorkspaceBackend:     workspace.BackendHost,
-		WorkspaceBackendSet:  true,
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		RequireBundleMatch:   false,
-		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		NoRequireBundleMatch: true,
-		TestLLMRuntime:       bootFloorNativeFallbackRuntime{},
+		SourceRoot:          writeServeRuntimeNativeBashFixture(t),
+		WorkspaceBackend:    workspace.BackendHost,
+		WorkspaceBackendSet: true,
+		PlatformSpecPath:    defaultPlatformSpecPath,
+		StoreMode:           storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:       "127.0.0.1:0",
+		MCPListenAddr:       "127.0.0.1:0",
+		SelfCheck:           true,
+		ShutdownGrace:       runtimepkg.DefaultShutdownGrace,
+		TestLLMRuntime:      bootFloorNativeFallbackRuntime{},
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -62,12 +60,12 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 
 func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	contractsRoot := writeServeRuntimeNativeBashFixture(t)
+	sourceRoot := writeServeRuntimeNativeBashFixture(t)
 	configPath := writeTestVerifyRuntimeConfig(t)
 
 	t.Run("verify text", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr, Run)
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -76,7 +74,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("verify json", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--contracts", contractsRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -96,7 +94,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 		var stdout, stderr bytes.Buffer
 		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"describe",
-			"--contracts", contractsRoot,
+			sourceRoot,
 			"--config", configPath,
 		}, &stdout, &stderr, Run)
 		if code != 0 {
@@ -109,7 +107,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 		var stdout, stderr bytes.Buffer
 		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"describe",
-			"--contracts", contractsRoot,
+			sourceRoot,
 			"--config", configPath,
 			"--json",
 		}, &stdout, &stderr, Run)
@@ -132,24 +130,22 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	configPath := writeDoctorClaudeHostConfig(t, "")
-	contractsPath := doctorAgentContractsPath
+	sourceRoot := doctorAgentContractsPath
 
 	t.Run("serve", func(t *testing.T) {
 		var out lockedBuffer
 		swarmDir := t.TempDir()
 		code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-			ConfigPath:           configPath,
-			ContractsPath:        contractsPath,
-			PlatformSpecPath:     defaultPlatformSpecPath,
-			StoreMode:            storebackend.ActiveDefaultBackend().String(),
-			SwarmDir:             swarmDir,
-			SwarmDirSet:          true,
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			SelfCheck:            true,
-			RequireBundleMatch:   false,
-			NoRequireBundleMatch: true,
-			Output:               &out,
+			ConfigPath:       configPath,
+			SourceRoot:       sourceRoot,
+			PlatformSpecPath: defaultPlatformSpecPath,
+			StoreMode:        storebackend.ActiveDefaultBackend().String(),
+			SwarmDir:         swarmDir,
+			SwarmDirSet:      true,
+			APIListenAddr:    "127.0.0.1:0",
+			MCPListenAddr:    "127.0.0.1:0",
+			SelfCheck:        true,
+			Output:           &out,
 		})
 		if code == 0 {
 			t.Fatalf("serve unexpectedly succeeded\n%s", out.String())
@@ -159,7 +155,7 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 
 	t.Run("verify", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code == 0 {
 			t.Fatalf("verify unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
 		}
 		assertClaudeHostRefusal(t, stderr.String())
@@ -167,7 +163,7 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 
 	t.Run("describe", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"describe", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"describe", sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code == 0 {
 			t.Fatalf("describe unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
 		}
 		assertClaudeHostRefusal(t, stderr.String())

@@ -31,7 +31,7 @@ func (m testRunLifecycleMutation) RequireActive(ctx context.Context, runID strin
 func (m testRunLifecycleMutation) RequirePresentSource(
 	ctx context.Context,
 	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	_, source, err := m.load(ctx, runID, false)
 	return source, err
 }
@@ -39,7 +39,7 @@ func (m testRunLifecycleMutation) RequirePresentSource(
 func (m testRunLifecycleMutation) RequireActiveSource(
 	ctx context.Context,
 	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	_, source, err := m.load(ctx, runID, true)
 	return source, err
 }
@@ -51,16 +51,16 @@ func (m testRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
 	query := `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, origin_kind,
+			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_event_id, started_at
 		)
 		VALUES (
-			?, 'running', ?, ?, ?,
+			?, 'running', ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), ?
 		)
@@ -69,19 +69,19 @@ func (m testRunLifecycleMutation) Create(
 	if m.dialect == workflowStoreDialectPostgres {
 		query = `
 			INSERT INTO runs (
-				run_id, status, bundle_hash, bundle_source, origin_kind,
+				run_id, status, bundle_hash, origin_kind,
 				trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 				forked_from_run_id, forked_from_event_id, started_at
 			)
 			VALUES (
-				$1::uuid, 'running', $2, $3, $4,
-				NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
-				NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, $11
+				$1::uuid, 'running', $2, $3,
+				NULLIF($4, '')::uuid, NULLIF($5, ''), NULLIF($6, '')::uuid, NULLIF($7, 0),
+				NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10
 			)
 			ON CONFLICT (run_id) DO NOTHING
 		`
 	}
-	result, err := m.tx.ExecContext(ctx, query, request.RunID, bundleHash, bundleSource,
+	result, err := m.tx.ExecContext(ctx, query, request.RunID, bundleHash,
 		origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
 	if err != nil {
@@ -252,18 +252,18 @@ func (m testRunLifecycleMutation) ReviseSource(
 	if current.Matches(request.Source) {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	query := `
-		UPDATE runs SET bundle_hash = ?, bundle_source = ?
+		UPDATE runs SET bundle_hash = ?
 		WHERE run_id = ? AND status IN ('running', 'paused')
 	`
-	args := []any{bundleHash, bundleSource, request.RunID}
+	args := []any{bundleHash, request.RunID}
 	if m.dialect == workflowStoreDialectPostgres {
 		query = `
-			UPDATE runs SET bundle_hash = $2, bundle_source = $3
+			UPDATE runs SET bundle_hash = $2
 			WHERE run_id = $1::uuid AND status IN ('running', 'paused')
 		`
-		args = []any{request.RunID, bundleHash, bundleSource}
+		args = []any{request.RunID, bundleHash}
 	}
 	result, err := m.tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -284,11 +284,11 @@ func (m testRunLifecycleMutation) RequireActiveRun(ctx context.Context, runID st
 	return m.RequireActive(ctx, runID)
 }
 
-func (m testRunLifecycleMutation) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m testRunLifecycleMutation) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.RequirePresentSource(ctx, runID)
 }
 
-func (m testRunLifecycleMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m testRunLifecycleMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.RequireActiveSource(ctx, runID)
 }
 
@@ -328,7 +328,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		return runtimerunlifecycle.Snapshot{}, errors.New("pipeline test lifecycle transaction is required")
 	}
 	query := `
-		SELECT run_id, status, bundle_hash, bundle_source,
+		SELECT run_id, status, bundle_hash,
 		       origin_kind, COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, ''),
@@ -339,7 +339,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 	`
 	if m.dialect == workflowStoreDialectPostgres {
 		query = `
-			SELECT run_id::text, status, bundle_hash, bundle_source,
+			SELECT run_id::text, status, bundle_hash,
 			       origin_kind, COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, ''),
@@ -364,7 +364,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		endedAt     sql.NullTime
 	)
 	if err := m.tx.QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(
-		&snapshot.RunID, &stateRaw, &snapshot.BundleHash, &snapshot.BundleSource,
+		&snapshot.RunID, &stateRaw, &snapshot.BundleHash,
 		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRun, &sourceEvent,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID,
 		&startedAt, &endedAt,
@@ -440,48 +440,37 @@ func (m testRunLifecycleMutation) load(
 	ctx context.Context,
 	runID string,
 	requireActive bool,
-) (runtimerunlifecycle.State, runtimecorrelation.BundleSourceFact, error) {
+) (runtimerunlifecycle.State, runtimecorrelation.SourceArtifactFact, error) {
 	if m.tx == nil {
-		return "", runtimecorrelation.BundleSourceFact{}, errors.New("pipeline test lifecycle transaction is required")
+		return "", runtimecorrelation.SourceArtifactFact{}, errors.New("pipeline test lifecycle transaction is required")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return "", runtimecorrelation.BundleSourceFact{}, errors.New("pipeline test lifecycle run_id is required")
+		return "", runtimecorrelation.SourceArtifactFact{}, errors.New("pipeline test lifecycle run_id is required")
 	}
-	query := `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = ?`
+	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
 	if m.dialect == workflowStoreDialectPostgres {
-		query = `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid FOR UPDATE`
 	}
-	var statusRaw, bundleHash, bundleSource string
-	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(&statusRaw, &bundleHash, &bundleSource); err != nil {
+	var statusRaw, bundleHash string
+	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(&statusRaw, &bundleHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+			return "", runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 		}
-		return "", runtimecorrelation.BundleSourceFact{}, fmt.Errorf("load pipeline test run lifecycle: %w", err)
+		return "", runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load pipeline test run lifecycle: %w", err)
 	}
 	state, err := runtimerunlifecycle.ParseState(statusRaw)
 	if err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, err
 	}
 	if requireActive && !state.Active() {
-		return "", runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: state}
+		return "", runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: state}
 	}
-	source, err := testRunLifecycleSource(bundleHash, bundleSource)
+	source, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 	if err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return state, source, nil
-}
-
-func testRunLifecycleSource(bundleHash, source string) (runtimecorrelation.BundleSourceFact, error) {
-	switch strings.TrimSpace(source) {
-	case runtimerunlifecycle.BundleSourceEphemeral:
-		return runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
-	case runtimerunlifecycle.BundleSourcePersisted:
-		return runtimecorrelation.NewPersistedBundleSourceFact(strings.TrimSpace(bundleHash))
-	default:
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("pipeline test run has unsupported bundle_source %q", source)
-	}
 }
 
 func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore {
@@ -505,6 +494,9 @@ func newPostgresPipelineCoordinatorForTest(
 	db *sql.DB,
 	opts PipelineCoordinatorOptions,
 ) *PipelineCoordinator {
+	if preview, ok := opts.Module.(*previewWorkflowModule); ok {
+		opts.Module = canonicalPreviewWorkflowModuleForTest(preview)
+	}
 	if db != nil && !opts.Persistence.Valid() {
 		opts.Persistence = workflowPersistenceForTest(newPostgresWorkflowInstanceStoreForTest(db))
 	}

@@ -21,7 +21,6 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"agent_replay.go":    {},
 		"agent_restart.go":   {},
 		"agents.go":          {},
-		"bundle.go":          {},
 		"channel_command.go": {},
 		"control_mailbox.go": {},
 		"control_nuke.go":    {},
@@ -85,28 +84,6 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	}
 }
 
-func TestBundleDeleteCLIConsumesCanonicalAPIOnly(t *testing.T) {
-	source := readProductionCommandSources(t)["bundle.go"]
-	for _, needle := range []string{
-		"internal/runtime/bundledelete",
-		"internal/runtime/destructivereset",
-		"internal/store",
-		"PlanBundleDelete(",
-		"ApplyBundleDeleteFinalMutation(",
-		"ApplyBundleForceDeletePreservationCleanup(",
-		"ManagedResetContainerInventory(",
-		"DELETE FROM",
-		"UPDATE runs",
-	} {
-		if strings.Contains(source, needle) {
-			t.Fatalf("bundle.go contains non-authoritative bundle delete bypass %q; swarm bundle delete must consume /v1/rpc bundle.delete only", needle)
-		}
-	}
-	if !strings.Contains(source, "bundleDeleteMethod") || !strings.Contains(source, `"bundle.delete"`) || !strings.Contains(source, "newCLIAPIClient(") {
-		t.Fatalf("bundle.go must expose bundle.delete only through the shared CLI API client")
-	}
-}
-
 func TestCLILocalRuntimeHelpersRemainNonOperatorQuarantined(t *testing.T) {
 	sources := readProductionCommandSources(t)
 	all := strings.Join(sortedSourceValues(sources), "\n")
@@ -147,13 +124,6 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 	if err := os.WriteFile(payloadPath, []byte(`{"topic":"sample"}`), 0o600); err != nil {
 		t.Fatalf("write payload: %v", err)
 	}
-	envelopePath := filepath.Join(t.TempDir(), "bundle-register.yaml")
-	if err := os.WriteFile(envelopePath, []byte("api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\nversion: \\\"1.0.0\\\"\\nplatform_version: \\\">=0.7.0 <0.8.0\\\"\\nflows: []\\n\"\n"), 0o600); err != nil {
-		t.Fatalf("write bundle register envelope: %v", err)
-	}
-	contractsDir := writeBundleRegisterContractsFixture(t)
-	scenarioContractsDir := writeScenarioRunnerFixture(t)
-
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -185,12 +155,6 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "event view", args: []string{"event", "view", "event-1"}},
 		{name: "event replay", args: []string{"event", "replay", "event-1"}},
 		{name: "event publish", args: []string{"event", "publish", "scan.requested", "--payload-json", `{"topic":"sample"}`}},
-		{name: "bundle list", args: []string{"bundle", "list"}},
-		{name: "bundle show", args: []string{"bundle", "show", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
-		{name: "bundle agents", args: []string{"bundle", "agents", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
-		{name: "bundle register", args: []string{"bundle", "register", envelopePath}},
-		{name: "bundle register contracts", args: []string{"bundle", "register", "--contracts", contractsDir}},
-		{name: "bundle delete", args: []string{"bundle", "delete", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		{name: "conversations list", args: []string{"conversation", "list"}},
 		{name: "conversation view", args: []string{"conversation", "view", "session-1"}},
 		{name: "conversation turn", args: []string{"conversation", "turn", "session-1", "1"}},
@@ -205,7 +169,6 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "forkchat list", args: []string{"forkchat", "list"}},
 		{name: "forkchat view", args: []string{"forkchat", "view", "fork-1"}},
 		{name: "forkchat delete", args: []string{"forkchat", "delete", "fork-1"}},
-		{name: "test", args: []string{"test", "--contracts", scenarioContractsDir}},
 		{name: "version server", args: []string{"version", "--server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

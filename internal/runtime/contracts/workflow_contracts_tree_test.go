@@ -11,32 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestDiscoverProjectPackagePathsIncludesNestedFlowPackages(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	workflowDir := writeLayer3FlowTreeFixture(t)
-
-	paths := ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDir, "")
-
-	if len(paths.ProjectPackages) < 2 {
-		t.Fatalf("expected nested flow package discovery, got %d packages", len(paths.ProjectPackages))
-	}
-	var found bool
-	for _, pkg := range paths.ProjectPackages {
-		if strings.Contains(pkg.Key, `\`) {
-			t.Fatalf("package key %q uses an OS-native separator; want portable slash identity", pkg.Key)
-		}
-		if pkg.Key == "flows/parent" {
-			found = true
-			if pkg.ParentKey != "." {
-				t.Fatalf("expected nested flow package parent '.'; got %q", pkg.ParentKey)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected nested flow package \"flows/parent\" in discovered package tree")
-	}
-}
-
 func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	workflowDir := writeLayer3FlowTreeFixture(t)
@@ -59,63 +33,44 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected flow path %q in FlowTree.ByPath", "parent/child")
 	}
-	if got := strings.TrimSpace(parent.Paths.ID); got != "parent" {
-		t.Fatalf("expected parent flow id %q, got %q", "parent", got)
+	if got := strings.TrimSpace(parent.Paths.FlowPath); got != "parent" {
+		t.Fatalf("expected parent flow path %q, got %q", "parent", got)
 	}
-	if got := strings.TrimSpace(child.Paths.ID); got != "child" {
-		t.Fatalf("expected child flow id %q, got %q", "child", got)
+	if got := strings.TrimSpace(child.Paths.FlowPath); got != "parent/child" {
+		t.Fatalf("expected child flow path %q, got %q", "parent/child", got)
 	}
-	if got := strings.TrimSpace(parent.URI); got != "root-platform://parent" {
-		t.Fatalf("expected parent flow uri %q, got %q", "root-platform://parent", got)
+	if got := strings.TrimSpace(parent.URI); got != "swarm://parent" {
+		t.Fatalf("expected parent flow uri %q, got %q", "swarm://parent", got)
 	}
-	if got := strings.TrimSpace(child.URI); got != "root-platform://parent/child" {
-		t.Fatalf("expected child flow uri %q, got %q", "root-platform://parent/child", got)
+	if got := strings.TrimSpace(child.URI); got != "swarm://parent/child" {
+		t.Fatalf("expected child flow uri %q, got %q", "swarm://parent/child", got)
 	}
 	if child.Parent == nil {
 		t.Fatal("expected child flow parent pointer to be set")
 	}
-	if got := strings.TrimSpace(child.Parent.Paths.ID); got != "parent" {
-		t.Fatalf("expected child parent flow id %q, got %q", "parent", got)
+	if got := strings.TrimSpace(child.Parent.Paths.FlowPath); got != "parent" {
+		t.Fatalf("expected child parent flow path %q, got %q", "parent", got)
 	}
-	if got := parent.NodeURIs["parent-node"]; got != "root-platform://parent/parent-node" {
+	if got := parent.NodeURIs["parent-node"]; got != "swarm://parent/parent-node" {
 		t.Fatalf("expected parent node uri, got %q", got)
 	}
-	if got := child.AgentURIs["child-agent"]; got != "root-platform://parent/child/child-agent" {
+	if got := child.AgentURIs["child-agent"]; got != "swarm://parent/child/child-agent" {
 		t.Fatalf("expected child agent uri, got %q", got)
 	}
-	if got := child.EventURIs["child.completed"]; got != "root-platform://parent/child/child.completed" {
+	if got := child.EventURIs["child.completed"]; got != "swarm://parent/child/child.completed" {
 		t.Fatalf("expected child event uri, got %q", got)
 	}
-	records := bundle.ScopedNodeRecords()
-	wantNodes := map[string]bool{
-		identitytest.ExecutableNode(t, "flows/parent", "parent", "parent-node").Key(): false,
-		identitytest.ExecutableNode(t, "flows/parent", "child", "child-node").Key():   false,
-	}
-	for _, record := range records {
-		node, identityErr := record.Identity()
-		if identityErr != nil {
-			t.Fatalf("scoped node identity: %v", identityErr)
-		}
-		if _, exists := wantNodes[node.Key()]; exists {
-			wantNodes[node.Key()] = true
-		}
-	}
-	for node, found := range wantNodes {
-		if !found {
-			t.Fatalf("scoped node records %#v missing exact imported package node %q", records, node)
-		}
-	}
-	if ref, ok := bundle.URIRegistry.ByURI["root-platform://parent/child/child.completed"]; !ok {
+	if ref, ok := bundle.URIRegistry.ByURI["swarm://parent/child/child.completed"]; !ok {
 		t.Fatal("expected full URI in registry")
-	} else if ref.Kind != "event" || ref.FlowID != "child" {
+	} else if ref.Kind != "event" || ref.FlowID != "parent/child" {
 		t.Fatalf("unexpected URI registry ref: %+v", ref)
 	}
-	policy := bundle.ResolvedPolicyForFlow("child")
+	policy := bundle.ResolvedPolicyForFlow("parent/child")
 	if got := policy.Values["root_policy"].Value; got != "root" {
 		t.Fatalf("expected root policy value %q, got %#v", "root", got)
 	}
-	if got := policy.Values["package_policy"].Value; got != "nested" {
-		t.Fatalf("expected package policy value %q, got %#v", "nested", got)
+	if got := policy.Values["parent_policy"].Value; got != "nested" {
+		t.Fatalf("expected parent policy value %q, got %#v", "nested", got)
 	}
 	if got := policy.Values["shared"].Value; got != "child" {
 		t.Fatalf("expected child flow override %q, got %#v", "child", got)
@@ -125,53 +80,17 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	}
 }
 
-func TestBuildFlowTreeRootOnlyPackageIndexesAgentIdentityWithoutCopyingCatalogs(t *testing.T) {
-	paths := ProjectPackagePaths{Key: ".", Dir: "."}
-	bundle := &WorkflowContractBundle{
-		Package: ProjectPackageDocument{Name: "root-platform"},
-		PackageTree: []LoadedProjectPackage{{
-			Key:   ".",
-			Paths: paths,
-		}},
-		projectContracts: map[string]ProjectContractView{
-			".": {
-				Paths:  paths,
-				Nodes:  map[string]SystemNodeContract{"root-node": {}},
-				Events: map[string]EventCatalogEntry{"root.event": {}},
-				Agents: map[string]AgentRegistryEntry{"root-agent": {}},
-			},
-		},
-	}
-
-	if err := buildFlowTree(bundle, nil); err != nil {
-		t.Fatalf("buildFlowTree: %v", err)
-	}
-	if bundle.FlowTree.Root != nil || len(bundle.FlowTree.ByPath) != 0 || len(bundle.FlowTree.ByID) != 0 {
-		t.Fatalf("root-only package unexpectedly materialized a flow tree: %#v", bundle.FlowTree)
-	}
-	if _, ok := bundle.URIRegistry.Agents["root-agent"]; !ok {
-		t.Fatalf("root agent identity was not indexed: %#v", bundle.URIRegistry.Agents)
-	}
-	if len(bundle.URIRegistry.Nodes) != 0 || len(bundle.URIRegistry.Events) != 0 {
-		t.Fatalf(
-			"root-only package copied project catalogs into the identity registry: nodes=%#v events=%#v",
-			bundle.URIRegistry.Nodes,
-			bundle.URIRegistry.Events,
-		)
-	}
-}
-
 func TestAgentDeclarationRejectsArbitraryIDInterpolation(t *testing.T) {
 	for _, id := range []string{"account-worker-{instance_id}", "account-worker-{unknown_business_key}"} {
 		t.Run(id, func(t *testing.T) {
 			_, err := normalizeAgentRegistryEntries(map[string]AgentRegistryEntry{
 				"account-worker": {ID: id},
-			}, "flows/account/agents.yaml")
+			}, "account/agents.yaml")
 			if err == nil {
 				t.Fatalf("agent declaration accepted retired interpolation %q", id)
 			}
 			for _, want := range []string{
-				"flows/account/agents.yaml",
+				"account/agents.yaml",
 				`agent "account-worker"`,
 				"contains interpolation",
 				"move the discriminator to instance.by",
@@ -251,7 +170,8 @@ func TestAgentDeclarationRejectsDuplicateEffectiveNames(t *testing.T) {
 
 func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testing.T) {
 	flowView := &FlowContractView{
-		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},
+		Paths: FlowContractPaths{FlowPath: "analysis", SchemaFile: "analysis/schema.yaml", AgentsFile: "analysis/agents.yaml"},
+		Path:  "analysis",
 		Agents: map[string]AgentRegistryEntry{
 			"analyzer": {
 				Subscriptions: []string{"analysis.requested"},
@@ -259,26 +179,27 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 			},
 		},
 	}
-	bundle := &WorkflowContractBundle{
-		Paths:      ContractPaths{RootSchemaFile: "schema.yaml", ProjectAgentsFile: "agents.yaml"},
-		RootSchema: &FlowSchemaDocument{},
+	root := &FlowContractView{
+		Paths:  FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml", AgentsFile: "agents.yaml"},
+		Path:   ".",
+		Schema: FlowSchemaDocument{},
 		Agents: map[string]AgentRegistryEntry{
 			"root-agent": {
 				Subscriptions: []string{"root.requested"},
 				EmitEvents:    []string{"root.done"},
 			},
 		},
+		Children: []FlowContractView{*flowView},
+	}
+	bundle := &WorkflowContractBundle{
+		RootSchema: &FlowSchemaDocument{},
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"analysis": {},
 		},
-		FlowTree: FlowTree{ByID: map[string]*FlowContractView{"analysis": flowView}},
-	}
-	bundle.FlowTree.Root = flowView
-	bundle.projectContracts = map[string]ProjectContractView{
-		".": {
-			Paths:     ProjectPackagePaths{Key: ".", ProjectAgentsFile: "agents.yaml"},
-			Agents:    bundle.Agents,
-			AgentURIs: map[string]string{"root-agent": "swarm://root/agent/root-agent"},
+		FlowTree: FlowTree{
+			Root:   root,
+			ByPath: map[string]*FlowContractView{".": root, "analysis": &root.Children[0]},
+			ByID:   map[string]*FlowContractView{".": root, "analysis": &root.Children[0]},
 		},
 	}
 
@@ -297,13 +218,13 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 
 func TestWorkflowContractBundleEffectiveRequiredAgentsPreserveExplicitEmpty(t *testing.T) {
 	flowView := &FlowContractView{
-		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},
+		Paths: FlowContractPaths{FlowPath: "analysis", SchemaFile: "analysis/schema.yaml", AgentsFile: "analysis/agents.yaml"},
+		Path:  "analysis",
 		Agents: map[string]AgentRegistryEntry{
 			"analyzer": {Subscriptions: []string{"analysis.requested"}},
 		},
 	}
 	bundle := &WorkflowContractBundle{
-		Paths: ContractPaths{RootSchemaFile: "schema.yaml", ProjectAgentsFile: "agents.yaml"},
 		RootSchema: &FlowSchemaDocument{
 			RequiredAgentsDeclared: true,
 		},
@@ -313,7 +234,7 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsPreserveExplicitEmpty(t *t
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"analysis": {RequiredAgentsDeclared: true},
 		},
-		FlowTree: FlowTree{ByID: map[string]*FlowContractView{"analysis": flowView}},
+		FlowTree: FlowTree{Root: flowView, ByPath: map[string]*FlowContractView{"analysis": flowView}, ByID: map[string]*FlowContractView{"analysis": flowView}},
 	}
 
 	if got := bundle.RootRequiredAgents(); len(got) != 0 {
@@ -328,14 +249,6 @@ func TestLoadWorkflowContractBundleLoadsCanonicalToolSchemasFromRootAndFlowTools
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: canonical-tool-schema
-version: "1.0.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: canonical-tool-schema\n")
 	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 root_lookup:
@@ -356,11 +269,11 @@ root_lookup:
       result:
         type: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker
 mode: static
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "worker", "tools.yaml"), `
 flow_lookup:
   description: Flow-level lookup tool.
   handler_type: http
@@ -416,7 +329,7 @@ func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
 		filepath.Join("tests", "tier8-boot-verification", "test-boot-permission-tool-mismatch", "tools.yaml"),
 		filepath.Join("tests", "tier11-flow-composition", "test-child-flow-tool-inherit", "tools.yaml"),
 		filepath.Join("tests", "tier11-flow-composition", "test-tool-override", "tools.yaml"),
-		filepath.Join("tests", "tier11-flow-composition", "test-tool-override", "flows", "child", "tools.yaml"),
+		filepath.Join("tests", "tier11-flow-composition", "test-tool-override", "child", "tools.yaml"),
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -448,25 +361,13 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: cross-flow-localization
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-  - id: validation
-    flow: validation
-    mode: static
-`)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-localization\n")
 
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 initial_state: discovered
 terminal_states: [done]
@@ -476,11 +377,11 @@ pins:
     events:
       - vertical.shortlisted
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 vertical.shortlisted:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
   id: scoring-node
   execution_type: system_node
@@ -493,7 +394,7 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `
 name: validation
 initial_state: researching
 terminal_states: [done]
@@ -506,11 +407,11 @@ pins:
     events:
       - validation.started
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.started:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
   id: validation-orchestrator
   execution_type: system_node
@@ -542,25 +443,13 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: cross-flow-on-success
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-  - id: validation
-    flow: validation
-    mode: static
-`)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-on-success\n")
 
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 initial_state: discovered
 terminal_states: [done]
@@ -570,11 +459,11 @@ pins:
     events:
       - vertical.shortlisted
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 vertical.shortlisted:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
   id: scoring-node
   execution_type: system_node
@@ -587,7 +476,7 @@ scoring-node:
       emit: vertical.shortlisted
 `)
 
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `
 name: validation
 initial_state: researching
 terminal_states: [done]
@@ -601,13 +490,13 @@ pins:
       - validation.rule
       - validation.started
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "events.yaml"), `
 validation.rule:
   entity_id: string
 validation.started:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
   id: validation-orchestrator
   execution_type: system_node
@@ -618,7 +507,6 @@ validation-orchestrator:
     vertical.shortlisted:
       rules:
         accepted:
-          element_id: 00000000-0000-4000-8000-000000000001
           condition: "else"
           emit: validation.rule
       on_success:
@@ -659,12 +547,6 @@ func currentWorkflowContractsDirForTest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: contract-test-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -722,14 +604,6 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: root-platform
-version: "1.0.0"
-flows:
-  - id: parent
-    flow: parent
-    mode: static
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: root-platform
 required_agents:
@@ -741,59 +615,51 @@ root_policy:
 shared:
   value: root
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "schema.yaml"), `
 name: parent
 mode: static
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "nodes.yaml"), `
 parent-node:
   id: parent-node
   execution_type: system_node
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "events.yaml"), `
 parent.started:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "agents.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "agents.yaml"), `
 parent-agent:
   id: parent-agent
   role: parent-agent
   intent: {inline: "Coordinate the parent flow."}
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-flows:
-  - id: child
-    flow: child
-    mode: static
-`)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "policy.yaml"), `
-package_policy:
+	writeFixtureFile(t, filepath.Join(root, "parent", "policy.yaml"), `
+parent_policy:
   value: nested
 shared:
   value: package
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "schema.yaml"), `
 name: child
 mode: static
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "nodes.yaml"), `
 child-node:
   id: child-node
   execution_type: system_node
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "events.yaml"), `
 child.completed:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "agents.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "agents.yaml"), `
 child-agent:
   id: child-agent
   role: child-agent
   intent: {inline: "Execute the child flow."}
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "policy.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "policy.yaml"), `
 shared:
   value: child
 `)

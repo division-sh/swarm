@@ -86,6 +86,7 @@ func (s claudeStartupWorkspaceStub) ValidateSource(context.Context, semanticview
 }
 func (s claudeStartupWorkspaceStub) EnsurePrereqs(context.Context) error                 { return nil }
 func (s claudeStartupWorkspaceStub) EnsureSystemWorkspaces(context.Context) error        { return nil }
+func (s claudeStartupWorkspaceStub) SetBundleScope(string)                               {}
 func (s claudeStartupWorkspaceStub) EnsureEntityWorkspace(context.Context, string) error { return nil }
 func (s claudeStartupWorkspaceStub) StopEntityWorkspace(context.Context, string) error   { return nil }
 
@@ -607,8 +608,8 @@ func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	}
 	joined := strings.Join(unmocked, "\n")
 	for _, want := range []string{
-		"project packages/project-a agent shared-worker",
-		"project packages/project-b agent shared-worker",
+		"flow packages/project-a agent shared-worker",
+		"flow packages/project-b agent shared-worker",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("unmocked declarations = %q, want %q", joined, want)
@@ -617,7 +618,7 @@ func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
 	err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source)
-	if err == nil || !strings.Contains(err.Error(), "project packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
+	if err == nil || !strings.Contains(err.Error(), "flow packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
 		t.Fatalf("model alias validation error = %v, want hidden scoped declaration", err)
 	}
 }
@@ -625,14 +626,7 @@ func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 func ambiguousScopedClaudeStartupSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-claude-startup
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-`)
+
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-claude-startup\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
@@ -655,7 +649,7 @@ root-mock:
 		{name: "project-b", model: "regular"},
 	} {
 		dir := filepath.Join(root, "packages", project.name)
-		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
+
 		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  memory: false\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

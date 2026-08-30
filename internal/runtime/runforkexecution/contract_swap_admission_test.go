@@ -127,10 +127,7 @@ func contractSwapClassificationHas(items []runfork.RunForkReplayResumeDispositio
 
 func testContractSwapSelection() runfork.RunForkContractSelection {
 	return runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		ContractsRoot:   "/tmp/contracts",
-		WorkflowName:    "workflow",
-		WorkflowVersion: "v1",
+		Mode: "selected_contracts",
 	}
 }
 
@@ -149,8 +146,8 @@ func testContractSwapSelectedExecutionAdmission(selection runfork.RunForkContrac
 		AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner:        runfork.RunForkSelectedContractExecutionModelOwner,
 		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		SourceWorkflowName:         selection.WorkflowName,
-		SourceWorkflowVersion:      selection.WorkflowVersion,
+		SourceWorkflowName:         "workflow",
+		SourceWorkflowVersion:      "v1",
 		FrontierEventCount:         1,
 		RouteTopology: &runfork.RunForkSelectedContractRouteTopology{
 			Owner:                         runfork.RunForkSelectedContractRouteTopologyOwner,

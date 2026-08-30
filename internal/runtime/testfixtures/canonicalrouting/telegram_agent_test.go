@@ -13,7 +13,7 @@ func TestTelegramAgentConsumesEmbeddedPackInventory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(exampleRoot, "provider-triggers")); !os.IsNotExist(err) {
 		t.Fatalf("Telegram example must not own a provider-trigger snapshot: %v", err)
 	}
-	for _, relative := range []string{"swarm.live.yaml", filepath.Join("bot", "swarm.yaml")} {
+	for _, relative := range []string{"swarm.yaml", "swarm.live.yaml"} {
 		body, err := os.ReadFile(filepath.Join(exampleRoot, relative))
 		if err != nil {
 			t.Fatalf("read Telegram example config %s: %v", relative, err)

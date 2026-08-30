@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -150,8 +151,8 @@ func TestGeneratedInputFixtureCompilesOnlyRequestedInputAndRejectsDuplicateExact
 func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatalf("bundle hash: %v", err)
@@ -183,7 +184,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash}
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	step := scenarioStep{Action: "publish", PublishEvent: "item.received", GeneratePayload: true}
-	if err := runner.runPublishStep(context.Background(), scenarioTestFile{}, mustScenarioExpressionEvaluatorWithSeed(t, "public-rpc"), state, step); err != nil {
+	if err := runner.runPublishStep(context.Background(), scenarioTestFile{FlowID: "."}, mustScenarioExpressionEvaluatorWithSeed(t, "public-rpc"), state, step); err != nil {
 		t.Fatalf("run generated publish step: %v", err)
 	}
 	if len(calls) != 1 {
@@ -195,8 +196,8 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	contractsPath := filepath.Join(exampleRoot, "bot")
-	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	sourceRoot := filepath.Join(exampleRoot, "bot")
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	const eventName = "inbound.telegram.text_message"
 	if bare := semanticview.ResolveEventSchema(semanticview.Wrap(bundle), "telegram-chat", eventName); bare.HasSchema {
 		t.Fatalf("bare authored bundle unexpectedly owns imported schema: %#v", bare)
@@ -233,7 +234,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 		if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 			t.Fatalf("decode RPC: %v", err)
 		}
-		if call.Method != eventPublishMethod || call.Params["event_name"] != eventName || call.Params["bundle_hash"] != bundleHash {
+		if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/"+eventName || call.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", call.Params)
 		}
 		if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
@@ -261,8 +262,24 @@ func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *t
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	contractsPath := filepath.Join(exampleRoot, "bot")
-	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	sourceRoot := filepath.Join(exampleRoot, "bot")
+	wantPayload := map[string]any{
+		"conversation_reference":     "123",
+		"conversation_scope":         "direct",
+		"external_account_reference": "456",
+		"provider_message_reference": float64(789),
+		"text":                       "authored fixture",
+	}
+	fixturePath := filepath.Join(sourceRoot, "telegram-chat", "tests", "fixtures", "telegram.yaml")
+	writeWorkflowValidationFixtureFile(t, fixturePath, `
+conversation_reference: "123"
+conversation_scope: direct
+external_account_reference: "456"
+provider_message_reference: 789
+text: authored fixture
+`)
+	scenarioPath := path.Join("telegram-chat", "tests", "scenario.yaml")
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
 	if err != nil {
 		t.Fatalf("compose effective provider source: %v", err)
@@ -271,22 +288,6 @@ func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *t
 	if err != nil {
 		t.Fatalf("bundle hash: %v", err)
 	}
-	wantPayload := map[string]any{
-		"conversation_reference":     "123",
-		"conversation_scope":         "direct",
-		"external_account_reference": "456",
-		"provider_message_reference": float64(789),
-		"text":                       "authored fixture",
-	}
-	fixturePath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "fixtures", "telegram.yaml")
-	writeWorkflowValidationFixtureFile(t, fixturePath, `
-conversation_reference: "123"
-conversation_scope: direct
-external_account_reference: "456"
-provider_message_reference: 789
-text: authored fixture
-`)
-	scenarioPath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "scenario.yaml")
 
 	for _, test := range []struct {
 		name    string
@@ -307,7 +308,7 @@ text: authored fixture
 				if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 					t.Fatalf("decode RPC: %v", err)
 				}
-				if call.Method != eventPublishMethod || call.Params["event_name"] != "inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
+				if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
 					t.Fatalf("event.publish params = %#v", call.Params)
 				}
 				if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
@@ -321,11 +322,11 @@ text: authored fixture
 				t.Fatalf("client: %v", err)
 			}
 			runner := scenarioRunner{
-				client:       client,
-				bundle:       bundle,
-				source:       source,
-				bundleHash:   bundleHash,
-				contractsDir: contractsPath,
+				client:     client,
+				bundle:     bundle,
+				source:     source,
+				bundleHash: bundleHash,
+				sourceRoot: sourceRoot,
 			}
 			step := scenarioStep{Action: "publish", PublishEvent: "inbound.telegram.text_message", Payload: test.payload}
 			state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
@@ -346,16 +347,16 @@ func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *te
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	contractsPath := filepath.Join(exampleRoot, "bot")
-	configPath := filepath.Join(contractsPath, "swarm.yaml")
-	scenarioPath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "generated-telegram.yaml")
+	sourceRoot := exampleRoot
+	configPath := filepath.Join(sourceRoot, "swarm.yaml")
+	scenarioPath := filepath.Join(sourceRoot, "bot", "telegram-chat", "tests", "generated-telegram.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: generated Telegram normalized input
 steps:
   - publish: inbound.telegram.text_message
     payload: generate
 `)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
 		"conversation_scope":         "direct",
@@ -372,9 +373,9 @@ steps:
 		calls = append(calls, rpc)
 		switch rpc.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash)
 		case eventPublishMethod:
-			if rpc.Params["event_name"] != "inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
+			if rpc.Params["event_name"] != "bot/telegram-chat/inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", rpc.Params)
 			}
 			if !reflect.DeepEqual(rpc.Params["payload"], wantPayload) {
@@ -390,13 +391,12 @@ steps:
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), contractsPath, []string{
-		"test",
-		"--contracts", contractsPath,
+	code := executeRootCommandWithOptions(context.Background(), sourceRoot, []string{
+		"test", sourceRoot,
 		"--config", configPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-		filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "generated-telegram.yaml")),
+		filepath.ToSlash(filepath.Join("bot", "telegram-chat", "tests", "generated-telegram.yaml")),
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
@@ -465,7 +465,7 @@ func generatedInputFixtureBundle(t testing.TB) *runtimecontracts.WorkflowContrac
 		}, Required: []string{"code"}},
 	}
 	alpha := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha", PackageKey: "flows/alpha"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "alpha"},
 		Path:  "alpha",
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
 			EventPins: []runtimecontracts.FlowInputEventPin{
@@ -479,7 +479,7 @@ func generatedInputFixtureBundle(t testing.TB) *runtimecontracts.WorkflowContrac
 		},
 	}
 	beta := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta", PackageKey: "flows/beta"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "beta"},
 		Path:  "beta",
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
 			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "shared.received"}},

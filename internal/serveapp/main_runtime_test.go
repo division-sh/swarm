@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -23,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -40,7 +38,7 @@ import (
 	runtimeagentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
+
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -61,19 +59,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
-	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
-	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -81,6 +75,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -88,6 +83,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -104,7 +100,7 @@ func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.Provid
 	return runtimellm.OpenAICompatibleProviderContract()
 }
 
-const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const serveRuntimeTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *testing.T) {
 	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
@@ -127,8 +123,8 @@ func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *te
 			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLIContractPlatformSpecPaths{
-				ContractsPath: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
+			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLISourcePlatformSpecPaths{
+				SourceRoot: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
 			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
@@ -251,7 +247,7 @@ func managedRuntimeAdmissionContextForTest(t testing.TB, ctx context.Context) co
 		1,
 		"",
 		"cmd-swarm-test-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -565,7 +561,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 				return test.code
 			}
 			var stdout, stderr bytes.Buffer
-			code := executeCLIFrom(context.Background(), t.TempDir(), []string{"serve", "--config", configPath}, &stdout, &stderr, runServe)
+			code := executeCLIFrom(context.Background(), t.TempDir(), []string{"serve", ".", "--config", configPath}, &stdout, &stderr, runServe)
 			if code != test.code {
 				t.Fatalf("code = %d, want %d\nstdout=%s\nstderr=%s", code, test.code, stdout.String(), stderr.String())
 			}
@@ -582,133 +578,37 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 	}
 }
 
-func TestServeBundleMatchAvailabilityAdmissionExcludesCurrentStandingAndRejectsOrdinaryConflicts(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
-	bootHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	persistedMissingRunID := uuid.NewString()
-	deletedRunID := uuid.NewString()
-	standingDeletedRunID := uuid.NewString()
-
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-		RunID: persistedMissingRunID, State: "running",
-		BundleHash:   "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222",
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
-	})
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-		RunID: deletedRunID, State: "paused",
-		BundleHash: bootHash, BundleSource: storerunlifecycle.BundleSourceDeleted,
-	})
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-		RunID: standingDeletedRunID, State: "paused",
-		BundleHash: bootHash, BundleSource: storerunlifecycle.BundleSourceDeleted,
-	})
-	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingDeletedRunID, bootHash, storerunlifecycle.BundleSourcePersisted)
-
-	err := enforceServeBundleMatchAdmission(ctx, pg, bootHash, true, "")
-	if err == nil {
-		t.Fatal("enforceServeBundleMatchAdmission error = nil, want availability conflict")
-	}
-	got := err.Error()
-	for _, want := range []string{
-		"active non-standing run bundle availability conflict",
-		persistedMissingRunID,
-		"BUNDLE_DATA_INTEGRITY_ERROR",
-		"persisted_missing_bundle_row",
-		deletedRunID,
-		"BUNDLE_UNAVAILABLE",
-		"cause=deleted",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("admission error = %q, want detail %q", got, want)
-		}
-	}
-	if strings.Contains(got, standingDeletedRunID) {
-		t.Fatalf("availability admission claimed current standing run %s: %q", standingDeletedRunID, got)
-	}
-
-	pinnedHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
-	if err == nil || !strings.Contains(err.Error(), "active non-standing run bundle availability conflict") {
-		t.Fatalf("DB-loaded disabled legacy admission error = %v, want active availability conflict", err)
-	}
-}
-
-func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
-	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: serve-test', '{}'::jsonb)
-	`, persistedHash); err != nil {
-		t.Fatalf("seed bundle row: %v", err)
-	}
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: uuid.NewString(), BundleHash: persistedHash,
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
-	})
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-		RunID: uuid.NewString(), State: "completed",
-		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
-		EndedAt: time.Now().UTC(),
-	})
-	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true, ""); err != nil {
-		t.Fatalf("enforceServeBundleMatchAdmission persisted-present/completed-missing: %v", err)
-	}
-
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-		RunID: uuid.NewString(), State: "running",
-		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
-	})
-	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false, ""); err != nil {
-		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
-	}
-}
-
 func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
-	pinnedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	otherHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
+	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
+	pinnedHash := pinnedArtifact.BundleHash()
+	otherHash := otherArtifact.BundleHash()
 	otherRunID := uuid.NewString()
 	standingOtherRunID := uuid.NewString()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES
-			($1, 'name: pinned', '{}'::jsonb),
-			($2, 'name: other', '{}'::jsonb)
-	`, pinnedHash, otherHash); err != nil {
-		t.Fatalf("seed bundle rows: %v", err)
-	}
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: uuid.NewString(), BundleHash: pinnedHash,
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
+		RunID: uuid.NewString(), Artifact: pinnedArtifact,
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: otherRunID, State: storerunlifecycle.StatePaused,
-		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+		Artifact: otherArtifact,
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: standingOtherRunID, State: storerunlifecycle.StatePaused,
-		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+		Artifact: otherArtifact,
 	})
-	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingOtherRunID, otherHash, storerunlifecycle.BundleSourcePersisted)
+	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingOtherRunID, otherHash)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
-		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+		Artifact: otherArtifact,
 	})
 
-	err := enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, true, pinnedHash)
+	err := enforceServePinnedBundleAdmissionForHashes(ctx, pg, pinnedHash, []string{pinnedHash})
 	if err == nil {
-		t.Fatal("enforceServeBundleMatchAdmission error = nil, want pinned bundle_hash conflict")
+		t.Fatal("enforceServePinnedBundleAdmissionForHashes error = nil, want pinned bundle_hash conflict")
 	}
 	got := err.Error()
 	for _, want := range []string{
@@ -716,7 +616,6 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		pinnedHash,
 		otherRunID,
 		otherHash,
-		"bundle_source=persisted",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("admission error = %q, want detail %q", got, want)
@@ -726,143 +625,23 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
 	}
 
-	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
-	if err == nil || !strings.Contains(err.Error(), "active non-standing run pinned bundle_hash conflict") {
-		t.Fatalf("disabled legacy admission error = %v, want DB-loaded pinned conflict", err)
+	if err := enforceServePinnedBundleAdmissionForHashes(ctx, pg, pinnedHash, nil); err != nil {
+		t.Fatalf("unpinned admission = %v, want no pinned-context constraint", err)
 	}
 }
 
-func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Context, db *sql.DB, runID, bundleHash, bundleSource string) {
+func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Context, db *sql.DB, runID, bundleHash string) {
 	t.Helper()
 	serviceID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO standing_services (
-			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
-			operator_override, effective_state, current_bundle_hash, current_bundle_source,
+			service_id, flow_path, instance_id, entity_id, declaration_present,
+			operator_override, effective_state, current_bundle_hash,
 			revision_sequence, current_generation, current_run_id, publication_state,
 			publication_sequence, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'pending', 0, NOW(), NOW())
-	`, serviceID, "bundle-admission-proof", "flow-"+serviceID, uuid.NewString(), uuid.NewString(), bundleHash, bundleSource, runID); err != nil {
+		) VALUES ($1::uuid, $2, $3, $4::uuid, TRUE, 'none', 'active', $5, 1, 1, $6::uuid, 'pending', 0, NOW(), NOW())
+	`, serviceID, "bundle-admission-proof", uuid.NewString(), uuid.NewString(), bundleHash, runID); err != nil {
 		t.Fatalf("seed current standing bundle admission run: %v", err)
-	}
-}
-
-func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
-	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
-		BundleHash:  projection.BundleHash,
-		ContentYAML: projection.ContentYAML,
-		ParsedJSON:  projection.ParsedJSON,
-		DataBlob:    projection.DataBlob,
-		Metadata:    projection.Metadata,
-	}); err != nil {
-		t.Fatalf("UpsertBundleCatalog: %v", err)
-	}
-	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRootForTest())
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRootForTest(), nil, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t)); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
-		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
-	}
-
-	stores := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
-	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if stores.RuntimeDeps().InboundStore == nil {
-		t.Fatal("selected PostgreSQL owner missing inbound store for served webhook ingress")
-	}
-	catalog, available := stores.BundleRuntimeCatalog()
-	if !available {
-		t.Fatal("selected PostgreSQL owner missing bundle runtime catalog")
-	}
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRootForTest(), catalog, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t))
-	if err != nil {
-		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
-	}
-	defer func() {
-		if loaded.cleanup != nil {
-			if err := loaded.cleanup(); err != nil {
-				t.Fatalf("cleanup DB-loaded runtime source: %v", err)
-			}
-		}
-	}()
-
-	if !loaded.dbLoaded {
-		t.Fatal("dbLoaded = false, want true")
-	}
-	if loaded.serveIdentityDetail() != projection.BundleHash {
-		t.Fatalf("serve identity = %q, want bundle hash %q", loaded.serveIdentityDetail(), projection.BundleHash)
-	}
-	authorLabel := serveRuntimeBundleAuthorLabel(loaded)
-	if authorLabel == "" || strings.Contains(authorLabel, projection.BundleHash) {
-		t.Fatalf("author label = %q, want workflow name/version without bundle identity", authorLabel)
-	}
-	if projectName := serveLifecycleProjectName(cliapp.LocalRuntimeStateResolution{}, []serveRuntimeBundle{loaded}); projectName != authorLabel {
-		t.Fatalf("no-root project name = %q, want author label %q", projectName, authorLabel)
-	}
-	if loaded.bundleSourceFact.BundleHash() != projection.BundleHash || !loaded.bundleSourceFact.IsPersisted() {
-		t.Fatalf("bundle source fact = %#v, want persisted %s", loaded.bundleSourceFact, projection.BundleHash)
-	}
-	if strings.Contains(loaded.contractsRoot, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access")) {
-		t.Fatalf("DB-loaded contracts root leaked local fixture path: %s", loaded.contractsRoot)
-	}
-	if _, err := os.Stat(filepath.Join(loaded.contractsRoot, "flows", "support", "data", "exclusions.yaml")); err != nil {
-		t.Fatalf("DB-loaded source missing reconstructed data file: %v", err)
-	}
-	persistence := projectServeRuntimePersistence(stores)
-	prepared, err := prepareLoadedServeBundleSource(ctx, persistence, loaded, false)
-	if err != nil {
-		t.Fatalf("prepareLoadedServeBundleSource: %v", err)
-	}
-	if prepared.BundleHash() != projection.BundleHash || !prepared.IsPersisted() {
-		t.Fatalf("prepared source fact = %#v, want persisted %s", prepared, projection.BundleHash)
-	}
-	if _, err := prepareLoadedServeBundleSource(ctx, persistence, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
-		t.Fatalf("prepareLoadedServeBundleSource dev error = %v", err)
-	}
-}
-
-type presentZeroServeRuntimeCatalog struct {
-	record runbundle.BundleCatalogRuntimeRecord
-	loads  int
-}
-
-func (c *presentZeroServeRuntimeCatalog) LoadBundleCatalogRuntimeRecord(context.Context, string) (runbundle.BundleCatalogRuntimeRecord, error) {
-	c.loads++
-	return c.record, nil
-}
-
-func TestLoadServeRuntimeBundleFromCatalogRejectsPresentZeroBeforePublication(t *testing.T) {
-	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
-	catalog := &presentZeroServeRuntimeCatalog{record: runbundle.BundleCatalogRuntimeRecord{
-		BundleHash:  projection.BundleHash,
-		ContentYAML: bundleCatalogContentWithPresentZeroAgents(t, projection.ContentYAML),
-		DataBlob:    projection.DataBlob,
-	}}
-
-	_, err = loadServeRuntimeBundleFromCatalog(
-		ctx,
-		repoRootForTest(),
-		catalog,
-		projection.BundleHash,
-		runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
-		testPlatformPackBaseGenerations(t),
-	)
-	if err == nil || !strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
-		t.Fatalf("loadServeRuntimeBundleFromCatalog error = %v, want present-zero rejection", err)
-	}
-	if catalog.loads != 1 {
-		t.Fatalf("catalog loads = %d, want one read and no runtime publication", catalog.loads)
 	}
 }
 
@@ -871,351 +650,10 @@ func bundleCatalogContentWithPresentZeroAgents(t *testing.T, contentYAML string)
 	const marker = "canonical_inputs:\n"
 	const file = "  - label: \"bundle/agents.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
 	if !strings.Contains(contentYAML, marker) {
-		t.Fatal("bundle catalog content is missing canonical_inputs")
+		t.Fatal("source artifacts content is missing canonical_inputs")
 	}
 	return strings.Replace(contentYAML, marker, file+marker, 1) +
 		"  - label: \"bundle/agents.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
-}
-
-func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) {
-	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
-	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
-		BundleHash:  projection.BundleHash,
-		ContentYAML: projection.ContentYAML,
-		ParsedJSON:  projection.ParsedJSON,
-		DataBlob:    projection.DataBlob,
-		Metadata:    projection.Metadata,
-	}); err != nil {
-		t.Fatalf("UpsertBundleCatalog: %v", err)
-	}
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         projection.BundleHash,
-		PlatformSpecPath:   filepath.Join(t.TempDir(), "missing-platform-spec.yaml"),
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-	})
-
-	serve.waitForReadyLine()
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
-	if strings.Contains(serve.outputString(), "missing-platform-spec.yaml") || strings.Contains(serve.outputString(), "read platform spec") {
-		t.Fatalf("DB-loaded serve used missing local platform spec before catalog read:\n%s", serve.outputString())
-	}
-}
-
-func TestRunServeRuntimeDBLoadedExecutesExplicitHostRefusal(t *testing.T) {
-	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	bundleHash := seedServeRuntimeBundleCatalog(t, ctx, pg, doctorAgentContractsPath)
-	var out lockedBuffer
-	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeHostConfig(t, ""),
-		BundleHash:         bundleHash,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Output:             &out,
-	})
-	if code != cliapp.CLIExitRuntime {
-		t.Fatalf("DB-loaded serve code = %d, want %d\n%s", code, cliapp.CLIExitRuntime, out.String())
-	}
-	assertClaudeHostRefusal(t, out.String())
-}
-
-func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
-	const dockerBin = "/opt/db-loaded-docker"
-	var daemonProbes atomic.Int32
-	contractsRoot := writeServeRuntimeNativeBashFixture(t)
-	_, _, pg := installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
-		manager := workspace.NewDockerManager(nil)
-		cfg := workspace.DefaultDockerConfig()
-		cfg.DockerBin = dockerBin
-		cfg.WorkspaceImage = "db-loaded-workspace:test"
-		cfg.SharedDataSource = mountSources.DataSource
-		cfg.ContractsSource = contractsRoot
-		manager.SetConfig(cfg)
-		manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "version" {
-				daemonProbes.Add(1)
-				return "", fmt.Errorf("daemon offline")
-			}
-			return "", nil
-		})
-		return manager
-	})
-	ctx := context.Background()
-	bundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, contractsRoot)
-	var out lockedBuffer
-	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         bundleHash,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Output:             &out,
-	})
-	if code == 0 {
-		t.Fatalf("DB-loaded serve code = 0, want Docker prerequisite failure\n%s", out.String())
-	}
-	if daemonProbes.Load() == 0 {
-		t.Fatal("DB-loaded runtime did not execute DockerManager daemon probe")
-	}
-	for _, want := range []string{dockerBin, "Start the Docker daemon, then verify with `" + dockerBin + " info`"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("DB-loaded runtime output missing %q:\n%s", want, out.String())
-		}
-	}
-}
-
-func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsAdmittedIdentity(t *testing.T) {
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundle := loadWorkflowValidationFixtureBundle(t, contractsPath)
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      contractsPath,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-	})
-	serve.waitForReadyLine()
-	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
-
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	at := time.Unix(1700000335, 0).UTC()
-	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Disk Loaded Entity", "serve-disk-loaded-test", at)
-	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, projection.BundleHash)
-
-	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
-		"source_run_id":         sourceRunID,
-		"fork_event_id":         sourceEventID,
-		"confirm_source_freeze": true,
-		"idempotency_key":       "disk-loaded-serve-fork",
-	}, 20*time.Second)
-	if response.Error != nil {
-		t.Fatalf("run.fork error = %#v\nserve output:\n%s", response.Error, serve.outputString())
-	}
-	var result apiv1.RunForkExecutionResult
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatalf("decode run.fork result: %v\n%s", err, string(response.Result))
-	}
-	if result.SourceRunID != sourceRunID || result.BundleHash != projection.BundleHash || result.ExecutedEventCount != 1 {
-		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", result, sourceRunID, projection.BundleHash)
-	}
-	if !result.SourceFrozen || result.SourceRunStatus != runfork.RunForkSourceFrozenStatus || result.ForkRunID == "" {
-		t.Fatalf("run.fork source/fork outcome = %#v, want frozen source and materialized fork", result)
-	}
-
-	var forkBundleHash, forkBundleSource string
-	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
-		t.Fatalf("load fork run bundle identity: %v", err)
-	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("fork bundle identity = hash:%q source:%q, want admitted %s/%s", forkBundleHash, forkBundleSource, projection.BundleHash, storerunlifecycle.BundleSourcePersisted)
-	}
-
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
-	}
-}
-
-func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity(t *testing.T) {
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
-	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
-		BundleHash:  projection.BundleHash,
-		ContentYAML: projection.ContentYAML,
-		ParsedJSON:  projection.ParsedJSON,
-		DataBlob:    projection.DataBlob,
-		Metadata:    projection.Metadata,
-	}); err != nil {
-		t.Fatalf("UpsertBundleCatalog: %v", err)
-	}
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         projection.BundleHash,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-	})
-	serve.waitForReadyLine()
-	apiAddr := serveRuntimeAPIListenerFromOutput(t, serve.outputString())
-
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	at := time.Unix(1700000340, 0).UTC()
-	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve DB Loaded Entity", "serve-db-loaded-test", at)
-	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, projection.BundleHash)
-
-	body := fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"db-loaded-serve-fork"}}`,
-		sourceRunID,
-		sourceEventID,
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+apiAddr+"/v1/rpc", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("build run.fork request: %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST /v1/rpc run.fork: %v\nserve output:\n%s", err, serve.outputString())
-	}
-	defer resp.Body.Close()
-	var rpc struct {
-		Result apiv1.RunForkExecutionResult `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-			Data    any    `json:"data,omitempty"`
-		} `json:"error,omitempty"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rpc); err != nil {
-		t.Fatalf("decode run.fork response: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK || rpc.Error != nil {
-		t.Fatalf("run.fork status=%d error=%#v result=%#v\nserve output:\n%s", resp.StatusCode, rpc.Error, rpc.Result, serve.outputString())
-	}
-	if rpc.Result.SourceRunID != sourceRunID || rpc.Result.BundleHash != projection.BundleHash || rpc.Result.ExecutedEventCount != 1 {
-		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", rpc.Result, sourceRunID, projection.BundleHash)
-	}
-	if !rpc.Result.SourceFrozen || rpc.Result.SourceRunStatus != runfork.RunForkSourceFrozenStatus {
-		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", rpc.Result)
-	}
-	if rpc.Result.ForkRunID == "" || rpc.Result.ForkEventID != sourceEventID {
-		t.Fatalf("run.fork fork identity = %#v, want fork run and source fork event %s", rpc.Result, sourceEventID)
-	}
-
-	var forkBundleHash, forkBundleSource string
-	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, rpc.Result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
-		t.Fatalf("load fork run bundle identity: %v", err)
-	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("fork bundle identity = hash:%q source:%q, want persisted %s", forkBundleHash, forkBundleSource, projection.BundleHash)
-	}
-	var lineageRows int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM run_fork_selected_contract_executions
-		WHERE fork_run_id = $1::uuid
-		  AND source_run_id = $2::uuid
-		  AND source_event_id = $3::uuid
-	`, rpc.Result.ForkRunID, sourceRunID, sourceEventID).Scan(&lineageRows); err != nil {
-		t.Fatalf("count selected-contract execution lineage: %v", err)
-	}
-	if lineageRows != 1 {
-		t.Fatalf("selected-contract execution lineage rows = %d, want 1", lineageRows)
-	}
-
-	advancedSourceRunID := uuid.NewString()
-	advancedEntityID := uuid.NewString()
-	advancedSourceEventID := uuid.NewString()
-	advancedAfterEventID := uuid.NewString()
-	advancedAt := at.Add(10 * time.Second)
-	seedRunForkSelectedExecutionSourceEvent(t, db, advancedSourceRunID, advancedEntityID, advancedSourceEventID, "task.requested", "complete-task", "pending", "Serve Advanced Entity", "serve-advanced-test", advancedAt)
-	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, advancedSourceRunID, projection.BundleHash)
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
-	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
-
-	stdout, stderr, code := runServedCLICommand(t, "http://"+apiAddr+"/v1/rpc", []string{
-		"run", "fork", advancedSourceRunID,
-		"--at-event", advancedSourceEventID,
-		"--confirm-source-freeze",
-		"--idempotency-key", "db-loaded-serve-advanced-fork",
-		"--json",
-	})
-	if code != 0 {
-		t.Fatalf("advanced swarm run fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr, stdout, serve.outputString())
-	}
-	if strings.TrimSpace(stderr) != "" {
-		t.Fatalf("advanced swarm run fork stderr=%q, want empty", stderr)
-	}
-	var advancedResult apiv1.RunForkExecutionResult
-	if err := json.Unmarshal([]byte(stdout), &advancedResult); err != nil {
-		t.Fatalf("decode advanced swarm run fork json: %v\n%s", err, stdout)
-	}
-	if advancedResult.SourceRunID != advancedSourceRunID || advancedResult.SourceFrozen || advancedResult.SourceRunStatus != "running" || advancedResult.ForkRunStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("advanced run.fork result = %#v, want preserved running source and activated fork", advancedResult)
-	}
-	var advancedSourceStatus, advancedContinuedAs string
-	if err := db.QueryRowContext(ctx, `
-		SELECT status, COALESCE(continued_as_run_id::text, '')
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, advancedSourceRunID).Scan(&advancedSourceStatus, &advancedContinuedAs); err != nil {
-		t.Fatalf("load advanced source outcome: %v", err)
-	}
-	if advancedSourceStatus != "running" || advancedContinuedAs != "" {
-		t.Fatalf("advanced source status/continued_as = %q/%q, want running with no freeze pointer", advancedSourceStatus, advancedContinuedAs)
-	}
-
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
@@ -1348,6 +786,40 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	}
 }
 
+func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime, *store.PostgresStore) {
+	t.Helper()
+	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	root := canonicalrouting.CopyServedJoinProof(t)
+	repo := repoRootForTest()
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load served join source: %v", err)
+	}
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
+	if err != nil {
+		t.Fatalf("project served join durable data: %v", err)
+	}
+	if _, err := pg.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+		t.Fatalf("persist served join source: %v", err)
+	}
+	bundleHash := bundle.SourceArtifact.BundleHash()
+	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		BundleHash:              bundleHash,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedJoinProofOutboxSweeperConfig(),
+	})
+	return endpoint, db, bundleHash, rt, pg
+}
+
 func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
@@ -1406,163 +878,12 @@ func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, backend, runID st
 	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
-func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
-
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	ctx := context.Background()
-	sourceBundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	sourceProjection, err := runtimecontracts.BuildBundleCatalogProjection(sourceBundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection(source): %v", err)
-	}
-	targetRoot := canonicalrouting.CopyRunForkTarget(t)
-	targetBundle := loadWorkflowValidationBundleAt(t, targetRoot)
-	targetProjection, err := runtimecontracts.BuildBundleCatalogProjection(targetBundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection(target): %v", err)
-	}
-	for label, projection := range map[string]runtimecontracts.BundleCatalogProjection{
-		"source": sourceProjection,
-		"target": targetProjection,
-	} {
-		if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
-			BundleHash:  projection.BundleHash,
-			ContentYAML: projection.ContentYAML,
-			ParsedJSON:  projection.ParsedJSON,
-			DataBlob:    projection.DataBlob,
-			Metadata:    projection.Metadata,
-		}); err != nil {
-			t.Fatalf("UpsertBundleCatalog(%s): %v", label, err)
-		}
-	}
-	if sourceProjection.BundleHash == targetProjection.BundleHash {
-		t.Fatalf("source and target projections unexpectedly share hash %s", sourceProjection.BundleHash)
-	}
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         sourceProjection.BundleHash,
-		BundleHashes:       []string{targetProjection.BundleHash},
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-	})
-	serve.waitForReadyLine()
-	apiAddr := serveRuntimeAPIListenerFromOutput(t, serve.outputString())
-
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	at := time.Unix(1700000345, 0).UTC()
-	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Cross Bundle Entity", "serve-cross-bundle-test", at)
-	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, sourceProjection.BundleHash)
-
-	var stdout, stderr bytes.Buffer
-	code := executeCLIFrom(ctx, t.TempDir(), []string{
-		"run", "fork", sourceRunID,
-		"--bundle-hash", targetProjection.BundleHash,
-		"--at-event", sourceEventID,
-		"--confirm-source-freeze",
-		"--idempotency-key", "db-loaded-cross-bundle-serve-fork",
-		"--json",
-		"--api-server", "http://" + apiAddr,
-		"--config", writeTestVerifyRuntimeConfig(t),
-	}, &stdout, &stderr, nil)
-	if code != 0 {
-		t.Fatalf("swarm fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), serve.outputString())
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("swarm fork stderr=%q, want empty", stderr.String())
-	}
-	var rpcResult apiv1.RunForkExecutionResult
-	if err := json.Unmarshal(stdout.Bytes(), &rpcResult); err != nil {
-		t.Fatalf("decode swarm fork json: %v\n%s", err, stdout.String())
-	}
-	if rpcResult.SourceRunID != sourceRunID || rpcResult.BundleHash != targetProjection.BundleHash || rpcResult.ExecutedEventCount != 1 {
-		t.Fatalf("run.fork result = %#v, want source=%s target=%s executed=1", rpcResult, sourceRunID, targetProjection.BundleHash)
-	}
-
-	var forkBundleHash, forkBundleSource string
-	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, rpcResult.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
-		t.Fatalf("load fork run bundle identity: %v", err)
-	}
-	if forkBundleHash != targetProjection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("fork bundle identity = hash:%q source:%q, want persisted target %s", forkBundleHash, forkBundleSource, targetProjection.BundleHash)
-	}
-	var mode, selectedHash, contractsRoot string
-	if err := db.QueryRowContext(ctx, `
-		SELECT mode, COALESCE(bundle_hash, ''), COALESCE(contracts_root, '')
-		FROM run_fork_selected_contract_bindings
-		WHERE fork_run_id = $1::uuid
-	`, rpcResult.ForkRunID).Scan(&mode, &selectedHash, &contractsRoot); err != nil {
-		t.Fatalf("load selected-contract binding: %v", err)
-	}
-	if mode != runfork.RunForkContractSelectionModeBundleHash || selectedHash != targetProjection.BundleHash || contractsRoot != "" {
-		t.Fatalf("selected-contract binding = mode:%q hash:%q root:%q, want target bundle_hash selection", mode, selectedHash, contractsRoot)
-	}
-	var routeMode, routeHash string
-	if err := db.QueryRowContext(ctx, `
-		SELECT mode, COALESCE(bundle_hash, '')
-		FROM run_fork_selected_contract_route_recoveries
-		WHERE fork_run_id = $1::uuid
-	`, rpcResult.ForkRunID).Scan(&routeMode, &routeHash); err != nil {
-		t.Fatalf("load selected-contract route recovery: %v", err)
-	}
-	if routeMode != runfork.RunForkContractSelectionModeBundleHash || routeHash != targetProjection.BundleHash {
-		t.Fatalf("route recovery = mode:%q hash:%q, want target bundle_hash selection", routeMode, routeHash)
-	}
-	var forkEventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT fork_event_id::text
-		FROM run_fork_selected_contract_executions
-		WHERE fork_run_id = $1::uuid AND source_event_id = $2::uuid
-	`, rpcResult.ForkRunID, sourceEventID).Scan(&forkEventID); err != nil {
-		t.Fatalf("load selected-contract execution lineage: %v", err)
-	}
-	var targetSubscriberDeliveries, sourceSubscriberDeliveries int
-	targetNode := identitytest.RootNode(t, "test-node").Key()
-	sourceNode := identitytest.RootNode(t, "complete-task").Key()
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = $3
-	`, rpcResult.ForkRunID, forkEventID, targetNode).Scan(&targetSubscriberDeliveries); err != nil {
-		t.Fatalf("count target subscriber deliveries: %v", err)
-	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = $3
-	`, rpcResult.ForkRunID, forkEventID, sourceNode).Scan(&sourceSubscriberDeliveries); err != nil {
-		t.Fatalf("count source subscriber deliveries: %v", err)
-	}
-	if targetSubscriberDeliveries == 0 || sourceSubscriberDeliveries != 0 {
-		t.Fatalf("fork delivery recipients target=%d source=%d, want target bundle route only", targetSubscriberDeliveries, sourceSubscriberDeliveries)
-	}
-
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run exit code = %d\noutput:\n%s", code, serve.outputString())
-	}
-}
-
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	var servedDB *sql.DB
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
@@ -1570,13 +891,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	})
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestLifecycleProbe:      probe,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -1586,134 +905,6 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
 	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
-}
-
-func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
-	dsn, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
-		ContractsPath:           contractsPath,
-		PlatformSpecPath:        defaultPlatformSpecPath,
-		StoreMode:               "postgres",
-		StoreModeSet:            true,
-		APIListenAddr:           "127.0.0.1:0",
-		MCPListenAddr:           "127.0.0.1:0",
-		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		Verbose:                 true,
-		TestLifecycleProbe:      probe,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	})
-	serve.waitForReadyLine()
-	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
-
-	proof := runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
-	requirePersistedRunForkBranchAuthority(t, db, proof.RunID, proof.FollowUpEventID)
-
-	amendedContractsPath := writeServedEventPublishFollowUpFixture(t)
-	packagePath := filepath.Join(amendedContractsPath, "package.yaml")
-	packageYAML, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatalf("read amended bundle package: %v", err)
-	}
-	amendedPackageYAML := strings.Replace(string(packageYAML), `version: "1.0.0"`, `version: "1.0.1"`, 1)
-	if amendedPackageYAML == string(packageYAML) {
-		t.Fatal("amended bundle package version replacement did not apply")
-	}
-	if err := os.WriteFile(packagePath, []byte(amendedPackageYAML), 0o644); err != nil {
-		t.Fatalf("write amended bundle package: %v", err)
-	}
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(
-		repoRoot, amendedContractsPath, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
-	}
-	registrationParams := map[string]any{
-		"content_yaml":    upload.ContentYAML,
-		"idempotency_key": "issue-2272-postgres-amended-bundle",
-	}
-	if upload.DataBlob != nil {
-		registrationParams["data_blob"] = upload.DataBlob
-	}
-	var registration struct {
-		BundleHash string `json:"bundle_hash"`
-		Registered bool   `json:"registered"`
-	}
-	requireServedJSONRPCResult(t, endpoint, "bundle.register", registrationParams, &registration)
-	if !registration.Registered || runtimecontracts.ValidateBundleHash(registration.BundleHash) != nil || registration.BundleHash == bundleHash {
-		t.Fatalf("amended bundle registration = %#v, want distinct registered bundle", registration)
-	}
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("first served runtime exit code = %d\noutput:\n%s", code, serve.outputString())
-	}
-	reopened, err := store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("reopen PostgreSQL runtime store: %v", err)
-	}
-	t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
-	storetest.BootstrapPostgresRuntimeStore(t, reopened)
-	plan, err := reopened.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
-		SourceRunID: proof.RunID,
-		At:          proof.FollowUpEventID,
-	})
-	if err != nil {
-		t.Fatalf("load persisted restart fork authority: %v", err)
-	}
-	if plan.ForkPoint.EventID != proof.FollowUpEventID || plan.ForkPoint.Revision <= 0 || plan.SourceRunID != proof.RunID {
-		t.Fatalf("persisted restart fork authority = %#v", plan.ForkPoint)
-	}
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(reopened), cfg), nil
-	}
-
-	restarted := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         bundleHash,
-		BundleHashes:       []string{registration.BundleHash},
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-	})
-	restarted.waitForReadyLine()
-	endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
-
-	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
-		"source_run_id":         proof.RunID,
-		"fork_event_id":         proof.FollowUpEventID,
-		"bundle_hash":           registration.BundleHash,
-		"confirm_source_freeze": true,
-		"idempotency_key":       "issue-2272-postgres-real-run-fork",
-	}, 30*time.Second)
-	if response.Error != nil {
-		_, planErr := reopened.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
-			SourceRunID: proof.RunID,
-			At:          proof.FollowUpEventID,
-		})
-		t.Fatalf("run.fork real served path error = %#v\nplanner error: %v\nserve output:\n%s", response.Error, planErr, restarted.outputString())
-	}
-	var fork apiv1.RunForkExecutionResult
-	if err := json.Unmarshal(response.Result, &fork); err != nil {
-		t.Fatalf("decode run.fork real served path result: %v\n%s", err, response.Result)
-	}
-	if fork.SourceRunID != proof.RunID || fork.ForkEventID != proof.FollowUpEventID || fork.ForkRunID == "" || fork.BundleHash != registration.BundleHash || fork.ExecutedEventCount != 1 {
-		t.Fatalf("run.fork real served path result = %#v", fork)
-	}
-	requireServedRunForkCounterfactualCompleted(t, db, fork.ForkRunID, 1)
-	if code := restarted.stop(); code != 0 {
-		t.Fatalf("restarted served runtime exit code = %d\noutput:\n%s", code, restarted.outputString())
-	}
 }
 
 func requirePersistedRunForkBranchAuthority(t *testing.T, db *sql.DB, runID, eventID string) {
@@ -1778,8 +969,8 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := writeServedEventPublishTargetRouteFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishTargetRouteFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	var servedDB *sql.DB
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
@@ -1787,13 +978,11 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	})
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestLifecycleProbe:      probe,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -1809,19 +998,18 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	contractsPath := writeServedEventPublishTargetRouteFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishTargetRouteFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
 		Verbose:                 true,
 		TestLifecycleProbe:      probe,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -1834,8 +1022,8 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := writeServedEventPublishActiveLoadFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishActiveLoadFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	agentStarted := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -1846,13 +1034,11 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	})
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestLifecycleProbe:      probe,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -1869,22 +1055,21 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	contractsPath := writeServedEventPublishActiveLoadFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishActiveLoadFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	agentStarted := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
 		Verbose:                 true,
 		TestLifecycleProbe:      probe,
 		TestLLMRuntime:          servedEventPublishBlockingLLMRuntime{started: agentStarted, release: release},
@@ -1895,162 +1080,43 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	runServedEventPublishActiveLoadProof(t, endpoint, db, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
-func TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
-	proof := startServedSessionCleanupProof(t)
-	var result struct {
-		OK      bool   `json:"ok"`
-		Status  string `json:"status"`
-		Deleted bool   `json:"deleted"`
-	}
-	runServedSessionCleanupMutation(t, proof, "bundle.delete", map[string]any{
-		"bundle_hash": proof.BundleHash, "force": true, "idempotency_key": "issue-1927-bundle-force-" + uuid.NewString(),
-	}, &result)
-	if !result.OK || result.Status != "completed" || !result.Deleted {
-		t.Fatalf("served bundle.delete result = %#v", result)
-	}
-	assertServedSessionCleanupQuiesced(t, proof)
-}
-
-func TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRemovalPostgres(t *testing.T) {
-	rt := startServedLiveAgentProofRuntime(t, servedparity.BackendExplicitPostgres)
-	if rt.Postgres == nil {
-		t.Fatal("postgres selected-store owner is required for non-force bundle.delete proof")
-	}
-	deletePlan, err := rt.Postgres.PlanBundleDelete(context.Background(), runtimebundledelete.Request{
-		BundleHash:  rt.BundleHash,
-		RequestedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("plan live-agent fixture runs before non-force bundle.delete: %v", err)
-	}
-	for _, run := range deletePlan.ActiveRuns {
-		response := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
-			"run_id":          run.RunID,
-			"idempotency_key": "issue-2125-bundle-non-force-stop-" + uuid.NewString(),
-		})
-		if response.Error != nil {
-			if response.Error.Data["code"] != apiv1.RunAlreadyTerminalCode {
-				t.Fatalf("run.stop error = %#v", response.Error)
-			}
-			continue
-		}
-		var result map[string]any
-		if err := json.Unmarshal(response.Result, &result); err != nil {
-			t.Fatalf("decode run.stop result: %v", err)
-		}
-		if result["ok"] != true {
-			t.Fatalf("run.stop result = %#v, want ok=true", result)
-		}
-		requireServedRunControlState(t, rt.DB, rt.Backend, run.RunID, "stopped", "cancelled")
-	}
-	deletePlan, err = rt.Postgres.PlanBundleDelete(context.Background(), runtimebundledelete.Request{
-		BundleHash:  rt.BundleHash,
-		RequestedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("replan live-agent fixture runs before non-force bundle.delete: %v", err)
-	}
-	if len(deletePlan.ActiveRuns) != 0 {
-		t.Fatalf("active fixture runs before non-force bundle.delete = %#v, want none", deletePlan.ActiveRuns)
-	}
-
-	var before, running int
-	if err := rt.DB.QueryRowContext(context.Background(), `
-		SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active' AND lifecycle_phase = 'running')
-		FROM agents
-	`).Scan(&before, &running); err != nil {
-		t.Fatalf("read agents before non-force bundle.delete: %v", err)
-	}
-	if before == 0 || running != before {
-		t.Fatalf("agents before non-force bundle.delete = total:%d running:%d, want nonzero all running", before, running)
-	}
-
-	response := requestServedJSONRPC(t, rt.Endpoint, "bundle.delete", map[string]any{
-		"bundle_hash": rt.BundleHash, "force": false,
-		"idempotency_key": "issue-2125-bundle-non-force-" + uuid.NewString(),
-	})
-	if response.Error != nil {
-		t.Fatalf("bundle.delete error = %#v", response.Error)
-	}
-	var result struct {
-		OK      bool `json:"ok"`
-		Deleted bool `json:"deleted"`
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatalf("decode bundle.delete result: %v", err)
-	}
-	if !result.OK || !result.Deleted {
-		t.Fatalf("bundle.delete result = %#v, want completed deletion", result)
-	}
-
-	var quiesced int
-	if err := rt.DB.QueryRowContext(context.Background(), `
-		SELECT COUNT(*)
-		FROM agents
-		WHERE lifecycle_phase = 'registered' AND lifecycle_run_mode = 'stopped'
-	`).Scan(&quiesced); err != nil {
-		t.Fatalf("read agents after non-force bundle.delete: %v", err)
-	}
-	if quiesced != before {
-		t.Fatalf("quiesced agents after non-force bundle.delete = %d, want %d", quiesced, before)
-	}
-	var bundleExists bool
-	if err := rt.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, rt.BundleHash).Scan(&bundleExists); err != nil {
-		t.Fatalf("read bundle after non-force bundle.delete: %v", err)
-	}
-	if bundleExists {
-		t.Fatalf("bundle %s survived non-force bundle.delete", rt.BundleHash)
-	}
-	var rawPlan []byte
-	if err := rt.DB.QueryRowContext(context.Background(), `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
-		t.Fatalf("read process topology after non-force bundle.delete: %v", err)
-	}
-	var plan runtimeagenttopology.SourceSetPlan
-	if err := json.Unmarshal(rawPlan, &plan); err != nil {
-		t.Fatalf("decode process topology after non-force bundle.delete: %v", err)
-	}
-	if len(plan.Sources) != 0 || len(plan.Agents) != 0 {
-		t.Fatalf("process topology after non-force bundle.delete = %#v, want empty complete source set", plan)
-	}
-}
-
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
 	proof := startServedSessionCleanupProof(t)
 	var result struct {
-		OK             bool   `json:"ok"`
-		Status         string `json:"status"`
-		IncludeBundles bool   `json:"include_bundles"`
+		OK                     bool   `json:"ok"`
+		Status                 string `json:"status"`
+		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
 	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_bundles": false, "idempotency_key": "issue-1927-runtime-nuke-" + uuid.NewString(),
+		"include_source_artifacts": false, "idempotency_key": "issue-1927-runtime-nuke-" + uuid.NewString(),
 	}, &result)
-	if !result.OK || result.Status != "completed" || result.IncludeBundles {
+	if !result.OK || result.Status != "completed" || result.IncludeSourceArtifacts {
 		t.Fatalf("served runtime.nuke result = %#v", result)
 	}
 	assertServedSessionCleanupQuiesced(t, proof)
 }
 
-func TestRunServeRuntimeNukeWithBundlesClearsProcessTopologyBeforeCleanupPostgres(t *testing.T) {
+func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanupPostgres(t *testing.T) {
 	proof := startServedSessionCleanupProof(t)
 	var result struct {
-		OK             bool   `json:"ok"`
-		Status         string `json:"status"`
-		IncludeBundles bool   `json:"include_bundles"`
+		OK                     bool   `json:"ok"`
+		Status                 string `json:"status"`
+		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
 	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_bundles": true, "idempotency_key": "issue-2125-runtime-nuke-bundles-" + uuid.NewString(),
+		"include_source_artifacts": true, "idempotency_key": "issue-2125-runtime-nuke-bundles-" + uuid.NewString(),
 	}, &result)
-	if !result.OK || result.Status != "completed" || !result.IncludeBundles {
-		t.Fatalf("served runtime.nuke include_bundles result = %#v", result)
+	if !result.OK || result.Status != "completed" || !result.IncludeSourceArtifacts {
+		t.Fatalf("served runtime.nuke include_source_artifacts result = %#v", result)
 	}
 	assertServedSessionCleanupQuiesced(t, proof)
 
-	var bundleExists bool
-	if err := proof.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, proof.BundleHash).Scan(&bundleExists); err != nil {
-		t.Fatalf("read served bundle after runtime.nuke: %v", err)
+	var artifactExists bool
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`, proof.BundleHash).Scan(&artifactExists); err != nil {
+		t.Fatalf("read served source artifact after runtime.nuke: %v", err)
 	}
-	if bundleExists {
-		t.Fatalf("bundle %s survived include_bundles runtime.nuke", proof.BundleHash)
+	if artifactExists {
+		t.Fatalf("source artifact %s survived include_source_artifacts runtime.nuke", proof.BundleHash)
 	}
 	var rawPlan []byte
 	if err := proof.DB.QueryRowContext(context.Background(), `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
@@ -2083,17 +1149,17 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	contractsPath := writeServedSessionCleanupFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedSessionCleanupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	started := make(chan string, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true, TestLifecycleProbe: probe,
+		SelfCheck: true, Verbose: true, TestLifecycleProbe: probe,
 		TestLLMRuntime:          servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release},
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
@@ -2286,51 +1352,6 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedConversationForkBackendProof)
 }
 
-func TestRunServeRuntimeBundleRegisterLifecycleDefaultSQLite(t *testing.T) {
-	runServedBundleRegisterBackendProof(t, servedparity.BackendDefaultSQLite)
-}
-
-func TestRunServeRuntimeBundleRegisterLifecyclePostgres(t *testing.T) {
-	runServedBundleRegisterBackendProof(t, servedparity.BackendExplicitPostgres)
-}
-
-func TestServedParityHarnessBundleRegisterLifecycle(t *testing.T) {
-	scenario := servedparity.MustScenario(servedparity.ScenarioBundleRegisterLifecycle)
-	servedparity.Run(t, scenario, runServedBundleRegisterBackendProof)
-}
-
-func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
-	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite)
-	cases := []struct {
-		method string
-		params map[string]any
-	}{
-		{
-			method: "bundle.delete",
-			params: map[string]any{
-				"bundle_hash":     rt.BundleHash,
-				"force":           true,
-				"idempotency_key": "issue-1386-sqlite-bundle-delete",
-			},
-		},
-		{
-			method: "runtime.nuke",
-			params: map[string]any{
-				"dry_run":         true,
-				"idempotency_key": "issue-1386-sqlite-runtime-nuke",
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(strings.ReplaceAll(tc.method, ".", "_"), func(t *testing.T) {
-			errResp := requireServedJSONRPCError(t, rt.Endpoint, tc.method, tc.params)
-			if errResp.Data["code"] != apiv1.MethodUnavailableCode {
-				t.Fatalf("%s SQLite fail-closed data = %#v, want %s", tc.method, errResp.Data, apiv1.MethodUnavailableCode)
-			}
-		})
-	}
-}
-
 type servedControlProofRuntime struct {
 	Endpoint   string
 	DB         *sql.DB
@@ -2348,12 +1369,12 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 		t.Fatal("served control proof runtime is required for exact author activity scope")
 	}
 	runtimeInstanceID := strings.TrimSpace(rt.Runtime.Options.RuntimeInstanceID)
-	fact := rt.Runtime.Options.BundleSourceFact
+	fact := rt.Runtime.Options.SourceArtifactFact
 	if runtimeInstanceID == "" || fact.BundleHash() == "" || fact.BundleHash() != strings.TrimSpace(rt.BundleHash) {
 		t.Fatalf("served control proof scope = runtime %q fact %#v bundle %q", runtimeInstanceID, fact, rt.BundleHash)
 	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 	if rt.Runtime.WorkOccurrence() == nil {
 		t.Fatal("served control proof runtime work occurrence is required")
@@ -2382,8 +1403,8 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		contractsPath := writeServedLiveAgentFixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := writeServedLiveAgentFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		oldProjection := projectRuntimePersistenceForServe
 		t.Cleanup(func() {
@@ -2399,13 +1420,11 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		}
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
-			NoRequireBundleMatch:    true,
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -2426,19 +1445,18 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 				return wrapServedDirectiveFaultPersistence(t, oldProjection(owner), faults)
 			}
 		}
-		contractsPath := writeServedLiveAgentFixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := writeServedLiveAgentFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			StoreMode:               "postgres",
 			StoreModeSet:            true,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -2482,8 +1500,8 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		contractsPath := fixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := fixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		var servedDB *sql.DB
 		var servedSQLite *store.SQLiteRuntimeStore
@@ -2492,13 +1510,11 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		})
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
-			NoRequireBundleMatch:    true,
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -2511,19 +1527,18 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
-		contractsPath := fixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := fixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			StoreMode:               "postgres",
 			StoreModeSet:            true,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -2644,333 +1659,6 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle))
 }
 
-func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Backend) {
-	t.Helper()
-	rt := startServedControlProofRuntime(t, backend)
-	if rt.Runtime == nil {
-		t.Fatal("served bundle.register proof requires the running runtime")
-	}
-	initialSource := rt.Runtime.Options.BundleSourceFact
-	initialRuns := servedBundleRegisterTableCount(t, rt.DB, "runs")
-
-	insert := writeServedBundleRegistrationFixture(t, "1.0.1")
-	firstParams := servedBundleRegisterParams(insert.Upload, "issue-2359-"+rt.Backend+"-insert")
-	first := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
-	if !first.Registered || first.BundleHash != insert.BundleHash {
-		t.Fatalf("%s first bundle.register = %#v, want registered %s", rt.Backend, first, insert.BundleHash)
-	}
-	requireServedBundleRegisterListReadback(t, rt.Endpoint, insert.Expected)
-
-	keyedReplay := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
-	if keyedReplay != first {
-		t.Fatalf("%s keyed bundle.register replay = %#v, want exact %#v", rt.Backend, keyedReplay, first)
-	}
-	catalogReplayParams := servedBundleRegisterParams(insert.Upload, "issue-2359-"+rt.Backend+"-catalog-replay")
-	catalogReplay := requireServedBundleRegisterResult(t, rt.Endpoint, catalogReplayParams)
-	if catalogReplay.Registered || catalogReplay.BundleHash != insert.BundleHash {
-		t.Fatalf("%s catalog bundle.register replay = %#v, want existing %s", rt.Backend, catalogReplay, insert.BundleHash)
-	}
-	unavailable := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
-		"event_name":      "item.received",
-		"bundle_hash":     insert.BundleHash,
-		"payload":         map[string]any{"item_id": "registered-but-unloaded"},
-		"idempotency_key": "issue-2359-" + rt.Backend + "-catalog-only",
-	})
-	if unavailable.Data["code"] != apiv1.BundleUnavailableCode {
-		t.Fatalf("%s publication against registered-only bundle data = %#v, want %s", rt.Backend, unavailable.Data, apiv1.BundleUnavailableCode)
-	}
-
-	beforeMalformedBundles := servedBundleRegisterTableCount(t, rt.DB, "bundles")
-	beforeMalformedIdempotency := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency")
-	malformed := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", map[string]any{
-		"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles: []\n",
-		"idempotency_key": "issue-2359-" + rt.Backend + "-malformed",
-	})
-	if malformed.Code != -32602 || malformed.Data["details"] == nil {
-		t.Fatalf("%s malformed bundle.register error = %#v, want invalid params with details", rt.Backend, malformed)
-	}
-	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformedBundles {
-		t.Fatalf("%s malformed bundle.register bundle rows = %d, want %d", rt.Backend, got, beforeMalformedBundles)
-	}
-	if got := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency"); got != beforeMalformedIdempotency {
-		t.Fatalf("%s malformed bundle.register idempotency rows = %d, want %d", rt.Backend, got, beforeMalformedIdempotency)
-	}
-
-	malformedDataKey := "issue-2359-" + rt.Backend + "-malformed-data"
-	malformedDataParams := servedBundleRegisterParams(insert.Upload, malformedDataKey)
-	malformedDataParams["data_blob"] = map[string]any{
-		"api_version": "swarm.bundle.data.v1",
-		"entries": []any{map[string]any{
-			"path":        "flows/receive/data/malformed.bin",
-			"data_base64": "not-standard-base64",
-		}},
-	}
-	beforeMalformedDataBundles := servedBundleRegisterTableCount(t, rt.DB, "bundles")
-	beforeMalformedDataIdempotency := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency")
-	malformedData := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", malformedDataParams)
-	details, ok := malformedData.Data["details"].(map[string]any)
-	if malformedData.Code != -32602 || !ok || details["field"] != "data_blob.entries[0].data_base64" {
-		t.Fatalf("%s malformed bundle.register data_blob error = %#v, want typed invalid params for data_blob entry", rt.Backend, malformedData)
-	}
-	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformedDataBundles {
-		t.Fatalf("%s malformed data_blob bundle rows = %d, want %d", rt.Backend, got, beforeMalformedDataBundles)
-	}
-	if got := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency"); got != beforeMalformedDataIdempotency {
-		t.Fatalf("%s malformed data_blob idempotency rows = %d, want %d", rt.Backend, got, beforeMalformedDataIdempotency)
-	}
-	if got := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "bundle.register", malformedDataKey); got != 0 {
-		t.Fatalf("%s malformed data_blob idempotency key rows = %d, want 0", rt.Backend, got)
-	}
-
-	conflictFixture := writeServedBundleRegistrationFixture(t, "1.0.2")
-	conflictParams := servedBundleRegisterParams(conflictFixture.Upload, "issue-2359-"+rt.Backend+"-conflict-seed")
-	seed := requireServedBundleRegisterResult(t, rt.Endpoint, conflictParams)
-	if !seed.Registered || seed.BundleHash != conflictFixture.BundleHash {
-		t.Fatalf("%s conflict seed bundle.register = %#v", rt.Backend, seed)
-	}
-	forceServedBundleRegisterConflict(t, rt, conflictFixture.BundleHash)
-	conflictParams["idempotency_key"] = "issue-2359-" + rt.Backend + "-conflict"
-	conflict := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", conflictParams)
-	if conflict.Data["code"] != apiv1.BundleRegisterConflictCode {
-		t.Fatalf("%s conflicting bundle.register data = %#v, want %s", rt.Backend, conflict.Data, apiv1.BundleRegisterConflictCode)
-	}
-
-	rollbackFixture := writeServedBundleRegistrationFixture(t, "1.0.3")
-	rollbackParams := servedBundleRegisterParams(rollbackFixture.Upload, "issue-2359-"+rt.Backend+"-rollback")
-	dropRollbackFault := installServedBundleRegisterRollbackFault(t, rt, rollbackFixture.BundleHash)
-	if failed := requestServedJSONRPC(t, rt.Endpoint, "bundle.register", rollbackParams); failed.Error == nil {
-		t.Fatalf("%s forced-rollback bundle.register error = nil, result=%s", rt.Backend, string(failed.Result))
-	}
-	if got := servedBundleRegisterRowCount(t, rt, rollbackFixture.BundleHash); got != 0 {
-		t.Fatalf("%s forced-rollback bundle row count = %d, want 0", rt.Backend, got)
-	}
-	dropRollbackFault()
-	rollbackRetry := requireServedBundleRegisterResult(t, rt.Endpoint, rollbackParams)
-	if !rollbackRetry.Registered || rollbackRetry.BundleHash != rollbackFixture.BundleHash {
-		t.Fatalf("%s rollback retry bundle.register = %#v, want registered %s", rt.Backend, rollbackRetry, rollbackFixture.BundleHash)
-	}
-	requireServedBundleRegisterListReadback(t, rt.Endpoint, rollbackFixture.Expected)
-
-	if got := servedBundleRegisterTableCount(t, rt.DB, "runs"); got != initialRuns {
-		t.Fatalf("%s bundle.register run rows = %d, want unchanged %d", rt.Backend, got, initialRuns)
-	}
-	if !rt.Runtime.Options.BundleSourceFact.Matches(initialSource) {
-		t.Fatalf("%s bundle.register changed running source from %#v to %#v", rt.Backend, initialSource, rt.Runtime.Options.BundleSourceFact)
-	}
-}
-
-type servedBundleRegistrationFixture struct {
-	Upload     runtimecontracts.BundleRegistrationUpload
-	BundleHash string
-	Expected   bundlecatalog.Detail
-}
-
-type servedBundleRegisterResult struct {
-	BundleHash    string `json:"bundle_hash"`
-	Registered    bool   `json:"registered"`
-	HasData       bool   `json:"has_data"`
-	DataSizeBytes int64  `json:"data_size_bytes"`
-}
-
-func writeServedBundleRegistrationFixture(t *testing.T, version string) servedBundleRegistrationFixture {
-	t.Helper()
-	root := writeServedEventPublishFollowUpFixture(t)
-	packagePath := filepath.Join(root, "package.yaml")
-	raw, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatalf("read bundle.register package: %v", err)
-	}
-	amended := strings.Replace(string(raw), `version: "1.0.0"`, fmt.Sprintf("version: %q", version), 1)
-	if amended == string(raw) {
-		t.Fatalf("bundle.register fixture package does not declare version 1.0.0: %s", packagePath)
-	}
-	if err := os.WriteFile(packagePath, []byte(amended), 0o644); err != nil {
-		t.Fatalf("write bundle.register package: %v", err)
-	}
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("BuildBundleRegistrationDirectoryUpload(%s): %v", version, err)
-	}
-	bundle := loadWorkflowValidationBundleAt(t, root)
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	platformSpec, err := os.ReadFile(platformSpecPath)
-	if err != nil {
-		t.Fatalf("read bundle.register platform spec: %v", err)
-	}
-	platformSpecHash := fmt.Sprintf("%x", sha256.Sum256(platformSpec))
-	projection, err := runtimecontracts.BuildBundleCatalogProjectionWithOptions(bundle, runtimecontracts.BundleCatalogProjectionOptions{
-		Source:             "bundle.register",
-		PlatformSpecSHA256: platformSpecHash,
-	})
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection(%s): %v", version, err)
-	}
-	expectedMetadata := map[string]any{
-		"api_version":               "swarm.bundle.metadata.v1",
-		"registered_by":             "bundle.register",
-		"platform_spec_source":      "server_effective",
-		"platform_spec_hash":        "sha256:" + platformSpecHash,
-		"platform_spec_path_policy": "server_internal_not_user_supplied",
-	}
-	for _, key := range []string{
-		"projection_version",
-		"workflow_name",
-		"workflow_version",
-		"file_count",
-		"data_file_count",
-		"package_name",
-		"package_version",
-		"package_platform_version",
-		"package_keywords",
-		"package_license",
-		"package_repository",
-		"package_extra",
-	} {
-		if value, ok := projection.Metadata[key]; ok {
-			expectedMetadata[key] = value
-		}
-	}
-	agents, ok := projection.ParsedJSON["agents"].([]any)
-	if !ok {
-		t.Fatalf("bundle.register canonical agents projection = %T, want []any", projection.ParsedJSON["agents"])
-	}
-	expected := bundlecatalog.Detail{
-		BundleHash:    projection.BundleHash,
-		ContentYAML:   projection.ContentYAML,
-		ParsedJSON:    projection.ParsedJSON,
-		Metadata:      expectedMetadata,
-		AgentCount:    len(agents),
-		HasData:       len(projection.DataBlob) > 0,
-		DataSizeBytes: int64(len(projection.DataBlob)),
-	}
-	return servedBundleRegistrationFixture{Upload: upload, BundleHash: projection.BundleHash, Expected: expected}
-}
-
-func servedBundleRegisterParams(upload runtimecontracts.BundleRegistrationUpload, idempotencyKey string) map[string]any {
-	params := map[string]any{"content_yaml": upload.ContentYAML}
-	if upload.DataBlob != nil {
-		params["data_blob"] = upload.DataBlob
-	}
-	if strings.TrimSpace(idempotencyKey) != "" {
-		params["idempotency_key"] = idempotencyKey
-	}
-	return params
-}
-
-func requireServedBundleRegisterResult(t *testing.T, endpoint string, params map[string]any) servedBundleRegisterResult {
-	t.Helper()
-	var result servedBundleRegisterResult
-	requireServedJSONRPCResult(t, endpoint, "bundle.register", params, &result)
-	return result
-}
-
-func requireServedBundleRegisterListReadback(t *testing.T, endpoint string, expected bundlecatalog.Detail) {
-	t.Helper()
-	var list bundlecatalog.ListResult
-	requireServedJSONRPCResult(t, endpoint, "bundle.list", map[string]any{"limit": 100}, &list)
-	for _, summary := range list.Bundles {
-		if summary.BundleHash != expected.BundleHash {
-			continue
-		}
-		if summary.AgentCount != expected.AgentCount || summary.HasData != expected.HasData || summary.DataSizeBytes != expected.DataSizeBytes {
-			t.Fatalf("bundle.list(%s) stable fields = %#v, want %#v", expected.BundleHash, summary, expected)
-		}
-		if summary.IngestedAt.IsZero() || summary.IngestedAt.Location() != time.UTC {
-			t.Fatalf("bundle.list(%s) ingested_at = %s, want non-zero UTC", expected.BundleHash, summary.IngestedAt)
-		}
-		return
-	}
-	t.Fatalf("bundle.list omitted registered hash %q: %#v", expected.BundleHash, list.Bundles)
-}
-
-func servedBundleRegisterTableCount(t *testing.T, db *sql.DB, table string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
-		t.Fatalf("count %s: %v", table, err)
-	}
-	return count
-}
-
-func servedBundleRegisterRowCount(t *testing.T, rt servedControlProofRuntime, bundleHash string) int {
-	t.Helper()
-	query := `SELECT COUNT(*) FROM bundles WHERE bundle_hash = ?`
-	if rt.Backend == "postgres" {
-		query = `SELECT COUNT(*) FROM bundles WHERE bundle_hash = $1`
-	}
-	var count int
-	if err := rt.DB.QueryRowContext(context.Background(), query, bundleHash).Scan(&count); err != nil {
-		t.Fatalf("%s count bundle %s: %v", rt.Backend, bundleHash, err)
-	}
-	return count
-}
-
-func forceServedBundleRegisterConflict(t *testing.T, rt servedControlProofRuntime, bundleHash string) {
-	t.Helper()
-	query := `UPDATE bundles SET content_yaml = ? WHERE bundle_hash = ?`
-	args := []any{"forced conflict", bundleHash}
-	if rt.Backend == "postgres" {
-		query = `UPDATE bundles SET content_yaml = $1 WHERE bundle_hash = $2`
-	}
-	result, err := rt.DB.ExecContext(context.Background(), query, args...)
-	if err != nil {
-		t.Fatalf("%s force bundle.register conflict: %v", rt.Backend, err)
-	}
-	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-		t.Fatalf("%s force bundle.register conflict rows = %d, err=%v", rt.Backend, rows, err)
-	}
-}
-
-func installServedBundleRegisterRollbackFault(t *testing.T, rt servedControlProofRuntime, bundleHash string) func() {
-	t.Helper()
-	var install, drop string
-	if rt.Backend == "postgres" {
-		install = `
-			CREATE FUNCTION swarm_test_reject_bundle_register() RETURNS trigger LANGUAGE plpgsql AS $$
-			BEGIN
-				IF NEW.bundle_hash = '` + bundleHash + `' THEN
-					RAISE EXCEPTION 'forced served bundle register rollback';
-				END IF;
-				RETURN NEW;
-			END
-			$$;
-			CREATE TRIGGER swarm_test_reject_bundle_register
-			AFTER INSERT ON bundles
-			FOR EACH ROW EXECUTE FUNCTION swarm_test_reject_bundle_register()
-		`
-		drop = `
-			DROP TRIGGER IF EXISTS swarm_test_reject_bundle_register ON bundles;
-			DROP FUNCTION IF EXISTS swarm_test_reject_bundle_register()
-		`
-	} else {
-		install = `
-			CREATE TRIGGER swarm_test_reject_bundle_register
-			AFTER INSERT ON bundles
-			WHEN NEW.bundle_hash = '` + bundleHash + `'
-			BEGIN
-				SELECT RAISE(ABORT, 'forced served bundle register rollback');
-			END
-		`
-		drop = `DROP TRIGGER IF EXISTS swarm_test_reject_bundle_register`
-	}
-	if _, err := rt.DB.ExecContext(context.Background(), install); err != nil {
-		t.Fatalf("%s install bundle.register rollback fault: %v", rt.Backend, err)
-	}
-	dropped := false
-	cleanup := func() {
-		if dropped {
-			return
-		}
-		dropped = true
-		if _, err := rt.DB.ExecContext(context.Background(), drop); err != nil {
-			t.Fatalf("%s drop bundle.register rollback fault: %v", rt.Backend, err)
-		}
-	}
-	t.Cleanup(cleanup)
-	return cleanup
-}
-
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
@@ -3061,14 +1749,12 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 			servedDB, servedPostgres, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
 		opts.ConfigPath = configPath
-		contractsPath := canonicalrouting.CopyRootIngressServedConversationFork(t)
-		opts.ContractsPath = contractsPath
+		sourceRoot := canonicalrouting.CopyRootIngressServedConversationFork(t)
+		opts.SourceRoot = sourceRoot
 		opts.PlatformSpecPath = defaultPlatformSpecPath
 		opts.APIListenAddr = "127.0.0.1:0"
 		opts.MCPListenAddr = "127.0.0.1:0"
 		opts.SelfCheck = true
-		opts.RequireBundleMatch = false
-		opts.NoRequireBundleMatch = true
 		opts.Verbose = true
 		opts.TestLLMRuntime = servedOpenAICompatibleNoopLLMRuntime{}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
@@ -3076,7 +1762,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 			t.Fatal("served conversation fork SQLDB is required")
 		}
 		return servedControlProofRuntime{
-			Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, contractsPath), Runtime: rt,
+			Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot), Runtime: rt,
 			Postgres: servedPostgres, SQLite: servedSQLite,
 		}
 	}
@@ -3592,21 +2278,19 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		contractsPath := writeServedTestSetupFixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := writeServedTestSetupFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		var servedDB *sql.DB
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
-			NoRequireBundleMatch:    true,
 			Verbose:                 true,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		})
@@ -3618,18 +2302,17 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
-		contractsPath := writeServedTestSetupFixture(t)
-		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		sourceRoot := writeServedTestSetupFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
-			ContractsPath:           contractsPath,
+			SourceRoot:              sourceRoot,
 			PlatformSpecPath:        defaultPlatformSpecPath,
 			StoreMode:               "postgres",
 			StoreModeSet:            true,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
-			RequireBundleMatch:      false,
 			Verbose:                 true,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		})
@@ -4066,31 +2749,31 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 	t.Helper()
 	db := rt.DB
 	backend := rt.Backend
-	bundleHash, wantSource := rt.Runtime.Options.BundleSourceFact.StorageValues()
-	if bundleHash == "" || wantSource == "" || bundleHash != rt.BundleHash {
-		t.Fatalf("%s served runtime bundle source = %q/%q, want exact hash %q", backend, bundleHash, wantSource, rt.BundleHash)
+	bundleHash := rt.Runtime.Options.SourceArtifactFact.BundleHash()
+	if bundleHash == "" || bundleHash != rt.BundleHash {
+		t.Fatalf("%s served runtime source artifact = %q, want exact hash %q", backend, bundleHash, rt.BundleHash)
 	}
-	var status, originKind, trigger, gotHash, source string
+	var status, originKind, trigger, gotHash string
 	var runQuery string
 	var runArgs []any
 	switch backend {
 	case "postgres":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = $1::uuid`
+		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid`
 		runArgs = []any{runID}
 	case "sqlite":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = ?`
+		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = ?`
 		runArgs = []any{runID}
 	default:
 		t.Fatalf("unknown test.setup_entities proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash, &source); err != nil {
+	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash); err != nil {
 		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
 	}
 	if status != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) ||
-		trigger != "" || gotHash != bundleHash || source != wantSource {
+		trigger != "" || gotHash != bundleHash {
 		t.Fatalf(
-			"%s setup run row = status:%q origin:%q trigger:%q hash:%q source:%q",
-			backend, status, originKind, trigger, gotHash, source,
+			"%s setup run row = status:%q origin:%q trigger:%q hash:%q",
+			backend, status, originKind, trigger, gotHash,
 		)
 	}
 
@@ -4178,7 +2861,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	ctx := servedControlProofAuthorActivityContext(t, rt)
 	now := time.Now().UTC().Add(-time.Minute)
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	bundleFact := rt.Runtime.Options.BundleSourceFact
+	bundleFact := rt.Runtime.Options.SourceArtifactFact
 	bundleHash := bundleFact.BundleHash()
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
@@ -4233,7 +2916,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
 	}
-	activation, err := gateruntime.New(runID, runID, entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
+	activation, err := gateruntime.New(runID, runID, entityID, ".", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new gate activation: %v", err)
 	}
@@ -4266,7 +2949,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4320,21 +3003,19 @@ func runServedCreateCarryProjectionSQLiteProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var servedDB *sql.DB
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 		servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 	})
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
@@ -4349,18 +3030,17 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	contractsPath := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
@@ -4457,8 +3137,8 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := writeServedDynamicAutoEmitFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedDynamicAutoEmitFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -4472,13 +3152,11 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestWorkflowNodeHandlerStartHook: func(ctx context.Context, nodeID string, evt events.Event) error {
@@ -4510,21 +3188,20 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	contractsPath := writeServedDynamicAutoEmitFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedDynamicAutoEmitFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
-		ContractsPath:                    contractsPath,
+		SourceRoot:                       sourceRoot,
 		PlatformSpecPath:                 defaultPlatformSpecPath,
 		StoreMode:                        "postgres",
 		StoreModeSet:                     true,
 		APIListenAddr:                    "127.0.0.1:0",
 		MCPListenAddr:                    "127.0.0.1:0",
 		SelfCheck:                        true,
-		RequireBundleMatch:               false,
 		Verbose:                          true,
 		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
 		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
@@ -5386,20 +4063,20 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
-	bundleHash, bundleSource := rt.Runtime.Options.BundleSourceFact.StorageValues()
-	if bundleHash == "" || bundleSource == "" || bundleHash != rt.BundleHash {
-		t.Fatalf("%s served runtime bundle source = %q/%q, want exact hash %q", backend, bundleHash, bundleSource, rt.BundleHash)
+	bundleHash := rt.Runtime.Options.SourceArtifactFact.BundleHash()
+	if bundleHash == "" || bundleHash != rt.BundleHash {
+		t.Fatalf("%s served runtime source artifact = %q, want exact hash %q", backend, bundleHash, rt.BundleHash)
 	}
 	var selectedStore any
 	switch backend {
 	case "postgres":
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash})
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for run-control seed")
 		}
 		selectedStore = rt.Postgres
 	case "sqlite":
-		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash})
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for run-control seed")
 		}
@@ -5426,7 +4103,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	sourceEventID := uuid.NewString()
 	bundleHash := strings.TrimSpace(rt.BundleHash)
 	if bundleHash == "" {
-		bundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+		bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	}
 	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
@@ -5436,7 +4113,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
 	}
-	activation, err := gateruntime.New(runID, runID, entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
+	activation, err := gateruntime.New(runID, runID, entityID, ".", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new %s run.stop gate activation: %v", rt.Backend, err)
 	}
@@ -5482,7 +4159,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -5569,7 +4246,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if err != nil {
 		t.Fatalf("restore %s terminal gate carrier: %v", rt.Backend, err)
 	}
-	activation, ok, err := gateruntime.Load(carrier.StateBuckets, "", "launch_review")
+	activation, ok, err := gateruntime.Load(carrier.StateBuckets, ".", "launch_review")
 	if err != nil || !ok || activation.Status != gateruntime.StatusSuperseded {
 		t.Fatalf("%s terminal gate activation = %#v, found=%v err=%v", rt.Backend, activation, ok, err)
 	}
@@ -5774,29 +4451,6 @@ func writeServedExternalEventFixture(t *testing.T) string {
 func writeServedTestSetupFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyServedTestSetup(t)
-}
-
-func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime, *store.PostgresStore) {
-	t.Helper()
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	root := writeServedJoinProofFixture(t)
-	bundleHash := seedServeRuntimeBundleCatalogRoot(t, context.Background(), pg, root)
-	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
-		BundleHash:              bundleHash,
-		PlatformSpecPath:        defaultPlatformSpecPath,
-		StoreMode:               "postgres",
-		StoreModeSet:            true,
-		APIListenAddr:           "127.0.0.1:0",
-		MCPListenAddr:           "127.0.0.1:0",
-		SelfCheck:               true,
-		RequireBundleMatch:      true,
-		Verbose:                 true,
-		TestOutboxSweeperConfig: servedJoinProofOutboxSweeperConfig(),
-	})
-	return endpoint, db, bundleHash, rt, pg
 }
 
 func servedJoinProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
@@ -6179,7 +4833,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if entityViewCode != 0 {
 		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
 	}
-	for _, want := range []string{entityID, "done", "Fields  none"} {
+	for _, want := range []string{entityID, "done", "item_id  none"} {
 		if !strings.Contains(entityViewStdout, want) {
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}
@@ -7519,15 +6173,14 @@ func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing
 	})
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -7547,19 +6200,17 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	})
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:           configPath,
-		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
-		WorkspaceBackend:     workspace.BackendHost,
-		WorkspaceBackendSet:  true,
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		RequireBundleMatch:   false,
-		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		Verbose:              true,
-		NoRequireBundleMatch: true,
+		ConfigPath:          configPath,
+		SourceRoot:          filepath.Join("examples", "routing", "root-ingress"),
+		WorkspaceBackend:    workspace.BackendHost,
+		WorkspaceBackendSet: true,
+		PlatformSpecPath:    defaultPlatformSpecPath,
+		StoreMode:           storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:       "127.0.0.1:0",
+		MCPListenAddr:       "127.0.0.1:0",
+		SelfCheck:           true,
+		ShutdownGrace:       runtimepkg.DefaultShutdownGrace,
+		Verbose:             true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -7577,16 +6228,14 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
-		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		RequireBundleMatch:   false,
-		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		Verbose:              true,
-		NoRequireBundleMatch: true,
+		SourceRoot:       filepath.Join("examples", "routing", "root-ingress"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
+		Verbose:          true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -7609,17 +6258,15 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 			fmt.Sprintf("  host_root: %q", hostRoot),
 		}),
-		ContractsPath:        writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		RequireBundleMatch:   false,
-		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		Verbose:              true,
-		NoRequireBundleMatch: true,
-		TestLLMRuntime:       servedNoopLLMRuntime{},
+		SourceRoot:       writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
+		Verbose:          true,
+		TestLLMRuntime:   servedNoopLLMRuntime{},
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -7642,18 +6289,16 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
-		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		RequireBundleMatch:   false,
-		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-		Verbose:              true,
-		NoRequireBundleMatch: true,
-		TestLLMRuntime:       servedNoopLLMRuntime{},
-		Output:               &out,
+		SourceRoot:       writeServeRuntimeNativeBashFixture(t),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
+		Verbose:          true,
+		TestLLMRuntime:   servedNoopLLMRuntime{},
+		Output:           &out,
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
@@ -7674,22 +6319,21 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
 	})
 
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	for _, table := range []string{"bundles", "runs", "events", "event_deliveries"} {
+	for _, table := range []string{"source_artifacts", "runs", "events", "event_deliveries"} {
 		assertPostgresTableExists(t, db, table)
 	}
 	if !strings.Contains(serve.outputString(), "state_stores=verified") {
@@ -7702,26 +6346,24 @@ func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
-		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            "postgres",
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		Dev:                  true,
-		LocalRun:             true,
-		RequireBundleMatch:   false,
-		NoRequireBundleMatch: true,
-		AbandonActiveRuns:    true,
-		Verbose:              true,
+		ConfigPath:        writeServeRuntimeTestConfig(t),
+		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:  defaultPlatformSpecPath,
+		StoreMode:         "postgres",
+		APIListenAddr:     "127.0.0.1:0",
+		MCPListenAddr:     "127.0.0.1:0",
+		SelfCheck:         true,
+		Dev:               true,
+		LocalRun:          true,
+		AbandonActiveRuns: true,
+		Verbose:           true,
 	})
 
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	for _, table := range []string{"bundles", "runs", "run_control_state", "event_receipts"} {
+	for _, table := range []string{"source_artifacts", "runs", "run_control_state", "event_receipts"} {
 		assertPostgresTableExists(t, db, table)
 	}
 	if strings.Contains(serve.outputString(), "relation") && strings.Contains(serve.outputString(), "does not exist") {
@@ -7742,25 +6384,24 @@ func TestServeDevContextAndSwarmDirCannotPartitionScratchEpoch(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	swarmDirA := t.TempDir()
 	swarmDirB := t.TempDir()
-	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-	repo := contractsPath
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	repo := sourceRoot
 	base := func(contextName, swarmDir string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
-			ContractsPath:        contractsPath,
-			PlatformSpecPath:     filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-			SwarmDir:             swarmDir,
-			SwarmDirSet:          true,
-			ContextName:          contextName,
-			ContextNameSet:       true,
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-			Dev:                  true,
-			SelfCheck:            true,
-			NoRequireBundleMatch: true,
-			NoFeed:               true,
-			Verbose:              true,
+			ConfigPath:       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
+			SourceRoot:       sourceRoot,
+			PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+			SwarmDir:         swarmDir,
+			SwarmDirSet:      true,
+			ContextName:      contextName,
+			ContextNameSet:   true,
+			APIListenAddr:    "127.0.0.1:0",
+			MCPListenAddr:    "127.0.0.1:0",
+			ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
+			Dev:              true,
+			SelfCheck:        true,
+			NoFeed:           true,
+			Verbose:          true,
 		}
 	}
 	first := startServeRuntimeTestProcessAtRepo(t, repo, base("first", swarmDirA))
@@ -7864,15 +6505,14 @@ func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		StoreModeSet:     true,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
 	})
 	serve.waitForReadyLine()
 
@@ -7925,12 +6565,12 @@ func TestServeCancellationExitCodeDistinguishesOwnershipLoss(t *testing.T) {
 }
 
 func TestNonDevServeOwnershipParity(t *testing.T) {
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	base := func(configPath, backend string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-			ShutdownGrace: runtimepkg.DefaultShutdownGrace, SelfCheck: true, RequireBundleMatch: true, Verbose: true,
+			ShutdownGrace: runtimepkg.DefaultShutdownGrace, SelfCheck: true, Verbose: true,
 		}
 	}
 	assertLiveRefusal := func(t *testing.T, opts cliapp.ServeOptions) {
@@ -7961,7 +6601,7 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 }
 
 func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	run := func(t *testing.T, configPath string) {
 		t.Helper()
 		payloadPath := filepath.Join(t.TempDir(), "payload.json")
@@ -7976,8 +6616,8 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"--swarm-dir", t.TempDir(),
-			"run", "start", "--event", "task.requested", "--payload", payloadPath,
-			"--config", configPath, "--contracts", contractsPath, "--api-port", apiPort, "--mcp-port", mcpPort,
+			"run", "start", sourceRoot, "--event", "task.requested", "--payload", payloadPath,
+			"--config", configPath, "--api-port", apiPort, "--mcp-port", mcpPort,
 		}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("local run start code=%d stdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
@@ -8019,17 +6659,17 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 }
 
 func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(repoRootForTest(), contractsPath))
+	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(repoRootForTest(), sourceRoot))
 	if err != nil {
 		t.Fatalf("canonicalize project: %v", err)
 	}
 	base := func(configPath, backend, swarmDir string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: backend, StoreModeSet: true, SwarmDir: swarmDir, SwarmDirSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: runtimepkg.DefaultShutdownGrace,
-			Dev: true, LocalRun: true, SelfCheck: true, NoRequireBundleMatch: true, NoFeed: true, Verbose: true,
+			Dev: true, LocalRun: true, SelfCheck: true, NoFeed: true, Verbose: true,
 		}
 	}
 	run := func(t *testing.T, opts cliapp.ServeOptions, storePath string) {
@@ -8129,21 +6769,17 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	requireBundleMatch := !dev
-	noRequireBundleMatch := dev
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		Dev:                  dev,
-		LocalRun:             dev,
-		RequireBundleMatch:   requireBundleMatch,
-		NoRequireBundleMatch: noRequireBundleMatch,
-		AbandonActiveRuns:    true,
-		Verbose:              true,
+		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:  defaultPlatformSpecPath,
+		APIListenAddr:     "127.0.0.1:0",
+		MCPListenAddr:     "127.0.0.1:0",
+		SelfCheck:         true,
+		Dev:               dev,
+		LocalRun:          dev,
+		AbandonActiveRuns: true,
+		Verbose:           true,
 	})
 
 	serve.waitForReadyLine()
@@ -8170,20 +6806,18 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            "sqlite",
-		StoreModeSet:         true,
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		Dev:                  true,
-		LocalRun:             true,
-		RequireBundleMatch:   false,
-		NoRequireBundleMatch: true,
-		Verbose:              true,
-		Output:               &out,
+		ConfigPath:       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:       writeArtifactRepoCommitServeFixture(t),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "sqlite",
+		StoreModeSet:     true,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Dev:              true,
+		LocalRun:         true,
+		Verbose:          true,
+		Output:           &out,
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
@@ -8216,20 +6850,18 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            "sqlite",
-		StoreModeSet:         true,
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		Dev:                  true,
-		LocalRun:             true,
-		RequireBundleMatch:   false,
-		NoRequireBundleMatch: true,
-		Verbose:              true,
-		Output:               &out,
+		ConfigPath:       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:       writeArtifactRepoCommitServeFixture(t),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "sqlite",
+		StoreModeSet:     true,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Dev:              true,
+		LocalRun:         true,
+		Verbose:          true,
+		Output:           &out,
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
@@ -8261,19 +6893,17 @@ func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *
 	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:     defaultPlatformSpecPath,
-		StoreMode:            "sqlite",
-		StoreModeSet:         true,
-		APIListenAddr:        "127.0.0.1:0",
-		MCPListenAddr:        "127.0.0.1:0",
-		SelfCheck:            true,
-		Dev:                  true,
-		LocalRun:             true,
-		RequireBundleMatch:   false,
-		NoRequireBundleMatch: true,
-		Verbose:              true,
+		ConfigPath:       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "sqlite",
+		StoreModeSet:     true,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Dev:              true,
+		LocalRun:         true,
+		Verbose:          true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -8288,20 +6918,19 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(repoRootForTest(), contractsPath))
-	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, bundleHash)
+	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	bundle := loadWorkflowValidationBundleAt(t, filepath.Join(repoRootForTest(), sourceRoot))
+	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, bundle)
 	ctx := context.Background()
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-		ContractsPath:      contractsPath,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		AbandonActiveRuns:  true,
-		Verbose:            false,
+		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		SourceRoot:        sourceRoot,
+		PlatformSpecPath:  defaultPlatformSpecPath,
+		APIListenAddr:     "127.0.0.1:0",
+		MCPListenAddr:     "127.0.0.1:0",
+		SelfCheck:         true,
+		AbandonActiveRuns: true,
+		Verbose:           false,
 	})
 
 	serve.waitForReadyLine()
@@ -8383,19 +7012,18 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         missingHash,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-		Output:             &out,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		BundleHash:       missingHash,
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
+		Output:           &out,
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
@@ -8403,7 +7031,7 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	for _, want := range []string{
 		"bundle_hash=" + missingHash,
 		"BUNDLE_UNAVAILABLE",
-		"bundle_hash " + missingHash + " is not present in bundles",
+		"bundle_hash " + missingHash + " is not present in source_artifacts",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing %q:\n%s", want, out.String())
@@ -8412,8 +7040,95 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "[22/22]") {
 		t.Fatalf("serve reached readiness after missing DB-loaded bundle:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "bundle catalog read surface requires bundles columns") || strings.Contains(out.String(), "relation \"bundles\" does not exist") {
+	if strings.Contains(out.String(), "source artifacts read surface requires bundles columns") || strings.Contains(out.String(), "relation \"bundles\" does not exist") {
 		t.Fatalf("serve reported schema/bootstrap failure instead of typed bundle unavailability:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeBundleHashBootsFromSelectedStores(t *testing.T) {
+	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
+		t.Run(backend.String(), func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			unsetStoreSelectorEnv(t)
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+
+			bundle := loadWorkflowValidationBundleAt(t, filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"))
+			catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
+			if err != nil {
+				t.Fatalf("build durable source catalog: %v", err)
+			}
+			bundleHash := bundle.SourceArtifact.BundleHash()
+			var workspaceBundleScopes []string
+			opts := cliapp.ServeOptions{
+				BundleHash:       bundleHash,
+				PlatformSpecPath: defaultPlatformSpecPath,
+				StoreMode:        backend.String(),
+				StoreModeSet:     true,
+				APIListenAddr:    "127.0.0.1:0",
+				MCPListenAddr:    "127.0.0.1:0",
+				SelfCheck:        true,
+				Verbose:          true,
+				TestLLMRuntime:   servedNoopLLMRuntime{},
+			}
+
+			switch backend {
+			case storebackend.BackendSQLite:
+				stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t, &workspaceBundleScopes)
+				path := filepath.Join(t.TempDir(), "persisted-source.sqlite")
+				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), path)
+				spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+				if err != nil {
+					t.Fatalf("load platform spec: %v", err)
+				}
+				plans, err := store.GeneratePlatformTableDDLs(spec)
+				if err != nil {
+					t.Fatalf("generate platform table DDLs: %v", err)
+				}
+				selected, err := store.NewSQLiteRuntimeStore(path)
+				if err != nil {
+					t.Fatalf("open SQLite selected store: %v", err)
+				}
+				bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
+				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+					_ = selected.Close()
+					t.Fatalf("persist SQLite source artifact: %v", err)
+				}
+				if err := selected.Close(); err != nil {
+					t.Fatalf("close seeded SQLite selected store: %v", err)
+				}
+			case storebackend.BackendPostgres:
+				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
+				})
+				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
+				if _, err := selected.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+					t.Fatalf("persist PostgreSQL source artifact: %v", err)
+				}
+			default:
+				t.Fatalf("unsupported selected store %q", backend)
+			}
+
+			process := startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+			process.mu.Lock()
+			rt := process.runtime
+			process.mu.Unlock()
+			if rt == nil {
+				t.Fatal("serve reached readiness without publishing its runtime")
+			}
+			if got := rt.Options.SourceArtifactFact.BundleHash(); got != bundleHash {
+				t.Fatalf("served source artifact = %q, want persisted %q", got, bundleHash)
+			}
+			if !reflect.DeepEqual(workspaceBundleScopes, []string{bundleHash}) {
+				t.Fatalf("workspace bundle scopes = %#v, want exact single-context source %q", workspaceBundleScopes, bundleHash)
+			}
+			if code := process.stop(); code != 0 {
+				t.Fatalf("serve code=%d output:\n%s", code, process.outputString())
+			}
+		})
 	}
 }
 
@@ -8479,56 +7194,6 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	firstRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-a", "alpha", "shared-worker")
-	secondRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-b", "beta", "shared-worker")
-	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
-	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
-	if firstHash == secondHash {
-		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
-	}
-
-	var out lockedBuffer
-	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		BundleHash:         firstHash,
-		BundleHashes:       []string{secondHash},
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
-		TestLLMRuntime:     servedNoopLLMRuntime{},
-	})
-	if code == 0 {
-		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
-	}
-	for _, want := range []string{
-		"[5/22] startup_ownership_lease",
-		`duplicate runtime context agent_id "shared-worker"`,
-		firstHash,
-		secondHash,
-		"bundle_source=persisted",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("serve output missing %q:\n%s", want, out.String())
-		}
-	}
-	for _, notWant := range []string{"[22/22]", "ready                      ok", "manager_event_loop_start", "platform_boot_event_published"} {
-		if strings.Contains(out.String(), notWant) {
-			t.Fatalf("serve reached %q after duplicate agent slug admission failure:\n%s", notWant, out.String())
-		}
-	}
-}
-
 func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
@@ -8537,7 +7202,7 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:       writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
-		ContractsPath:    project,
+		SourceRoot:       project,
 		PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr:    "127.0.0.1:0",
 		MCPListenAddr:    "127.0.0.1:0",
@@ -8557,366 +7222,30 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 	}
 }
 
-func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	firstRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-a", "alpha-worker")
-	secondRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-b", "beta-worker")
-	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
-	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
-	if firstHash == secondHash {
-		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
-	}
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
-		BundleHash:              firstHash,
-		BundleHashes:            []string{secondHash},
-		PlatformSpecPath:        defaultPlatformSpecPath,
-		StoreMode:               "postgres",
-		APIListenAddr:           "127.0.0.1:0",
-		MCPListenAddr:           "127.0.0.1:0",
-		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		Verbose:                 false,
-		TestLLMRuntime:          servedNoopLLMRuntime{},
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	})
-	serve.waitForReadyLine()
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
-	for _, want := range []string{"swarm serve · 2 persisted bundles", "2 bundles", "ready in "} {
-		if !strings.Contains(serve.outputString(), want) {
-			t.Fatalf("serve output missing %q:\n%s", want, serve.outputString())
-		}
-	}
-	for _, forbidden := range []string{firstHash, secondHash, "bundle-v1:sha256:", "sha256:", "fingerprint"} {
-		if strings.Contains(serve.outputString(), forbidden) {
-			t.Fatalf("concise multi-context output exposed identity %q:\n%s", forbidden, serve.outputString())
-		}
-	}
-}
-
-func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	dsn, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	firstRoot := writeServeRuntimeAgentSlugFixture(t, "delete-source-set-a", "alpha-worker")
-	secondRoot := writeServeRuntimeAgentSlugFixture(t, "delete-source-set-b", "beta-worker")
-	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
-	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
-	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), BundleHash: firstHash, BundleHashes: []string{secondHash},
-		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
-		TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
-			contextsReady <- contexts
-		},
-	})
-	serve.waitForReadyLine()
-	var contexts *runtimepkg.RuntimeContextManager
-	select {
-	case contexts = <-contextsReady:
-	case <-time.After(serveRuntimeReadyTimeout):
-		t.Fatal("timed out waiting for multi-bundle runtime contexts")
-	}
-	var predecessorGrantID, predecessorRevision string
-	var predecessorGeneration uint64
-	if err := db.QueryRowContext(ctx, `
-		SELECT grant_id::text, runtime_generation, source_set_revision
-		FROM runtime_generation_grants
-		WHERE bundle_hash = $1 AND state = 'admitted'
-		ORDER BY created_at DESC, state_version DESC
-		LIMIT 1
-	`, secondHash).Scan(&predecessorGrantID, &predecessorGeneration, &predecessorRevision); err != nil {
-		t.Fatalf("read surviving predecessor grant: %v", err)
-	}
-	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
-	deletePlan, err := pg.PlanBundleDelete(ctx, runtimebundledelete.Request{
-		BundleHash:  firstHash,
-		RequestedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("plan active fixture runs before survivor-refresh bundle.delete: %v", err)
-	}
-	for _, run := range deletePlan.ActiveRuns {
-		stopResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.stop", map[string]any{
-			"run_id":          run.RunID,
-			"idempotency_key": "issue-2125-survivor-refresh-stop-" + uuid.NewString(),
-		}, 30*time.Second)
-		if stopResponse.Error != nil {
-			if stopResponse.Error.Data["code"] != apiv1.RunAlreadyTerminalCode {
-				t.Fatalf("run.stop before survivor-refresh bundle.delete = %#v", stopResponse.Error)
-			}
-			continue
-		}
-		var stopResult map[string]any
-		if err := json.Unmarshal(stopResponse.Result, &stopResult); err != nil {
-			t.Fatalf("decode run.stop before survivor-refresh bundle.delete: %v", err)
-		}
-		if stopResult["ok"] != true {
-			t.Fatalf("run.stop before survivor-refresh bundle.delete = %#v, want ok=true", stopResult)
-		}
-	}
-	deletePlan, err = pg.PlanBundleDelete(ctx, runtimebundledelete.Request{
-		BundleHash:  firstHash,
-		RequestedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("replan active fixture runs before survivor-refresh bundle.delete: %v", err)
-	}
-	if len(deletePlan.ActiveRuns) != 0 {
-		t.Fatalf("active fixture runs before survivor-refresh bundle.delete = %#v, want none", deletePlan.ActiveRuns)
-	}
-	response := requestServedJSONRPCWithTimeout(t, endpoint, "bundle.delete", map[string]any{
-		"bundle_hash": firstHash, "force": false,
-		"idempotency_key": "issue-2125-survivor-refresh-" + uuid.NewString(),
-	}, 30*time.Second)
-	if response.Error != nil {
-		t.Fatalf("bundle.delete error = %#v", response.Error)
-	}
-	var result struct {
-		OK      bool `json:"ok"`
-		Deleted bool `json:"deleted"`
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatalf("decode bundle.delete result: %v", err)
-	}
-	if !result.OK || !result.Deleted {
-		t.Fatalf("bundle.delete result = %#v, want completed deletion", result)
-	}
-	if lookup := contexts.LookupBundleHashStatus(firstHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded {
-		t.Fatalf("deleted runtime context state = %#v, want unloaded", lookup)
-	}
-	if lookup := contexts.LookupBundleHashStatus(secondHash); lookup.State != runtimepkg.RuntimeContextStateLoaded {
-		t.Fatalf("surviving runtime context state = %#v, want loaded", lookup)
-	}
-
-	var rawPlan []byte
-	if err := db.QueryRowContext(ctx, `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
-		t.Fatalf("read source-set head after bundle delete: %v", err)
-	}
-	var plan runtimeagenttopology.SourceSetPlan
-	if err := json.Unmarshal(rawPlan, &plan); err != nil {
-		t.Fatalf("decode source-set head after bundle delete: %v", err)
-	}
-	if err := plan.Validate(); err != nil {
-		t.Fatalf("validate source-set head after bundle delete: %v", err)
-	}
-	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != secondHash {
-		t.Fatalf("source-set head after bundle delete = %#v, want sole survivor %s", plan.Sources, secondHash)
-	}
-	var successorGrantID, successorRevision string
-	var successorGeneration uint64
-	if err := db.QueryRowContext(ctx, `
-		SELECT grant_id::text, runtime_generation, source_set_revision
-		FROM runtime_generation_grants
-		WHERE bundle_hash = $1 AND state = 'admitted'
-		ORDER BY created_at DESC, state_version DESC
-		LIMIT 1
-	`, secondHash).Scan(&successorGrantID, &successorGeneration, &successorRevision); err != nil {
-		t.Fatalf("read surviving successor grant: %v", err)
-	}
-	if successorGrantID == predecessorGrantID || successorGeneration != predecessorGeneration+1 ||
-		successorRevision != plan.Revision || predecessorRevision == plan.Revision {
-		t.Fatalf("surviving grant rotation = predecessor:%s/%d/%s successor:%s/%d/%s plan:%s",
-			predecessorGrantID, predecessorGeneration, predecessorRevision,
-			successorGrantID, successorGeneration, successorRevision, plan.Revision)
-	}
-	var predecessorState string
-	if err := db.QueryRowContext(ctx, `
-		SELECT state
-		FROM runtime_generation_grants
-		WHERE grant_id = $1::uuid
-		ORDER BY state_version DESC
-		LIMIT 1
-	`, predecessorGrantID).Scan(&predecessorState); err != nil {
-		t.Fatalf("read surviving predecessor retirement: %v", err)
-	}
-	if predecessorState != "retired" {
-		t.Fatalf("surviving predecessor grant state = %q, want retired", predecessorState)
-	}
-	rows, err := db.QueryContext(ctx, `SELECT agent_id, lifecycle_phase, lifecycle_run_mode, topology_admission FROM agents ORDER BY agent_id`)
-	if err != nil {
-		t.Fatalf("read lifecycle cells after bundle delete: %v", err)
-	}
-	defer rows.Close()
-	seenSurvivor := false
-	for rows.Next() {
-		var agentID, phase, runMode string
-		var rawAdmission []byte
-		if err := rows.Scan(&agentID, &phase, &runMode, &rawAdmission); err != nil {
-			t.Fatalf("scan lifecycle cell after bundle delete: %v", err)
-		}
-		var admission runtimeagenttopology.Admission
-		if err := json.Unmarshal(rawAdmission, &admission); err != nil {
-			t.Fatalf("decode %s topology admission: %v", agentID, err)
-		}
-		owner := admission.Authority.Static
-		if owner == nil || owner.BundleHash != secondHash {
-			continue
-		}
-		seenSurvivor = true
-		if owner.SourceSetRevision != plan.Revision || phase != "running" || runMode != "standard" {
-			t.Fatalf("surviving lifecycle cell = agent:%s phase:%s mode:%s topology:%#v, want running/current", agentID, phase, runMode, admission)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate lifecycle cells after bundle delete: %v", err)
-	}
-	if !seenSurvivor {
-		t.Fatal("surviving runtime has no current static lifecycle cell")
-	}
-	var rebindOperations int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM agent_lifecycle_operations
-		WHERE operation_kind = 'source_set_rebind' AND agent_id = 'beta-worker'
-	`).Scan(&rebindOperations); err != nil {
-		t.Fatalf("count surviving topology rebind operations: %v", err)
-	}
-	if rebindOperations != 1 {
-		t.Fatalf("surviving topology rebind operations = %d, want 1", rebindOperations)
-	}
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code after survivor refresh = %d\noutput:\n%s", code, serve.outputString())
-	}
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		reopened, err := store.NewPostgresStore(dsn)
-		if err != nil {
-			return nil, err
-		}
-		storetest.BootstrapPostgresRuntimeStore(t, reopened)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(reopened), cfg), nil
-	}
-
-	restarted := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), BundleHash: secondHash,
-		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
-		TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	})
-	restarted.waitForReadyLine()
-	if code := restarted.stop(); code != 0 {
-		t.Fatalf("Run code after deleted-source restart = %d\noutput:\n%s", code, restarted.outputString())
-	}
-	var removedPhase, removedTopology string
-	if err := db.QueryRowContext(ctx, `
-		SELECT lifecycle_phase, topology_admission::text
-		FROM agents
-		WHERE agent_id = 'alpha-worker'
-	`).Scan(&removedPhase, &removedTopology); err != nil {
-		t.Fatalf("read removed-source lifecycle after restart: %v", err)
-	}
-	if removedPhase != "terminated" {
-		t.Fatalf("removed-source lifecycle phase after restart = %q, want terminated", removedPhase)
-	}
-	var removalAdmission runtimeagenttopology.Admission
-	if err := json.Unmarshal([]byte(removedTopology), &removalAdmission); err != nil {
-		t.Fatalf("decode removed-source cleanup admission: %v", err)
-	}
-	if removalAdmission.Authority.Static == nil ||
-		removalAdmission.Authority.Static.BundleHash != secondHash ||
-		removalAdmission.Authority.Static.SourceSetRevision != plan.Revision {
-		t.Fatalf("removed-source cleanup admission = %#v, want current survivor grant topology", removalAdmission)
-	}
-}
-
-func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrForkchat(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
-
-	var workspaceConfigured atomic.Bool
-	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		workspaceConfigured.Store(true)
-		return serveRuntimeWorkspaceStub{}
-	})
-	ctx := context.Background()
-	firstHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	secondHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("examples", "routing", "root-ingress"))
-	if firstHash == secondHash {
-		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
-	}
-
-	var out lockedBuffer
-	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t, ""),
-		Backend:            "claude_cli",
-		BundleHash:         firstHash,
-		BundleHashes:       []string{secondHash},
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
-	})
-	if code != 3 {
-		t.Fatalf("Run code = %d, want 3\noutput:\n%s", code, out.String())
-	}
-	for _, want := range []string{
-		"[4/22] bundle_load",
-		"[5/22] startup_ownership_lease",
-		"multi-context swarm serve --bundle-hash",
-		"llm.backend=claude_cli",
-		"ToolGatewayBinding",
-		"MCP /mcp and /tools routes",
-		"forkchat sandbox runtime",
-		"single-context",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("serve output missing %q:\n%s", want, out.String())
-		}
-	}
-	for _, notWant := range []string{"http_listener_bind", "[20/22]", "[22/22]", "ready                      ok", "init forkchat sandbox runtime"} {
-		if strings.Contains(out.String(), notWant) {
-			t.Fatalf("serve reached %q after multi-context claude_cli admission failure:\n%s", notWant, out.String())
-		}
-	}
-	if workspaceConfigured.Load() {
-		t.Fatalf("workspace lifecycle was configured despite fail-closed admission:\n%s", out.String())
-	}
-}
-
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
-	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: persistedMissingRunID, State: "running",
-		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+		BundleHash: missingHash,
 	})
 
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		StoreModeSet:     true,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
+		Output:           &out,
 	})
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
@@ -8926,93 +7255,6 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}
 }
-
-func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailableRuns(t *testing.T) {
-	stoppedContainers := []string{}
-	_, db, runtimePG := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{
-			managedContainers: []runtimedestructivereset.ContainerRef{
-				{Name: "swarm-unavailable-agent", RunID: serveRuntimeUnavailableRunIDForTest, Kind: "agent"},
-				{Name: "swarm-unrelated-agent", RunID: uuid.NewString(), Kind: "agent"},
-			},
-			stoppedContainers: &stoppedContainers,
-		}
-	})
-	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-	ctx := context.Background()
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
-	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Authored(true),
-	})
-	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repoRootForTest(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
-	if err != nil {
-		t.Fatalf("contracts root: %v", err)
-	}
-	_, _, err = cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("load test workflow bundle: %v", err)
-	}
-	persistedRunID := uuid.NewString()
-	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: serve-test', '{}'::jsonb)
-	`, persistedHash); err != nil {
-		t.Fatalf("seed bundle row: %v", err)
-	}
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: persistedRunID, BundleHash: persistedHash, BundleSource: "persisted"})
-
-	orphanTargets := []struct {
-		runID  string
-		source string
-		cause  string
-	}{
-		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceEphemeral, cause: preservationcleanup.BundleEphemeralOrphanedReason},
-		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceDeleted, cause: preservationcleanup.BundleDeletedOrphanedReason},
-		{runID: serveRuntimeUnavailableRunIDForTest, source: storerunlifecycle.BundleSourceEphemeral, cause: preservationcleanup.BundleEphemeralOrphanedReason},
-	}
-	for _, target := range orphanTargets {
-		seedServeRuntimeUnavailableBundleRunState(t, ctx, runtimePG, target.runID, target.source)
-	}
-	releaseServeTestAgentFixtureCapability(t, runtimePG)
-
-	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		StoreModeSet:       true,
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            false,
-	})
-
-	serve.waitForReadyLine()
-	if code := serve.stop(); code != 0 {
-		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
-	}
-	if !strings.Contains(serve.outputString(), "unfinished work could not be resumed and was closed") {
-		t.Fatalf("concise recovery output omitted author outcome:\n%s", serve.outputString())
-	}
-	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
-		if strings.Contains(serve.outputString(), forbidden) {
-			t.Fatalf("concise recovery output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
-		}
-	}
-	assertServeRuntimeRunStillActive(t, context.Background(), storetest.NewPostgresStoreForTest(db), persistedRunID)
-	for _, target := range orphanTargets {
-		assertServeRuntimeUnavailableBundleRunOrphaned(t, context.Background(), storetest.NewPostgresStoreForTest(db), target.runID, target.cause)
-	}
-	if len(stoppedContainers) != 1 || stoppedContainers[0] != "swarm-unavailable-agent" {
-		t.Fatalf("stopped containers = %#v, want only unavailable run container", stoppedContainers)
-	}
-}
-
-const serveRuntimeUnavailableRunIDForTest = "11111111-2222-3333-4444-555555555555"
 
 func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
@@ -9028,7 +7270,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	}, false)
 }
 
-func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash string) (string, string) {
+func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *runtimecontracts.WorkflowContractBundle) (string, string) {
 	t.Helper()
 	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
@@ -9044,11 +7286,21 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	}
 	bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
 	ctx := context.Background()
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
+	if err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("build sqlite abandon source catalog: %v", err)
+	}
+	if _, err := sqliteStore.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("persist sqlite abandon source artifact: %v", err)
+	}
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	now := time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
-	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash})
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	requireServeTestAgentFixture(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
@@ -9091,15 +7343,19 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 func serveDeliveryLifecycleFixtureContext() context.Context {
 	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	))
 }
 
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t, nil)
+}
+
+func stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t *testing.T, bundleScopes *[]string) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-		return serveRuntimeWorkspaceStub{}, nil
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		return serveRuntimeWorkspaceStub{bundleScopes: bundleScopes}, nil
 	}
 	t.Cleanup(func() {
 		cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
@@ -9133,7 +7389,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ workspace.Lookup, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ workspace.Lookup, _ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -9154,67 +7410,6 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 	}
 }
 
-func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source string) {
-	t.Helper()
-	db := storetest.DatabaseForTest(runtimePG)
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
-	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	admissionSource := source
-	if source == storerunlifecycle.BundleSourceDeleted {
-		admissionSource = storerunlifecycle.BundleSourceEphemeral
-	}
-	sessionID := uuid.NewString()
-	eventID := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: admissionSource})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a")}
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
-	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
-	if err != nil {
-		t.Fatalf("claim delivery %s: %v", source, err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, status
-		)
-		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active')
-	`, sessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
-		t.Fatalf("seed session %s: %v", source, err)
-	}
-	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
-		t.Fatalf("bind delivery session %s: %v", source, err)
-	}
-	entityID := uuid.NewString()
-	routingSource, err := events.NewRootRoutingSource(entityID)
-	if err != nil {
-		t.Fatalf("construct timer route %s: %v", source, err)
-	}
-	if _, err := runtimePG.AdmitGenericSchedule(ctx, runtimegenericschedule.AdmissionCommand{
-		ScheduleKey: "timer-" + source, RunID: runID, EntityID: entityID,
-		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "serve-startup-recovery",
-		EventType: "timer.fired", Payload: semanticvalue.EmptyObject(), RoutingSource: routingSource,
-		ExecutionMode: executionmode.Live,
-		Due:           runtimegenericschedule.DelayDue(time.Hour), TaskID: "timer-" + source,
-	}); err != nil {
-		t.Fatalf("seed timer %s: %v", source, err)
-	}
-	if source == storerunlifecycle.BundleSourceDeleted {
-		runlifecyclefixture.CorruptPostgresSource(
-			t,
-			ctx,
-			db,
-			runID,
-			bundleHash,
-			storerunlifecycle.BundleSourceDeleted,
-		)
-	}
-}
-
 func reviseServeTestRunSource(
 	t *testing.T,
 	ctx context.Context,
@@ -9223,7 +7418,7 @@ func reviseServeTestRunSource(
 	bundleHash string,
 ) {
 	t.Helper()
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	source, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9252,185 +7447,10 @@ func assertServeRuntimeRunStillActive(t *testing.T, ctx context.Context, pg *sto
 	}
 }
 
-func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, reason string) {
-	t.Helper()
-	var runStatus, controlStatus, controlReason string
-	var failure []byte
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT r.status, r.failure, rc.control_status, COALESCE(rc.reason, '')
-		FROM runs r
-		JOIN run_control_state rc ON rc.run_id = r.run_id
-		WHERE r.run_id = $1::uuid
-	`, runID).Scan(&runStatus, &failure, &controlStatus, &controlReason); err != nil {
-		t.Fatalf("load orphaned run %s: %v", runID, err)
-	}
-	if runStatus != "cancelled" || len(failure) != 0 || controlStatus != "stopped" || controlReason != reason {
-		t.Fatalf("orphaned run %s = %s/failure:%s/%s/%s, want cancelled/no-failure/stopped/%s", runID, runStatus, failure, controlStatus, controlReason, reason)
-	}
-	var deadLetters int
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		  AND status = 'dead_letter'
-		  AND reason_code = $2
-		  AND current_attempt_version IS NULL
-	`, runID, reason).Scan(&deadLetters); err != nil {
-		t.Fatalf("count orphaned deliveries %s: %v", runID, err)
-	}
-	if deadLetters != 1 {
-		t.Fatalf("orphaned run %s dead-letter deliveries = %d, want 1", runID, deadLetters)
-	}
-	var receipts int
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts er
-		JOIN events e ON e.event_id = er.event_id
-		WHERE e.run_id = $1::uuid
-		  AND er.outcome = 'dead_letter'
-		  AND er.reason_code = $2
-		  AND er.subscriber_type = 'platform'
-		  AND er.subscriber_id = 'pipeline'
-	`, runID, reason).Scan(&receipts); err != nil {
-		t.Fatalf("count orphaned receipts %s: %v", runID, err)
-	}
-	if receipts != 1 {
-		t.Fatalf("orphaned run %s platform pipeline receipts = %d, want 1", runID, receipts)
-	}
-	var deliveryOutcomes int
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_delivery_outcomes o
-		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-		WHERE d.run_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = 'agent-a'
-		  AND o.outcome = 'terminalized'
-		  AND o.reason_code = $2
-	`, runID, reason).Scan(&deliveryOutcomes); err != nil {
-		t.Fatalf("count orphaned delivery outcomes %s: %v", runID, err)
-	}
-	if deliveryOutcomes != 1 {
-		t.Fatalf("orphaned run %s terminalized delivery outcomes = %d, want 1", runID, deliveryOutcomes)
-	}
-	var sessions int
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM agent_sessions
-		WHERE run_id = $1::uuid
-		  AND status = 'terminated'
-		  AND termination_reason = 'orphaned'
-		  AND termination_detail = $2
-	`, runID, reason).Scan(&sessions); err != nil {
-		t.Fatalf("count orphaned sessions %s: %v", runID, err)
-	}
-	if sessions != 1 {
-		t.Fatalf("orphaned run %s sessions = %d, want 1", runID, sessions)
-	}
-	var timers int
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND status = 'cancelled'
-	`, runID).Scan(&timers); err != nil {
-		t.Fatalf("count orphaned timers %s: %v", runID, err)
-	}
-	if timers != 1 {
-		t.Fatalf("orphaned run %s timers = %d, want 1", runID, timers)
-	}
-}
-
-func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, pg, bundle)
-	if err != nil {
-		t.Fatalf("prepareServeBundleSource: %v", err)
-	}
-	if !fact.IsPersisted() || fact.BundleHash() == "" {
-		t.Fatalf("source fact = %#v", fact)
-	}
-	detail, err := pg.LoadBundleCatalog(ctx, fact.BundleHash())
-	if err != nil {
-		t.Fatalf("LoadBundleCatalog(%s): %v", fact.BundleHash(), err)
-	}
-	if detail.BundleHash != fact.BundleHash() || detail.AgentCount == 0 || detail.ContentYAML == "" {
-		t.Fatalf("bundle catalog detail = %#v", detail)
-	}
-}
-
-func TestPrepareServeBundleSourceDevPersistsCatalogRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
-	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, pg, bundle)
-	if err != nil {
-		t.Fatalf("prepareServeBundleSource(dev): %v", err)
-	}
-	if !fact.IsPersisted() || fact.BundleHash() == "" {
-		t.Fatalf("source fact = %#v", fact)
-	}
-	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != nil {
-		t.Fatalf("LoadBundleCatalog(dev hash): %v", err)
-	}
-}
-
-func TestPrepareServeBundleSourceSQLitePersistsCatalogForContractsServe(t *testing.T) {
-	ctx := context.Background()
-	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), nil)
-	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
-		t.Fatalf("initialize SQLite platform state: %v", err)
-	}
+func TestPrepareServeSourceArtifactRequiresSelectedIngestWriter(t *testing.T) {
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle)
-	if err != nil {
-		t.Fatalf("prepareServeBundleSource(sqlite local): %v", err)
-	}
-	if !fact.IsPersisted() || fact.BundleHash() == "" {
-		t.Fatalf("source fact = %#v", fact)
-	}
-	catalog, available := stores.BundleCatalog()
-	if !available {
-		t.Fatal("SQLite bundle catalog reader unavailable")
-	}
-	if _, err := catalog.LoadBundleCatalog(ctx, fact.BundleHash()); err != nil {
-		t.Fatalf("LoadBundleCatalog(%s): %v", fact.BundleHash(), err)
-	}
-}
-
-func TestPrepareServeBundleSourceSQLiteDevPersistsCatalogRow(t *testing.T) {
-	ctx := context.Background()
-	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), nil)
-	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
-		t.Fatalf("initialize SQLite platform state: %v", err)
-	}
-	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle)
-	if err != nil {
-		t.Fatalf("prepareServeBundleSource(sqlite dev): %v", err)
-	}
-	if !fact.IsPersisted() || fact.BundleHash() == "" {
-		t.Fatalf("source fact = %#v, want persisted", fact)
-	}
-	catalog, available := stores.BundleCatalog()
-	if !available {
-		t.Fatal("SQLite bundle catalog reader unavailable")
-	}
-	if _, err := catalog.LoadBundleCatalog(ctx, fact.BundleHash()); err != nil {
-		t.Fatalf("LoadBundleCatalog(dev hash): %v", err)
-	}
-}
-
-func TestPrepareServeBundleSourceRequiresSelectedIngestWriter(t *testing.T) {
-	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	if _, err := prepareServeBundleSource(context.Background(), nil, bundle); err == nil || !strings.Contains(err.Error(), "selected bundle ingest writer") {
-		t.Fatalf("prepareServeBundleSource error = %v, want required ingest writer", err)
+	if _, err := prepareServeSourceArtifact(context.Background(), nil, bundle); err == nil || !strings.Contains(err.Error(), "selected bundle ingest writer") {
+		t.Fatalf("prepareServeSourceArtifact error = %v, want required ingest writer", err)
 	}
 }
 
@@ -9540,10 +7560,13 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: serveRuntimeTestBundleHash})
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		BundleHash: bundleHash,
+	})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
@@ -9597,38 +7620,6 @@ func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families 
 		t.Fatalf("commit run-fork revision fixture: %v", err)
 	}
 	return revision
-}
-
-func seedServeRuntimeBundleCatalog(t *testing.T, ctx context.Context, pg *store.PostgresStore, relativeRoot string) string {
-	t.Helper()
-	return seedServeRuntimeBundleCatalogFromBundle(t, ctx, pg, relativeRoot, loadWorkflowValidationFixtureBundle(t, relativeRoot))
-}
-
-func seedServeRuntimeBundleCatalogRoot(t *testing.T, ctx context.Context, pg *store.PostgresStore, root string) string {
-	t.Helper()
-	return seedServeRuntimeBundleCatalogFromBundle(t, ctx, pg, root, loadWorkflowValidationBundleAt(t, root))
-}
-
-func seedServeRuntimeBundleCatalogFromBundle(t *testing.T, ctx context.Context, pg *store.PostgresStore, label string, bundle *runtimecontracts.WorkflowContractBundle) string {
-	t.Helper()
-	if pg == nil {
-		t.Fatal("postgres store is required")
-	}
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection(%s): %v", label, err)
-	}
-	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
-		BundleHash:  projection.BundleHash,
-		ContentYAML: projection.ContentYAML,
-		ParsedJSON:  projection.ParsedJSON,
-		DataBlob:    projection.DataBlob,
-		Metadata:    projection.Metadata,
-	}); err != nil {
-		t.Fatalf("UpsertBundleCatalog(%s): %v", label, err)
-	}
-	return projection.BundleHash
 }
 
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
@@ -9860,15 +7851,14 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 
 	sqlitePath := filepath.Join(t.TempDir(), "verbose-sequence.sqlite")
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "sqlite",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
+		ConfigPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "sqlite",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
 	})
 
 	serve.waitForReadyLine()
@@ -9927,16 +7917,15 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 
 			var out lockedBuffer
 			code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-				ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
-				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath:   defaultPlatformSpecPath,
-				StoreMode:          "sqlite",
-				APIListenAddr:      apiAddr,
-				MCPListenAddr:      mcpAddr,
-				SelfCheck:          true,
-				RequireBundleMatch: true,
-				Verbose:            verbose,
-				Output:             &out,
+				ConfigPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
+				SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				PlatformSpecPath: defaultPlatformSpecPath,
+				StoreMode:        "sqlite",
+				APIListenAddr:    apiAddr,
+				MCPListenAddr:    mcpAddr,
+				SelfCheck:        true,
+				Verbose:          verbose,
+				Output:           &out,
 			})
 			if code != 3 {
 				t.Fatalf("Run code = %d, want 3\noutput:\n%s", code, out.String())
@@ -10024,17 +8013,16 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	bindingCh := make(chan toolgateway.Binding, 1)
 	opts := cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeDevScratchConfig(t),
-		Backend:            "claude_cli",
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "sqlite",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      mcpAddr,
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Dev:                true,
+		ConfigPath:       writeDoctorClaudeDevScratchConfig(t),
+		Backend:          "claude_cli",
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "sqlite",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    mcpAddr,
+		SelfCheck:        true,
+		Verbose:          true,
+		Dev:              true,
 		TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) {
 			bindingCh <- rt.Options.ToolGatewayBinding
 		},
@@ -10115,12 +8103,11 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 	var stdout, stderr bytes.Buffer
 	go func() {
 		done <- executeCLIFrom(ctx, repoRootForTest(), []string{
-			"run", "start",
+			"run", "start", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 			"--event", "task.requested",
 			"--payload", payloadPath,
 			"--config", configPath,
 			"--backend", "claude_cli",
-			"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 			"--data", dataSource,
 			"--api-port", apiPortText,
 		}, &stdout, &stderr, runServe)
@@ -10166,11 +8153,10 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"run", "start",
+		"run", "start", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		"--event", "task.requested",
 		"--payload", payloadPath,
 		"--config", writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "late-gate.sqlite"), nil),
-		"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		"--data", t.TempDir(),
 		"--api-port", apiPortText,
 	}, &stdout, &stderr, runServe)
@@ -10230,15 +8216,14 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 			t.Setenv(tt.env, tt.value)
 
 			assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, tt.env, cliapp.ServeOptions{
-				ConfigPath:         writeDoctorClaudeConfig(t, ""),
-				Backend:            "claude_cli",
-				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath:   defaultPlatformSpecPath,
-				StoreMode:          "not-a-store",
-				APIListenAddr:      "127.0.0.1:0",
-				MCPListenAddr:      "127.0.0.1:0",
-				SelfCheck:          true,
-				RequireBundleMatch: false,
+				ConfigPath:       writeDoctorClaudeConfig(t, ""),
+				Backend:          "claude_cli",
+				SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				PlatformSpecPath: defaultPlatformSpecPath,
+				StoreMode:        "not-a-store",
+				APIListenAddr:    "127.0.0.1:0",
+				MCPListenAddr:    "127.0.0.1:0",
+				SelfCheck:        true,
 			})
 		})
 	}
@@ -10251,16 +8236,15 @@ func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffe
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t, ""),
-		Backend:            "claude_cli",
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "not-a-store",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		BundleHash:         "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ConfigPath:       writeDoctorClaudeConfig(t, ""),
+		Backend:          "claude_cli",
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "not-a-store",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		BundleHash:       "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	})
 }
 
@@ -10271,15 +8255,14 @@ func TestRunServeRuntimeNonClaudeRetiredGatewayURLEnvFailsBeforeStartupSideEffec
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_CONTAINER_URL", cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		Backend:            "anthropic",
-		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "not-a-store",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
+		ConfigPath:       writeServeRuntimeTestConfig(t),
+		Backend:          "anthropic",
+		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "not-a-store",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
 	})
 }
 
@@ -10322,8 +8305,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load config for preflight proof: %v", err)
 	}
-	resolvedPaths, err := cliapp.ResolveCLIContractPlatformSpecPaths(repoRootForTest(), cliapp.CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.ContractsPath,
+	resolvedPaths, err := cliapp.ResolveCLISourcePlatformSpecPaths(repoRootForTest(), cliapp.CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.SourceRoot,
 		PlatformSpecPath: opts.PlatformSpecPath,
 		ConfigPath:       opts.ConfigPath,
 	})
@@ -10338,7 +8321,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load platform pack base for preflight proof: %v", err)
 	}
-	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), resolvedPaths.ContractsPath, resolvedPaths.PlatformSpecPath, platformPackBase)
+	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), resolvedPaths.SourceRoot, resolvedPaths.PlatformSpecPath, platformPackBase)
 	if err != nil {
 		t.Fatalf("load workflow bundle for preflight proof: %v", err)
 	}
@@ -10379,7 +8362,7 @@ func localPreflightReportHasFinding(report cliapp.LocalPreflightReport, code str
 func stubServeWorkspaceLifecycleForTest(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -10466,7 +8449,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -10479,9 +8462,17 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
-	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(repoRootForTest(), contractsPath))
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	bundle := loadWorkflowValidationBundleAt(t, filepath.Join(repoRootForTest(), sourceRoot))
+	bundleHash := bundle.SourceArtifact.BundleHash()
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
+	if err != nil {
+		t.Fatalf("build postgres abandon source catalog: %v", err)
+	}
+	if _, err := runtimePG.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+		t.Fatalf("persist postgres abandon source artifact: %v", err)
+	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
@@ -10513,16 +8504,15 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	releaseServeTestAgentFixtureCapability(t, runtimePG)
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
-		ContractsPath:      contractsPath,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "postgres",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		AbandonActiveRuns:  true,
-		Verbose:            true,
+		ConfigPath:        writeServeRuntimeTestConfig(t),
+		SourceRoot:        sourceRoot,
+		PlatformSpecPath:  defaultPlatformSpecPath,
+		StoreMode:         "postgres",
+		APIListenAddr:     "127.0.0.1:0",
+		MCPListenAddr:     "127.0.0.1:0",
+		SelfCheck:         true,
+		AbandonActiveRuns: true,
+		Verbose:           true,
 	})
 
 	serve.waitForReadyLine()
@@ -10589,6 +8579,13 @@ type serveRuntimeWorkspaceStub struct {
 	cleanup           func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
 	managedContainers []runtimedestructivereset.ContainerRef
 	stoppedContainers *[]string
+	bundleScopes      *[]string
+}
+
+func (s serveRuntimeWorkspaceStub) SetBundleScope(bundleHash string) {
+	if s.bundleScopes != nil {
+		*s.bundleScopes = append(*s.bundleScopes, bundleHash)
+	}
 }
 
 func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
@@ -10735,12 +8732,12 @@ func (p *serveRuntimeTestProcess) runtimeWorkContext(ctx context.Context) contex
 	if rt == nil || rt.WorkOccurrence() == nil {
 		p.t.Fatal("serve runtime work occurrence is not ready")
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	if err := fact.Validate(); err != nil {
 		p.t.Fatalf("serve runtime bundle source fact: %v", err)
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		rt.Options.RuntimeInstanceID,
 		fact.BundleHash(),
@@ -10904,12 +8901,12 @@ func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 	return canonicalrouting.CopyRootIngressServedFollowUp(t)
 }
 
-func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) string {
+func servedEventPublishFixtureBundleHash(t *testing.T, sourceRoot string) string {
 	t.Helper()
-	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
-		t.Fatalf("BundleHash(%s): %v", contractsPath, err)
+		t.Fatalf("BundleHash(%s): %v", sourceRoot, err)
 	}
 	return bundleHash
 }

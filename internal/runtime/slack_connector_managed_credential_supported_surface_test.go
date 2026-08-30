@@ -40,7 +40,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		const (
 			runID        = "7a000000-0000-0000-0000-000000000001"
 			entityID     = "7a000000-0000-0000-0000-000000000002"
-			flowInstance = "slack-connector-managed-credential-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -69,7 +69,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		const (
 			runID        = "7b000000-0000-0000-0000-000000000001"
 			entityID     = "7b000000-0000-0000-0000-000000000002"
-			flowInstance = "slack-connector-managed-credential-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -361,8 +361,9 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "slack", Tool: "slack.post_message"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
@@ -388,20 +389,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 			},
 		},
 	}))
-	importSource := slackManagedConnectorPackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "slack", Tool: "slack.post_message"}},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, slackManagedConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, slackManagedConnectorPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
@@ -442,15 +430,6 @@ func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerco
 		t.Fatalf("NewPackRegistry: %v", err)
 	}
 	return registry
-}
-
-type slackManagedConnectorPackImportSource struct {
-	semanticview.Source
-	projectScopes []semanticview.ProjectScope
-}
-
-func (s slackManagedConnectorPackImportSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.projectScopes...)
 }
 
 type slackManagedConnectorModule struct {

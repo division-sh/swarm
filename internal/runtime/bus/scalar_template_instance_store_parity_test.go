@@ -101,11 +101,6 @@ func (s *sqliteScalarTemplateInstanceStore) scalarTemplateInstanceDescriptorCall
 func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
-			seedCompleteEventDispatchRun(t, ctx, db, backend, runID, time.Now().UTC().Add(-time.Minute))
-
 			repo := canonicalrouting.RepoRoot(t)
 			root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -113,13 +108,18 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatalf("load scalar resolution fixture: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
+			sourceFact := testSourceArtifactFact(source)
+			sourceBundleHash := sourceFact.BundleHash()
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
+			seedCompleteEventDispatchRun(t, ctx, db, backend, runID, time.Now().UTC().Add(-time.Minute))
 			entityID := uuid.NewString()
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
 				InstanceID:      "one",
 				EntityID:        entityID,
 				FlowInstance:    "account/one",
-				BundleHash:      authorActivityTestBundleHash,
-				BundleSource:    authorActivityTestBundleSource,
+				BundleHash:      sourceBundleHash,
 				WorkflowVersion: source.WorkflowVersion(),
 				AddressFields:   map[string]string{"entity.account_id": "acct-1"},
 			}})
@@ -198,8 +198,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				InstanceID:      "drift",
 				EntityID:        uuid.NewString(),
 				FlowInstance:    "account/drift",
-				BundleHash:      authorActivityTestBundleHash,
-				BundleSource:    authorActivityTestBundleSource,
+				BundleHash:      sourceBundleHash,
 				WorkflowVersion: source.WorkflowVersion(),
 				AddressFields:   map[string]string{"entity.account_id": "acct-1"},
 			}})

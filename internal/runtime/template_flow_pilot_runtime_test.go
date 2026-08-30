@@ -74,12 +74,12 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	evt := eventtest.ExistingRunRootIngress(
@@ -236,11 +236,10 @@ type templateFlowPilotMemoryStore struct {
 }
 
 func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 	for i := range descriptors {
 		descriptors[i].BundleHash = bundleHash
-		descriptors[i].BundleSource = bundleSource
 		descriptors[i].WorkflowVersion = s.source.WorkflowVersion()
 	}
 	return descriptors, nil

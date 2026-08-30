@@ -420,16 +420,6 @@ func ValidateExternalDispatchRateLimitDeclarations(source semanticview.Source) [
 		}
 	}
 	errs = appendExternalDispatchPolicyValidationErrors(errs, "root policy", source.ResolvedPolicyForFlow("").Values)
-	for _, scope := range source.ProjectScopes() {
-		label := strings.TrimSpace(scope.Key)
-		if label == "" {
-			label = strings.TrimSpace(scope.Manifest.Name)
-		}
-		if label == "" {
-			label = "project"
-		}
-		errs = appendExternalDispatchPolicyValidationErrors(errs, "project policy "+label, scope.Policy.Values)
-	}
 	for _, scope := range source.FlowScopes() {
 		label := strings.TrimSpace(scope.ID)
 		if label == "" {
@@ -630,11 +620,11 @@ func externalDispatchSourceKey(source semanticview.Source) string {
 		parts = append(parts, version)
 	}
 	if len(parts) == 0 {
-		scopes := source.ProjectScopes()
+		scopes := source.FlowScopes()
 		labels := make([]string, 0, len(scopes))
 		for _, scope := range scopes {
-			if key := strings.TrimSpace(scope.Key); key != "" {
-				labels = append(labels, key)
+			if path := strings.TrimSpace(scope.Path); path != "" {
+				labels = append(labels, path)
 			}
 		}
 		sort.Strings(labels)

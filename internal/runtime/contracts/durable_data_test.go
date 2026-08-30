@@ -12,21 +12,22 @@ import (
 func TestAuthoredEventOwnsDatasetSchemaIdentityAndAgentAccess(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writePromptTestBundle(t, repo)
-	appendFixtureFile(t, filepath.Join(root, "flows", "intake", "events.yaml"), `
+	appendFixtureFile(t, filepath.Join(root, "intake", "events.yaml"), `
 score.available:
   slug: text
   score: integer
 `)
 	appendFixtureFile(t, filepath.Join(root, "agents.yaml"), `
   data_access:
-    - data: intake/score.available
+    - flow_path: intake
+      data: intake/score.available
 `)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	ref, err := durableDataDeclarationRef(".", "intake/score.available")
+	ref, err := durableDataDeclarationRef("intake", "intake/score.available")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ score.available:
 	if consumer.LogicalID == "" {
 		t.Fatal("agent carrying data_access was not compiled")
 	}
-	access := bundle.DurableDataForAgent(consumer.Source.PackageKey, consumer.OwnerFlowID, consumer.LogicalID)
+	access := bundle.DurableDataForAgent(consumer.OwnerFlowID, consumer.LogicalID)
 	if len(access) != 1 || access[0] != declaration.Ref {
 		t.Fatalf("compiled resource access = %#v, want %#v", access, declaration.Ref)
 	}
@@ -57,7 +58,7 @@ score.available:
 	}
 
 	before := declaration.SchemaDigest
-	eventsPath := filepath.Join(root, "flows", "intake", "events.yaml")
+	eventsPath := filepath.Join(root, "intake", "events.yaml")
 	writeFixtureFile(t, eventsPath, strings.ReplaceAll(readFixtureFile(t, eventsPath), "  score: integer\n", "  score: integer?\n"))
 	drifted, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -76,11 +77,11 @@ func TestDurableDataProjectionConsumesCompiledBusinessKey(t *testing.T) {
 			"score": {Type: "integer"},
 		}, Required: []string{"slug", "score"}},
 	}
-	keyed, err := newCompiledEventSchema(".", "score.available", entry, TypeCatalogDocument{}, "slug", CompiledEventSchemaSource{FlowID: "intake", File: "events.yaml"})
+	keyed, err := newCompiledEventSchema(".", "score.available", entry, TypeCatalogDocument{}, "slug", CompiledEventSchemaSource{FlowPath: "intake", File: "events.yaml"})
 	if err != nil {
 		t.Fatalf("compile keyed event: %v", err)
 	}
-	keyless, err := newCompiledEventSchema(".", "score.available", entry, TypeCatalogDocument{}, "", CompiledEventSchemaSource{FlowID: "intake", File: "events.yaml"})
+	keyless, err := newCompiledEventSchema(".", "score.available", entry, TypeCatalogDocument{}, "", CompiledEventSchemaSource{FlowPath: "intake", File: "events.yaml"})
 	if err != nil {
 		t.Fatalf("compile keyless event: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestDurableDataRejectsRetiredDataYAML(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writePromptTestBundle(t, repo)
 	writeFixtureFile(t, filepath.Join(root, "data.yaml"), "data: {}\n")
-	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "data.yaml is retired") {
+	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), `unclassified source file "data.yaml"`) {
 		t.Fatalf("retired data.yaml error = %v", err)
 	}
 }

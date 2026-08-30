@@ -6,31 +6,11 @@ import (
 	"testing"
 )
 
-func TestAgentDeclarationRecordsCanonicalizeDeepPackageBackedFlowProjection(t *testing.T) {
+func TestAgentDeclarationRecordsCanonicalizeDeepFilesystemFlowProjection(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: canonical-agent-records
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - {path: parent}
-`)
 	writeAgentDeclarationBaseFiles(t, root, "canonical-agent-records")
-	writeFixtureFile(t, filepath.Join(root, "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-packages:
-  - {path: child}
-`)
-	writeFixtureFile(t, filepath.Join(root, "parent", "child", "package.yaml"), `
-name: child
-version: "1.0.0"
-flows:
-  - {id: support, flow: support, mode: static}
-`)
-	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
-	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+	flowRoot := filepath.Join(root, "parent", "child", "support")
 	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
@@ -47,18 +27,13 @@ worker:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	rawOccurrences := 0
-	for _, view := range bundle.ProjectViews() {
-		if _, ok := view.Agents["worker"]; ok {
-			rawOccurrences++
-		}
-	}
 	for _, view := range bundle.FlowViews() {
 		if _, ok := view.Agents["worker"]; ok {
 			rawOccurrences++
 		}
 	}
-	if rawOccurrences < 2 {
-		t.Fatalf("raw declaration occurrences = %d, want loader projection in both package and flow views", rawOccurrences)
+	if rawOccurrences != 1 {
+		t.Fatalf("raw declaration occurrences = %d, want one filesystem-owned declaration", rawOccurrences)
 	}
 
 	records := bundle.AgentDeclarationRecords()
@@ -66,17 +41,14 @@ worker:
 		t.Fatalf("records = %#v, want one physical declaration", records)
 	}
 	record := records[0]
-	if record.LogicalID != "worker" || record.OwnerFlowID != "support" || record.Source.Layer != "flow" ||
-		record.Source.PackageKey != "parent/child" || record.Source.FlowID != "support" ||
-		!strings.HasSuffix(filepath.ToSlash(record.Source.File), "parent/child/flows/support/agents.yaml") {
-		t.Fatalf("record = %#v, want exact child-package flow declaration", record)
+	if record.LogicalID != "worker" || record.OwnerFlowID != "parent/child/support" || record.Source.Family != "agents" ||
+		record.Source.FlowPath != "parent/child/support" ||
+		!strings.HasSuffix(filepath.ToSlash(record.Source.File), "parent/child/support/agents.yaml") {
+		t.Fatalf("record = %#v, want exact filesystem flow declaration", record)
 	}
-	project, ok := bundle.ProjectViewByKey("parent/child/flows/support")
-	if !ok || record.OwnerURI == "" || record.OwnerURI != project.AgentURIs["worker"] {
-		t.Fatalf("record owner = %q, project owners = %#v", record.OwnerURI, project.AgentURIs)
-	}
-	if got := bundle.PackageOwningFlowID("parent/child/flows/support"); got != "support" {
-		t.Fatalf("PackageOwningFlowID = %q, want support", got)
+	view, ok := bundle.FlowTree.ByPath["parent/child/support"]
+	if !ok || record.OwnerURI == "" || record.OwnerURI != view.AgentURIs["worker"] {
+		t.Fatalf("record owner = %q, flow owners = %#v", record.OwnerURI, view.AgentURIs)
 	}
 
 	records[0].Entry.Subscriptions[0] = "mutated"
@@ -90,19 +62,11 @@ worker:
 func TestAgentDeclarationRecordsPreserveDistinctSameIDPhysicalDeclarations(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: distinct-agent-records
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - {path: left}
-  - {path: right}
-`)
 	writeAgentDeclarationBaseFiles(t, root, "distinct-agent-records")
 	for _, side := range []string{"left", "right"} {
-		packageRoot := filepath.Join(root, side)
-		writeFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: "+side+"\nversion: \"1.0.0\"\nflows: []\n")
-		writeFixtureFile(t, filepath.Join(packageRoot, "agents.yaml"), "worker:\n  role: "+side+"-worker\n  intent: {inline: Exercise distinct physical identity.}\n  model: regular\n  memory: false\n")
+		flowRoot := filepath.Join(root, side)
+		writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+side+"\n")
+		writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), "worker:\n  role: "+side+"-worker\n  intent: {inline: Exercise distinct physical identity.}\n  model: regular\n  memory: false\n")
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

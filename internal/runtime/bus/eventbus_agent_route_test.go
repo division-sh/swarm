@@ -35,14 +35,14 @@ type exactHandoffProofStore struct {
 	attempts    int
 	binds       int
 	failOnce    bool
-	handoffFact runtimecorrelation.BundleSourceFact
-	bindFact    runtimecorrelation.BundleSourceFact
+	handoffFact runtimecorrelation.SourceArtifactFact
+	bindFact    runtimecorrelation.SourceArtifactFact
 }
 
 func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	s.mu.Lock()
 	s.attempts++
-	s.handoffFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	s.handoffFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	fail := s.failOnce && s.attempts == 1
 	s.mu.Unlock()
 	if fail {
@@ -54,7 +54,7 @@ func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID strin
 func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
 	s.mu.Lock()
 	s.binds++
-	s.bindFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	s.mu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -137,7 +137,6 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			connect_execution_claim BLOB NOT NULL,
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
-			authority_bundle_source TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,
 			execution_authority_generation INTEGER NOT NULL,
 			selected_execution_id TEXT,
@@ -232,7 +231,7 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 	if err != nil {
 		t.Fatalf("create exact handoff adapter: %v", err)
 	}
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	if err != nil {
 		t.Fatalf("create exact handoff source: %v", err)
 	}
@@ -326,7 +325,7 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	store := newExactHandoffProofStore(t, false)
 	forkRunID := uuid.NewString()
 	authority, err := runtimedelivery.NewSelectedExecutionAuthority(
-		store.authority.BundleSource(),
+		store.authority.SourceArtifact(),
 		uuid.NewString(),
 		forkRunID,
 		1,

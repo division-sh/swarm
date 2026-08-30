@@ -18,8 +18,8 @@ import (
 func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	repo := repoRootForTest()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
-		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
+		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
@@ -29,7 +29,7 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
 	cfg.Runtime.ExecutionPosture = executionposture.Live
-	loaded.bundleSourceFact = mustServeTestEphemeralBundleSourceFact(loaded.bootIdentity.BundleHash)
+	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 		Ctx: context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
 		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
@@ -46,8 +46,8 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(t *testing.T) {
 	repo := repoRootForTest()
 	root := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
-		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
+		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
@@ -57,7 +57,7 @@ func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
 	cfg.Runtime.ExecutionPosture = executionposture.Live
-	loaded.bundleSourceFact = mustServeTestEphemeralBundleSourceFact(loaded.bootIdentity.BundleHash)
+	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime-context-abort.sqlite"), cfg)
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
 	persistence := projectServeRuntimePersistence(stores)

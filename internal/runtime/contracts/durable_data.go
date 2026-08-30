@@ -11,17 +11,17 @@ import (
 )
 
 // DurableDataAccessRef names one immutable resource declaration in the
-// declaring agent's package. Package qualification is supplied by the loader.
+// admitted flow tree. Omitted flow_path means the declaring agent's flow.
 type DurableDataAccessRef struct {
-	Package string `json:"package,omitempty"`
-	Data    string `json:"data"`
+	FlowPath string `json:"flow_path,omitempty"`
+	Data     string `json:"data"`
 }
 
 func (r *DurableDataAccessRef) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode || node.Tag == "!!null" {
 		return fmt.Errorf("data_access entries must be non-null mappings")
 	}
-	if err := validateClosedMapping("data_access entry", node, map[string]struct{}{"package": {}, "data": {}}); err != nil {
+	if err := validateClosedMapping("data_access entry", node, map[string]struct{}{"flow_path": {}, "data": {}}); err != nil {
 		return err
 	}
 	data := yamlMappingValueNode(node, "data")
@@ -29,11 +29,11 @@ func (r *DurableDataAccessRef) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("data_access data must be a non-empty scalar without surrounding whitespace")
 	}
 	r.Data = data.Value
-	if pkg := yamlMappingValueNode(node, "package"); pkg != nil {
-		if pkg.Kind != yaml.ScalarNode || pkg.Tag == "!!null" || pkg.Value == "" || strings.TrimSpace(pkg.Value) != pkg.Value {
-			return fmt.Errorf("data_access package must be a non-empty scalar without surrounding whitespace")
+	if flow := yamlMappingValueNode(node, "flow_path"); flow != nil {
+		if flow.Kind != yaml.ScalarNode || flow.Tag == "!!null" || flow.Value == "" || strings.TrimSpace(flow.Value) != flow.Value {
+			return fmt.Errorf("data_access flow_path must be a canonical non-empty flow path")
 		}
-		r.Package = pkg.Value
+		r.FlowPath = flow.Value
 	}
 	return nil
 }
@@ -56,11 +56,6 @@ func loadDurableDataDeclarations(bundle *WorkflowContractBundle) error {
 		return nil
 	}
 	bundle.dataDeclarations = make(map[string]DurableDataDeclaration)
-	for _, pkg := range bundle.PackageTree {
-		if strings.TrimSpace(pkg.Paths.DataFile) != "" {
-			return fmt.Errorf("%s: data.yaml is retired; immutable datasets are declared by authored events and imported with --data event=file", pkg.Paths.DataFile)
-		}
-	}
 	compiled, err := bundle.CompiledEventSchemas()
 	if err != nil {
 		return fmt.Errorf("compile durable data declarations: %w", err)
@@ -77,9 +72,9 @@ func appendDurableDataEvent(bundle *WorkflowContractBundle, event CompiledEventS
 	if !event.Importable() {
 		return nil
 	}
-	ref, err := durabledata.ParseDeclarationRef(event.PackageKey(), event.EventName())
+	ref, err := durabledata.ParseDeclarationRef(event.FlowPath(), event.EventName())
 	if err != nil {
-		return fmt.Errorf("compiled authored event %s:%s cannot own a dataset: %w", event.PackageKey(), event.EventName(), err)
+		return fmt.Errorf("compiled authored event %s:%s cannot own a dataset: %w", event.FlowPath(), event.EventName(), err)
 	}
 	businessKey := ""
 	if key, ok := event.BusinessKey(); ok {
@@ -96,7 +91,7 @@ func appendDurableDataEvent(bundle *WorkflowContractBundle, event CompiledEventS
 		}
 	}
 	declaration := DurableDataDeclaration{
-		Name: event.EventName(), Ref: ref, OwnerFlowID: strings.TrimSpace(event.Source().FlowID), BusinessKey: businessKey,
+		Name: event.EventName(), Ref: ref, OwnerFlowID: strings.TrimSpace(event.Source().FlowPath), BusinessKey: businessKey,
 		Schema: schema, CanonicalSchema: canonicalSchema, SchemaDigest: durabledata.SchemaDigestFor(canonicalSchema),
 		SourceFile: event.Source().File,
 	}
@@ -112,22 +107,22 @@ func validateAgentDurableDataAccess(bundle *WorkflowContractBundle) error {
 	for _, record := range bundle.AgentDeclarationRecords() {
 		seen := map[string]struct{}{}
 		for _, access := range record.Entry.DataAccess {
-			packageKey := strings.TrimSpace(access.Package)
-			if packageKey == "" {
-				packageKey = strings.TrimSpace(record.Source.PackageKey)
+			flowPath := strings.TrimSpace(access.FlowPath)
+			if flowPath == "" {
+				flowPath = strings.TrimSpace(record.Source.FlowPath)
 			}
-			declaration, ok := bundle.DurableDataDeclarationByName(packageKey, access.Data)
+			declaration, ok := bundle.DurableDataDeclarationByName(flowPath, access.Data)
 			if !ok {
-				return fmt.Errorf("agent %s data_access resource %q is not declared in package %s", record.LogicalID, access.Data, packageKey)
+				return fmt.Errorf("agent %s data_access resource %q is not declared in flow %s", record.LogicalID, access.Data, flowPath)
 			}
 			if _, duplicate := seen[declaration.Ref.Key()]; duplicate {
 				return fmt.Errorf("agent %s repeats data_access declaration %s", record.LogicalID, declaration.Ref.Key())
 			}
 			seen[declaration.Ref.Key()] = struct{}{}
-			key := staticAgentDeclarationKey(record.Source.PackageKey, record.OwnerFlowID, record.LogicalID)
+			key := staticAgentDeclarationKey(record.OwnerFlowID, record.LogicalID)
 			bundle.resourceDataAccess[key] = append(bundle.resourceDataAccess[key], declaration.Ref)
 		}
-		key := staticAgentDeclarationKey(record.Source.PackageKey, record.OwnerFlowID, record.LogicalID)
+		key := staticAgentDeclarationKey(record.OwnerFlowID, record.LogicalID)
 		sort.Slice(bundle.resourceDataAccess[key], func(i, j int) bool {
 			return durabledata.CompareDeclarationRef(bundle.resourceDataAccess[key][i], bundle.resourceDataAccess[key][j]) < 0
 		})
@@ -135,11 +130,11 @@ func validateAgentDurableDataAccess(bundle *WorkflowContractBundle) error {
 	return nil
 }
 
-func (b *WorkflowContractBundle) DurableDataForAgent(packageKey, flowID, logicalID string) []durabledata.DeclarationRef {
+func (b *WorkflowContractBundle) DurableDataForAgent(flowPath, logicalID string) []durabledata.DeclarationRef {
 	if b == nil {
 		return nil
 	}
-	return append([]durabledata.DeclarationRef(nil), b.resourceDataAccess[staticAgentDeclarationKey(packageKey, flowID, logicalID)]...)
+	return append([]durabledata.DeclarationRef(nil), b.resourceDataAccess[staticAgentDeclarationKey(flowPath, logicalID)]...)
 }
 
 func (b *WorkflowContractBundle) DataProjectionRequired() bool {
@@ -173,12 +168,12 @@ func (b *WorkflowContractBundle) DurableDataDeclarations() []DurableDataDeclarat
 	return out
 }
 
-func (b *WorkflowContractBundle) DurableDataDeclarationByName(packageKey, name string) (DurableDataDeclaration, bool) {
+func (b *WorkflowContractBundle) DurableDataDeclarationByName(flowPath, name string) (DurableDataDeclaration, bool) {
 	if b == nil {
 		return DurableDataDeclaration{}, false
 	}
 	for _, declaration := range b.dataDeclarations {
-		if declaration.Ref.PackageKey == strings.TrimSpace(packageKey) && declaration.Name == strings.TrimSpace(name) {
+		if declaration.Ref.FlowPath == strings.TrimSpace(flowPath) && declaration.Name == strings.TrimSpace(name) {
 			declaration.Schema = cloneEventSchemaMap(declaration.Schema)
 			declaration.CanonicalSchema = append([]byte(nil), declaration.CanonicalSchema...)
 			return declaration, true

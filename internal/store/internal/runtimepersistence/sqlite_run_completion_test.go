@@ -150,8 +150,8 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	currentEntity := uuid.NewString()
 	runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, store.backend.ConstructionHandle(), runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: runID, State: "running",
-		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", EventCount: 99, EntityCount: 9, StartedAt: now,
+		BundleHash: authorActivityTestBundleHash,
+		EventCount: 99, EntityCount: 9, StartedAt: now,
 	})
 	for _, fixture := range []struct {
 		id, name, entityID string

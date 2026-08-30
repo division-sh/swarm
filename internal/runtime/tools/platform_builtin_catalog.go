@@ -182,16 +182,16 @@ func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.
 	}
 	if len(resources) > 0 {
 		kinds = append(kinds, "resource_row", "resource_rows")
-		packageKeys := make([]any, 0, len(resources))
+		flowPaths := make([]any, 0, len(resources))
 		events := make([]any, 0, len(resources))
 		for _, ref := range resources {
-			packageKeys = append(packageKeys, ref.PackageKey)
+			flowPaths = append(flowPaths, ref.FlowPath)
 			events = append(events, ref.EventName)
 		}
 		properties["declaration"] = ObjectSchema(map[string]any{
-			"package_key": map[string]any{"type": "string", "enum": packageKeys},
-			"event":       map[string]any{"type": "string", "enum": events},
-		}, "package_key", "event")
+			"flow_path": map[string]any{"type": "string", "enum": flowPaths},
+			"event":     map[string]any{"type": "string", "enum": events},
+		}, "flow_path", "event")
 		properties["position"] = map[string]any{"type": "integer", "minimum": 1, "maximum": durabledata.MaxResourceRows}
 		properties["key"] = map[string]any{}
 		properties["page"] = ObjectSchema(map[string]any{

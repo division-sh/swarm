@@ -583,7 +583,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	forkTurnID := uuid.NewString()
 	requestOccurrenceID := uuid.NewString()
 	runtimeInstanceID := uuid.NewString()
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	prepared := runfork.ConversationForkChatPrepared{
 		Fork: runfork.OperatorConversationForkSession{
 			ForkID:        forkID,
@@ -690,7 +690,7 @@ func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *test
 	if err != nil {
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	policy := runfork.CanonicalConversationForkSandboxPolicy()
 	prepared := runfork.ConversationForkChatPrepared{
 		Fork: runfork.OperatorConversationForkSession{

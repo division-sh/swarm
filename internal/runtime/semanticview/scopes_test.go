@@ -9,77 +9,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := t.TempDir()
-
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
-name: support
-version: "1.0.0"
-flows: []
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
-flow-agent:
-  id: flow-agent
-  intent: {inline: "Exercise package-backed scope."}
-  model: regular
-  memory: true
-  subscriptions:
-    - support/item.created
-`)
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	source := Wrap(bundle)
-
-	var packageScope ProjectScope
-	var found bool
-	for _, scope := range source.ProjectScopes() {
-		if scope.Key == "flows/support" && len(scope.Agents) > 0 {
-			packageScope = scope
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected package-backed support project scope, got %#v", source.ProjectScopes())
-	}
-	if packageScope.OwningFlowID != "support" {
-		t.Fatalf("OwningFlowID = %q, want support", packageScope.OwningFlowID)
-	}
-}
-
 func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 	root := runtimecontracts.FlowContractView{
-		Path:  "authored-root",
-		Paths: runtimecontracts.FlowContractPaths{ID: "authored-root", Flow: "authored-root"},
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "authored-root",
 		},
@@ -88,7 +21,7 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "display-workflow"},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"authored-root": &root},
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
 		},
 	})
 	const runID = "11111111-1111-1111-1111-111111111111"
@@ -97,13 +30,13 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitRootExecutionCoordinate: %v", err)
 	}
-	if coordinate.FlowID() != "authored-root" || coordinate.RunID() != runID {
-		t.Fatalf("coordinate = (%q, %q), want exact authored root and run", coordinate.FlowID(), coordinate.RunID())
+	if coordinate.FlowID() != "." || coordinate.RunID() != runID {
+		t.Fatalf("coordinate = (%q, %q), want exact filesystem root and run", coordinate.FlowID(), coordinate.RunID())
 	}
 	if source.WorkflowName() != "display-workflow" || coordinate.FlowID() == source.WorkflowName() {
 		t.Fatalf("test requires distinct display and authored root identities: display=%q authored=%q", source.WorkflowName(), coordinate.FlowID())
 	}
-	if !coordinate.Matches("authored-root", runID) {
+	if !coordinate.Matches(".", runID) {
 		t.Fatal("exact root coordinate did not match")
 	}
 	for _, hostile := range []struct {
@@ -111,7 +44,7 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 		runID  string
 	}{
 		{flowID: "display-workflow", runID: runID},
-		{flowID: "authored-root", runID: "22222222-2222-2222-2222-222222222222"},
+		{flowID: ".", runID: "22222222-2222-2222-2222-222222222222"},
 		{flowID: "display-workflow", runID: "22222222-2222-2222-2222-222222222222"},
 	} {
 		if coordinate.Matches(hostile.flowID, hostile.runID) {
@@ -126,143 +59,6 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 	}
 }
 
-func TestProjectScopes_SoleParentFlowDoesNotOwnUnrelatedSiblingPackage(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := t.TempDir()
-
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: extras
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
-name: extras
-version: "1.0.0"
-flows: []
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
-flow-agent:
-  id: flow-agent
-  intent: {inline: "Exercise sole-parent scope."}
-  model: regular
-  memory: true
-  subscriptions:
-    - support/item.created
-`)
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	source := Wrap(bundle)
-
-	var packageScope ProjectScope
-	var found bool
-	for _, scope := range source.ProjectScopes() {
-		if scope.Key == "extras" && len(scope.Agents) > 0 {
-			packageScope = scope
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected extras project scope, got %#v", source.ProjectScopes())
-	}
-	if packageScope.OwningFlowID != "" {
-		t.Fatalf("OwningFlowID = %q, want explicit root ownership", packageScope.OwningFlowID)
-	}
-	declarations := AgentDeclarations(source)
-	if len(declarations) != 1 || declarations[0].OwnerFlowID != "" {
-		t.Fatalf("declarations = %#v, want unrelated package declaration to remain root-owned", declarations)
-	}
-}
-
-func TestResolveAgentMemoryProof_PackageBackedFlowProjectionUsesCanonicalFlowSource(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := t.TempDir()
-
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
-name: support
-version: "1.0.0"
-flows: []
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
-name: support
-initial_state: waiting
-states:
-  - waiting
-  - done
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
-backend:
-  intent: {inline: "Exercise package-backed memory proof."}
-  model: regular
-  memory: true
-  subscriptions:
-    - support/item.created
-`)
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	source := Wrap(bundle)
-
-	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
-		AgentID: "backend",
-		FlowID:  "support",
-	})
-	if proof.OwningFlowID != "support" {
-		t.Fatalf("OwningFlowID = %q, want support; declarations = %#v", proof.OwningFlowID, AgentDeclarations(source))
-	}
-	if proof.ProjectScopeKey != "." || proof.ContractSource.Layer != "flow" || proof.ContractSource.FlowID != "support" {
-		t.Fatalf("memory proof source = %#v, want root-package flow-owned source", proof)
-	}
-	if proof.FlowPath != "support" {
-		t.Fatalf("FlowPath = %q, want support", proof.FlowPath)
-	}
-}
-
 func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -271,28 +67,19 @@ func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 initial_state: waiting
 states:
   - waiting
   - done
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 backend:
   intent: {inline: "Exercise flow-scoped memory proof."}
   model: regular
@@ -308,8 +95,8 @@ backend:
 	source := Wrap(bundle)
 
 	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
-		AgentID: "backend",
-		FlowID:  "support",
+		AgentID:  "backend",
+		FlowPath: "support",
 	})
 	if proof.OwningFlowID != "support" {
 		t.Fatalf("OwningFlowID = %q, want support", proof.OwningFlowID)

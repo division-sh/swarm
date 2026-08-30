@@ -80,11 +80,11 @@ func (e SelectedContractRunForkExecutor) SelectRunForkExecutor(contextDef *swrun
 	e.AgentRuntime.Workspace = selectedRuntime.Workspace
 	e.AgentRuntime.Credentials = selectedRuntime.Credentials
 	e.EffectiveSourceIdentity = contextDef.EffectiveSourceIdentity
-	e.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
+	e.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source)
 	loader, err := runtimerunforkexecution.NewAdmittedSelectedContractSourceLoader(
 		e.ContractSelection,
 		selectedRuntime.Options.WorkflowModule,
-		contextDef.BundleSourceFact,
+		contextDef.SourceArtifactFact,
 		contextDef.EffectiveSourceIdentity,
 	)
 	if err != nil {
@@ -166,10 +166,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	if availability.DataIntegrityError() {
 		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
 	}
-	loadedEphemeralCandidate := runtimeContextManager(opts.RuntimeContexts) != nil &&
-		availability.BundleSource.IsEphemeral() &&
-		strings.TrimSpace(availability.BundleHash) != ""
-	if !availability.Available() && !loadedEphemeralCandidate {
+	if !availability.Available() {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
 	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
@@ -309,7 +306,7 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	}
 	if bundleHash != "" {
 		if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
-			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v2:sha256:<64 lowercase hex>"})
 		}
 	}
 	confirmSourceFreeze, err := optionalBoolParam(params, "confirm_source_freeze", false)
@@ -402,10 +399,9 @@ func optionalUUIDParam(params map[string]any, name string) (string, bool, error)
 func runForkAvailabilityDetails(availability runbundle.Availability) map[string]any {
 	details := map[string]any{"run_id": strings.TrimSpace(availability.RunID)}
 	for key, value := range map[string]string{
-		"status":        availability.Status,
-		"bundle_hash":   availability.BundleHash,
-		"bundle_source": availability.BundleSource.String(),
-		"cause":         availability.Cause,
+		"status":      availability.Status,
+		"bundle_hash": availability.BundleHash,
+		"cause":       availability.Cause,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			details[key] = trimmed

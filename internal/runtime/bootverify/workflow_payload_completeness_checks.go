@@ -27,7 +27,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 			continue
 		}
 		nodeID := node.Key()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		entityFields := map[string]struct{}{}
 		if contract := wave1EntityContractForFlow(c.source, flowID); contract.Defined {
 			for field := range contract.Contract.Fields {

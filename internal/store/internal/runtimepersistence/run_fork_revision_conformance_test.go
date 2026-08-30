@@ -605,6 +605,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
+	requireDefaultSourceArtifactForTest(t, ctx, store)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	agentID := "revision-lifecycle-agent"
 	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)

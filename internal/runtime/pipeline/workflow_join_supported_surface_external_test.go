@@ -34,6 +34,13 @@ type exactExternalJoinSource struct {
 	plans  []runtimecontracts.WorkflowJoinPlan
 }
 
+func exactJoinFlowPath(flowID string) string {
+	if flowID == "" {
+		return "."
+	}
+	return flowID
+}
+
 func (s exactExternalJoinSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return append([]runtimecontracts.WorkflowJoinPlan(nil), s.plans...)
 }
@@ -213,7 +220,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("join readback = %#v err=%v", joins, err)
 				}
 				if joins[0].Status != joinruntime.StatusClosed || joins[0].CloseReason != joinruntime.CloseReasonComplete ||
-					joins[0].FlowID() != flowID || joins[0].Completed() != 2 || !joins[0].TimerCancelled {
+					joins[0].FlowPath() != exactJoinFlowPath(flowID) || joins[0].Completed() != 2 || !joins[0].TimerCancelled {
 					t.Fatalf("closed join = %#v", joins[0])
 				}
 
@@ -232,13 +239,13 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 				}
 				assertExactJoinDeliveryCount(t, selected, ctx, eventsByMember[1].ID(), joinNode.Key(), 1)
-				assertPersistedHandlerRuleSelectionInPackage(
+				assertPersistedHandlerRuleSelectionInFlow(
 					t, selected, ctx, eventsByMember[1].ID(), handlerselection.ContextJoinComplete,
-					handlerselection.DispositionSelected, ".", "00000000-0000-4000-8000-000000000013", "",
+					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "",
 				)
-				assertTraceHandlerRuleSelectionInPackage(
+				assertTraceHandlerRuleSelectionInFlow(
 					t, selected, ctx, runID, eventsByMember[1].ID(), handlerselection.ContextJoinComplete,
-					handlerselection.DispositionSelected, ".", "00000000-0000-4000-8000-000000000013", "",
+					handlerselection.DispositionSelected, exactJoinFlowPath(flowID), `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`, "",
 				)
 			})
 		}
@@ -254,10 +261,10 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 		terminalState string
 		closeReason   joinruntime.CloseReason
 		context       handlerselection.Context
-		elementID     string
+		semanticPath  string
 	}{
-		{name: "completion", expected: []any{}, timeout: "1h", eventName: "platform.join_complete", terminalState: "ready", closeReason: joinruntime.CloseReasonComplete, context: handlerselection.ContextJoinComplete, elementID: "00000000-0000-4000-8000-000000000013"},
-		{name: "timeout", expected: []any{"a"}, timeout: "20ms", eventName: "platform.join_timeout", terminalState: "attention", closeReason: joinruntime.CloseReasonTimeout, context: handlerselection.ContextJoinTimeout, elementID: "00000000-0000-4000-8000-000000000014"},
+		{name: "completion", expected: []any{}, timeout: "1h", eventName: "platform.join_complete", terminalState: "ready", closeReason: joinruntime.CloseReasonComplete, context: handlerselection.ContextJoinComplete, semanticPath: `nodes["join-node"].handlers["item.completed"].join.on_complete[0]`},
+		{name: "timeout", expected: []any{"a"}, timeout: "20ms", eventName: "platform.join_timeout", terminalState: "attention", closeReason: joinruntime.CloseReasonTimeout, context: handlerselection.ContextJoinTimeout, semanticPath: `nodes["join-node"].handlers["item.completed"].join.timeout[0]`},
 	}
 	for _, storeCase := range []struct {
 		name string
@@ -399,17 +406,17 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					if err != nil || len(joins) != 1 {
 						t.Fatalf("join occurrence readback = %#v err=%v", joins, err)
 					}
-					if joins[0].Status != joinruntime.StatusClosed || joins[0].FlowID() != flowID ||
+					if joins[0].Status != joinruntime.StatusClosed || joins[0].FlowPath() != exactJoinFlowPath(flowID) ||
 						joins[0].CloseReason != outcome.closeReason || !joins[0].OutcomeFired {
 						t.Fatalf("fired join occurrence = %#v", joins[0])
 					}
-					assertPersistedHandlerRuleSelectionInPackage(
+					assertPersistedHandlerRuleSelectionInFlow(
 						t, selected, ctx, eventID, outcome.context, handlerselection.DispositionSelected,
-						".", outcome.elementID, "",
+						exactJoinFlowPath(flowID), outcome.semanticPath, "",
 					)
-					assertTraceHandlerRuleSelectionInPackage(
+					assertTraceHandlerRuleSelectionInFlow(
 						t, selected, ctx, runID, eventID, outcome.context, handlerselection.DispositionSelected,
-						".", outcome.elementID, "",
+						exactJoinFlowPath(flowID), outcome.semanticPath, "",
 					)
 
 					prepared, found, err := store.LoadPreparedPublishEvent(ctx, eventID)

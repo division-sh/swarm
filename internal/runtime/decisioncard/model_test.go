@@ -476,7 +476,7 @@ func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutco
 
 func testStageAnchor() Anchor {
 	anchor, err := NewStageGateAnchor(StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: "entity-1", Stage: "awaiting_review",
+		Route: runtimeflowidentity.RouteForInstancePath("root"), FlowID: ".", EntityID: "entity-1", Stage: "awaiting_review",
 		StageActivationID: uuid.NewString(), Source: testRootRoutingSource("entity-1"),
 	})
 	if err != nil {
@@ -497,7 +497,7 @@ func testSnapshot(t *testing.T, outcomes map[string]runtimecontracts.WorkflowGat
 func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	source := testRootRoutingSource("entity-1")
 	stage, err := NewStageGateAnchor(StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: "entity-1", Source: source, Stage: "review", StageActivationID: "activation-1",
+		Route: runtimeflowidentity.RouteForInstancePath("root"), FlowID: ".", EntityID: "entity-1", Source: source, Stage: "review", StageActivationID: "activation-1",
 	})
 	if err != nil {
 		t.Fatal(err)

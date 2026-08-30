@@ -27,7 +27,7 @@ func TestPlatformSpecOwnsLifecycleCleanupQuiescence(t *testing.T) {
 	authority := mustMappingValue(t, root, "agent_lifecycle_authority")
 	cleanup := mustMappingValue(t, authority, "destructive_cleanup_quiescence")
 
-	assertScalarContains(t, mustMappingValue(t, cleanup, "bundle_force"), "before preservation/session cleanup")
 	assertScalarContains(t, mustMappingValue(t, cleanup, "runtime_nuke"), "before session cleanup")
-	assertScalarContains(t, mustMappingValue(t, cleanup, "runtime_nuke"), "bundle catalog rows are retained")
+	assertScalarContains(t, mustMappingValue(t, cleanup, "runtime_nuke"), "source artifacts are retained")
+	assertScalarContains(t, mustMappingValue(t, cleanup, "other_ordering"), "compatibility migration and backfill paths do not exist")
 }

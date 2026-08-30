@@ -4,19 +4,19 @@ const (
 	CleanupTableKindPlatform  = "platform_table"
 	CleanupTableKindGenerated = "generated_table_class"
 
-	CleanupDeleteAll                = "delete_all"
-	CleanupDeleteByRunID            = "delete_by_run_id"
-	CleanupDeleteByEventJoin        = "delete_by_event_join"
-	CleanupDeleteByRunLineage       = "delete_by_run_lineage"
-	CleanupDeleteMixedRowPolicy     = "delete_mixed_row_policy"
-	CleanupRetainDirectiveAuthority = "retain_directive_authority"
-	CleanupPreserve                 = "preserve"
-	CleanupSplitPreserve            = "split_preserve"
-	CleanupRequestScopedBundles     = "request_scoped_bundle_catalog"
+	CleanupDeleteAll                    = "delete_all"
+	CleanupDeleteByRunID                = "delete_by_run_id"
+	CleanupDeleteByEventJoin            = "delete_by_event_join"
+	CleanupDeleteByRunLineage           = "delete_by_run_lineage"
+	CleanupDeleteMixedRowPolicy         = "delete_mixed_row_policy"
+	CleanupRetainDirectiveAuthority     = "retain_directive_authority"
+	CleanupPreserve                     = "preserve"
+	CleanupSplitPreserve                = "split_preserve"
+	CleanupRequestScopedSourceArtifacts = "request_scoped_source_artifacts"
 )
 
 type CleanupPolicy struct {
-	IncludeBundles bool
+	IncludeSourceArtifacts bool
 }
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
@@ -58,7 +58,6 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "runtime_startup_authority_repairs", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable runtime startup authority repair journal", PreservationProof: "operator repair idempotency and before/after authority evidence must survive destructive runtime cleanup"},
 		{Table: "agent_topology_source_set_head", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "complete admitted agent topology authority", PreservationProof: "the process capability must retain the current complete source-set head across destructive runtime cleanup"},
 		{Table: "agent_topology_source_set_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable complete source-set operation authority", PreservationProof: "source-set idempotency and predecessor evidence must survive destructive runtime cleanup"},
-		{Table: "bundle_delete_final_mutation_replays", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable bundle-delete final-mutation replay authority", PreservationProof: "an API retry must retain exact committed final-mutation evidence across destructive runtime cleanup"},
 		{Table: "operator_principals", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "selected-store authenticated operator principal", PreservationProof: "bearer rotation and runtime cleanup must not change operator identity"},
 		{Table: "operator_channel_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "durable operator-channel operation and proof projection authority", PreservationProof: "claim replay, confirmation, binding outcome, and pending proof responsibility must survive runtime cleanup"},
 		{Table: "operator_channel_bindings", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "current local operator-channel binding and unbind fence", PreservationProof: "runtime cleanup must not revoke or silently recreate operator authority"},
@@ -97,7 +96,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "runtime_store_metadata", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable runtime store creation origin", PreservationProof: "must survive destructive runtime cleanup unchanged"},
 		{Table: "resource_declarations", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "package-qualified durable resource declaration identity", PreservationProof: "resource identity and version lineage survive runtime cleanup"},
 		{Table: "resource_bundle_declarations", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "exact bundle resource schema snapshots", PreservationProof: "permanent operation replay and version interpretation retain exact schema evidence"},
-		{Table: "bundle_static_data", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "exact bundle catalog static bytes", PreservationProof: "admitted static byte identity survives runtime cleanup"},
+		{Table: "bundle_static_data", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "exact admitted source static bytes", PreservationProof: "admitted static byte identity survives runtime cleanup"},
 		{Table: "resource_versions", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable semantic resource versions and tombstones", PreservationProof: "cross-run state and retained forkability survive runtime cleanup"},
 		{Table: "resource_version_provenance", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "immutable resource producer provenance", PreservationProof: "version provenance remains attached to retained semantic versions"},
 		{Table: "resource_heads", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "resource declaration compare-and-set heads", PreservationProof: "cross-run current-version authority survives runtime cleanup"},
@@ -114,7 +113,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "agents", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "agent registry/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "flow_instances", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "product/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "routing_rules", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "routing/topology config", PreservationProof: "must survive destructive runtime cleanup"},
-		{Table: "bundles", TableKind: CleanupTableKindPlatform, Classification: CleanupRequestScopedBundles, PredicateOwner: "runtime.nuke include_bundles request policy", PreservationProof: "include_bundles=false preserves bundle catalog state; include_bundles=true deletes it as part of server-wide runtime.nuke"},
+		{Table: "source_artifacts", TableKind: CleanupTableKindPlatform, Classification: CleanupRequestScopedSourceArtifacts, PredicateOwner: "runtime.nuke include_source_artifacts request policy", PreservationProof: "include_source_artifacts=false preserves admitted source artifacts; include_source_artifacts=true deletes them as part of server-wide runtime.nuke"},
 		{Table: "mailbox", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; source_event_id policy split", PreservationProof: "preserve until a mailbox cleanup owner exists"},
 		{Table: "spend_ledger", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; cost audit policy split", PreservationProof: "preserve until a spend cleanup owner exists"},
 	}
@@ -165,19 +164,19 @@ func CleanupCatalogByTableForPolicy(policy CleanupPolicy) map[string]CleanupCata
 }
 
 func CleanupEntryForPolicy(entry CleanupCatalogEntry, policy CleanupPolicy) CleanupCatalogEntry {
-	if entry.Table != "bundles" || entry.Classification != CleanupRequestScopedBundles {
+	if entry.Table != "source_artifacts" || entry.Classification != CleanupRequestScopedSourceArtifacts {
 		return entry
 	}
-	if policy.IncludeBundles {
+	if policy.IncludeSourceArtifacts {
 		entry.Classification = CleanupDeleteAll
-		entry.PredicateOwner = "runtime.nuke include_bundles=true server-wide bundle catalog deletion"
+		entry.PredicateOwner = "runtime.nuke include_source_artifacts=true server-wide admitted source deletion"
 		entry.DeleteOrderGroup = 7
 		entry.PreservationProof = ""
 		return entry
 	}
 	entry.Classification = CleanupPreserve
-	entry.PredicateOwner = "runtime.nuke include_bundles=false bundle catalog preservation"
+	entry.PredicateOwner = "runtime.nuke include_source_artifacts=false admitted source preservation"
 	entry.DeleteOrderGroup = 0
-	entry.PreservationProof = "bundle catalog rows must survive runtime.nuke when include_bundles=false"
+	entry.PreservationProof = "source artifact rows must survive runtime.nuke when include_source_artifacts=false"
 	return entry
 }

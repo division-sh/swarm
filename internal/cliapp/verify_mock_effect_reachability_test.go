@@ -35,10 +35,10 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			contractsPath := writeVerifyMockConnectorFixture(t, tc.includeLive, tc.includeActivity)
+			sourceRoot := writeVerifyMockConnectorFixture(t, tc.includeLive, tc.includeActivity)
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-				"verify", "--contracts", contractsPath, "--config", configPath,
+				"verify", sourceRoot, "--config", configPath,
 			}, &stdout, &stderr, defaultRootCommandOptions())
 			combined := stdout.String() + stderr.String()
 			if len(tc.wantFailure) == 0 {

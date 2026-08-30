@@ -109,7 +109,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	ctx := context.Background()
 	runID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: runID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral",
+		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 		StartedAt: time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC),
 	})
 
@@ -217,7 +217,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID:      materializedLikePausedRunID,
 		State:      storerunlifecycle.StatePaused,
-		BundleHash: authorActivityTestBundleSourceFact.BundleHash(),
+		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {

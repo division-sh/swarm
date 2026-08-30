@@ -66,27 +66,27 @@ func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testin
 			source: fanoutobligation.SourceRef{
 				Kind: fanoutobligation.SourceEventPayloadField, EventID: "event-id", Field: "items",
 			},
-			want: []any{"event-id", nil, nil, "items", nil, nil, nil, nil},
+			want: []any{"event_payload_field", "event-id", nil, nil, "items", nil, nil, nil, nil},
 		},
 		{
 			name: "entity field revision",
 			source: fanoutobligation.SourceRef{
 				Kind: fanoutobligation.SourceEntityField, RunID: "run-id", EntityID: "entity-id", Field: "items", MutationID: "mutation-id",
 			},
-			want: []any{nil, "run-id", "entity-id", "items", "mutation-id", nil, nil, nil},
+			want: []any{"entity_field_revision", nil, "run-id", "entity-id", "items", "mutation-id", nil, nil, nil},
 		},
 		{
 			name: "resource version",
 			source: fanoutobligation.SourceRef{
 				Kind:        fanoutobligation.SourceResourceVersion,
-				Declaration: durabledata.DeclarationRef{PackageKey: "root", EventName: "records"},
+				Declaration: durabledata.DeclarationRef{FlowPath: "root", EventName: "records"},
 				VersionID:   durabledata.VersionID("resource-version"),
 			},
-			want: []any{nil, nil, nil, nil, nil, "root", "records", "resource-version"},
+			want: []any{"resource_version", nil, nil, nil, nil, nil, "root", "records", "resource-version"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := fanOutIntentSQLArgs(request, test.source, []byte(`{}`), fanoutobligation.StatusOpen, now)[7:15]
+			got := fanOutIntentSQLArgs(request, test.source, []byte(`{}`), fanoutobligation.StatusOpen, now)[7:16]
 			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("source SQL args = %#v, want %#v", got, test.want)
 			}
@@ -123,7 +123,7 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 						time.Sleep(1100 * time.Millisecond)
 					}
 					if outcome == "contradictory" {
-						if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.PackageKey, command.Claim.Key.ElementRef.ElementID); err != nil {
+						if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath); err != nil {
 							return err
 						}
 					}
@@ -132,8 +132,8 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 				committed, err := commitFanOutChunk(
 					context.Background(), nil, backend == "postgres", run,
 					func(ctx context.Context, claim fanoutobligation.Claim, status fanoutobligation.Status, nextChunk int, lastChunkMS int64, observedAt time.Time) error {
-						query := `UPDATE fan_out_intents SET next_chunk_size=$1,last_chunk_ms=$2,last_served_at=$3,updated_at=$3,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND package_key=$6 AND element_id=$7 AND status=$8 AND claim_generation=$9 AND ((status='open' AND claim_owner=$10) OR (status='closed' AND claim_owner IS NULL))`
-						result, updateErr := db.ExecContext(ctx, query, nextChunk, lastChunkMS, observedAt, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.PackageKey, claim.Key.ElementRef.ElementID, string(status), claim.Generation, claim.Owner)
+						query := `UPDATE fan_out_intents SET next_chunk_size=$1,last_chunk_ms=$2,last_served_at=$3,updated_at=$3,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND status=$9 AND claim_generation=$10 AND ((status='open' AND claim_owner=$11) OR (status='closed' AND claim_owner IS NULL))`
+						result, updateErr := db.ExecContext(ctx, query, nextChunk, lastChunkMS, observedAt, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, string(status), claim.Generation, claim.Owner)
 						if updateErr != nil {
 							return updateErr
 						}
@@ -153,7 +153,7 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 				)
 				var cursor, count, nextChunk int
 				var lastChunkMS int64
-				if queryErr := db.QueryRow(`SELECT cursor,next_chunk_size,last_chunk_ms,(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.package_key=i.package_key AND o.element_id=i.element_id) FROM fan_out_intents i`).Scan(&cursor, &nextChunk, &lastChunkMS, &count); queryErr != nil {
+				if queryErr := db.QueryRow(`SELECT cursor,next_chunk_size,last_chunk_ms,(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path) FROM fan_out_intents i`).Scan(&cursor, &nextChunk, &lastChunkMS, &count); queryErr != nil {
 					t.Fatal(queryErr)
 				}
 				switch outcome {
@@ -191,18 +191,18 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 	}
 	statements := []string{
 		`CREATE TABLE fan_out_intents (
-			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, package_key TEXT NOT NULL, element_id TEXT NOT NULL,
+			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL, declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL,
 			bundle_hash TEXT NOT NULL, semantic_digest TEXT NOT NULL, source_kind TEXT NOT NULL,
 			source_event_id TEXT, source_run_id TEXT, source_entity_id TEXT, source_field TEXT, source_mutation_id TEXT,
-			source_resource_package_key TEXT, source_resource_event_name TEXT, source_resource_version_id TEXT,
+			source_resource_flow_path TEXT, source_resource_event_name TEXT, source_resource_version_id TEXT,
 			cardinality INTEGER NOT NULL, cursor INTEGER NOT NULL, status TEXT NOT NULL, next_chunk_size INTEGER NOT NULL,
 			last_chunk_ms BIGINT NOT NULL DEFAULT 0, last_served_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
 			claim_owner TEXT, claim_generation BIGINT NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT, capsule TEXT NOT NULL,
-			PRIMARY KEY (run_id,triggering_delivery_id,package_key,element_id))`,
+			PRIMARY KEY (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path))`,
 		`CREATE TABLE fan_out_outcomes (
-			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, package_key TEXT NOT NULL, element_id TEXT NOT NULL,
+			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL, declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL,
 			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, inherited_disposition TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (run_id,triggering_delivery_id,package_key,element_id,ordinal))`,
+			PRIMARY KEY (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal))`,
 	}
 	if backend == "postgres" {
 		statements[1] = strings.ReplaceAll(statements[1], "event_id TEXT", "event_id UUID")
@@ -220,7 +220,8 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChunkCommand {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	runID, eventID, deliveryID, elementID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	runID, eventID, deliveryID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	elementRef := runtimecontracts.FanOutElementRef{FlowPath: "root", Family: "handler_rule", SemanticPath: `handlers["items.ready"].rules[0]`}
 	producer, err := events.NewRootRoutingSource(uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
@@ -234,14 +235,14 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 		t.Fatal(err)
 	}
 	claim := fanoutobligation.Claim{
-		Key:   fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: deliveryID, ElementRef: runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: elementID}},
+		Key:   fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: deliveryID, ElementRef: elementRef},
 		Owner: "readback-worker", Generation: 1, LeaseUntil: now.Add(time.Minute),
 	}
 	if _, err := db.Exec(`INSERT INTO fan_out_intents (
-		run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,
+		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,
 		cardinality,cursor,status,next_chunk_size,last_chunk_ms,created_at,updated_at,claim_owner,claim_generation,lease_expires_at,capsule
-	) VALUES ($1,$2,$3,$4,$5,$6,'event_payload_field',$7,'items',2,0,'open',4,0,$8,$8,$9,1,$10,$11)`,
-		runID, deliveryID, "root", elementID, "bundle-v1:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,'event_payload_field',$8,'items',2,0,'open',4,0,$9,$9,$10,1,$11,$12)`,
+		runID, deliveryID, elementRef.FlowPath, elementRef.Family, elementRef.SemanticPath, "bundle-v2:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
 		t.Fatal(err)
 	}
 	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit", nil))

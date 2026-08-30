@@ -120,7 +120,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 				delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL,
 				connect_execution_claim BLOB NOT NULL,
 				execution_authority_kind TEXT NOT NULL, authority_bundle_hash TEXT NOT NULL,
-				authority_bundle_source TEXT NOT NULL, execution_authority_id TEXT NOT NULL,
+				execution_authority_id TEXT NOT NULL,
 				execution_authority_generation INTEGER NOT NULL, selected_execution_id TEXT,
 				selected_fork_run_id TEXT, selected_execution_generation INTEGER, status TEXT NOT NULL,
 				continuation_handoff_at TIMESTAMP,
@@ -167,7 +167,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
 	}
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery source: %v", err)
 	}
@@ -182,7 +182,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 
 func (s *runtimeShutdownDeliveryStore) InspectDeliveryRecovery(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	return s.adapter.InspectRecovery(ctx, s.db, source)
 }
@@ -671,7 +671,7 @@ func TestRuntimeShutdownRetiresGrantAfterCompletionPersistenceSettles(t *testing
 		t,
 		nil,
 		nil,
-		testBundleSourceFact(t, runtimeTestBundleHash),
+		testSourceArtifactFact(t, runtimeTestBundleHash),
 		authorActivityTestRuntimeInstanceID,
 		session,
 	)
@@ -740,7 +740,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	publicationStore := &cancellationBlockingInboundStore{
 		entered: make(chan struct{}, 1),
 	}
-	hash := "bundle-v1:sha256:" + strings.Repeat("7", 64)
+	hash := "bundle-v2:sha256:" + strings.Repeat("7", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -764,7 +764,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	go func() {
 		rec := httptest.NewRecorder()
 		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-			BundleHash: hash, FlowID: "chat", RunID: "41000000-0000-0000-0000-000000000001",
+			BundleHash: hash, FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001",
 			FlowInstance: "chat/a", EntityID: "41000000-0000-0000-0000-000000000002",
 			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 		}, nil)

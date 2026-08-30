@@ -161,15 +161,15 @@ func (s *pipelineTestDeliveryOwner) commitInitial(ctx context.Context, event eve
 }
 
 func (s *pipelineTestDeliveryOwner) authorityForRun(ctx context.Context, tx *sql.Tx, runID string) (runtimedelivery.ExecutionAuthority, error) {
-	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	query := `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
 	if s.dialect == deliveryfixture.DialectSQLite {
-		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+		query = `SELECT bundle_hash FROM runs WHERE run_id=?`
 	}
-	var bundleHash, bundleSource string
-	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
+	var bundleHash string
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
 	}
-	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
 	}
@@ -240,7 +240,7 @@ func configurePipelineTestDeliveryOwner(t interface {
 
 func (s *pipelineTestDeliveryOwner) activeExecutionAuthority(ctx context.Context) (runtimedelivery.ExecutionAuthority, error) {
 	query := `
-		SELECT execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+		SELECT execution_authority_kind, authority_bundle_hash,
 		       execution_authority_id, execution_authority_generation
 		FROM event_deliveries
 		ORDER BY created_at DESC, delivery_id DESC
@@ -248,20 +248,18 @@ func (s *pipelineTestDeliveryOwner) activeExecutionAuthority(ctx context.Context
 	var (
 		kind       runtimedelivery.ExecutionAuthorityKind
 		bundleHash string
-		source     string
 		execution  string
 		generation uint64
 	)
 	if err := s.db.QueryRowContext(ctx, query).Scan(
 		&kind,
 		&bundleHash,
-		&source,
 		&execution,
 		&generation,
 	); err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
 	}
-	return runtimedelivery.DecodeExecutionAuthority(kind, bundleHash, source, execution, "", generation)
+	return runtimedelivery.DecodeExecutionAuthority(kind, bundleHash, execution, "", generation)
 }
 
 func (s *pipelineTestDeliveryOwner) makeRetryEligible(ctx context.Context, deliveryID string) error {
@@ -298,7 +296,7 @@ func (s *pipelineTestDeliveryOwner) ActivateDeliveryAuthority(ctx context.Contex
 
 func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	return s.adapter.InspectRecovery(ctx, s.db, source)
 }

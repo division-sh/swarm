@@ -8,10 +8,6 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", `name: handler-rule-selection-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
 pins:
   inputs:
@@ -38,28 +34,23 @@ direct: {swarm: {source: external}}
     rules.selected:
       rules:
         selected:
-          element_id: 00000000-0000-4000-8000-000000000421
           id: rules-label
           condition: else
     rules.no_match:
       rules:
-        - element_id: 00000000-0000-4000-8000-000000000422
-          id: never-rules
+        - id: never-rules
           condition: "false"
     rules.evaluation_failed:
       rules:
-        - element_id: 00000000-0000-4000-8000-000000000426
-          id: failed-rules
+        - id: failed-rules
           condition: "payload.proof > 0"
     complete.selected:
       on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000423
-          id: complete-label
+        - id: complete-label
           condition: else
     complete.no_match:
       on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000424
-          id: never-complete
+        - id: never-complete
           condition: "false"
     direct: {}
 `)
@@ -115,35 +106,23 @@ pins:
         stage: awaiting
         members: {from: entity.expected, by: payload.member_id}
         output: payload.result
-        on_complete: {element_id: 00000000-0000-4000-8000-000000000013, advances_to: ready}
-        timeout: {element_id: 00000000-0000-4000-8000-000000000014, after: ` + timeout + `, advances_to: attention}
+        on_complete: {advances_to: ready}
+        timeout: {after: ` + timeout + `, advances_to: attention}
 `
 
 	switch flowID {
 	case "":
-		writeClosedVariantFile(t, root, "package.yaml", `name: join-eventbus-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
 		writeClosedVariantFile(t, root, "schema.yaml", joinSchema)
 		writeClosedVariantFile(t, root, "entities.yaml", joinEntities)
 		writeClosedVariantFile(t, root, "events.yaml", joinEvents)
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
 	case "orders":
-		writeClosedVariantFile(t, root, "package.yaml", `name: join-eventbus-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: orders
-    flow: orders
-    mode: template
-`)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "mode: template\ninstance: order_id\n"+joinSchema,
 			joinEvents, joinEntities, joinNodes)
-		writeClosedVariantFile(t, root, "flows/orders/types.yaml", joinTypes)
+		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
 	default:
 		t.Fatalf("unsupported exact join flow %q", flowID)
 	}
@@ -155,10 +134,7 @@ flows:
 func CopyRecurringTimerCancellation(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", `name: timer-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", `name: timer-proof
 stages:
   waiting:
@@ -192,23 +168,16 @@ pins:
 func CopyTemplateOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: template
-connect:
-  - event: deploy.done
-    from: producer
-    to: .
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root
 pins:
   inputs:
     events:
       - deploy.done
+connect:
+  - event: deploy.done
+    from: producer
+    to: .
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:

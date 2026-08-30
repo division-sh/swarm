@@ -43,7 +43,6 @@ type AuthoredSubscriptionRequest struct {
 	ConsumerID   string
 	FlowID       string
 	FlowPath     string
-	PackageKey   string
 	LocalEvents  map[string]struct{}
 	InputEvents  []string
 	Authored     string
@@ -164,7 +163,6 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	req.ConsumerID = strings.TrimSpace(req.ConsumerID)
 	req.FlowID = strings.TrimSpace(req.FlowID)
 	req.FlowPath = eventidentity.Normalize(req.FlowPath)
-	req.PackageKey = strings.TrimSpace(req.PackageKey)
 	req.Authored = eventidentity.Normalize(req.Authored)
 	result := AuthoredSubscriptionAdmission{
 		consumerKind: req.ConsumerKind,
@@ -181,27 +179,6 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureTimerPatternForbidden,
 				fmt.Sprintf("timer %q event reference %q must be an exact local event name", req.ConsumerID, req.Authored))
 		}
-		if source != nil {
-			resolution := ResolveImportBoundaryWildcardSubscription(source, req.PackageKey, req.FlowID, req.FlowPath, req.LocalEvents, req.Authored)
-			if resolution.Scoped && len(resolution.Patterns) == 0 {
-				return failedAuthoredSubscription(result, AuthoredSubscriptionFailurePatternUnauthorized,
-					fmt.Sprintf("%s %q subscription %q has no imported-package subtree candidate or bind.observe grant", req.ConsumerKind, req.ConsumerID, req.Authored))
-			}
-			if resolution.Scoped {
-				patterns := make([]string, 0, len(resolution.Patterns))
-				localizedEvents := make([]string, 0, len(resolution.Patterns))
-				for _, pattern := range resolution.Patterns {
-					patterns = append(patterns, pattern.EventPattern)
-					localizedEvents = append(localizedEvents, pattern.LocalizedEvent)
-				}
-				result.class = AuthoredSubscriptionImportedPattern
-				result.persistedValue = req.Authored
-				result.routePatterns = normalizedSubscriptionValues(patterns)
-				result.localizedEvents = normalizedSubscriptionValues(localizedEvents)
-				return result
-			}
-		}
-
 		pattern := ""
 		if req.ConsumerKind == AuthoredSubscriptionConsumerAgent {
 			resolved, err := admitNonImportAgentPattern(req.FlowPath, req.Authored)
@@ -282,21 +259,14 @@ func ClassifyExecutableNodeSubscription(source Source, node runtimeidentity.Exec
 			fmt.Sprintf("node %q semantic scope is invalid: %v", node.Key(), scopeErr))
 	}
 	if scope, ok := semanticScope.OwningFlow(); ok {
-		flowPath = scope.Path
+		flowPath = sourceFlowPath(source, node.FlowPath())
 		localEvents, inputEvents = authoredSubscriptionScopeEvents(scope)
-	} else if project, ok := semanticScope.DeclarationProject(); ok && node.FlowID() == "" {
-		for eventType := range project.Events {
-			if eventType = eventidentity.Normalize(eventType); eventType != "" {
-				localEvents[eventType] = struct{}{}
-			}
-		}
 	}
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerNode,
 		ConsumerID:   node.Key(),
-		FlowID:       node.FlowID(),
+		FlowID:       node.FlowPath(),
 		FlowPath:     flowPath,
-		PackageKey:   node.PackageKey(),
 		LocalEvents:  localEvents,
 		InputEvents:  inputEvents,
 		Authored:     authored,
@@ -358,7 +328,7 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 	var inputEvents []string
 	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
 		if scope, ok := semanticScope.OwningFlow(); ok {
-			flowPath = scope.Path
+			flowPath = sourceFlowPath(source, node.FlowPath())
 			inputEvents = append([]string(nil), scope.InputEvents...)
 		}
 	}
@@ -386,13 +356,10 @@ func fillAuthoredSubscriptionScope(source Source, req *AuthoredSubscriptionReque
 	if req == nil || source == nil {
 		return
 	}
-	if req.FlowPath == "" {
+	if req.FlowPath == "" && strings.TrimSpace(req.FlowID) != "." {
 		req.FlowPath = eventidentity.Normalize(source.FlowPath(req.FlowID))
 	}
 	if scope, ok := source.FlowScopeByID(req.FlowID); ok {
-		if req.PackageKey == "" {
-			req.PackageKey = strings.TrimSpace(scope.PackageKey)
-		}
 		if len(req.LocalEvents) == 0 || len(req.InputEvents) == 0 {
 			localEvents, inputEvents := authoredSubscriptionScopeEvents(scope)
 			if len(req.LocalEvents) == 0 {
@@ -462,10 +429,11 @@ func authoredSubscriptionDescendants(source Source, flowID string) []eventidenti
 }
 
 func sourceFlowPath(source Source, flowID string) string {
-	if source == nil {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "." {
 		return ""
 	}
-	return source.FlowPath(strings.TrimSpace(flowID))
+	return source.FlowPath(flowID)
 }
 
 func sortedSubscriptionEventSet(events map[string]struct{}) []string {

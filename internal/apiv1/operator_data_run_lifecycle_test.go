@@ -11,19 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-const dataRunSchemaBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-const dataRunMissingBundleHash = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+var dataRunAmendedSourceArtifact = mustAPITestSourceArtifactNamed("data-run-schema-amended")
+var dataRunMissingSourceArtifact = mustAPITestSourceArtifactNamed("data-run-missing")
+var dataRunAmendedBundleHash = dataRunAmendedSourceArtifact.BundleHash()
+var dataRunMissingBundleHash = dataRunMissingSourceArtifact.BundleHash()
 
 type dataRunLifecycleStore interface {
 	runtimebus.EventStore
@@ -34,7 +36,7 @@ type dataRunLifecycleStore interface {
 	EntityReadStore
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
-	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
@@ -415,7 +417,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				runID := uuid.NewString()
 				storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 					RunID: runID, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
-					BundleHash: runStartTestBundleHash, BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
+					BundleHash: runStartTestBundleHash,
 				})
 				return runID
 			}
@@ -458,7 +460,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			missingTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: missingTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
-				BundleHash: dataRunMissingBundleHash, BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
+				BundleHash: dataRunMissingBundleHash,
 			})
 			_, err = storetest.MaterializeDataForkPins(ctx, fixture.primary, fusedRunID, missingTarget, dataRunMissingBundleHash, nil, false)
 			var domainErr *durabledata.DomainError
@@ -509,18 +511,21 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 		})
 
 		t.Run("same declaration schema amendment is not comparable", func(t *testing.T) {
-			amended, _, _ := dataRunLifecycleCatalog(t, dataRunSchemaBundleHash, true)
-			if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, amended); err != nil {
+			amendedBundle := runStartTestBundle("scan.requested")
+			amendedBundle.SourceArtifact = dataRunAmendedSourceArtifact
+			amendedBundleHash := dataRunAmendedBundleHash
+			amended, _, _ := dataRunLifecycleCatalog(t, amendedBundleHash, true)
+			if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, amendedBundle.SourceArtifact, amended); err != nil {
 				t.Fatalf("register amended catalog: %v", err)
 			}
-			amendedSource := semanticview.Wrap(runStartTestBundle("scan.requested"))
+			amendedSource := semanticview.Wrap(amendedBundle)
 			amendedBus, err := newScopedAPITestEventBus(t, fixture.primary, runtimebus.EventBusOptions{
-				ContractBundle: amendedSource, BundleSourceFact: mustAPITestBundleSourceFact(dataRunSchemaBundleHash),
+				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
 			})
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)
 			}
-			if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, amended); err != nil {
+			if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, amendedBundle.SourceArtifact, amended); err != nil {
 				t.Fatalf("restore amended catalog: %v", err)
 			}
 			amendedHandler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, amendedBus, amendedSource)
@@ -531,7 +536,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 					"declaration": dataRunDeclaration(scanRef), "version_id": firstVersion,
 				}},
 			}
-			mismatchBody := dataRunEventPublishBodyForBundle(mismatchRunID, "explicit-schema-mismatch", dataRunSchemaBundleHash, mismatchData)
+			mismatchBody := dataRunEventPublishBodyForBundle(mismatchRunID, "explicit-schema-mismatch", amendedBundleHash, mismatchData)
 			for attempt := 0; attempt < 2; attempt++ {
 				response := rpcCall(t, amendedHandler, mismatchBody)
 				if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataRejected) {
@@ -547,13 +552,13 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("schema-mismatch explicit pin receipt = %#v, %v", mismatchReceipt, err)
 			}
 			result, err := fixture.primary.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
-				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: dataRunSchemaBundleHash,
+				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: amendedBundleHash,
 				Declaration: scanRef, ExpectedHead: second.Head.After, InputFormat: "jsonl", Input: []byte("{\"stage\":\"new\",\"topic\":\"pool-three\"}\n"),
 			})
 			if err != nil || result.Outcome != "accepted" || result.Delta.State != "not_comparable" || result.Delta.Reason != "schema_changed" {
 				t.Fatalf("schema amendment result = %#v, %v", result, err)
 			}
-			snapshot, err := fixture.reconstructed.ShowDataResource(ctx, dataRunSchemaBundleHash, scanRef)
+			snapshot, err := fixture.reconstructed.ShowDataResource(ctx, amendedBundleHash, scanRef)
 			if err != nil || len(snapshot.Versions) != 3 || snapshot.Versions[0].VersionID != firstVersion || snapshot.Versions[0].Manifest.SchemaDigest == result.SchemaDigest {
 				t.Fatalf("schema amendment history = %#v, %v", snapshot, err)
 			}
@@ -562,9 +567,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			incompatibleTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: incompatibleTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
-				BundleHash: dataRunSchemaBundleHash, BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
+				BundleHash: amendedBundleHash,
 			})
-			_, err = storetest.MaterializeDataForkPins(ctx, fixture.primary, fusedRunID, incompatibleTarget, dataRunSchemaBundleHash, nil, false)
+			_, err = storetest.MaterializeDataForkPins(ctx, fixture.primary, fusedRunID, incompatibleTarget, amendedBundleHash, nil, false)
 			var domainErr *durabledata.DomainError
 			if !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeSchemaMismatch {
 				t.Fatalf("schema-incompatible inherited fork error = %v", err)
@@ -575,9 +580,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			overrideTarget := uuid.NewString()
 			storetest.RequireRun(t, ctx, fixture.primary, storetest.RunFixture{
 				RunID: overrideTarget, State: runtimerunlifecycle.StateRunning, Origin: storetest.ScenarioSetupOrigin(),
-				BundleHash: dataRunSchemaBundleHash, BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
+				BundleHash: amendedBundleHash,
 			})
-			pins, err := storetest.MaterializeDataForkPins(ctx, fixture.primary, fusedRunID, overrideTarget, dataRunSchemaBundleHash, []durabledata.ExplicitPin{{
+			pins, err := storetest.MaterializeDataForkPins(ctx, fixture.primary, fusedRunID, overrideTarget, amendedBundleHash, []durabledata.ExplicitPin{{
 				Declaration: scanRef, VersionID: result.Candidate.VersionID,
 			}}, false)
 			if err != nil || len(pins) != 1 || pins[0].Selection != "fork_override" || pins[0].VersionID != result.Candidate.VersionID {
@@ -722,7 +727,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 		value        func() any
 	}{
 		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
+		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
 	}
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
@@ -1289,11 +1294,16 @@ func dataRunLifecycleCatalog(t *testing.T, bundleHash string, amended bool) (dur
 }
 
 func registerDataRunLifecycleCatalog(ctx context.Context, selected dataRunLifecycleStore, catalog durabledata.Catalog) error {
-	_, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash: catalog.BundleHash, ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
-		ParsedJSON: map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
-		Metadata:   map[string]any{"source": "api-test"},
-	}, catalog)
+	artifact := authorActivityTestSourceArtifact
+	if catalog.BundleHash == dataRunAmendedBundleHash {
+		artifact = dataRunAmendedSourceArtifact
+	} else if catalog.BundleHash == dataRunMissingBundleHash {
+		artifact = dataRunMissingSourceArtifact
+	}
+	if artifact.BundleHash() != catalog.BundleHash {
+		return fmt.Errorf("no API test source artifact for catalog %s", catalog.BundleHash)
+	}
+	_, err := selected.EnsureSourceArtifactWithData(ctx, artifact, catalog)
 	return err
 }
 
@@ -1343,7 +1353,7 @@ func dataRunFusedImport(id string, ref durabledata.DeclarationRef, expected dura
 }
 
 func dataRunDeclaration(ref durabledata.DeclarationRef) map[string]any {
-	return map[string]any{"package_key": ref.PackageKey, "event": ref.EventName}
+	return map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName}
 }
 
 func dataRunHasPin(pins []durabledata.Pin, runID, state string) bool {

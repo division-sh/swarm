@@ -208,7 +208,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	bundleHash := req.LoadedSource.BundleSourceFact.BundleHash()
+	bundleHash := req.LoadedSource.SourceArtifactFact.BundleHash()
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
 		bundleHash, nil)
@@ -289,7 +289,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	var lifecycleManager *runtimemanager.AgentManager
 	deliveryAuthority, err := runtimedelivery.NewSelectedExecutionAuthority(
-		req.LoadedSource.BundleSourceFact,
+		req.LoadedSource.SourceArtifactFact,
 		c.authority.SelectedFork.ExecutionID,
 		c.authority.SelectedFork.ForkRunID,
 		c.authority.SelectedFork.Generation,
@@ -304,7 +304,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		ReceiverExecution:           receiverExecution,
 		Durable:                     c.ports.busDurable,
 		PipelineObligations:         c.ports.pipelineObligations,
-		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
+		SourceArtifactFact:          req.LoadedSource.SourceArtifactFact,
 		DeliveryAuthority:           deliveryAuthority,
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture),

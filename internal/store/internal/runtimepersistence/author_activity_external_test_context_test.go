@@ -2,7 +2,6 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +20,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -40,7 +40,7 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	fixture := &externalStoreTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
+		BundleHash:        sourceartifactfixture.BundleHash,
 	})
 	if err != nil {
 		t.Fatalf("create external store test work owner: %v", err)
@@ -83,6 +83,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type externalStoreTestDurableEventBusStore interface {
+	sourceartifactfixture.Writer
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -112,8 +113,10 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = mustExternalStoreTestBundleSourceFact()
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), selected)
+	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
+		sourceartifactfixture.Require(t, context.Background(), selected)
 	}
 	if opts.RuntimeInstanceID == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
@@ -126,7 +129,7 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -156,18 +159,14 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	return bus, nil
 }
 
-func mustExternalStoreTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
-	if err != nil {
-		panic(err)
-	}
-	return fact
+func mustExternalStoreTestSourceArtifactFact() runtimecorrelation.SourceArtifactFact {
+	return sourceartifactfixture.Fact()
 }
 
 func testAuthorActivityContext() context.Context {
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	fact := mustExternalStoreTestBundleSourceFact()
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), fact)
+	bundleHash := sourceartifactfixture.BundleHash
+	fact := mustExternalStoreTestSourceArtifactFact()
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",

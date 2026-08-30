@@ -128,9 +128,6 @@ func eventMetadataInternalActorNames(source semanticview.Source) eventMetadataNa
 			names.add(required.Role, fmt.Sprintf("required agent role %s", strings.TrimSpace(required.Role)))
 		}
 	}
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
-		eventMetadataAddGlobalFlowTopologyNames(source, names, "")
-	}
 	eventMetadataAddGlobalCompositionConnectNames(source, names)
 	for _, timer := range source.WorkflowTimers() {
 		names.add(timer.ID, fmt.Sprintf("timer %s", strings.TrimSpace(timer.ID)))
@@ -223,14 +220,8 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 }
 
 func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndpoint, decl deadEventDeclaration) bool {
-	if normalizeEventMetadataPackageKey(endpoint.PackageKey) != normalizeEventMetadataPackageKey(decl.PackageKey) {
-		return false
-	}
 	if eventidentity.Normalize(endpoint.Event.Canonical) != eventidentity.Normalize(decl.Canonical) {
 		return false
-	}
-	if strings.TrimSpace(decl.FlowID) == "" {
-		return strings.TrimSpace(endpoint.FlowID) == ""
 	}
 	return deadEventSameScope(decl.FlowID, endpoint.FlowID)
 }
@@ -296,14 +287,6 @@ func eventMetadataAddNodeRole(source semanticview.Source, names eventMetadataNam
 	}
 }
 
-func normalizeEventMetadataPackageKey(value string) string {
-	value = strings.Trim(strings.TrimSpace(value), "/")
-	if value == "" {
-		return runtimeidentity.RootPackageKey
-	}
-	return value
-}
-
 func eventMetadataAddAgentRole(names eventMetadataNameIndex, agentKey, agentRole, role string) {
 	agentKey = strings.TrimSpace(agentKey)
 	role = strings.TrimSpace(role)
@@ -325,7 +308,7 @@ func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, rol
 	names.add(flowID, label)
 	if pinName != "" {
 		names.add(pinName, label)
-		if flowID == "" {
+		if flowID == "." {
 			names.add("."+pinName, label)
 		} else {
 			names.add(flowID+"."+pinName, label)
@@ -335,7 +318,7 @@ func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, rol
 
 func eventMetadataFlowLabel(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return "root flow"
 	}
 	return fmt.Sprintf("flow %s", flowID)

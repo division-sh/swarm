@@ -1,0 +1,4 @@
+name: worker
+version: 1.0.0
+description: Template worker flow that auto-emits on creation.
+platform_version: ">=0.7.0 <0.8.0"

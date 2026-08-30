@@ -22,7 +22,7 @@ func TestCompileRequiresExactInputWhenAmbiguousAndBindsEmptyProfile(t *testing.T
 		t.Fatal(err)
 	}
 	hash, _ := runtimecontracts.BundleHash(bundle)
-	fact, _ := runtimecorrelation.NewEphemeralBundleSourceFact(hash)
+	fact, _ := runtimecorrelation.NewSourceArtifactFact(hash)
 	identity, _ := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("a", 64))
 	source := semanticview.Wrap(bundle)
 	inputs := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
@@ -129,7 +129,7 @@ func derivationHostileTestSource(t *testing.T) (semanticview.Source, scenarioexe
 	if err != nil {
 		t.Fatal(err)
 	}
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(hash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
 	if err != nil {
 		t.Fatal(err)
 	}

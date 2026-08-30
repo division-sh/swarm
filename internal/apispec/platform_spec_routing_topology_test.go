@@ -59,7 +59,7 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "including when a caller supplies a prebuilt route table")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "every declared materializable event independently of current producer-census membership")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "low-level event.publish")
-	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "exact authored package.yaml file:line")
+
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "connect_source_location_missing")
 	qualifiedRetirement := mustMappingValue(t, routing, "qualified_cross_flow_subscription_retirement")
 	assertScalarContains(t, qualifiedRetirement, "hard invalidity")

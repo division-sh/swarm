@@ -39,7 +39,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		}
 		states := normalizedGateSet(c.source.FlowStates(flowID))
 		terminal := normalizedGateSet(c.source.FlowTerminalStages(flowID))
-		if flowID == "" {
+		if flowID == "." {
 			states = normalizedGateSet(workflowStageIDs(c.source.WorkflowStages()))
 			terminal = normalizedGateSet(c.source.WorkflowTerminalStages())
 		}
@@ -231,7 +231,7 @@ func workflowStageIDs(stages []runtimecontracts.WorkflowStageContract) []string 
 }
 
 func stageGateLocation(flowID, stage, decision string) string {
-	if strings.TrimSpace(flowID) == "" {
+	if strings.TrimSpace(flowID) == "." {
 		flowID = "root"
 	}
 	return fmt.Sprintf("flow %s stage %s gate %s", flowID, stage, decision)

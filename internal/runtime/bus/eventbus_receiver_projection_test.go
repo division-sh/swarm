@@ -537,6 +537,7 @@ func TestEventBusNodeRouteReceiverProjectionRejectsPublisherState(t *testing.T) 
 	}
 	evt := receiverProjectionEvent("node-route")
 	eventBus.deliveryPlanner = nodeOnlyDeliveryPlanner(t, "workflow-node", evt.Type())
+	_ = subscribeInternalDeliveriesForTest(t, eventBus, workflowRuntimeInternalCarrierID, evt.Type())
 	if err := eventBus.Publish(hostilePublisherContext(t), evt); err != nil {
 		t.Fatalf("publish through node-route receiver: %v", err)
 	}
@@ -855,7 +856,7 @@ func validateClosedReceiverContext(ctx context.Context, evt events.Event) error 
 	if _, ok := worklifetime.OccurrenceFromContext(ctx); !ok {
 		return fmt.Errorf("receiver occurrence is missing")
 	}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); !ok || !fact.Matches(authorActivityTestBundleSourceFact) {
+	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok || !fact.Matches(authorActivityTestSourceArtifactFact) {
 		return fmt.Errorf("receiver bundle source fact is missing or wrong")
 	}
 	return nil

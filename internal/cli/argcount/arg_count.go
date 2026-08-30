@@ -64,6 +64,18 @@ func MaximumNArgs(count int) cobra.PositionalArgs {
 	}
 }
 
+func RangeArgs(minimum, maximum int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) < minimum {
+			return NewDiagnostic(cmd, args, Rule{Exact: minimum})
+		}
+		if len(args) > maximum {
+			return NewDiagnostic(cmd, args, Rule{Max: maximum})
+		}
+		return nil
+	}
+}
+
 func NewDiagnostic(cmd *cobra.Command, args []string, rule Rule) error {
 	commandPath := ""
 	name := ""

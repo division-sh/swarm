@@ -195,14 +195,10 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 		"  execution_posture: live",
 		"serve:",
 		"  api_listen_addr: 127.0.0.1:1111",
-		"paths:",
-		"  contracts_path: user-contracts",
 	}, "\n")+"\n")
 	writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), strings.Join([]string{
 		"serve:",
 		"  api_listen_addr: 127.0.0.1:2222",
-		"paths:",
-		"  contracts_path: project-contracts",
 	}, "\n")+"\n")
 	localDir := filepath.Join(repo, ".swarm")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
@@ -211,8 +207,6 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 	writeRuntimeConfigText(t, filepath.Join(localDir, "swarm.yaml"), strings.Join([]string{
 		"serve:",
 		"  api_listen_addr: 127.0.0.1:3333",
-		"paths:",
-		"  contracts_path: \"\"",
 	}, "\n")+"\n")
 
 	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
@@ -222,10 +216,6 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 	if got.CLI.Serve.APIListenAddr != "127.0.0.1:3333" {
 		t.Fatalf("serve api listen addr = %q, want local-operator override", got.CLI.Serve.APIListenAddr)
 	}
-	if got.CLI.Paths.ContractsPath != "" {
-		t.Fatalf("contracts_path = %q, want explicit empty local override", got.CLI.Paths.ContractsPath)
-	}
-
 	explicitPath := filepath.Join(t.TempDir(), "explicit.yaml")
 	writeRuntimeConfigText(t, explicitPath, "serve:\n  api_listen_addr: 127.0.0.1:4444\n")
 	got, err = loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicitPath})
@@ -310,7 +300,7 @@ func TestUnifiedConfigRejectsProjectTrustAndPathEscapes(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(repo, "contracts-link")); err != nil {
 			t.Skipf("symlink unavailable: %v", err)
 		}
-		writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "paths:\n  contracts_path: contracts-link\n")
+		writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "paths:\n  platform_spec_path: contracts-link\n")
 		_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 		if err == nil || !strings.Contains(err.Error(), "path escapes project root") {
 			t.Fatalf("loadUnifiedConfig error = %v, want project path containment rejection", err)

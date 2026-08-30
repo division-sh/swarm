@@ -148,7 +148,7 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "channel_logical_operation_identity_required", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)})
 	}
-	bundleFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	bundleFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "channel_bundle_identity_required", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)})
 	}

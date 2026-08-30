@@ -9,8 +9,6 @@ import (
 )
 
 const (
-	PackageName = "template-select-or-create"
-
 	ProducerFlowID    = "producer"
 	ProducerNodeID    = "producer-node"
 	ProducerInputPin  = "account.requested"
@@ -81,7 +79,7 @@ func Write(t testing.TB, opts Options) string {
 
 func addTemplateLifecycleOverlay(t testing.TB, root string) {
 	t.Helper()
-	canonicalrouting.ApplyOverlay(t, root, "flows/"+TemplateFlowID+"/schema.yaml",
+	canonicalrouting.ApplyOverlay(t, root, TemplateFlowID+"/schema.yaml",
 		"initial_state: pending\nstates: [pending, reviewed]\nterminal_states: [reviewed]\n")
 }
 

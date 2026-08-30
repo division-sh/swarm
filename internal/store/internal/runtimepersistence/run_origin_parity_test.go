@@ -87,7 +87,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 
 			t.Run("scenario_origin_survives_publication_and_lifecycle", func(t *testing.T) {
 				runID := uuid.NewString()
-				source := mustStoreTestEphemeralBundleSourceFact(runLifecycleCandidateParityBundleHash)
+				source := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 				request := runtimerunlifecycle.CreateRequest{
 					RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 					Source: source, StartedAt: at.Add(time.Minute),
@@ -113,7 +113,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				}
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 
-				replacement := mustStoreTestEphemeralBundleSourceFact(runLifecycleCandidateParityReplacementHash)
+				replacement := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
 				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil ||
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
@@ -165,14 +165,16 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 			reader := selected.(runOriginReadStore)
 			ctx := testAuthorActivityRuntimeContext()
-			serviceID := runtimeflowidentity.StandingServiceID("origin-parity", backend)
-			firstHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+			flowPath := "origin-parity/" + backend
+			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
+			firstArtifact := storeTestSourceArtifact("standing-origin-first-" + backend)
+			firstHash := firstArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID: serviceID, PackageKey: "origin-parity", FlowID: backend,
+				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
-			seedStoreTestPersistedBundle(t, db, firstHash)
+			seedStoreTestPersistedArtifact(t, db, firstArtifact)
 
 			fresh, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -243,15 +245,18 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			candidateStore := selected.(runLifecycleCandidateParityStore)
 			registrar := selected.(runtimerunlifecycle.CandidateRegistrar)
 			ctx := testAuthorActivityRuntimeContext()
-			serviceID := runtimeflowidentity.StandingServiceID("repair-candidate", "standing")
-			firstHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
-			secondHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+			flowPath := "repair-candidate/standing"
+			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
+			firstArtifact := storeTestSourceArtifact("standing-repair-first-" + backend)
+			secondArtifact := storeTestSourceArtifact("standing-repair-second-" + backend)
+			firstHash := firstArtifact.BundleHash()
+			secondHash := secondArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID: serviceID, PackageKey: "repair-candidate", FlowID: "standing",
+				ServiceID: serviceID, FlowPath: flowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
-			seedStoreTestPersistedBundle(t, db, firstHash)
+			seedStoreTestPersistedArtifact(t, db, firstArtifact)
 			fresh, err := workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
 				t.Fatalf("create standing generation: %v", err)
@@ -273,8 +278,8 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			insertStandingRestartAbandonControl(t, ctx, db, backend, fresh.RunID)
 
-			candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
-			seedStoreTestPersistedBundle(t, db, secondHash)
+			candidate.Source = mustStoreTestSourceArtifactFact(secondHash)
+			seedStoreTestPersistedArtifact(t, db, secondArtifact)
 			process := worklifetime.NewProcess()
 			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, secondHash)
 			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
@@ -315,11 +320,12 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			awaitRunLifecycleExecutorCandidates(t, executor, 0)
 
-			suspendedServiceID := runtimeflowidentity.StandingServiceID("repair-candidate-suspended", "standing")
+			suspendedFlowPath := "repair-candidate-suspended/standing"
+			suspendedServiceID := runtimeflowidentity.StandingServiceID(suspendedFlowPath)
 			suspendedCandidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID: suspendedServiceID, PackageKey: "repair-candidate-suspended", FlowID: "standing",
+				ServiceID: suspendedServiceID, FlowPath: suspendedFlowPath,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact(firstHash),
+				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
 			suspendedFresh, err := workflow.ReconcileStandingService(ctx, suspendedCandidate)
 			if err != nil {
@@ -347,7 +353,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			}
 			insertStandingRestartAbandonControl(t, ctx, db, backend, suspendedFresh.RunID)
 
-			suspendedCandidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
+			suspendedCandidate.Source = mustStoreTestSourceArtifactFact(secondHash)
 			beforeSuspendedRepair := countingStore.executions.Load()
 			suspendedStopped, err := workflow.ReconcileStandingService(runtimeCtx, suspendedCandidate)
 			if err != nil {
@@ -721,7 +727,7 @@ func insertRawRunOrigin(
 ) error {
 	snapshot := runlifecyclefixture.CorruptSnapshot{
 		RunID: runID, State: string(runtimerunlifecycle.StateRunning),
-		BundleHash: runLifecycleCandidateParityBundleHash, BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
+		BundleHash: runLifecycleCandidateParityBundleHash,
 		OriginKind: kind, TriggerEventID: eventID, TriggerEventType: eventType,
 		OriginServiceID: serviceID, OriginGeneration: generation,
 		ForkedFromRunID: sourceRunID, ForkedFromEventID: sourceEventID,

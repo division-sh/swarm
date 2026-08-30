@@ -11,14 +11,7 @@ import (
 
 func TestWorkspaceClassFindingsCensusAmbiguousScopedDeclarations(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-workspace-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-validation\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 workspace_classes:
@@ -27,7 +20,7 @@ workspace_classes:
 `)
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "agents.yaml"), `
 shared-worker:
   id: shared-worker
@@ -44,8 +37,8 @@ shared-worker:
 	source := semanticview.Wrap(bundle)
 	joined := findingsText(workspaceClassFindings(source))
 	for _, want := range []string{
-		`project packages/project-a agent shared-worker references undefined workspace_class "missing"`,
-		`project packages/project-b agent shared-worker references undefined workspace_class "missing"`,
+		`agent flow packages/project-a agent shared-worker references undefined workspace_class "missing"`,
+		`agent flow packages/project-b agent shared-worker references undefined workspace_class "missing"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("workspace findings = %q, want %q", joined, want)

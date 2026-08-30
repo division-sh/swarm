@@ -112,7 +112,7 @@ func TestManagedHITLNamesRejectEveryNonPlatformOwnerAndHandlerDisposition(t *tes
 	}
 
 	for _, toolName := range []string{NotifyHumanToolName, AskHumanToolName} {
-		for _, scope := range []string{"root", "project", "flow"} {
+		for _, scope := range []string{"root", "flow"} {
 			for _, disposition := range dispositions {
 				t.Run(toolName+"/"+scope+"/"+disposition.name, func(t *testing.T) {
 					entry := runtimecontracts.AgentRegistryEntry{ID: "worker", Tools: []string{toolName}}
@@ -181,7 +181,7 @@ func TestHITLIdentityLifecycleRejectsSourceDefinitionsWithoutAgents(t *testing.T
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
 	for _, identity := range identities {
-		for _, scope := range []string{"root", "project", "flow"} {
+		for _, scope := range []string{"root", "flow"} {
 			t.Run(identity.name+"/"+scope, func(t *testing.T) {
 				source := retiredToolSourceForScope(scope, nil, map[string]runtimecontracts.ToolSchemaEntry{
 					identity.name: retiredToolEntry(
@@ -290,7 +290,7 @@ func TestHITLIdentityLifecycleRejectsWithheldAndRetiredReferences(t *testing.T) 
 		{name: "human_task_request", teaching: "use ask_human"},
 	}
 	for _, identity := range identities {
-		for _, scope := range []string{"root", "project", "flow"} {
+		for _, scope := range []string{"root", "flow"} {
 			for _, surface := range []string{"configured_tool", "direct_permission", "permission_bundle"} {
 				t.Run(identity.name+"/"+scope+"/"+surface, func(t *testing.T) {
 					entry := runtimecontracts.AgentRegistryEntry{ID: "worker"}

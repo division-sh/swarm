@@ -34,7 +34,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		var (
 			bundleHash, semanticDigest, sourceKind, sourceField, status, blockedReason string
 			sourceEvent, sourceRun, sourceEntity, sourceMutation                       sql.NullString
-			resourcePackage, resourceEvent, resourceVersion                            sql.NullString
+			resourceFlowPath, resourceEvent, resourceVersion                           sql.NullString
 			cardinality, cursor, nextChunk                                             int
 			capsuleRaw                                                                 []byte
 			claimOwner                                                                 sql.NullString
@@ -45,21 +45,21 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			SELECT bundle_hash, semantic_digest, source_kind,
 				source_event_id, source_run_id, source_entity_id,
 				COALESCE(source_field, ''), source_mutation_id,
-				source_resource_package_key, source_resource_event_name, source_resource_version_id,
+				source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 				cardinality, cursor, status, next_chunk_size, capsule,
 				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, '')
 			FROM fan_out_intents
-			WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`
+			WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
 		if postgres {
 			intentQuery = strings.NewReplacer(
 				"source_event_id, source_run_id, source_entity_id", "source_event_id::text, source_run_id::text, source_entity_id::text",
 				"source_mutation_id,", "source_mutation_id::text,",
 			).Replace(intentQuery)
 		}
-		if err := tx.QueryRowContext(ctx, intentQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID).Scan(
+		if err := tx.QueryRowContext(ctx, intentQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.FlowPath, sourceIntent.Request.Key.ElementRef.Family, sourceIntent.Request.Key.ElementRef.SemanticPath).Scan(
 			&bundleHash, &semanticDigest, &sourceKind,
 			&sourceEvent, &sourceRun, &sourceEntity, &sourceField, &sourceMutation,
-			&resourcePackage, &resourceEvent, &resourceVersion,
+			&resourceFlowPath, &resourceEvent, &resourceVersion,
 			&cardinality, &cursor, &status, &nextChunk, &capsuleRaw,
 			&claimOwner, &claimGeneration, &leaseExpires, &lastServed, &blockedReason,
 		); err != nil {
@@ -73,7 +73,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if bundleHash != planRef.BundleHash || semanticDigest != planRef.SemanticDigest || sourceKind != string(source.Kind) ||
 			strings.TrimSpace(sourceEvent.String) != strings.TrimSpace(source.EventID) || strings.TrimSpace(sourceRun.String) != strings.TrimSpace(source.RunID) ||
 			strings.TrimSpace(sourceEntity.String) != strings.TrimSpace(source.EntityID) || sourceField != strings.TrimSpace(source.Field) ||
-			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourcePackage.String) != strings.TrimSpace(source.Declaration.PackageKey) ||
+			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourceFlowPath.String) != strings.TrimSpace(source.Declaration.FlowPath) ||
 			strings.TrimSpace(resourceEvent.String) != strings.TrimSpace(source.Declaration.EventName) || strings.TrimSpace(resourceVersion.String) != strings.TrimSpace(string(source.VersionID)) ||
 			cardinality != sourceIntent.Request.Cardinality || cursor != sourceIntent.Cursor || status != string(sourceIntent.Status) || nextChunk != fanoutobligation.InitialChunkSize ||
 			!reflect.DeepEqual(capsule, sourceIntent.Request.Capsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires.Valid || lastServed.Valid || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
@@ -82,12 +82,12 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		outcomeQuery := `
 			SELECT ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
 			FROM fan_out_outcomes
-			WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
+			WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
 			ORDER BY ordinal`
 		if postgres {
 			outcomeQuery = strings.Replace(outcomeQuery, "event_id, source_event_id", "event_id::text, source_event_id::text", 1)
 		}
-		rows, err := tx.QueryContext(ctx, outcomeQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID)
+		rows, err := tx.QueryContext(ctx, outcomeQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.FlowPath, sourceIntent.Request.Key.ElementRef.Family, sourceIntent.Request.Key.ElementRef.SemanticPath)
 		if err != nil {
 			return fmt.Errorf("load materialized fork fan-out outcomes: %w", err)
 		}
@@ -145,14 +145,14 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 	targetBundleHash = strings.TrimSpace(targetBundleHash)
 	proofByElement := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(proofs))
 	for _, proof := range proofs {
-		if _, err := proof.ElementRef.ContractElementRef(); err != nil {
+		if _, err := proof.ElementRef.DeclarationIdentity(); err != nil {
 			return nil, fmt.Errorf("selected fan-out plan proof: %w", err)
 		}
 		if strings.TrimSpace(proof.BundleHash) != targetBundleHash || strings.TrimSpace(proof.SemanticDigest) == "" {
 			return nil, fmt.Errorf("selected fan-out plan proof must belong to target bundle %s", targetBundleHash)
 		}
 		if prior, duplicate := proofByElement[proof.ElementRef]; duplicate && prior != proof {
-			return nil, fmt.Errorf("selected fan-out plan proof is contradictory for %s/%s", proof.ElementRef.PackageKey, proof.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected fan-out plan proof is contradictory for %s", fanOutElementLabel(proof.ElementRef))
 		}
 		proofByElement[proof.ElementRef] = proof
 	}
@@ -162,7 +162,7 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 		if source.BundleHash == targetBundleHash {
 			if proof, present := proofByElement[source.ElementRef]; present {
 				if proof.SemanticDigest != source.SemanticDigest {
-					return nil, fmt.Errorf("selected bundle changed pending fan_out element %s/%s semantic digest", source.ElementRef.PackageKey, source.ElementRef.ElementID)
+					return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
 				}
 				resolved[source.ElementRef] = proof
 			} else {
@@ -172,10 +172,10 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 		}
 		proof, ok := proofByElement[source.ElementRef]
 		if !ok {
-			return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out element %s/%s", targetBundleHash, source.ElementRef.PackageKey, source.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
 		}
 		if proof.SemanticDigest != source.SemanticDigest {
-			return nil, fmt.Errorf("selected bundle changed pending fan_out element %s/%s semantic digest", source.ElementRef.PackageKey, source.ElementRef.ElementID)
+			return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
 		}
 		resolved[source.ElementRef] = proof
 	}
@@ -224,27 +224,27 @@ func materializeRunForkFanOutObligations(
 		}
 		intentInsert := `
 			INSERT INTO fan_out_intents (
-				run_id, triggering_delivery_id, package_key, element_id,
+				run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 				bundle_hash, semantic_digest, source_kind, source_event_id,
 				source_run_id, source_entity_id, source_field, source_mutation_id,
-				source_resource_package_key, source_resource_event_name, source_resource_version_id,
+				source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 				cardinality, cursor, status, next_chunk_size, capsule,
 				created_at, updated_at, claim_owner, claim_generation, lease_expires_at,
 				last_served_at, blocked_reason
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13, $14, $15,
-				$16, $17, $18, $19, $20,
-				$21, $21, NULL, 0, NULL, NULL, $22
+				$8, $9, $10, $11, $12, $13, $14, $15, $16,
+				$17, $18, $19, $20, $21,
+				$22, $22, NULL, 0, NULL, NULL, $23
 			)
 		`
 		if postgres {
-			intentInsert = strings.Replace(intentInsert, "$20,", "$20::jsonb,", 1)
+			intentInsert = strings.Replace(intentInsert, "$21,", "$21::jsonb,", 1)
 		}
-		if _, err := tx.ExecContext(ctx, intentInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
+		if _, err := tx.ExecContext(ctx, intentInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.FlowPath, intent.Request.Key.ElementRef.Family, intent.Request.Key.ElementRef.SemanticPath,
 			planRef.BundleHash, planRef.SemanticDigest, string(intent.Source.Kind), nullableRunForkString(intent.Source.EventID),
 			nullableRunForkString(intent.Source.RunID), nullableRunForkString(intent.Source.EntityID), nullableRunForkString(intent.Source.Field), nullableRunForkString(intent.Source.MutationID),
-			nullableRunForkString(intent.Source.Declaration.PackageKey), nullableRunForkString(intent.Source.Declaration.EventName), nullableRunForkString(string(intent.Source.VersionID)),
+			nullableRunForkString(intent.Source.Declaration.FlowPath), nullableRunForkString(intent.Source.Declaration.EventName), nullableRunForkString(string(intent.Source.VersionID)),
 			intent.Request.Cardinality, intent.Cursor, string(intent.Status), intent.NextChunkSize, capsule, now, nullableRunForkString(intent.BlockedReason)); err != nil {
 			return 0, fmt.Errorf("insert materialized fork fan-out %s: %w", intent.Request.Key.String(), err)
 		}
@@ -260,17 +260,17 @@ func materializeRunForkFanOutObligations(
 			}
 			outcomeInsert := `
 				INSERT INTO fan_out_outcomes (
-					run_id, triggering_delivery_id, package_key, element_id,
+					run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 					ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
 				) VALUES (
-					$1, $2, $3, $4, $5, $6,
-					$7, $8, $9, $10, $11
+					$1, $2, $3, $4, $5, $6, $7,
+					$8, $9, $10, $11, $12
 				)
 			`
 			if postgres {
-				outcomeInsert = strings.Replace(outcomeInsert, "$10,", "$10::jsonb,", 1)
+				outcomeInsert = strings.Replace(outcomeInsert, "$11,", "$11::jsonb,", 1)
 			}
-			if _, err := tx.ExecContext(ctx, outcomeInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
+			if _, err := tx.ExecContext(ctx, outcomeInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.FlowPath, intent.Request.Key.ElementRef.Family, intent.Request.Key.ElementRef.SemanticPath,
 				outcome.Ordinal, string(outcome.Kind), nullableRunForkString(outcome.EventID), nullableRunForkString(outcome.SourceEventID), nullableRunForkString(string(outcome.InheritedDisposition)), failure, now); err != nil {
 				return 0, fmt.Errorf("insert inherited fork fan-out outcome %d: %w", outcome.Ordinal, err)
 			}
@@ -320,12 +320,12 @@ func bindRunForkFanOutPendingReplays(
 			}
 			result, err := tx.ExecContext(ctx, `
 				INSERT INTO fan_out_outcomes (
-					run_id, triggering_delivery_id, package_key, element_id,
+					run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 					ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
-				) VALUES ($1,$2,$3,$4,$5,'committed',$6,NULL,NULL,NULL,$7)
-				ON CONFLICT (run_id, triggering_delivery_id, package_key, element_id, ordinal) DO NOTHING
+				) VALUES ($1,$2,$3,$4,$5,$6,'committed',$7,NULL,NULL,NULL,$8)
+				ON CONFLICT (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal) DO NOTHING
 			`, forkRunID, obligation.Intent.Request.Key.TriggeringDeliveryID,
-				obligation.Intent.Request.Key.ElementRef.PackageKey, obligation.Intent.Request.Key.ElementRef.ElementID,
+				obligation.Intent.Request.Key.ElementRef.FlowPath, obligation.Intent.Request.Key.ElementRef.Family, obligation.Intent.Request.Key.ElementRef.SemanticPath,
 				replay.Ordinal, forkEventID, now.UTC())
 			if err != nil {
 				return fmt.Errorf("bind fork fan-out pending ordinal %d: %w", replay.Ordinal, err)
@@ -339,9 +339,9 @@ func bindRunForkFanOutPendingReplays(
 			if err := tx.QueryRowContext(ctx, `
 				SELECT event_id, source_event_id, inherited_disposition
 				FROM fan_out_outcomes
-				WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4 AND ordinal=$5
+				WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal=$6
 			`, forkRunID, obligation.Intent.Request.Key.TriggeringDeliveryID,
-				obligation.Intent.Request.Key.ElementRef.PackageKey, obligation.Intent.Request.Key.ElementRef.ElementID,
+				obligation.Intent.Request.Key.ElementRef.FlowPath, obligation.Intent.Request.Key.ElementRef.Family, obligation.Intent.Request.Key.ElementRef.SemanticPath,
 				replay.Ordinal).Scan(&ownedEvent, &sourceEvent, &inherited); err != nil {
 				return err
 			}
@@ -354,4 +354,12 @@ func bindRunForkFanOutPendingReplays(
 		return effects.Add(forkRunID, runforkrevision.FamilyFanOutObligations)
 	}
 	return nil
+}
+
+func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
+	identity, err := ref.DeclarationIdentity()
+	if err != nil {
+		return "<invalid>"
+	}
+	return identity.Key()
 }

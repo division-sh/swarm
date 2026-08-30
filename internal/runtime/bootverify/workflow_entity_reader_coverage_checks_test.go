@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func TestRun_SuppressesEntityReaderCoverageWithUnusedReaderReason(t *testing.T) {
@@ -15,7 +15,7 @@ func TestRun_SuppressesEntityReaderCoverageWithUnusedReaderReason(t *testing.T) 
 		UnusedReaderReason: "external operator readout",
 	})
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.LintEvidence(), "entity_reader_coverage", "resolution") {
 		t.Fatalf("expected _unused_reader_reason to suppress reader coverage lint, got %#v", report.LintEvidence())
@@ -31,7 +31,7 @@ func TestRun_ReportsEntityReaderCoverageWithoutUnusedReaderReason(t *testing.T) 
 		Initial: "",
 	})
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type ticket declares field resolution with no detected internal reader coverage") {
 		t.Fatalf("expected reader coverage lint without _unused_reader_reason, got %#v", report.LintEvidence())
@@ -44,7 +44,7 @@ func TestRun_UnusedReaderReasonDoesNotSatisfyEntityWriterCoverage(t *testing.T) 
 		UnusedReaderReason: "external operator readout",
 	})
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.HardInvalidities(), "entity_writer_coverage", "without authored writer coverage") {
 		t.Fatalf("_unused_reader_reason must not satisfy writer coverage, got %#v", report.HardInvalidities())
@@ -60,7 +60,7 @@ func TestRun_GateContextCountsAsEntityReaderCoverage(t *testing.T) {
 		Initial: "",
 	})
 	bundle.Semantics.Gates = []runtimecontracts.WorkflowGatePlan{{
-		FlowID:   "",
+		FlowID:   ".",
 		Stage:    "review",
 		Decision: "review_gate",
 		Context: map[string]runtimecontracts.ExpressionValue{
@@ -68,7 +68,7 @@ func TestRun_GateContextCountsAsEntityReaderCoverage(t *testing.T) {
 		},
 	}}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.LintEvidence(), "entity_reader_coverage", "resolution") {
 		t.Fatalf("expected gate context read to count as reader coverage, got %#v", report.LintEvidence())
@@ -81,7 +81,7 @@ func TestRun_GateContextLiteralDoesNotCountAsEntityReaderCoverage(t *testing.T) 
 		Initial: "",
 	})
 	bundle.Semantics.Gates = []runtimecontracts.WorkflowGatePlan{{
-		FlowID:   "",
+		FlowID:   ".",
 		Stage:    "review",
 		Decision: "review_gate",
 		Context: map[string]runtimecontracts.ExpressionValue{
@@ -89,7 +89,7 @@ func TestRun_GateContextLiteralDoesNotCountAsEntityReaderCoverage(t *testing.T) 
 		},
 	}}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type ticket declares field resolution with no detected internal reader coverage") {
 		t.Fatalf("expected reader coverage lint when the gate context is not an entity reference, got %#v", report.LintEvidence())
