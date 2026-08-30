@@ -324,6 +324,28 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t *testing.T) {
+	provePreparedDurableTopologySourceSetRebindPreservesMixedPhase(
+		t, AgentLifecycleRunning, AgentRunModeStandard, AgentRunModeAuthoritativeDeliveryOnly,
+	)
+}
+
+func TestPreparedDurableTopologySourceSetRebindPreservesRegisteredAndFailedVariants(t *testing.T) {
+	for _, phase := range []AgentLifecyclePhase{AgentLifecycleRegistered, AgentLifecycleFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			provePreparedDurableTopologySourceSetRebindPreservesMixedPhase(
+				t, phase, AgentRunModeStopped, AgentRunModeStopped,
+			)
+		})
+	}
+}
+
+func provePreparedDurableTopologySourceSetRebindPreservesMixedPhase(
+	t *testing.T,
+	phase AgentLifecyclePhase,
+	staticRunMode AgentRunMode,
+	flowRunMode AgentRunMode,
+) {
+	t.Helper()
 	source := loadPackageBackedStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
@@ -375,25 +397,25 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	predecessorBinding := lifecycleProbeProcessBinding()
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[staticIdentity] = &agentLifecycleCell{
-		identity: staticIdentity, epoch: epoch, generation: generation, phase: AgentLifecycleRunning,
-		configRevision: staticRevision, runMode: AgentRunModeStandard, topology: predecessorAdmission,
+		identity: staticIdentity, epoch: epoch, generation: generation, phase: phase,
+		configRevision: staticRevision, runMode: staticRunMode, topology: predecessorAdmission,
 		processBinding: predecessorBinding,
 	}
 	manager.lifecycle.cells[flowIdentity] = &agentLifecycleCell{
-		identity: flowIdentity, epoch: epoch, generation: generation, phase: AgentLifecycleRunning,
-		configRevision: flowRevision, runMode: AgentRunModeAuthoritativeDeliveryOnly, topology: flowTopology,
+		identity: flowIdentity, epoch: epoch, generation: generation, phase: phase,
+		configRevision: flowRevision, runMode: flowRunMode, topology: flowTopology,
 		processBinding: predecessorBinding,
 	}
 	manager.lifecycle.mu.Unlock()
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{
 		{
 			Identity: staticIdentity, AgentID: staticIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
-			Phase: AgentLifecycleRunning, ConfigRevision: staticRevision, RunMode: AgentRunModeStandard,
+			Phase: phase, ConfigRevision: staticRevision, RunMode: staticRunMode,
 			Topology: predecessorAdmission, ProcessBinding: predecessorBinding,
 		},
 		{
 			Identity: flowIdentity, AgentID: flowIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
-			Phase: AgentLifecycleRunning, ConfigRevision: flowRevision, RunMode: AgentRunModeAuthoritativeDeliveryOnly,
+			Phase: phase, ConfigRevision: flowRevision, RunMode: flowRunMode,
 			Topology: flowTopology, ProcessBinding: predecessorBinding,
 		},
 	}}
@@ -401,7 +423,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: sourceSetSuccessorProcessBinding(),
 	}
 	successorStore.exists = true
-	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleRunning}
+	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: phase}
 	transitionAdmission := newSourceSetTransitionAdmissionProbe(successorPlan.Revision)
 	defer transitionAdmission.release()
 	prepared, err := manager.PrepareDurableTopologySourceSetRebind(
@@ -419,13 +441,16 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		t.Fatalf("mixed survivor requests=%d, want 2", len(requests))
 	}
 	for _, request := range requests {
+		if request.ExpectedPhase != phase || request.TargetPhase != phase {
+			t.Fatalf("mixed survivor phase changed: %#v", request)
+		}
 		switch request.Identity.Normalize() {
 		case staticIdentity.Normalize():
-			if !request.Topology.Equal(successorAdmission) {
+			if !request.Topology.Equal(successorAdmission) || request.RunMode != staticRunMode {
 				t.Fatalf("static target topology=%#v, want successor admission", request.Topology)
 			}
 		case flowIdentity.Normalize():
-			if !request.Topology.Equal(flowTopology) {
+			if !request.Topology.Equal(flowTopology) || request.RunMode != flowRunMode {
 				t.Fatalf("flow target topology=%#v, want preserved readiness admission", request.Topology)
 			}
 		default:

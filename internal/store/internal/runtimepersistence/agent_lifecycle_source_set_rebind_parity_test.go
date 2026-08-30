@@ -38,6 +38,11 @@ type lifecycleCensusDriftStore interface {
 	runtimestartupownership.Store
 }
 
+type lifecycleSourceSetPhaseVariantStore interface {
+	lifecycleSourceSetRebindStore
+	agentFixtureFlowStore
+}
+
 func TestAgentLifecycleSourceSetRebindParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		proveAgentLifecycleSourceSetRebind(t, newBootstrappedSQLiteRuntimeStoreForTest(t))
@@ -45,6 +50,16 @@ func TestAgentLifecycleSourceSetRebindParity(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		proveAgentLifecycleSourceSetRebind(t, admitTestPostgresStore(t, db))
+	})
+}
+
+func TestAgentLifecycleSourceSetRebindPhaseVariantParity(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		proveAgentLifecycleSourceSetRebindPhaseVariants(t, newBootstrappedSQLiteRuntimeStoreForTest(t))
+	})
+	t.Run("postgres", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		proveAgentLifecycleSourceSetRebindPhaseVariants(t, admitTestPostgresStore(t, db))
 	})
 }
 
@@ -463,4 +478,123 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		after.ConfigRevision != before.ConfigRevision || after.RunMode != before.RunMode || !after.Topology.Equal(before.Topology) {
 		t.Fatalf("lifecycle readback after source-set rebind = %#v, want %#v", after, before)
 	}
+}
+
+func proveAgentLifecycleSourceSetRebindPhaseVariants(t *testing.T, store lifecycleSourceSetPhaseVariantStore) {
+	t.Helper()
+	ctx := testAuthorActivityContext()
+	staticIdentity := testAgentIdentity(t, "phase-static-agent", "global")
+	staticRecord := agentFixtureStaticRecord(t, staticIdentity)
+	staticRevision, err := canonicaljson.Hash(staticRecord.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staticRevision = strings.TrimPrefix(staticRevision, "sha256:")
+	staticResult, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(),
+		Identity: staticIdentity, AgentID: staticIdentity.AgentID(), Trigger: "source_set_phase_variant_proof",
+		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+		ConfigRevision: staticRevision, RunMode: runtimemanager.AgentRunModeStopped,
+		Agent: &staticRecord, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("seed registered static survivor: %v", err)
+	}
+	staticState := loadLifecycleSourceSetPhaseVariantState(t, ctx, store, staticResult.Identity)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "static/registered", staticState)
+	staticState = transitionLifecycleSourceSetPhaseVariant(
+		t, ctx, store, "static/running", staticState, "start",
+		runtimemanager.AgentLifecycleRunning, runtimemanager.AgentRunModeStandard,
+	)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "static/running", staticState)
+	staticState = transitionLifecycleSourceSetPhaseVariant(
+		t, ctx, store, "static/failed", staticState, "teardown",
+		runtimemanager.AgentLifecycleFailed, runtimemanager.AgentRunModeStopped,
+	)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "static/failed", staticState)
+
+	flowIdentity := testAgentIdentity(t, "phase-flow-agent", "review/fixture")
+	flowState := seedExactAgentFixtureFlowState(t, ctx, store, flowIdentity)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "flow/registered", flowState)
+	flowState = transitionLifecycleSourceSetPhaseVariant(
+		t, ctx, store, "flow/running", flowState, "start",
+		runtimemanager.AgentLifecycleRunning, runtimemanager.AgentRunModeAuthoritativeDeliveryOnly,
+	)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "flow/running", flowState)
+	flowState = transitionLifecycleSourceSetPhaseVariant(
+		t, ctx, store, "flow/failed", flowState, "teardown",
+		runtimemanager.AgentLifecycleFailed, runtimemanager.AgentRunModeStopped,
+	)
+	proveLifecycleSourceSetPhaseVariantRebind(t, ctx, store, "flow/failed", flowState)
+}
+
+func transitionLifecycleSourceSetPhaseVariant(
+	t *testing.T,
+	ctx context.Context,
+	store lifecycleSourceSetPhaseVariantStore,
+	label string,
+	state runtimemanager.AgentLifecycleState,
+	operationKind string,
+	targetPhase runtimemanager.AgentLifecyclePhase,
+	runMode runtimemanager.AgentRunMode,
+) runtimemanager.AgentLifecycleState {
+	t.Helper()
+	if _, err := agentfixture.CommitExact(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: operationKind, RequestHash: uuid.NewString(),
+		Identity: state.Identity, AgentID: state.AgentID, Trigger: "source_set_phase_variant_proof",
+		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation + 1, TargetPhase: targetPhase,
+		ConfigRevision: state.ConfigRevision, RunMode: runMode, Topology: state.Topology, Now: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("transition %s survivor: %v", label, err)
+	}
+	return loadLifecycleSourceSetPhaseVariantState(t, ctx, store, state.Identity)
+}
+
+func proveLifecycleSourceSetPhaseVariantRebind(
+	t *testing.T,
+	ctx context.Context,
+	store lifecycleSourceSetPhaseVariantStore,
+	label string,
+	state runtimemanager.AgentLifecycleState,
+) {
+	t.Helper()
+	request := runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "source_set_rebind", RequestHash: uuid.NewString(),
+		Identity: state.Identity, AgentID: state.AgentID, Trigger: "source_set_phase_variant_proof",
+		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation, TargetPhase: state.Phase,
+		ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: state.Topology, Now: time.Now().UTC(),
+	}
+	result, err := agentfixture.CommitExact(t, ctx, store, request)
+	if err != nil {
+		t.Fatalf("rebind %s survivor: %v", label, err)
+	}
+	if result.RuntimeEpoch != state.RuntimeEpoch || result.Generation != state.Generation || result.Phase != state.Phase ||
+		result.ConfigRevision != state.ConfigRevision || result.RunMode != state.RunMode || !result.Topology.Equal(state.Topology) {
+		t.Fatalf("rebind %s result = %#v, want preserved %#v", label, result, state)
+	}
+	replayed, err := agentfixture.CommitExact(t, ctx, store, request)
+	if err != nil || !replayed.Replayed || replayed.TransitionID != result.TransitionID {
+		t.Fatalf("replay %s result = %#v err=%v, want transition %s", label, replayed, err, result.TransitionID)
+	}
+	after := loadLifecycleSourceSetPhaseVariantState(t, ctx, store, state.Identity)
+	if after.RuntimeEpoch != state.RuntimeEpoch || after.Generation != state.Generation || after.Phase != state.Phase ||
+		after.ConfigRevision != state.ConfigRevision || after.RunMode != state.RunMode || !after.Topology.Equal(state.Topology) {
+		t.Fatalf("rebind %s readback = %#v, want preserved %#v", label, after, state)
+	}
+}
+
+func loadLifecycleSourceSetPhaseVariantState(
+	t *testing.T,
+	ctx context.Context,
+	store lifecycleSourceSetPhaseVariantStore,
+	identity runtimeagentidentity.Identity,
+) runtimemanager.AgentLifecycleState {
+	t.Helper()
+	state, found, err := store.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found {
+		t.Fatalf("load lifecycle phase variant %s: found=%v err=%v", identity.Description(), found, err)
+	}
+	return state
 }
