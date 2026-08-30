@@ -1,0 +1,552 @@
+issue: 2378
+audit_type: Pre-Implementation Coverage Audit
+phase: pre_implementation_only
+agent: agent-g
+audit_head: 1c20c23a4bdeb8eec98e0d4953d223792d4fa36e
+prior_gate:
+  status: superseded
+  reason: >-
+    The prior audit treated retired Builder project reload and live source-set
+    replacement as a supported product operation. The authoritative Builder API
+    disposition already retires project.open, project.reload, project.close,
+    and source replacement, while production serve mounts only internal/apiv1.
+    The previous implementation and closure claim are therefore non-binding.
+current_gate:
+  status: requested
+  implementation_frozen: true
+
+category:
+  severity: P1
+  kinds:
+    - semantic_drift
+    - retired_product_operation_removal
+    - runtime_lifecycle
+    - selected_store_parity
+    - architecture_simplification
+
+observed_symptom: >-
+  A retired and production-unmounted Builder project mutation surface remains a
+  live internal semantic owner. Its supervisor can replace the process complete
+  source set and publish a changed bundle beneath existing run-bound authority.
+  The one supported operation that still removes a source, bundle.delete,
+  borrows that retired replacement state machine for runtime quiescence and
+  restoration and then refreshes only static durable survivors. Removing only
+  the local static helper defect would preserve the invalid product owner and
+  its rollback machinery.
+
+entry_point_not_boundary:
+  confirmed: true
+  entry_points:
+    - internal/runtime/manager/static_topology.go PrepareStaticTopologySourceSetRebind
+    - internal/runtime/context_manager.go PrepareSourceSetTransition
+    - internal/serveapp/builder_project_supervisor.go loadProject and ReplaceSourceSet
+    - internal/serveapp/bundle_delete_runtime_quiescence.go
+  audited_boundary: >-
+    The audit includes the product/API mount, every complete source-set writer,
+    every supervisor and RuntimeContextManager replacement API, run-bound bundle
+    authority, run.fork, startup install/restore, process shutdown, destructive
+    reset, bundle-delete apply/replay, survivor lifecycle projection, execution
+    admission, both selected stores, and replacement-only tests/spec claims.
+
+semantic_concepts:
+  - immutable_run_bundle_authority
+  - fork_owned_changed_bundle_continuation
+  - supported_complete_source_set_operation_set
+  - retired_live_source_replacement_removal
+  - exact_bundle_delete_runtime_quiescence_and_precommit_restore
+  - bundle_delete_complete_durable_survivor_rebind
+  - partial_progress_and_retry_execution_fencing
+
+failure_class:
+  chosen_working_class: retired_live_source_replacement_removal_and_bundle_delete_survivor_convergence
+  immediate_parent: supported_source_set_mutation_surface_and_run_bundle_authority
+  parent_above: declaration_source_set_and_lifecycle_process_authority_atomic_publication
+  broader_parent:
+    issue: 2250
+    class: runtime_startup_and_lifecycle_phase_decomposition
+  framing_before_repair: too_narrow_and_product_incorrect
+  framing_after_repair: broad_enough
+  first_slice: false
+  chosen_class_closure_commitment: >-
+    The implementation PR will remove the retired owner completely and eliminate
+    every known bundle-delete survivor convergence manifestation. It will not
+    preserve a dormant replacement seam or close only one survivor variant.
+
+binding_governing_context:
+  exact_spec_sections:
+    - platform-spec.yaml#api_specification.migration.builder_api_disposition
+    - platform-spec.yaml#runtime.run_fork
+    - platform-spec.yaml#agent_topology_authority.source_set
+    - platform-spec.yaml#agent_topology_authority.admission
+    - platform-spec.yaml#agent_topology_authority.process_capability.lifecycle_reconciliation
+    - platform-spec.yaml#agent_lifecycle_authority.durable_cell
+    - platform-spec.yaml#agent_lifecycle_authority.process_execution_projection
+    - platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete
+  issue_and_repro_context:
+    - issue_2378_body_and_thread_as_repaired_by_this_audit
+    - pr_2389_architecture_reassessment_issuecomment_5468563110
+    - pr_2374_fixture_diagnosis_as_entry_point_only
+  binding_decisions:
+    - project_open_reload_close_and_builder_source_replacement_are_retired
+    - production_serve_does_not_mount_the_legacy_builder_transport
+    - a_run_keeps_the_exact_bundle_hash_and_bundle_source_with_which_it_was_created
+    - changed_bundle_continuation_requires_run_fork_and_a_distinct_target_bound_run
+    - run_fork_never_performs_dynamic_load
+    - startup_install_restore_bundle_delete_removal_and_destructive_reset_remain_supported_distinct_operations
+    - old_selected_stores_are_unsupported_and_receive_no_migration_or_compatibility_path
+  contradiction_repair_required: >-
+    Remove stale runtime-replacement, rollback, workspace reload, standing
+    replacement, and ReplaceSourceSet claims while retaining the already binding
+    Builder retirement section. Add an explicit immutable run bundle-authority
+    rule and point changed-bundle continuation to run.fork.
+
+ratified_product_boundary:
+  remove:
+    - Builder_ProjectController_and_ProjectStatus_mutation_contract
+    - builder_RPC_project_open_project_reload_project_close_dispatch
+    - runtimeProjectSupervisor_loadProject_and_changed_bundle_candidate_construction
+    - changed_bundle_runtime_replacement_publication_and_rollback_state
+    - live_source_set_replace_and_restore_rollback_state
+    - ProcessCapability_ReplaceSourceSet_and_OperationReplaceSourceSet
+    - direct_unconsumed_ProcessCapability_RemoveBundleSource_method
+    - RuntimeContextManager_changed_bundle_replacement_validation_prepare_publish_withdraw_APIs
+    - source_replacement_disable_flags_and_dynamic_reload_configuration_loaders
+    - replacement_only_tests_fixtures_and_spec_claims
+  preserve:
+    - startup_InstallCompleteSourceSet
+    - startup_RestoreSourceSet_for_boot_reconciliation
+    - process_shutdown_without_semantic_retirement
+    - runtime_nuke_destructive_empty_source_set_reset
+    - bundle_delete_active_run_policy_quiescence_final_mutation_and_replay
+    - one_exact_same_bundle_precommit_runtime_restore_for_failed_bundle_delete
+    - run_fork_as_the_only_changed_bundle_continuation_owner
+    - bundle_register_as_catalog_registration_not_runtime_dynamic_load
+  forbidden:
+    - compatibility_or_tolerant_reader
+    - speculative_same_bundle_hot_reload
+    - Dynamic_Load
+    - replacement_alias_or_hidden_direct_API
+    - new_table_outbox_ledger_or_recovery_framework
+    - generic_source_set_transaction_framework
+
+user_visible_execution_paths:
+  changed_bundle_continuation:
+    operation: run.fork
+    ordered_path:
+      - step: resolve_source_run_and_exact_event_frontier
+        gate: different_semantic_concept_existing_fork_owner
+      - step: resolve_same_bundle_or_already_loaded_boot_pinned_target_bundle
+        gate: different_semantic_concept_existing_bundle_availability_owner
+      - step: freeze_or_preserve_source_run_as_required
+        gate: different_semantic_concept_existing_fork_source_owner
+      - step: create_a_distinct_target_bundle_bound_run_and_execute_selected_contract
+        gate: different_semantic_concept_existing_fork_owner
+    proof_before_observed_step: source_run_and_target_bundle_authority_must_exist
+    change_in_this_pr: no_runtime_behavior_change_spec_and_deletion_census_only
+  bundle_delete:
+    operation: bundle.delete
+    ordered_path:
+      - step: apiv1_request_validation_and_idempotency_admission
+        gate: different_semantic_concept_existing_API_owner
+      - step: acquire_bundle_delete_lock_and_plan_exact_bundle_effects
+        gate: different_semantic_concept_existing_bundle_delete_owner
+      - step: enforce_non_force_active_run_refusal_or_force_cleanup_policy
+        gate: different_semantic_concept_existing_bundle_delete_owner
+      - step: withdraw_and_quiesce_the_exact_loaded_removed_bundle_runtime
+        gate: same_chosen_class
+      - step: restore_the_same_predecessor_if_any_precommit_phase_fails
+        gate: same_chosen_class
+      - step: prepare_and_fence_every_surviving_loaded_context
+        gate: same_chosen_class
+      - step: atomically_delete_bundle_effects_and_remove_the_source_set_member
+        gate: same_chosen_class_existing_selected_store_finalizer
+      - step: commit_or_resume_every_survivor_lifecycle_rebind
+        gate: same_chosen_class
+      - step: publish_aggregate_survivor_visibility_and_commit_quiescence
+        gate: same_chosen_class
+      - step: replay_exact_committed_result_when_planner_observes_bundle_absent
+        gate: same_chosen_class
+    reachability_prerequisites:
+      - process_capability_and_complete_source_set_installed
+      - bundle_catalog_entry_exists_for_first_attempt
+      - runtime_context_loaded_only_when_runtime_quiescence_is_required
+      - active_run_policy_satisfied
+      - every_surviving_durable_lifecycle_cell_is_census_visible
+  startup_install_restore:
+    classification: different_semantic_concept_with_existing_execution_proof
+    reason: boot_reconciliation_occurs_before_public_runtime_readiness_and_never_changes_a_running_runs_bundle_authority
+  destructive_reset:
+    classification: different_semantic_concept_with_existing_execution_proof
+    reason: explicitly_quiesces_runtime_and_commits_an_empty_plan_with_no_survivors
+  process_shutdown:
+    classification: different_semantic_concept_with_existing_execution_proof
+    reason: retires_process_execution_without_retiring_or_replacing_semantic_bundle_authority
+
+canonical_owners_after_change:
+  - concept: run_bound_bundle_authority_and_changed_bundle_continuation
+    owner: persisted_runs_bundle_hash_bundle_source_plus_run_fork_selected_contract_owner
+    real_semantic_owner: true
+    touched_consumers:
+      - apiv1_run_fork
+      - CLI_swarm_run_fork
+      - selected_contract_materialization_and_recovery
+      - RuntimeContextManager_loaded_target_lookup
+  - concept: supported_complete_source_set_mutations
+    owner: startupownership_ProcessCapability_closed_operation_family
+    real_semantic_owner: true
+    allowed_operations:
+      - InstallCompleteSourceSet
+      - RestoreSourceSet_at_startup
+      - OperationRemoveBundleSource_only_inside_ApplyBundleDeleteFinalMutation
+      - ApplyDestructiveResetTopology
+    touched_consumers:
+      - installServeSourceSet
+      - processOwnedBundleDeleteFinalizer
+      - processOwnedDestructiveResetStore
+  - concept: bundle_delete_policy_and_phase_order
+    owner: runtime_bundledelete_Coordinator
+    real_semantic_owner: true
+    touched_consumers:
+      - apiv1_operator_bundle_delete
+      - selected_store_planner_cleaner_finalizer_and_lock
+      - managed_container_cleanup
+      - runtime_quiescer
+  - concept: exact_loaded_runtime_quiescence_and_precommit_restore
+    owner: bundleDeleteRuntimeQuiescence_plus_narrow_RuntimeContextManager_exact_withdraw_restore
+    real_semantic_owner: true
+    touched_consumers:
+      - force_bundle_delete
+      - non_force_bundle_delete
+      - every_precommit_failure_compensation
+    constraint: >-
+      Restoration republishes only the exact same bundle context, runtime,
+      publication generation, work owner, standing occurrences, and parked
+      scheduler authority. It cannot publish a changed bundle or candidate.
+  - concept: complete_durable_survivor_census_and_rebind
+    owner: selected_store_AgentLifecycleCellCensus_plus_AgentManager_lifecycle_coordinator
+    real_semantic_owner: true
+    touched_consumers:
+      - bundle_delete_apply_survivors
+      - bundle_delete_replay_survivors
+      - static_declaration_cells
+      - flow_readiness_cells
+      - direct_and_delivery_execution_admission
+  - concept: aggregate_survivor_transition_and_visibility
+    owner: RuntimeContextManager_PreparedRuntimeSourceSetTransition
+    real_semantic_owner: true
+    touched_consumers:
+      - processOwnedBundleDeleteFinalizer_apply
+      - processOwnedBundleDeleteFinalizer_replay
+      - every_surviving_loaded_Runtime
+  - concept: exact_generation_route_and_execution_handoff
+    owner: EventBus_exact_lifecycle_route_plus_lifecycle_execution_lease
+    real_semantic_owner: true
+    touched_consumers:
+      - subscribed_delivery
+      - identity_owned_delivery
+      - direct_execution
+      - lifecycle_self_release
+  - concept: startup_source_set_reconciliation
+    owner: installServeSourceSet_plus_startupownership_ProcessCapability
+    real_semantic_owner: true
+    touched_consumers:
+      - fresh_process_install
+      - boot_time_restore_before_runtime_start
+
+systematic_consumption_audit:
+  product_and_transport:
+    production_internal_apiv1_mount: already_consumes_supported_method_catalog
+    legacy_builder_handler_mount: absent_from_production_by_exact_constructor_census
+    builder_project_open_reload_close: remove
+    dashboard_builder_project_stubs_and_status: remove_or_delegate_only_if_compilation_proves_no_supported_consumer
+    run_fork: different_semantic_concept_preserved
+    bundle_register: different_catalog_only_concept_preserved
+  complete_source_set_writers:
+    InstallCompleteSourceSet: preserve_startup_owner
+    RestoreSourceSet: preserve_startup_only_owner_and_remove_live_rollback_consumption
+    ReplaceSourceSet: remove_all_callers_interface_method_operation_and_store_contract_tests
+    direct_RemoveBundleSource: remove_unconsumed_public_capability_method
+    OperationRemoveBundleSource: preserve_only_as_internal_typed_discriminator_for_atomic_bundle_delete_final_mutation
+    ApplyBundleDeleteFinalMutation: preserve_and_move_complete_survivor_proof_here
+    ApplyDestructiveResetTopology: preserve_distinct_empty_plan_owner
+    raw_selected_store_source_set_commit: remains_private_adapter_of_ProcessCapability_not_a_second_owner
+  runtime_project_supervisor:
+    loadProject_OpenProject_ReloadProject_CloseProject: remove
+    candidate_workflow_pack_workspace_and_runtime_construction: remove_replacement_only_fields_and_helpers
+    pendingReplacement_pendingReplacementRollback_pendingSourceSetRollback: remove
+    replacement_source_set_attempt_and_restore: remove
+    sourceReplacementDisabledReason_and_disable_calls: remove
+    current_runtime_and_context_manager_observation: preserve_for_public_ingress_and_shutdown
+    runtime_published_retired_and_startup_handoff_hooks: preserve_supported_startup_channel_lifecycle
+    ShutdownProcessWithOptions: preserve_without_project_semantic_retirement
+    bundle_delete_operation_lock: preserve_or_rename_as_process_runtime_mutation_serialization
+  runtime_context_manager:
+    ReplaceSameBundle: remove_unconsumed
+    ValidateReplacement: remove_retired_candidate_validation
+    BeginBundleHashReplacement: remove_changed_bundle_API
+    Prepare_Publish_WithdrawBundleHashReplacement: remove_changed_bundle_API
+    BeginBundleRuntimeQuiescence: preserve_but_stop_delegating_to_changed_bundle_replacement
+    exact_predecessor_restore: preserve_as_narrow_bundle_delete_compensation
+    PrepareSourceSetTransition: preserve_only_for_supported_bundle_delete_apply
+    PreparePendingSourceSetTransition: preserve_only_for_supported_bundle_delete_replay
+    source_set_transition_visibility_fence: preserve_and_prove
+    deactivation_unload: preserve_for_bundle_delete_commit_shutdown_and_reset
+  lifecycle_variants:
+    StaticDeclarationPlan_running_registered_failed: consume_complete_survivor_owner
+    FlowReadinessPlan_running_registered_failed: move_to_complete_survivor_owner_preserving_exact_admission
+    terminated_durable_cells: census_visible_but_inert_different_terminal_concept
+    ephemeral_cells: nonpersistable_different_lifetime
+    durable_registration: serialize_with_bundle_delete_transition
+    restart_reconfigure_teardown_self_release: consume_transition_conflict_or_terminal_precedence
+  execution_consumers:
+    acquireExecutionIdentity: fail_closed_while_transition_unsettled
+    acquireDeliveryExecution: wait_or_refuse_under_exact_transition_owner_without_false_settlement
+    EventBus_route: retain_exact_route_until_transition_and_lifecycle_settlement
+    context_AcquireRun_AcquireIngress_AcquireBundleHash: consume_aggregate_visibility
+    observation_only_snapshots: cannot_mint_execution_authority
+  bundle_delete_postures:
+    loaded_removed_bundle_no_survivors: quiesce_delete_commit_no_survivor_transition
+    loaded_removed_bundle_with_survivors: quiesce_prepare_delete_rebind_publish
+    unloaded_bundle: no_runtime_quiescence_but_same_atomic_finalizer
+    planner_absent_exact_retry: replay_committed_result_and_pending_survivor_transition
+    precommit_failure: exact_same_predecessor_restore
+    postcommit_survivor_failure: no_predecessor_restore_source_remains_removed_and_survivors_stay_fenced_for_replay
+    SQLite_public_method: capability_absent_and_fail_closed
+    PostgreSQL_public_method: supported
+
+old_non_authoritative_paths_and_removal_candidates:
+  invalid_and_remove:
+    - internal_builder_project_mutation_dispatch_and_controller
+    - runtimeProjectSupervisor_loadProject_and_project_status_semantics
+    - runtimeProjectSupervisor_changed_bundle_candidate_publication
+    - pending_runtime_replacement_and_rollback_state
+    - pending_live_source_set_restore_state
+    - ProcessCapability_ReplaceSourceSet
+    - OperationReplaceSourceSet
+    - RuntimeContextManager_changed_bundle_replacement_APIs
+    - generic_replacement_publication_as_bundle_delete_restore_authority
+    - static_only_survivor_helper_as_complete_bundle_delete_owner
+    - replacement_only_tests_and_fixture_factories
+    - runtime_replacement_and_dynamic_reload_spec_claims
+  survive_but_become_narrower:
+    - runtimeProjectSupervisor_process_shutdown_and_public_ingress_observation
+    - bundle_delete_operation_serialization
+    - RuntimeContextManager_exact_bundle_quiescence
+    - exact_same_predecessor_restore_on_precommit_failure
+    - PreparedRuntimeSourceSetTransition_for_bundle_delete_only
+    - per_cell_lifecycle_rebind_and_execution_fence
+  no_compatibility_aliases: true
+
+broader_failure_class: >-
+  Runtime startup, shutdown, topology, and source mutation phases remain composed
+  through an oversized supervisor/context-manager boundary. That decomposition is
+  #2250. This PR simplifies that parent by deleting an invalid operation but does
+  not claim the general orchestration class.
+
+manifestations_and_exact_proof_plan:
+  - manifestation: production_method_catalog_and_HTTP_have_no_project_open_reload_close
+    disposition: in_scope
+    proof: API_spec_OpenRPC_constructor_and_real_served_unknown_method_negative_tests
+  - manifestation: no_internal_live_source_set_replacement_writer_survives
+    disposition: in_scope
+    proof: compile_time_interface_removal_plus_repo_wide_symbol_and_caller_census
+  - manifestation: no_changed_bundle_RuntimeContextManager_publication_API_survives
+    disposition: in_scope
+    proof: deletion_census_and_context_manager_tests_contain_only_register_deactivate_quiesce_restore
+  - manifestation: existing_run_bundle_authority_cannot_be_mutated_in_place
+    disposition: in_scope
+    proof: spec_guard_plus_unchanged_run_fork_same_and_cross_bundle_tests
+  - manifestation: run_fork_rejects_unloaded_cross_bundle_target_without_dynamic_load
+    disposition: different_concept_execution_proven_through_existing_owner
+    proof: unchanged_selected_contract_run_fork_supported_surface
+  - manifestation: bundle_delete_target_runtime_is_not_loaded
+    disposition: in_scope
+    proof: inert_quiescence_and_atomic_finalizer_test_with_no_runtime_publication
+  - manifestation: bundle_delete_loaded_target_with_no_surviving_source
+    disposition: in_scope
+    proof: quiesce_delete_commit_proves_no_restore_and_context_unavailable
+  - manifestation: bundle_delete_quiesce_failure
+    disposition: in_scope
+    proof: exact_predecessor_context_runtime_work_owner_and_standing_authority_restored_once
+  - manifestation: bundle_delete_precommit_cleanup_or_container_failure
+    disposition: in_scope
+    proof: coordinator_phase_matrix_restores_exact_predecessor_and_reopens_admission
+  - manifestation: bundle_delete_atomic_final_mutation_failure
+    disposition: in_scope
+    proof: PostgreSQL_failure_injection_proves_source_head_and_bundle_unchanged_then_exact_predecessor_restore
+  - manifestation: static_running_registered_and_failed_survivors
+    disposition: in_scope
+    proof: manager_state_matrix_and_dual_store_lifecycle_readback
+  - manifestation: flow_readiness_running_registered_and_failed_survivors
+    disposition: in_scope
+    proof: exact_sealed_readiness_admission_preserved_and_only_process_binding_changes_on_both_stores
+  - manifestation: terminated_and_ephemeral_cells
+    disposition: different_semantic_concept_with_proof
+    proof: terminated_is_census_visible_inert_and_ephemeral_has_no_durable_write
+  - manifestation: durable_row_missing_process_cell_or_process_cell_missing_durable_row
+    disposition: in_scope
+    proof: refusal_before_final_mutation_with_zero_head_bundle_or_process_projection_change
+  - manifestation: concurrent_durable_registration_during_bundle_delete_preparation
+    disposition: in_scope
+    proof: deterministic_barrier_race_proves_creator_cannot_commit_after_census
+  - manifestation: later_survivor_row_failure
+    disposition: in_scope
+    proof: SQLite_and_PostgreSQL_fault_injection_proves_partial_rows_resumable_process_projection_hidden_and_gate_retained
+  - manifestation: later_surviving_runtime_failure_after_earlier_runtime_converges
+    disposition: in_scope
+    proof: multi_context_dual_store_fault_injection_proves_no_context_reopens_before_aggregate_success
+  - manifestation: exact_replay_after_committed_delete_and_partial_survivor_progress
+    disposition: in_scope
+    proof: PostgreSQL_real_delete_retry_and_dual_store_transition_replay_complete_once
+  - manifestation: unrecorded_adjacent_generation_grant_evidence
+    disposition: in_scope_if_supported_delete_path_reaches_binding_rank
+    proof: mutate_process_and_durable_evidence_independently_and_require_exact_retained_predecessor_or_successor_grant
+  - manifestation: Manager_cancellation_during_loop_release_while_bundle_delete_gate_closed
+    disposition: in_scope_if_supported_delete_path_reaches_gate_wait
+    proof: route_done_and_lifecycle_settlement_remain_owned_until_abort_or_convergence_with_no_stale_direct_acquisition
+  - manifestation: dequeued_EventBus_delivery_during_bundle_delete_gate_and_Manager_cancellation
+    disposition: in_scope_if_supported_delete_path_reaches_gate_wait
+    proof: real_EventBus_no_invocation_claim_settlement_dead_letter_or_carrier_return_before_exact_gate_settlement
+  - manifestation: direct_execution_and_directive_while_bundle_delete_transition_pending
+    disposition: in_scope
+    proof: no_lease_agent_call_or_external_effect_until_exact_abort_or_success
+  - manifestation: cold_restart_after_committed_delete_partial_survivor_progress
+    disposition: in_scope_interaction_with_existing_startup_owner
+    proof: dual_store_readback_then_existing_startup_takeover_converges_once_without_reintroducing_removed_source
+  - manifestation: force_and_non_force_active_run_policy
+    disposition: different_bundle_delete_policy_concept_with_execution_proof
+    proof: unchanged_coordinator_and_PostgreSQL_public_API_tests
+  - manifestation: process_shutdown
+    disposition: different_semantic_concept_with_execution_proof
+    proof: unchanged_shutdown_does_not_retire_semantic_authority_test_after_supervisor_simplification
+  - manifestation: startup_install_restore_and_destructive_reset
+    disposition: different_semantic_concepts_with_execution_proof
+    proof: unchanged_source_set_operation_and_reset_matrix_after_ReplaceSourceSet_deletion
+
+parent_and_sibling_probe:
+  parent_action: absorb_corrected_supported_boundary_now
+  siblings:
+    run_fork:
+      classification: different_changed_bundle_new_run_owner
+      action: preserve_and_reference
+    startup_install_restore:
+      classification: different_pre_readiness_reconciliation_owner
+      action: preserve
+    destructive_reset:
+      classification: different_empty_plan_owner
+      action: preserve
+    source_set_retire_removed_cell:
+      classification: different_terminal_lifecycle_transition
+      action: preserve
+    SQLite_bundle_delete_feature_support_2387:
+      classification: different_product_capability_parity_class
+      action: keep_open_and_blocked_until_shared_semantics_merge
+    orchestration_decomposition_2250:
+      classification: broader_parent_architecture
+      action: keep_open
+  remaining_child_slice_tail_after_PR:
+    chosen_class: zero
+    confidence: high_after_complete_deletion_and_supported_path_census
+    non_closure_bearing_tail:
+      - issue_2387_SQLite_bundle_delete_product_support
+      - issue_2250_general_phase_decomposition
+
+tracker_state:
+  decision: current_issue_must_be_updated_before_coding
+  repair_required:
+    - title
+    - body
+    - checked_in_audit
+    - watchlist_node
+    - PR_description_and_head
+  new_child_required: false
+  parent_issue_update_required: false
+  older_stream_superseded: >-
+    The previous #2378 live-replacement audit and PR closure claim are
+    superseded in place. Closed #2125 remains honestly closed.
+  separate_open_trackers:
+    - 2250
+    - 2387
+
+watchlist_backed_promotion_check:
+  mapping: declaration_owned_agent_topology_ownership
+  broader_class_already_tracked: declaration_runtime_lifecycle_and_source_revision_ownership
+  additional_live_siblings_found:
+    - retired_product_operation_can_survive_as_internal_semantic_owner
+    - supported_source_removal_can_borrow_retired_replacement_rollback
+    - complete_static_and_flow_readiness_survivor_census
+    - creator_and_execution_admission_serialization
+    - exact_retry_lineage_and_gate_lifetime
+  absorption_decision: >-
+    Absorb all supported bundle-delete manifestations now because leaving any
+    one behind preserves the same source-removal survivor class. Do not absorb
+    #2387 feature availability or #2250 general phase decomposition.
+  refinement: corrected_existing_node_no_new_node
+
+intended_closure:
+  level: failure_class_eliminated_with_net_deletion
+  can_close_in_one_PR: true
+  local_fix_would_leave_same_concept_interpreter: true
+  explanation: >-
+    Widening only the static survivor helper leaves the retired replacement
+    producer, changed-bundle publication owner, and replacement rollback state
+    live. Deleting those first leaves one supported bundle-delete transition that
+    can be closed in one bounded implementation.
+
+required_supported_surface_proof:
+  parity_issue: true
+  feature_parity_claim: false
+  PostgreSQL:
+    - real_served_bundle_delete_force_and_non_force
+    - loaded_and_unloaded_target
+    - precommit_restore
+    - mixed_static_and_flow_survivors
+    - exact_idempotent_replay_after_partial_survivor_progress
+    - restart_readback
+  SQLite:
+    - public_bundle_delete_capability_absent_and_fail_closed
+    - shared_lifecycle_survivor_rebind_success_failure_abort_retry_and_restart_contract
+    - startup_install_restore_and_destructive_reset_unchanged
+  shared:
+    - no_project_mutation_method_or_internal_writer
+    - unchanged_run_fork_same_and_cross_bundle_behavior
+    - manager_race_and_real_EventBus_gate_proofs
+    - API_spec_OpenRPC_and_persistence_authority_guards
+  focused_test_policy:
+    targeted: regular_go_test
+    whole_suite: go_run_./cmd/swarm-test
+
+architecture_feedback:
+  smell: >-
+    The runtimeProjectSupervisor retained a complete product reload implementation
+    after the public transport and product contract retired it. Bundle deletion
+    then reused that machinery for a narrower compensation need, causing an
+    unsupported changed-bundle state machine to become a dependency of a
+    supported destructive operation.
+  long_run_direction: >-
+    Product-visible lifecycle methods must own explicit typed process operations.
+    Bundle deletion should own exact quiesce/remove/restore/replay, startup should
+    own install/restore, process shutdown should own execution retirement, and
+    run.fork should own changed-bundle continuation. No generic supervisor reload
+    interpreter should sit above them.
+  tracking_decision: update_existing_issue_2250_and_watchlist_only
+  new_issue: false
+  estimated_effort_for_broader_smell: multi_PR_medium_to_high
+  ROI: high_but_non_closure_bearing_for_2378
+
+blocking_ambiguity_and_split_conditions:
+  current_blocker: fresh_independent_pre_implementation_gate
+  resolved_design_questions:
+    - delete_retired_replacement_instead_of_repairing_it
+    - run_fork_is_the_only_changed_bundle_continuation_owner
+    - bundle_delete_gets_a_narrow_exact_predecessor_restore
+    - startup_RestoreSourceSet_does_not_authorize_live_rollback
+    - no_legacy_store_support_or_dynamic_load
+  stop_and_repair_if_implementation_discovers:
+    - another_production_live_source_set_replacement_caller
+    - a_supported_consumer_of_changed_bundle_replacement_APIs
+    - bundle_delete_requires_changed_bundle_publication
+    - another_complete_source_set_writer_outside_the_closed_operation_family
+    - another_durable_lifecycle_creator_or_execution_path_outside_the_census_and_gate
+    - need_for_outbox_ledger_cross_row_transaction_compatibility_or_generic_recovery_framework
+  broad_refactor_escalation_required_now: false
