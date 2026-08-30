@@ -299,6 +299,9 @@ retired_builder_repository_record_manifest:
     - path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
       occurrence: unqualified_builder_run_summary_consumer
       disposition: qualify_as_historical_retired_Builder_consumer
+    - path: .github/audit-artifacts/issue-2007-failure-class.yaml
+      occurrence: superseded_issue_2007_Builder_identifiers_and_narrative_evidence
+      disposition: classify_complete_artifact_as_historical_and_make_transport_narrative_explicitly_retired
   enforcement: exact_git_tracked_file_semantic_token_count_and_classification_guard
 
 ratified_product_boundary:
