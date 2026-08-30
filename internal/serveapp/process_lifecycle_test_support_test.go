@@ -186,7 +186,7 @@ func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context,
 		}
 	}
 	return runtimeinbound.CommitResult{
-		Record: runtimeinbound.Record{Request: command.Request, State: "committed", OutputCount: len(children), Events: children, Created: true},
+		Record:       runtimeinbound.Record{Request: command.Request, State: "committed", OutputCount: len(children), Events: children, Created: true},
 		Publications: committed,
 	}, nil
 }
@@ -195,7 +195,9 @@ func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Contex
 	return runtimeinbound.Record{}, false, nil
 }
 
-func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Context) error { return nil }
+func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Context) error {
+	return nil
+}
 
 type processIngressEventStore struct {
 	events []events.Event
