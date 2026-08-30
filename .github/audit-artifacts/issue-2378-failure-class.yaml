@@ -6,33 +6,35 @@ audit_head: 1c20c23a4bdeb8eec98e0d4953d223792d4fa36e
 prior_gate:
   status: superseded
   reason: >-
-    The prior audit treated retired Builder project reload and live source-set
-    replacement as a supported product operation. The authoritative Builder API
-    disposition already retires project.open, project.reload, project.close,
-    and source replacement, while production serve mounts only internal/apiv1.
-    The previous implementation and closure claim are therefore non-binding.
+    The first audit treated retired Builder project reload and live source-set
+    replacement as supported. The first delete-first repair then scoped removal
+    to project mutation while leaving the rest of the same retired, unmounted
+    Builder transport alive. Both boundaries are non-binding.
 current_gate:
   status: requested
+  cycle: 3
   implementation_frozen: true
 
 category:
   severity: P1
   kinds:
     - semantic_drift
+    - complete_retired_transport_removal
     - retired_product_operation_removal
     - runtime_lifecycle
     - selected_store_parity
     - architecture_simplification
 
 observed_symptom: >-
-  A retired and production-unmounted Builder project mutation surface remains a
-  live internal semantic owner. Its supervisor can replace the process complete
-  source set and publish a changed bundle beneath existing run-bound authority.
-  The one supported operation that still removes a source, bundle.delete,
-  borrows that retired replacement state machine for runtime quiescence and
-  restoration and then refreshes only static durable survivors. Removing only
-  the local static helper defect would preserve the invalid product owner and
-  its rollback machinery.
+  The complete retired and production-unmounted internal/builder JSON-RPC and
+  WebSocket transport remains compiled through tests. Its sole non-test import
+  is runtimeProjectSupervisor project/status coupling, which also owns the only
+  live ReplaceSourceSet producer and can publish a changed bundle beneath
+  existing run-bound authority. The supported bundle.delete operation borrows
+  that retired replacement state machine for quiescence/restoration and then
+  refreshes only static durable survivors. Removing only project methods or the
+  local static helper would preserve the retired transport boundary and invalid
+  semantic owner.
 
 entry_point_not_boundary:
   confirmed: true
@@ -43,12 +45,15 @@ entry_point_not_boundary:
     - internal/serveapp/bundle_delete_runtime_quiescence.go
   audited_boundary: >-
     The audit includes the product/API mount, every complete source-set writer,
-    every supervisor and RuntimeContextManager replacement API, run-bound bundle
-    authority, run.fork, startup install/restore, process shutdown, destructive
-    reset, bundle-delete apply/replay, survivor lifecycle projection, execution
-    admission, both selected stores, and replacement-only tests/spec claims.
+    every internal/builder file, exported contract, test-only importer and
+    architecture/work-lifetime guard, every supervisor and RuntimeContextManager
+    replacement API, run-bound bundle authority, run.fork, startup install/restore,
+    process shutdown, destructive reset, bundle-delete apply/replay, survivor
+    lifecycle projection, execution admission, both selected stores, and every
+    ambiguous replacement occurrence in the authoritative spec.
 
 semantic_concepts:
+  - complete_retired_builder_transport_removal
   - immutable_run_bundle_authority
   - fork_owned_changed_bundle_continuation
   - supported_complete_source_set_operation_set
@@ -58,8 +63,8 @@ semantic_concepts:
   - partial_progress_and_retry_execution_fencing
 
 failure_class:
-  chosen_working_class: retired_live_source_replacement_removal_and_bundle_delete_survivor_convergence
-  immediate_parent: supported_source_set_mutation_surface_and_run_bundle_authority
+  chosen_working_class: retired_builder_transport_and_live_source_replacement_removal_with_bundle_delete_survivor_convergence
+  immediate_parent: retired_transport_semantic_owner_elimination_and_supported_source_set_mutation_surface
   parent_above: declaration_source_set_and_lifecycle_process_authority_atomic_publication
   broader_parent:
     issue: 2250
@@ -68,9 +73,10 @@ failure_class:
   framing_after_repair: broad_enough
   first_slice: false
   chosen_class_closure_commitment: >-
-    The implementation PR will remove the retired owner completely and eliminate
-    every known bundle-delete survivor convergence manifestation. It will not
-    preserve a dormant replacement seam or close only one survivor variant.
+    The implementation PR will remove the complete retired Builder transport and
+    its source-replacement owner, then eliminate every known bundle-delete
+    survivor convergence manifestation. It will not preserve a test-only
+    transport shell, dormant replacement seam, or only one survivor variant.
 
 binding_governing_context:
   exact_spec_sections:
@@ -86,8 +92,10 @@ binding_governing_context:
     - issue_2378_body_and_thread_as_repaired_by_this_audit
     - pr_2389_architecture_reassessment_issuecomment_5468563110
     - pr_2374_fixture_diagnosis_as_entry_point_only
+    - issue_375_absorbed_retired_builder_transport_tracker
+    - issue_2390_separate_retired_dashboard_REST_transport
   binding_decisions:
-    - project_open_reload_close_and_builder_source_replacement_are_retired
+    - the_complete_internal_builder_transport_and_all_its_methods_are_retired
     - production_serve_does_not_mount_the_legacy_builder_transport
     - a_run_keeps_the_exact_bundle_hash_and_bundle_source_with_which_it_was_created
     - changed_bundle_continuation_requires_run_fork_and_a_distinct_target_bound_run
@@ -95,16 +103,197 @@ binding_governing_context:
     - startup_install_restore_bundle_delete_removal_and_destructive_reset_remain_supported_distinct_operations
     - old_selected_stores_are_unsupported_and_receive_no_migration_or_compatibility_path
   contradiction_repair_required: >-
-    Remove stale runtime-replacement, rollback, workspace reload, standing
-    replacement, and ReplaceSourceSet claims while retaining the already binding
-    Builder retirement section. Add an explicit immutable run bundle-authority
-    rule and point changed-bundle continuation to run.fork.
+    Delete internal/builder and rewrite only occurrences that mean retired Builder
+    or live source-set replacement. Preserve exact different live concepts such
+    as agent-generation replacement, channel-activation replacement, data
+    replacement, and CLI command replacement. Preserve the authoritative Builder
+    retirement section, add immutable run bundle authority, and point
+    changed-bundle continuation to run.fork.
+
+spec_occurrence_manifest:
+  - current_line: 5600
+    occurrence: legacy_dev_database_empty_replacement
+    disposition: preserve_different_live_storage_path_concept
+    owner: project_local_SQLite_path_admission
+  - current_line: 5935
+    occurrence: retired_digest_has_no_replacement
+    disposition: preserve_retirement_statement
+    owner: retired_runtime_digest_contract
+  - current_line: 6293
+    occurrence: replacement_operation_context_cannot_own_post_commit_lifetime
+    disposition: rewrite_to_supported_operation_contexts_only
+    owner: engine_work_lifetime_handoff
+  - current_line: 6445
+    occurrence: bundle_register_never_implies_source_replacement
+    disposition: preserve_as_live_prohibition
+    owner: bundle_register_catalog_only_contract
+  - current_line: 6559
+    occurrence: Builder_validation_replacement_source_readiness_consumer
+    disposition: delete_Builder_and_replacement_consumers_preserve_verify_doctor_serve_boot
+    owner: bootverify_ResolveSourceBootEffectReachability
+  - current_line: 6565
+    occurrence: project_replacement_and_readback
+    disposition: delete_retired_runtime_replacement_semantics_preserve_atomic_runtime_identity_readback
+    owner: RuntimeContextManager_current_publication_snapshot
+  - current_line: 9041
+    occurrence: notice_sink_shared_by_replacement_runtime
+    disposition: delete_replacement_consumer_preserve_initial_and_selected_fork_process_sink
+    owner: process_scoped_informational_notice_sink
+  - current_line: 9043
+    occurrence: runtime_replacement_does_not_repeat_notice
+    disposition: rewrite_to_process_generation_identity_without_runtime_replacement
+    owner: process_scoped_informational_notice_sink
+  - current_line: 9648
+    occurrence: complete_development_replacement_pack_selection
+    disposition: preserve_different_pack_inventory_replacement_concept
+    owner: generated_pack_identity_owner
+  - current_line: 10039
+    occurrence: project_replacement_channel_readback
+    disposition: delete_retired_project_replacement_sentences_preserve_retained_channel_readback
+    owner: generation_aware_channel_readback
+  - current_line: 10193
+    occurrence: project_close_source_removal_and_completed_replacement_retirement
+    disposition: delete_project_close_and_completed_replacement_preserve_explicit_bundle_source_removal
+    owner: channel_activation_destructive_retirement
+  - current_line: 10621
+    occurrence: pack_projection_replacement_consumer
+    disposition: delete_retired_replacement_consumer_preserve_all_named_live_consumers
+    owner: packadmission_admitted_projection
+  - current_line: 10877
+    occurrence: target_replacement_invalidates_credential_readiness
+    disposition: delete_retired_runtime_replacement_term_preserve_removal_rotation_suppression_fencing_unload
+    owner: loaded_target_visibility_and_credential_snapshot
+  - current_line: 11847
+    occurrence: standing_replacement_reconciliation_owner
+    disposition: delete_retired_replacement_owner_and_keep_startup_lifecycle_materialization
+    owner: standing_service_reconciliation
+  - current_line: 11902
+    occurrence: RuntimeContextManager_replacement_visibility
+    disposition: delete_replacement_from_live_visibility_list
+    owner: RuntimeContextManager_context_selection_and_deactivation
+  - current_line: 11930
+    occurrence: replacement_project_candidate_and_rollback_section
+    disposition: delete_complete_retired_state_machine_through_line_11976
+    owner: none_retired
+  - current_line: 11966
+    occurrence: runtime_replacement_rollback_pending_publication_identity
+    disposition: delete_with_complete_retired_replacement_finalizer_section
+    owner: none_retired
+  - current_line: 14096
+    occurrence: event_descriptor_replacement_scope_registration
+    disposition: rewrite_to_supported_startup_and_bundle_delete_scope_lifecycle
+    owner: exact_runtime_bundle_event_descriptor_lease
+  - current_line: 15311
+    occurrence: replacement_delivery_claims_forbidden
+    disposition: preserve_different_claim_identity_prohibition
+    owner: delivery_attempt_and_settlement_owner
+  - current_line: 16262
+    occurrence: run_control_consumed_by_legacy_Builder_adapters
+    disposition: delete_legacy_Builder_consumer_preserve_v1_run_controls_and_dispatch_gate
+    owner: run_control_state
+  - current_line: 16374
+    occurrence: agent_topology_generation_replacement
+    disposition: preserve_different_live_agent_lifecycle_concept
+    owner: selected_store_agent_topology_admission
+  - current_line: 18565
+    occurrence: source_replacement_guard_symbol
+    disposition: delete
+    owner: none_retired
+  - current_line: 18580
+    occurrence: pinned_mode_disables_OpenProject_ReloadProject
+    disposition: delete_because_operation_no_longer_exists_in_any_mode
+    owner: none_retired
+  - current_line: 18737
+    occurrence: bundle_delete_settles_replacement_rollback_before_quiescence
+    disposition: rewrite_to_narrow_bundle_delete_quiescence_and_pending_survivor_convergence
+    owner: bundle_delete_runtime_quiescence
+  - current_line: 18746
+    occurrence: reload_replacement_close_adopt_pending_survivor_refresh
+    disposition: rewrite_to_bundle_delete_replay_and_process_shutdown_only
+    owner: processOwnedBundleDeleteFinalizer
+  - current_line: 18780
+    occurrence: invalid_unload_before_replacement_rollback
+    disposition: rewrite_to_invalid_unload_before_bundle_delete_quiescence_or_survivor_settlement
+    owner: bundle_delete_runtime_quiescence
+  - current_line: 19012
+    occurrence: source_replacement_guard_executable_proof
+    disposition: delete
+    owner: none_retired
+  - current_line: 20329
+    occurrence: data_mount_sources_have_no_replacement
+    disposition: preserve_different_workspace_mount_concept
+    owner: workspace_mount_source_selection
+  - current_line: 21682
+    occurrence: payload_full_replacement_before_emit_fields
+    disposition: preserve_different_semantic_value_operation
+    owner: handler_payload_projection
+  - current_line: 22298
+    occurrence: restart_and_runtime_replacement_effective_source_publication
+    disposition: delete_replacement_branch_preserve_restart_and_selected_fork_source_identity
+    owner: runtime_effective_source_identity
+  - current_line: 25709
+    occurrence: project_replacement_BundleContext_effective_source_retention
+    disposition: delete_project_replacement_and_restoration_preserve_initial_context_fork_readback_and_execution
+    owner: Runtime_Options_WorkflowModule
+  - current_line: 26814
+    occurrence: CLI_v2_replacement_for_investigate_run
+    disposition: preserve_different_command_migration_concept
+    owner: run_diagnose_CLI
+  - current_line: 37558-37580
+    occurrence: complete_Builder_transport_method_and_source_replacement_retirement_clause
+    disposition: preserve_and_strengthen_zero_package_consumer_postcondition
+    owner: api_specification_migration_builder_api_disposition
+  - current_line: 37705
+    occurrence: subscription_replacement_readiness
+    disposition: preserve_different_EventBus_subscription_generation_concept
+    owner: internal_subscription_lifecycle
+  - current_line: 37707
+    occurrence: standing_descendant_drain_mentions_replacement
+    disposition: remove_retired_runtime_replacement_reference_preserve_suspend_and_reset
+    owner: standing_occurrence_lifecycle
+  - current_line: 37718
+    occurrence: runtime_replacement_staged_publication
+    disposition: delete_complete_field
+    owner: none_retired
+  - current_line: 37732
+    occurrence: standing_service_runtime_replacement_and_scheduler_rebind
+    disposition: delete_runtime_replacement_sentences_preserve_suspend_reset_park_restore_semantics
+    owner: standing_service_lifecycle_and_scheduler
+  - current_line: 38059
+    occurrence: ReplaceSourceSet_in_closed_writer_list
+    disposition: remove_ReplaceSourceSet_and_scope_RestoreSourceSet_to_boot
+    owner: startupownership_ProcessCapability
+  - current_line: 38094
+    occurrence: RuntimeContextManager_live_replacement_and_rollback
+    disposition: delete_complete_paragraph_through_line_38110
+    owner: none_retired
+  - current_line: 38108
+    occurrence: retained_replacement_rollback_operation_and_later_boundary_resumption
+    disposition: delete_with_complete_retired_replacement_finalizer_paragraph
+    owner: none_retired
+  - current_line: 38173
+    occurrence: source_set_replacement_uses_source_set_rebind
+    disposition: rewrite_to_bundle_source_removal_survivor_rebind
+    owner: bundle_delete_final_mutation_plus_lifecycle_reconciliation
+  - current_line: 38246
+    occurrence: agent_execution_projection_replacement
+    disposition: preserve_different_live_agent_generation_transition
+    owner: agent_lifecycle_coordinator
+  - current_line: 38250
+    occurrence: EventBus_agent_route_replacement
+    disposition: preserve_different_live_agent_route_generation_transition
+    owner: EventBus_ReplaceAgentRoute
 
 ratified_product_boundary:
   remove:
-    - Builder_ProjectController_and_ProjectStatus_mutation_contract
-    - builder_RPC_project_open_project_reload_project_close_dispatch
+    - complete_internal_builder_package_all_production_and_test_files
+    - Builder_JSON_RPC_and_WebSocket_contracts_handlers_and_debug_stream
+    - Builder_run_controls_credentials_state_validation_and_project_methods
+    - Builder_exported_types_including_ProjectStatus_ProjectController_RuntimeAcquirer_and_transport_frames
+    - dashboard_server_test_only_Builder_adapters_and_imports_without_deleting_dashboard_server
+    - architecture_and_work_lifetime_guard_entries_that_enumerate_internal_builder
     - runtimeProjectSupervisor_loadProject_and_changed_bundle_candidate_construction
+    - runtimeProjectSupervisor_builder_ProjectStatus_dependency_and_project_shaped_methods
     - changed_bundle_runtime_replacement_publication_and_rollback_state
     - live_source_set_replace_and_restore_rollback_state
     - ProcessCapability_ReplaceSourceSet_and_OperationReplaceSourceSet
@@ -122,6 +311,7 @@ ratified_product_boundary:
     - run_fork_as_the_only_changed_bundle_continuation_owner
     - bundle_register_as_catalog_registration_not_runtime_dynamic_load
   forbidden:
+    - replacement_transport_or_Builder_compatibility_facade
     - compatibility_or_tolerant_reader
     - speculative_same_bundle_hot_reload
     - Dynamic_Load
@@ -256,9 +446,15 @@ canonical_owners_after_change:
 systematic_consumption_audit:
   product_and_transport:
     production_internal_apiv1_mount: already_consumes_supported_method_catalog
-    legacy_builder_handler_mount: absent_from_production_by_exact_constructor_census
-    builder_project_open_reload_close: remove
-    dashboard_builder_project_stubs_and_status: remove_or_delegate_only_if_compilation_proves_no_supported_consumer
+    complete_internal_builder_package: remove_all_3875_Go_LOC_and_every_exported_transport_contract
+    legacy_builder_handler_mount: absent_from_production_by_exact_constructor_census_then_package_removed
+    builder_run_controls_debug_credentials_state_validation_and_project_methods: remove_with_transport
+    serveapp_builder_import: remove_by_retyping_process_lifecycle_owner_without_ProjectStatus
+    dashboard_server_test_only_builder_imports: remove_with_Builder_adapter_tests_while_dashboard_package_remains_2390
+    events_construction_guard_builder_entry: remove_with_deleted_constructor
+    store_public_capability_architecture_builder_entries: remove_with_deleted_package
+    worklifetime_async_ledger_and_scan_root_builder_entries: remove_with_deleted_async_sites_and_root
+    runstart_root_input_builder_consumer_and_fixture: remove_with_deleted_dispatch
     run_fork: different_semantic_concept_preserved
     bundle_register: different_catalog_only_concept_preserved
   complete_source_set_writers:
@@ -272,6 +468,7 @@ systematic_consumption_audit:
     raw_selected_store_source_set_commit: remains_private_adapter_of_ProcessCapability_not_a_second_owner
   runtime_project_supervisor:
     loadProject_OpenProject_ReloadProject_CloseProject: remove
+    Builder_ProjectStatus_return_values: replace_with_error_only_process_shutdown_and_typed_internal_state_where_needed
     candidate_workflow_pack_workspace_and_runtime_construction: remove_replacement_only_fields_and_helpers
     pendingReplacement_pendingReplacementRollback_pendingSourceSetRollback: remove
     replacement_source_set_attempt_and_restore: remove
@@ -316,7 +513,8 @@ systematic_consumption_audit:
 
 old_non_authoritative_paths_and_removal_candidates:
   invalid_and_remove:
-    - internal_builder_project_mutation_dispatch_and_controller
+    - complete_internal_builder_package
+    - all_test_only_Builder_importers_adapters_and_architecture_guard_entries
     - runtimeProjectSupervisor_loadProject_and_project_status_semantics
     - runtimeProjectSupervisor_changed_bundle_candidate_publication
     - pending_runtime_replacement_and_rollback_state
@@ -344,9 +542,21 @@ broader_failure_class: >-
   not claim the general orchestration class.
 
 manifestations_and_exact_proof_plan:
-  - manifestation: production_method_catalog_and_HTTP_have_no_project_open_reload_close
+  - manifestation: complete_internal_builder_package_is_absent
     disposition: in_scope
-    proof: API_spec_OpenRPC_constructor_and_real_served_unknown_method_negative_tests
+    proof: filesystem_and_go_list_zero_package_census_plus_git_deletion_manifest
+  - manifestation: no_production_or_test_importer_constructs_or_imports_Builder
+    disposition: in_scope
+    proof: repo_wide_import_constructor_and_exported_symbol_zero_census
+  - manifestation: Builder_JSON_RPC_WebSocket_run_debug_credentials_state_validation_and_project_methods_are_absent
+    disposition: in_scope
+    proof: API_spec_OpenRPC_real_served_unknown_route_method_negatives_and_zero_symbol_census
+  - manifestation: Builder_test_only_dashboard_adapters_are_removed_without_deleting_dashboard_server
+    disposition: in_scope
+    proof: dashboard_tests_compile_without_internal_builder_and_issue_2390_remains_open_for_package_removal
+  - manifestation: architecture_and_work_lifetime_guards_no_longer_enumerate_Builder
+    disposition: in_scope
+    proof: construction_public_capability_worklifetime_and_root_input_guard_tests
   - manifestation: no_internal_live_source_set_replacement_writer_survives
     disposition: in_scope
     proof: compile_time_interface_removal_plus_repo_wide_symbol_and_caller_census
@@ -444,12 +654,19 @@ parent_and_sibling_probe:
     orchestration_decomposition_2250:
       classification: broader_parent_architecture
       action: keep_open
+    mixed_Builder_debug_transport_375:
+      classification: same_retired_Builder_transport_class
+      action: absorb_now_and_close_as_removed_when_PR_merges
+    retired_dashboard_REST_transport_2390:
+      classification: separate_unmounted_transport_without_source_set_or_bundle_delete_semantics
+      action: keep_open_and_do_not_delete_internal_dashboard_server_here
   remaining_child_slice_tail_after_PR:
     chosen_class: zero
     confidence: high_after_complete_deletion_and_supported_path_census
     non_closure_bearing_tail:
       - issue_2387_SQLite_bundle_delete_product_support
       - issue_2250_general_phase_decomposition
+      - issue_2390_retired_dashboard_REST_transport_removal
 
 tracker_state:
   decision: current_issue_must_be_updated_before_coding
@@ -467,20 +684,26 @@ tracker_state:
   separate_open_trackers:
     - 2250
     - 2387
+    - 2390
+  absorbed_tracker:
+    issue: 375
+    merge_action: close_as_removed_with_PR_2389_proof
 
 watchlist_backed_promotion_check:
   mapping: declaration_owned_agent_topology_ownership
   broader_class_already_tracked: declaration_runtime_lifecycle_and_source_revision_ownership
   additional_live_siblings_found:
+    - complete_unmounted_Builder_transport_and_test_only_consumers
     - retired_product_operation_can_survive_as_internal_semantic_owner
     - supported_source_removal_can_borrow_retired_replacement_rollback
     - complete_static_and_flow_readiness_survivor_census
     - creator_and_execution_admission_serialization
     - exact_retry_lineage_and_gate_lifetime
   absorption_decision: >-
-    Absorb all supported bundle-delete manifestations now because leaving any
-    one behind preserves the same source-removal survivor class. Do not absorb
-    #2387 feature availability or #2250 general phase decomposition.
+    Absorb the complete Builder transport, #375, and every supported bundle-delete
+    manifestation now. Leaving a test-only Builder shell preserves the same retired
+    product boundary. Do not absorb #2387 feature availability, #2250 general phase
+    decomposition, or the separate dashboard REST package tracked by #2390.
   refinement: corrected_existing_node_no_new_node
 
 intended_closure:
@@ -488,10 +711,17 @@ intended_closure:
   can_close_in_one_PR: true
   local_fix_would_leave_same_concept_interpreter: true
   explanation: >-
-    Widening only the static survivor helper leaves the retired replacement
-    producer, changed-bundle publication owner, and replacement rollback state
-    live. Deleting those first leaves one supported bundle-delete transition that
-    can be closed in one bounded implementation.
+    Removing only project methods or widening only the static survivor helper
+    leaves the retired Builder transport, replacement producer, changed-bundle
+    publication owner, and rollback state live. Complete transport deletion first
+    leaves one supported bundle-delete transition that can be closed in one PR.
+  zero_remaining_consumer_postconditions:
+    - no_internal_builder_directory_package_import_constructor_or_exported_symbol
+    - no_Builder_test_only_adapter_or_architecture_work_lifetime_guard_entry
+    - no_runtimeProjectSupervisor_project_shaped_method_or_ProjectStatus_type
+    - no_ReplaceSourceSet_interface_method_operation_or_store_contract_test
+    - no_changed_bundle_RuntimeContextManager_replacement_API
+    - no_live_restore_source_set_consumption_outside_boot
 
 required_supported_surface_proof:
   parity_issue: true
@@ -508,7 +738,8 @@ required_supported_surface_proof:
     - shared_lifecycle_survivor_rebind_success_failure_abort_retry_and_restart_contract
     - startup_install_restore_and_destructive_reset_unchanged
   shared:
-    - no_project_mutation_method_or_internal_writer
+    - complete_Builder_package_and_all_importers_absent
+    - no_project_mutation_status_type_or_internal_writer
     - unchanged_run_fork_same_and_cross_bundle_behavior
     - manager_race_and_real_EventBus_gate_proofs
     - API_spec_OpenRPC_and_persistence_authority_guards
@@ -518,18 +749,18 @@ required_supported_surface_proof:
 
 architecture_feedback:
   smell: >-
-    The runtimeProjectSupervisor retained a complete product reload implementation
-    after the public transport and product contract retired it. Bundle deletion
-    then reused that machinery for a narrower compensation need, causing an
-    unsupported changed-bundle state machine to become a dependency of a
-    supported destructive operation.
+    The complete Builder transport remained compiled through tests after production
+    and the product contract retired it. Its supervisor coupling retained a product
+    reload interpreter, and bundle deletion then reused that machinery for narrow
+    compensation. Test-only compilation allowed an unsupported transport and
+    changed-bundle state machine to remain semantic owners.
   long_run_direction: >-
     Product-visible lifecycle methods must own explicit typed process operations.
     Bundle deletion should own exact quiesce/remove/restore/replay, startup should
     own install/restore, process shutdown should own execution retirement, and
     run.fork should own changed-bundle continuation. No generic supervisor reload
     interpreter should sit above them.
-  tracking_decision: update_existing_issue_2250_and_watchlist_only
+  tracking_decision: absorb_375_update_2250_refine_watchlist_split_dashboard_to_2390
   new_issue: false
   estimated_effort_for_broader_smell: multi_PR_medium_to_high
   ROI: high_but_non_closure_bearing_for_2378
@@ -537,12 +768,14 @@ architecture_feedback:
 blocking_ambiguity_and_split_conditions:
   current_blocker: fresh_independent_pre_implementation_gate
   resolved_design_questions:
+    - delete_complete_internal_builder_package_not_only_project_methods
     - delete_retired_replacement_instead_of_repairing_it
     - run_fork_is_the_only_changed_bundle_continuation_owner
     - bundle_delete_gets_a_narrow_exact_predecessor_restore
     - startup_RestoreSourceSet_does_not_authorize_live_rollback
     - no_legacy_store_support_or_dynamic_load
   stop_and_repair_if_implementation_discovers:
+    - a_production_consumer_of_any_internal_builder_contract
     - another_production_live_source_set_replacement_caller
     - a_supported_consumer_of_changed_bundle_replacement_APIs
     - bundle_delete_requires_changed_bundle_publication
