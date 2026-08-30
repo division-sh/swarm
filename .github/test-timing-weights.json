@@ -13,7 +13,6 @@
     "github.com/division-sh/swarm/internal/apiidempotency": 0,
     "github.com/division-sh/swarm/internal/apispec": 1.645,
     "github.com/division-sh/swarm/internal/apiv1": 86.534,
-    "github.com/division-sh/swarm/internal/builder": 0.17,
     "github.com/division-sh/swarm/internal/bundlecatalog": 0,
     "github.com/division-sh/swarm/internal/cli/argcount": 0.004,
     "github.com/division-sh/swarm/internal/cli/readwindow": 0,

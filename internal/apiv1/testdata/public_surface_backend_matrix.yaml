@@ -1307,7 +1307,7 @@ rows:
     notes: >
       #1254 / PR #1278 closed the current-run entity_count class by moving
       SQLite and Postgres run headers, lifecycle/debug owners, API run reads,
-      builder summaries, and CLI status consumers to canonical run-scoped
+      the historical retired Builder run-summary consumer, and CLI status consumers to canonical run-scoped
       entity_state. This row consumes that closed proof without claiming the
       backend-portability parent remains open.
 

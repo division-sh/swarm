@@ -488,6 +488,9 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, runtimeDeactivationRule, "failure before durable final-mutation commit MUST restore")
 	assertScalarContains(t, runtimeDeactivationRule, "committed final mutation is terminal evidence")
 	assertScalarContains(t, runtimeDeactivationRule, "exact stored plan, cleanup, container, count, and final-mutation facts without synthesis")
+	assertScalarContains(t, runtimeDeactivationRule, "acquires the same serialized process-lifecycle operation")
+	assertScalarContains(t, runtimeDeactivationRule, "attaches the surviving primary runtime")
+	assertScalarContains(t, runtimeDeactivationRule, "even when no survivor refresh remains")
 	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
 	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
 		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")

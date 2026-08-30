@@ -122,8 +122,8 @@ func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context
 }
 
 type processOwnedBundleDeleteFinalizer struct {
-	capability      runtimestartupownership.ProcessCapability
-	runtimeContexts *runtime.RuntimeContextManager
+	capability runtimestartupownership.ProcessCapability
+	supervisor *processLifecycleSupervisor
 }
 
 type processOwnedDestructiveResetStore struct {
@@ -205,10 +205,16 @@ func (f processOwnedBundleDeleteFinalizer) ApplyBundleDeleteFinalMutation(ctx co
 	}
 	var transition *runtime.PreparedRuntimeSourceSetTransition
 	if len(next.Sources) > 0 {
-		if f.runtimeContexts == nil {
+		if f.supervisor == nil {
 			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete with surviving sources requires runtime context ownership")
 		}
-		transition, err = f.runtimeContexts.PrepareSourceSetTransition(ctx, next)
+		f.supervisor.mu.RLock()
+		manager := f.supervisor.runtimeContexts
+		f.supervisor.mu.RUnlock()
+		if manager == nil {
+			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete with surviving sources requires runtime context ownership")
+		}
+		transition, err = manager.PrepareSourceSetTransition(ctx, next)
 		if err != nil {
 			return runtimebundledelete.FinalMutationResult{}, err
 		}
@@ -232,6 +238,12 @@ func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx c
 	if f.capability == nil {
 		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires the process topology capability")
 	}
+	if f.supervisor == nil {
+		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires process lifecycle ownership")
+	}
+	f.supervisor.operationMu.Lock()
+	defer f.supervisor.operationMu.Unlock()
+
 	current, exists, err := f.capability.CurrentSourceSet(ctx)
 	if err != nil {
 		return runtimebundledelete.Result{}, err
@@ -244,27 +256,41 @@ func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx c
 			return runtimebundledelete.Result{}, errors.New("bundle delete replay source is still current")
 		}
 	}
-	var transition *runtime.PreparedRuntimeSourceSetTransition
-	if len(current.Sources) > 0 {
-		if f.runtimeContexts == nil {
-			return runtimebundledelete.Result{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
-		}
-		transition, err = f.runtimeContexts.PreparePendingSourceSetTransition(ctx, current)
-		if err != nil {
-			return runtimebundledelete.Result{}, err
-		}
+	result, err := f.capability.ReplayBundleDeleteResult(ctx, req)
+	if err != nil {
+		return runtimebundledelete.Result{}, err
 	}
-	result, replayErr := f.capability.ReplayBundleDeleteResult(ctx, req)
-	if replayErr != nil {
-		if transition != nil {
-			replayErr = errors.Join(replayErr, transition.Abort())
+	if len(current.Sources) == 0 {
+		f.supervisor.mu.Lock()
+		defer f.supervisor.mu.Unlock()
+		if f.supervisor.currentRT != nil {
+			return runtimebundledelete.Result{}, errors.New("bundle delete replay found a process runtime attached to an empty source set")
 		}
-		return runtimebundledelete.Result{}, replayErr
+		f.supervisor.currentBundleSourceFact = runtimecorrelation.BundleSourceFact{}
+		if f.supervisor.ready != nil {
+			f.supervisor.ready.Store(false)
+		}
+		return result, nil
+	}
+
+	f.supervisor.mu.RLock()
+	manager := f.supervisor.runtimeContexts
+	f.supervisor.mu.RUnlock()
+	if manager == nil {
+		return runtimebundledelete.Result{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
+	}
+	var transition *runtime.PreparedRuntimeSourceSetTransition
+	transition, err = manager.PreparePendingSourceSetTransition(ctx, current)
+	if err != nil {
+		return runtimebundledelete.Result{}, err
 	}
 	if transition != nil {
 		if err := transition.Commit(ctx, f.capability); err != nil {
 			return runtimebundledelete.Result{}, err
 		}
+	}
+	if err := f.supervisor.attachPrimaryRuntime(ctx, manager); err != nil {
+		return runtimebundledelete.Result{}, fmt.Errorf("publish bundle delete replay process runtime: %w", err)
 	}
 	return result, nil
 }
