@@ -38,9 +38,7 @@ type StandingTargetMutation struct {
 }
 
 type StandingTargetMutationRequest struct {
-	Previous   []StandingServiceCandidate
 	Targets    []StandingTargetMutation
-	Replace    bool
 	ObservedAt time.Time
 }
 
@@ -76,15 +74,6 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 	observedAt := req.ObservedAt.UTC()
 	if observedAt.IsZero() {
 		return nil, fmt.Errorf("standing target mutation requires observed_at")
-	}
-	if req.Replace {
-		candidates := make([]StandingServiceCandidate, 0, len(req.Targets))
-		for _, target := range req.Targets {
-			candidates = append(candidates, target.Candidate)
-		}
-		if _, err := pc.workflowStore.ReconcileStandingServiceReplacement(ctx, req.Previous, candidates); err != nil {
-			return nil, err
-		}
 	}
 	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
 	for _, target := range req.Targets {
@@ -258,18 +247,6 @@ func (pc *PipelineCoordinator) LoadReconciledStandingService(ctx context.Context
 
 func (pc *PipelineCoordinator) ReconcileStandingServiceSet(ctx context.Context, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
 	results, err := pc.workflowStore.ReconcileStandingServiceSet(ctx, candidates)
-	if err == nil {
-		for _, result := range results {
-			if err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations); err != nil {
-				break
-			}
-		}
-	}
-	return results, err
-}
-
-func (pc *PipelineCoordinator) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
-	results, err := pc.workflowStore.ReconcileStandingServiceReplacement(ctx, previous, candidates)
 	if err == nil {
 		for _, result := range results {
 			if err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations); err != nil {

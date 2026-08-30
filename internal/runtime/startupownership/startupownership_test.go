@@ -261,19 +261,19 @@ func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing
 		t.Fatalf("IssueGenerationGrant for admission: %v", err)
 	}
 	if _, err := grantToAdmit.MarkProbesSettled(context.Background(), []string{"startup"}); err != nil {
-		t.Fatalf("MarkProbesSettled before source-set replacement: %v", err)
+		t.Fatalf("MarkProbesSettled before source-set restore: %v", err)
 	}
-	replacement, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
+	restoredPlan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
 		{BundleHash: startupBundleHashA, BundleSource: "ephemeral"},
 		{BundleHash: startupBundleHashB, BundleSource: "ephemeral"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewSourceSetPlan: %v", err)
 	}
-	if _, err := capability.ReplaceSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: replacement,
+	if _, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: restoredPlan,
 	}); err != nil {
-		t.Fatalf("ReplaceSourceSet: %v", err)
+		t.Fatalf("RestoreSourceSet: %v", err)
 	}
 
 	if err := grant.ProveCurrent(context.Background()); err == nil {
@@ -296,7 +296,7 @@ func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing
 		t.Fatal("CommitAgentLifecycleTransition accepted flow readiness through a superseded grant")
 	}
 	if _, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: replacement.Revision, Plan: plan,
+		OperationID: uuid.NewString(), ExpectedRevision: restoredPlan.Revision, Plan: plan,
 	}); err != nil {
 		t.Fatalf("RestoreSourceSet: %v", err)
 	}

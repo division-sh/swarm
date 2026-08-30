@@ -1999,7 +1999,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			t.Fatalf("workspace backend failure behavior missing %q: %#v", want, authority.FailureBehavior)
 		}
 	}
-	for _, want := range []string{"serve boot", "run start", "Builder project reload", "selected-contract run-fork", "swarm verify", "swarm describe", "swarm doctor", "conversation.fork_chat"} {
+	for _, want := range []string{"serve boot", "run start", "selected-contract run-fork", "swarm verify", "swarm describe", "swarm doctor", "conversation.fork_chat"} {
 		if !joinedContains(authority.Consumers, want) {
 			t.Fatalf("workspace backend consumers missing %q: %#v", want, authority.Consumers)
 		}
@@ -2016,7 +2016,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if command.ConfigKey != "workspace.backend" || command.UnsafeConfigKey != "workspace.allow_exec_on_host" || command.RetiredEnvVar != "SWARM_WORKSPACE_BACKEND" || command.DefaultBackend != "capability-derived" {
 		t.Fatalf("serve command workspace backend selectors = %#v", command)
 	}
-	for _, want := range []string{"serve boot", "run start", "Builder project reload", "selected-contract run-fork", "verify/describe/doctor", "conversation.fork_chat"} {
+	for _, want := range []string{"serve boot", "run start", "selected-contract run-fork", "verify/describe/doctor", "conversation.fork_chat"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command workspace backend consumers missing %q: %#v", want, command.Consumers)
 		}

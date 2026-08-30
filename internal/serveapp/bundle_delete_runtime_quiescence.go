@@ -13,7 +13,7 @@ import (
 
 type bundleDeleteRuntimeQuiescer struct {
 	contexts   *runtime.RuntimeContextManager
-	supervisor *runtimeProjectSupervisor
+	supervisor *processLifecycleSupervisor
 }
 
 func (q bundleDeleteRuntimeQuiescer) QuiesceBundleRuntime(ctx context.Context, bundleHash string) (runtimebundledelete.RuntimeQuiescence, error) {
@@ -28,43 +28,33 @@ func (q bundleDeleteRuntimeQuiescer) QuiesceBundleRuntime(ctx context.Context, b
 			operation.release()
 		}
 	}()
-	if err := q.supervisor.completePendingReplacementRollback(ctx); err != nil {
-		return nil, fmt.Errorf("finalize pending runtime replacement rollback before bundle delete: %w", err)
-	}
-	if err := q.supervisor.completePendingSourceSetRollback(ctx); err != nil {
-		return nil, fmt.Errorf("finalize pending runtime source-set rollback before bundle delete: %w", err)
-	}
-	if err := q.supervisor.completePendingReplacement(); err != nil {
-		return nil, fmt.Errorf("complete pending runtime restoration before bundle delete: %w", err)
-	}
-	if err := q.supervisor.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
-		return nil, fmt.Errorf("finalize pending runtime source-set refresh before bundle delete: %w", err)
-	}
 	bundleHash = strings.TrimSpace(bundleHash)
-	if _, loaded := q.contexts.LookupBundleHash(bundleHash); !loaded {
+	if !q.contexts.LookupBundleHashStatus(bundleHash).Loaded() {
 		retained = true
 		return &inertBundleDeleteRuntimeQuiescence{operation: operation}, nil
 	}
-	predecessor, err := q.contexts.BeginBundleRuntimeQuiescence(ctx, bundleHash)
+	withdrawn, err := q.contexts.BeginBundleRuntimeQuiescence(ctx, bundleHash)
 	if err != nil {
 		return nil, err
 	}
+	predecessor := withdrawn.Context
 	if predecessor.Runtime == nil {
 		return nil, errors.New("bundle delete quiescence lost the predecessor runtime")
 	}
-	if err := q.supervisor.quiesceCurrentRuntimeWithOptions(context.Background(), predecessor.Runtime, q.supervisor.replacementShutdown); err != nil {
-		restoreErr := q.supervisor.completeFailedQuiescenceAndRestore(ctx, q.contexts, predecessor, predecessor.Runtime, nil)
+	if err := q.supervisor.stopRuntime(context.Background(), predecessor.Runtime, q.supervisor.shutdownOptions); err != nil {
+		restoreErr := q.supervisor.compensateBundleDeletePredecessor(context.WithoutCancel(ctx), q.contexts, predecessor, withdrawn.RuntimeGeneration)
 		return nil, errors.Join(fmt.Errorf("quiesce bundle runtime: %w", err), restoreErr)
 	}
 	retained = true
 	return &bundleDeleteRuntimeQuiescence{
-		contexts: q.contexts, supervisor: q.supervisor, predecessor: predecessor, operation: operation,
+		contexts: q.contexts, supervisor: q.supervisor, predecessor: predecessor,
+		predecessorGeneration: withdrawn.RuntimeGeneration, operation: operation,
 	}, nil
 }
 
 type bundleDeleteRuntimeOperation struct {
 	once       sync.Once
-	supervisor *runtimeProjectSupervisor
+	supervisor *processLifecycleSupervisor
 }
 
 func (o *bundleDeleteRuntimeOperation) release() {
@@ -75,14 +65,14 @@ func (o *bundleDeleteRuntimeOperation) release() {
 }
 
 type bundleDeleteRuntimeQuiescence struct {
-	mu                  sync.Mutex
-	contexts            *runtime.RuntimeContextManager
-	supervisor          *runtimeProjectSupervisor
-	predecessor         runtime.BundleContext
-	operation           *bundleDeleteRuntimeOperation
-	publicationRetained bool
-	restored            bool
-	committed           bool
+	mu                    sync.Mutex
+	contexts              *runtime.RuntimeContextManager
+	supervisor            *processLifecycleSupervisor
+	predecessor           runtime.BundleContext
+	predecessorGeneration uint64
+	operation             *bundleDeleteRuntimeOperation
+	restored              bool
+	committed             bool
 }
 
 func (q *bundleDeleteRuntimeQuiescence) Restore(ctx context.Context) error {
@@ -91,23 +81,15 @@ func (q *bundleDeleteRuntimeQuiescence) Restore(ctx context.Context) error {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	defer q.operation.release()
 	if q.committed || q.restored {
+		q.operation.release()
 		return nil
 	}
-	var err error
-	if q.publicationRetained {
-		err = q.supervisor.completePendingReplacement()
-	} else {
-		err = q.supervisor.restoreQuiescedPredecessor(ctx, q.contexts, q.predecessor, q.predecessor.Runtime, nil)
-		q.supervisor.mu.RLock()
-		q.publicationRetained = q.supervisor.pendingReplacement != nil
-		q.supervisor.mu.RUnlock()
-	}
-	if err != nil {
+	if err := q.supervisor.compensateBundleDeletePredecessor(ctx, q.contexts, q.predecessor, q.predecessorGeneration); err != nil {
 		return err
 	}
 	q.restored = true
+	q.operation.release()
 	return nil
 }
 
@@ -116,8 +98,26 @@ func (q *bundleDeleteRuntimeQuiescence) Commit() {
 		return
 	}
 	q.mu.Lock()
+	if q.committed {
+		q.mu.Unlock()
+		q.operation.release()
+		return
+	}
 	q.committed = true
 	q.mu.Unlock()
+	next, surviving := q.contexts.CommitBundleRuntimeRemoval(q.predecessor.BundleHash())
+	q.supervisor.mu.Lock()
+	if q.supervisor.currentRT == q.predecessor.Runtime {
+		q.supervisor.currentRT = nil
+		q.supervisor.currentBundleSourceFact = next.BundleSourceFact
+		if surviving {
+			q.supervisor.currentRT = next.Runtime
+		}
+		if q.supervisor.ready != nil {
+			q.supervisor.ready.Store(surviving && next.Runtime != nil)
+		}
+	}
+	q.supervisor.mu.Unlock()
 	q.operation.release()
 }
 

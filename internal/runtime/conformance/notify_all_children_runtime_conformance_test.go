@@ -253,7 +253,7 @@ func (p *notifyAllChildrenProcessTopology) install(
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 		if exists {
 			commit.ExpectedRevision = current.Revision
-			_, err = p.capability.ReplaceSourceSet(ctx, commit)
+			_, err = p.capability.RestoreSourceSet(ctx, commit)
 		} else {
 			_, err = p.capability.InstallCompleteSourceSet(ctx, commit)
 		}

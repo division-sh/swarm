@@ -1,6 +1,6 @@
 issue: 2378
 audit_type: Pre-Implementation Coverage Audit
-phase: pre_implementation_only
+phase: implementation_and_proof_complete
 agent: agent-g
 audit_head: 1c20c23a4bdeb8eec98e0d4953d223792d4fa36e
 prior_gate:
@@ -11,9 +11,10 @@ prior_gate:
     to project mutation while leaving the rest of the same retired, unmounted
     Builder transport alive. Both boundaries are non-binding.
 current_gate:
-  status: requested
+  status: approved
   cycle: 3
-  implementation_frozen: true
+  implementation_frozen: false
+  approval: https://github.com/division-sh/swarm/issues/2378#issuecomment-5468855313
 
 category:
   severity: P1
@@ -766,7 +767,7 @@ architecture_feedback:
   ROI: high_but_non_closure_bearing_for_2378
 
 blocking_ambiguity_and_split_conditions:
-  current_blocker: fresh_independent_pre_implementation_gate
+  current_blocker: none
   resolved_design_questions:
     - delete_complete_internal_builder_package_not_only_project_methods
     - delete_retired_replacement_instead_of_repairing_it
@@ -783,3 +784,203 @@ blocking_ambiguity_and_split_conditions:
     - another_durable_lifecycle_creator_or_execution_path_outside_the_census_and_gate
     - need_for_outbox_ledger_cross_row_transaction_compatibility_or_generic_recovery_framework
   broad_refactor_escalation_required_now: false
+
+implementation_result:
+  status: failure_class_eliminated
+  symptom_shaped_issue: true
+  achieved_closure_level: failure_class_eliminated_with_net_deletion
+  chosen_working_class: retired_builder_transport_and_live_source_replacement_removal_with_bundle_delete_survivor_convergence
+  parent_remaining_open:
+    issue: 2250
+    class: runtime_startup_and_lifecycle_phase_decomposition
+    estimated_tail: 2_to_4_PRs_or_1_to_2_engineer_weeks
+    estimate_changed_by_implementation: false
+  chosen_class_remaining_tail: zero
+
+  canonical_owners_after_change:
+    retired_transport_absence:
+      owner: platform-spec.yaml#api_specification.migration.builder_api_disposition
+      consumers:
+        - production_API_mount_and_legacy_route_rejection
+        - rejected_SWARM_BUILDER_AUTH_TOKEN_path
+        - architecture_and_work_lifetime_guards
+      systematic_consumption: >-
+        Production exposes only the canonical v1 API and MCP surfaces. The
+        complete internal/builder package, all constructors, adapters, imports,
+        and test-only compilation consumers are absent. Explicit legacy route
+        and token checks remain only as fail-closed prohibitions.
+    immutable_run_bundle_authority:
+      owner: platform-spec.yaml#runtime.run_fork
+      consumers:
+        - same_bundle_run_fork
+        - cross_bundle_run_fork_to_an_already_loaded_target
+        - source_bound_runtime_context_selection
+      systematic_consumption: >-
+        Existing runs retain their exact bundle hash/source. Changed-bundle
+        continuation creates distinct target-bound work through run.fork.
+        No dynamic load, same-bundle reload, or live source replacement path remains.
+    complete_source_set_operation_family:
+      owner: startupownership.ProcessCapability
+      consumers:
+        - startup_InstallCompleteSourceSet
+        - boot_only_RestoreSourceSet
+        - bundle_delete_atomic_remove_bundle_source
+        - destructive_reset_empty_topology
+      systematic_consumption: >-
+        ReplaceSourceSet and its operation discriminator are deleted. RestoreSourceSet
+        has no production live-transition consumer and remains boot-only. Bundle
+        deletion changes the complete head only through its named atomic final mutation.
+    bundle_delete_runtime_quiescence:
+      owner: serveapp.bundleDeleteRuntimeQuiescer_and_processLifecycleSupervisor
+      consumers:
+        - loaded_target_apply
+        - unloaded_target_apply
+        - precommit_failure_compensation
+        - committed_delete_replay
+        - process_shutdown
+      systematic_consumption: >-
+        Quiescence owns one exact predecessor occurrence and may restore only that
+        same source before commit. It cannot publish a changed bundle or serve as a
+        generic replacement owner. Terminal process-ownership loss still forces
+        runtime shutdown even when pending-transition settlement can no longer use
+        the terminal capability.
+    durable_survivor_rebind:
+      owner: manager.PreparedDurableTopologySourceSetRebind_and_AgentLifecyclePersistence
+      consumers:
+        - static_registered_running_failed_survivors
+        - flow_readiness_registered_running_failed_survivors
+        - terminated_and_ephemeral_classification
+        - direct_execution_and_dequeued_delivery_admission
+        - retry_rollback_restart_and_process_readback
+      systematic_consumption: >-
+        The selected-store lifecycle census is complete and sealed-variant aware.
+        One aggregate admission fences registration, start, restart, reconfigure,
+        loop release, direct execution, and delivery execution until exact abort or
+        convergence. A dedicated source-set publication RW lock prevents a source-set
+        writer from opening between gate recheck and route/loop settlement without
+        deadlocking ordinary generation replacement.
+
+  invalidated_old_paths:
+    removed:
+      - complete_internal_builder_package
+      - Builder_JSON_RPC_and_WebSocket_handlers
+      - Builder_test_adapters_and_runtime_acquirer
+      - runtimeProjectSupervisor_and_project_status_mutation_contracts
+      - live_ReplaceSourceSet_writer_interface_operation_and_store_tests
+      - changed_bundle_RuntimeContextManager_replacement_APIs
+      - replacement_candidate_rollback_and_publication_state_machines
+      - replacement_only_tests_fixtures_and_spec_claims
+      - generic_workflow_schedule_insertion_used_by_replacement
+    non_authoritative:
+      - process_local_lifecycle_cells_as_durable_census
+      - static_only_records_as_complete_survivor_inventory
+      - bundle_hash_or_source_equality_as_reload_admission
+      - dashboard_or_retired_Builder_labels_as_future_semantic_consumers
+    surviving_by_design:
+      - boot_only_RestoreSourceSet
+      - startup_install_and_takeover
+      - destructive_reset
+      - process_shutdown
+      - bundle_delete_source_removal_and_exact_precommit_compensation
+      - run_fork_to_loaded_target
+      - explicit_legacy_route_and_token_rejection
+
+  sibling_contexts_checked:
+    - startup_install_restore_and_takeover
+    - destructive_reset
+    - source_set_retire_for_removed_cells
+    - process_shutdown_and_terminal_ownership_loss
+    - same_and_cross_bundle_run_fork
+    - channel_and_agent_generation_replacement
+    - dashboard_REST_transport_issue_2390
+    - SQLite_bundle_delete_feature_surface_issue_2387
+    - broader_runtime_phase_decomposition_issue_2250
+
+  watchlist:
+    mapping: declaration_owned_agent_topology_ownership
+    artifact: swarm-docs@02bf5538ce4443c42c30b51d4fed7e7cfebecc87
+    decision: existing_node_sufficient_no_further_refinement
+
+  architecture_feedback:
+    smell: >-
+      A production-unmounted transport remained compiled by tests and retained a
+      live product interpreter. Its generic supervisor then became an accidental
+      owner for supported bundle-delete compensation.
+    long_run_direction: >-
+      Keep startup, bundle deletion, process shutdown, destructive reset, and
+      run.fork as separate typed process operations. General phase decomposition
+      remains tracked by #2250; no replacement framework or compatibility layer is warranted.
+    tracking_decision: existing_issue_2250_and_watchlist
+    estimated_effort: 2_to_4_PRs_or_1_to_2_engineer_weeks
+    ROI: high_for_future_topology_operations_but_non_closure_bearing_for_2378
+
+  manifestation_coverage:
+    - manifestation: complete_internal_builder_transport_and_test_only_consumers
+      status: reproduced_and_fixed
+      proof: zero_package_import_constructor_exported_symbol_and_guard_census
+    - manifestation: legacy_Builder_routes_or_token_authorize_work
+      status: execution_proven_through_the_same_corrected_path
+      proof: API_route_and_rejected_SWARM_BUILDER_AUTH_TOKEN_tests
+    - manifestation: live_ReplaceSourceSet_or_project_reload_mutates_run_authority
+      status: reproduced_and_fixed
+      proof: zero_writer_interface_operation_and_project_supervisor_census_plus_run_fork_tests
+    - manifestation: loaded_bundle_delete_success_and_exact_precommit_restore
+      status: reproduced_and_fixed
+      proof: real_PostgreSQL_force_nonforce_apply_failure_and_restore_matrix
+    - manifestation: unloaded_bundle_delete
+      status: execution_proven_through_the_same_corrected_path
+      proof: real_PostgreSQL_unloaded_target_final_mutation_without_runtime_publication
+    - manifestation: static_registered_running_failed_survivors
+      status: reproduced_and_fixed
+      proof: manager_phase_matrix_and_dual_store_lifecycle_rebind_tests
+    - manifestation: flow_readiness_registered_running_failed_survivors
+      status: reproduced_and_fixed
+      proof: sealed_readiness_manager_matrix_and_dual_store_lifecycle_rebind_tests
+    - manifestation: terminated_and_ephemeral_cells
+      status: execution_proven_through_the_same_corrected_path
+      proof: complete_census_classification_tests
+    - manifestation: census_process_projection_mismatch_or_malformed_authority
+      status: reproduced_and_fixed
+      proof: fail_closed_manager_and_dual_store_canonical_admission_tests
+    - manifestation: concurrent_registration_restart_reconfigure_or_teardown
+      status: reproduced_and_fixed
+      proof: repeated_manager_source_set_and_execution_projection_race_tests
+    - manifestation: Manager_cancellation_during_loop_release
+      status: reproduced_and_fixed
+      proof: TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation
+    - manifestation: dequeued_delivery_or_direct_execution_during_transition
+      status: reproduced_and_fixed
+      proof: real_EventBus_and_lifecycle_admission_tests_with_no_early_settlement
+    - manifestation: foreign_or_changed_generation_grant_lineage
+      status: reproduced_and_fixed
+      proof: exact_predecessor_successor_grant_counterexamples_for_process_and_durable_evidence
+    - manifestation: partial_survivor_progress_later_row_or_later_runtime_failure
+      status: reproduced_and_fixed
+      proof: SQLite_PostgreSQL_fault_injection_and_aggregate_visibility_tests
+    - manifestation: exact_retry_rollback_and_cold_restart_readback
+      status: reproduced_and_fixed
+      proof: dual_store_transition_replay_bundle_delete_replay_and_startup_takeover_tests
+    - manifestation: ordinary_restart_waits_for_predecessor_loop_release
+      status: reproduced_and_fixed
+      proof: TestExecutionProjectionReconfigureSerializesRestartSelection_repeated_and_served_parity_restart
+    - manifestation: process_ownership_loss_during_shutdown
+      status: reproduced_and_fixed
+      proof: TestPostgresIdleSessionLossReturnsFailureFromRun_and_terminal_capability_unit_proof
+    - manifestation: SQLite_public_bundle_delete_feature_support
+      status: split_escalated_as_separate_class
+      proof: issue_2387_under_2275_public_capability_absence_remains_fail_closed
+    - manifestation: dashboard_REST_transport_removal
+      status: split_escalated_as_separate_class
+      proof: issue_2390_no_source_set_or_bundle_delete_interpreter
+
+  supported_surface_proof_run:
+    whole_suite: go_run_./cmd/swarm-test_green
+    focused:
+      - go_test_manager_source_set_restart_and_cancellation_races_repeated
+      - served_SQLite_PostgreSQL_agent_restart_lifecycle
+      - real_PostgreSQL_idle_session_ownership_loss
+      - real_PostgreSQL_bundle_delete_force_nonforce_loaded_unloaded_apply_replay
+      - SQLite_public_optional_mutator_refusal
+      - same_and_cross_bundle_run_fork
+      - API_spec_OpenRPC_persistence_authority_selected_store_and_work_lifetime_guards
+    result: all_green

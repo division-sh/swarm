@@ -106,17 +106,17 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 
 	t.Run("RB-02_recovery_path", func(t *testing.T) {
 		if err := process.stopAndWait(10 * time.Second); err != nil {
-			t.Fatalf("graceful release serve stop before source replacement: %v\n%s", err, process.output.String())
+			t.Fatalf("graceful release serve stop before changed-source restart: %v\n%s", err, process.output.String())
 		}
 		bumpReleaseChannelSource(t, contracts)
 		process = start()
-		replacementBundleHash := releaseChannelServedBundleHash(t, process.rpc)
-		if replacementBundleHash == initialBundleHash {
-			t.Fatalf("release channel source replacement retained bundle hash %s\n%s", initialBundleHash, process.output.String())
+		restartedBundleHash := releaseChannelServedBundleHash(t, process.rpc)
+		if restartedBundleHash == initialBundleHash {
+			t.Fatalf("changed-source process restart retained bundle hash %s\n%s", initialBundleHash, process.output.String())
 		}
 		retained := requireReleaseCurrentChannel(t, releaseChannelList(t, binaryPath, root, env, configPath, process.apiBase, tokenFile))
 		if retained.Activation != nil || retained.Readiness != nil || retained.Recovery == nil || len(retained.Recovery.Commands) != 1 || retained.Recovery.Commands[0] != "swarm channel reconnect telegram" {
-			t.Fatalf("release retained identity after source replacement %s -> %s = %#v\n%s", initialBundleHash, replacementBundleHash, retained, process.output.String())
+			t.Fatalf("release retained identity after changed-source restart %s -> %s = %#v\n%s", initialBundleHash, restartedBundleHash, retained, process.output.String())
 		}
 		beforeRegistrations, beforeDeliveries := provider.Counts()
 		blocked := runReleaseChannelCommand(t, binaryPath, root, env, "", configPath,
@@ -432,7 +432,7 @@ func bumpReleaseChannelSource(t *testing.T, contracts string) {
 	path := filepath.Join(contracts, releaseChannelManifestName())
 	body, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read release channel package for replacement: %v", err)
+		t.Fatalf("read release channel package for changed-source restart: %v", err)
 	}
 	updated := strings.Replace(string(body), `version: "1.0.0"`, `version: "1.0.1"`, 1)
 	if updated == string(body) {

@@ -240,58 +240,6 @@ func (c *ProviderRegistrationController) Preflight(ctx context.Context, exposure
 	return err
 }
 
-// PrepareStartupHandoff settles predecessor-owned registration attempts and
-// prevents renewal from opening another attempt until the caller releases it.
-func (c *ProviderRegistrationController) PrepareStartupHandoff(ctx context.Context) (func(), error) {
-	if c == nil {
-		return nil, fmt.Errorf("provider registration controller is required")
-	}
-	c.reconcileMu.Lock()
-	if err := c.prepareStartupHandoffLocked(ctx); err != nil {
-		c.reconcileMu.Unlock()
-		return nil, err
-	}
-	var once sync.Once
-	return func() {
-		once.Do(c.reconcileMu.Unlock)
-	}, nil
-}
-
-func (c *ProviderRegistrationController) prepareStartupHandoffLocked(ctx context.Context) error {
-	snapshot := c.snapshot.capture()
-	keys := make([]string, 0, len(snapshot.registrations))
-	for key := range snapshot.registrations {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		state := snapshot.registrations[key]
-		switch state.Phase {
-		case registrationPhaseNoAttempt, registrationPhaseVerified, registrationPhaseOutcomeUncertain:
-			continue
-		case registrationPhasePrelaunch:
-			return fmt.Errorf("provider registration %s has an unresolved pre-launch attempt; startup handoff is refused", key)
-		case registrationPhasePendingSettlement:
-			candidate, err := c.admitReadbackCandidate(ctx, state)
-			if err != nil {
-				if settleErr := c.terminalizePendingReadback(ctx, key, state, err); settleErr != nil {
-					return fmt.Errorf("terminalize provider registration %s before startup handoff: %w", key, settleErr)
-				}
-				continue
-			}
-			if err := c.refreshReadback(ctx, candidate, state, true); err != nil {
-				settled, _ := c.snapshot.state(key)
-				if settled.Phase != registrationPhaseOutcomeUncertain {
-					return fmt.Errorf("settle provider registration %s before startup handoff: %w", key, err)
-				}
-			}
-		default:
-			return fmt.Errorf("provider registration %s has unsupported lifecycle phase %q", key, state.Phase)
-		}
-	}
-	return nil
-}
-
 func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
 	key := pairSemanticKey(pair)
 	activationAuthority := pair.ChannelActivationGeneration.Valid()

@@ -17,41 +17,6 @@ const (
 	topologyOperationBundleB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-func TestServeSourceSetAndReplacementOperationIDsIdentifyLogicalOccurrences(t *testing.T) {
-	capability, session := newTopologyOperationTestCapability(t)
-	initial := topologyOperationPlan(t, topologyOperationBundleA)
-	replacement := topologyOperationPlan(t, topologyOperationBundleB)
-
-	if err := installServeSourceSet(context.Background(), capability, initial); err != nil {
-		t.Fatalf("install initial source set: %v", err)
-	}
-	if err := installServeSourceSet(context.Background(), capability, replacement); err != nil {
-		t.Fatalf("restore replacement source set: %v", err)
-	}
-	if err := installServeSourceSet(context.Background(), capability, initial); err != nil {
-		t.Fatalf("restore recurring initial source set: %v", err)
-	}
-	assertDistinctTopologyOperationIDs(t, session.sourceSetRequests)
-
-	supervisor := &runtimeProjectSupervisor{processCapability: capability}
-	firstAttempt := newSourceSetReplacementAttempt()
-	previous, err := supervisor.replaceCommittedSourceSet(context.Background(), replacement, firstAttempt)
-	if err != nil {
-		t.Fatalf("replace source set: %v", err)
-	}
-	if err := supervisor.restoreCommittedSourceSet(context.Background(), replacement, previous, firstAttempt); err != nil {
-		t.Fatalf("restore source set: %v", err)
-	}
-	secondAttempt := newSourceSetReplacementAttempt()
-	if _, err := supervisor.replaceCommittedSourceSet(context.Background(), replacement, secondAttempt); err != nil {
-		t.Fatalf("repeat replacement: %v", err)
-	}
-	if firstAttempt.replaceOperationID == secondAttempt.replaceOperationID || firstAttempt.restoreOperationID == secondAttempt.replaceOperationID {
-		t.Fatalf("replacement attempts reused operation identity: first=%#v second=%#v", firstAttempt, secondAttempt)
-	}
-	assertDistinctTopologyOperationIDs(t, session.sourceSetRequests)
-}
-
 func TestAdministrativeTopologyMutationIDsSurviveRepeatedSourceCycles(t *testing.T) {
 	capability, session := newTopologyOperationTestCapability(t)
 	initial := topologyOperationPlan(t, topologyOperationBundleA)

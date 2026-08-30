@@ -140,6 +140,58 @@ pins:
 	return root
 }
 
+// CopyStaticAndTemplateAgentRoute derives one static agent plus one
+// flow-readiness agent from the closed template-instance route fixture.
+func CopyStaticAndTemplateAgentRoute(t testing.TB) string {
+	t.Helper()
+	root := CopyTemplateInstanceRoute(t, TemplateInstanceRouteOptions{
+		Mode: TemplateInstanceRouteSelect, Consumer: TemplateInstanceAgentConsumer,
+	})
+	writeClosedVariantFile(t, root, "flows/producer/schema.yaml", `name: producer
+mode: static
+pins:
+  inputs:
+    events:
+      - event: deploy.requested
+        source: external
+  outputs:
+    events: [deploy.done]
+`)
+	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
+  swarm:
+    source: external
+  vertical_id: string
+deploy.done:
+  key: vertical_id
+  vertical_id: string
+`)
+	writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", `producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to: [deploy.requested]
+  produces: [deploy.done]
+  event_handlers:
+    deploy.requested:
+      emit:
+        event: deploy.done
+        fields:
+          vertical_id: payload.vertical_id
+`)
+	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `beta-worker:
+  id: beta-worker
+  model: regular
+  intent:
+    inline: Preserve static source-set authority.
+  subscriptions: [deploy.done]
+`)
+	writeClosedVariantFile(t, root, "flows/consumer/entities.yaml", `deployment:
+  vertical_id:
+    type: string
+    _unused_reason: source-set survivor topology proof identity field
+`)
+	return root
+}
+
 func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, nodes string) {
 	t.Helper()
 	base := filepath.ToSlash(filepath.Join("flows", id))

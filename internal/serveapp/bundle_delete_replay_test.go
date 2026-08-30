@@ -33,6 +33,32 @@ type failOncePostCommitBundleDeleteCapability struct {
 	refreshAttempts        atomic.Int32
 }
 
+type failSourceSetGrantCapability struct {
+	runtimestartupownership.ProcessCapability
+	revision          string
+	attempts          atomic.Int32
+	failuresRemaining atomic.Int32
+}
+
+func (c *failSourceSetGrantCapability) IssueGenerationGrant(
+	ctx context.Context,
+	req runtimestartupownership.GrantRequest,
+) (runtimestartupownership.GenerationGrant, error) {
+	if c.revision == "" || req.SourceSetRevision == c.revision {
+		c.attempts.Add(1)
+		for {
+			remaining := c.failuresRemaining.Load()
+			if remaining <= 0 {
+				break
+			}
+			if c.failuresRemaining.CompareAndSwap(remaining, remaining-1) {
+				return nil, errors.New("injected predecessor survivor grant failure")
+			}
+		}
+	}
+	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
+}
+
 func (c *failOncePostCommitBundleDeleteCapability) ApplyBundleDeleteFinalMutation(
 	ctx context.Context,
 	req runtimebundledelete.FinalMutationRequest,
@@ -175,10 +201,10 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
-	supervisor := &runtimeProjectSupervisor{
-		currentRT: first.runtime, runtimeContexts: contexts, processCapability: failingCapability,
-		replacementShutdown: runtimepkg.DefaultShutdownOptions(),
-	}
+	supervisor := newProcessLifecycleSupervisor(projectServeRuntimePersistence(stores), nil, first.runtime)
+	supervisor.SetRuntimeContextManager(contexts, first.runtime.Options.BundleSourceFact)
+	supervisor.SetProcessCapability(failingCapability)
+	supervisor.shutdownOptions = runtimepkg.DefaultShutdownOptions()
 	coordinator := &runtimebundledelete.Coordinator{
 		Planner:   selected,
 		Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
@@ -247,11 +273,11 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	}
 	closeFailureCapability.failuresRemaining.Store(1)
 	supervisor.SetProcessCapability(closeFailureCapability)
-	if _, err := supervisor.CloseProject(ctx); err == nil || !strings.Contains(err.Error(), "injected predecessor survivor grant failure") {
+	if err := supervisor.settlePendingSourceSetTransition(ctx); err == nil || !strings.Contains(err.Error(), "injected predecessor survivor grant failure") {
 		t.Fatalf("close with pending survivor recovery failure = %v, want fail-closed grant error", err)
 	}
-	if supervisor.CurrentRuntime() != first.runtime {
-		t.Fatal("close detached the current runtime before pending survivor recovery completed")
+	if supervisor.CurrentRuntime() != nil {
+		t.Fatal("pending survivor recovery exposed a process runtime before topology converged")
 	}
 	for _, bundleHash := range []string{secondHash, thirdHash} {
 		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
@@ -259,8 +285,11 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		}
 	}
 	supervisor.SetProcessCapability(failingCapability)
-	if _, err := supervisor.CloseProject(ctx); err != nil {
+	if err := supervisor.settlePendingSourceSetTransition(ctx); err != nil {
 		t.Fatalf("close did not complete pending survivor recovery: %v", err)
+	}
+	if supervisor.CurrentRuntime() == nil || supervisor.CurrentRuntime() == first.runtime {
+		t.Fatalf("pending survivor recovery did not attach a surviving primary runtime: %p", supervisor.CurrentRuntime())
 	}
 	for _, bundleHash := range []string{secondHash, thirdHash} {
 		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {

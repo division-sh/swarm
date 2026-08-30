@@ -240,18 +240,6 @@ func (s *PipelineSQLiteOwner) ReconcileStandingServiceSet(ctx context.Context, c
 	return standingServiceResultsEvidence(results, adapter, err)
 }
 
-func (s *PipelinePostgresOwner) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error) {
-	adapter := newPostgresStandingServiceAdapter(s)
-	results, err := adapter.ReconcileStandingServiceReplacement(ctx, previous, candidates)
-	return standingServiceResultsEvidence(results, adapter, err)
-}
-
-func (s *PipelineSQLiteOwner) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error) {
-	adapter := newSQLiteStandingServiceAdapter(s)
-	results, err := adapter.ReconcileStandingServiceReplacement(ctx, previous, candidates)
-	return standingServiceResultsEvidence(results, adapter, err)
-}
-
 func (s *PipelinePostgresOwner) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
 	adapter := newPostgresStandingServiceAdapter(s)
 	result, err := adapter.SuspendStandingService(ctx, operation)
@@ -448,65 +436,6 @@ func (s *standingServiceAdapter) ReconcileStandingServiceSet(ctx context.Context
 		}
 		for _, current := range persisted {
 			if _, ok := declared[current.ServiceID]; ok || !current.DeclarationPresent {
-				continue
-			}
-			result, err := s.orphanStandingServiceTx(txctx, tx, current)
-			if err != nil {
-				return err
-			}
-			if !signalQueued {
-				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
-					return err
-				}
-				signalQueued = true
-			}
-			results = append(results, result)
-		}
-		return nil
-	})
-	return results, err
-}
-
-// ReconcileStandingServiceReplacement is the hot-reload desired-state owner.
-// It mutates only the predecessor declaration set so independently loaded
-// runtime contexts remain outside the replacement transaction.
-func (s *standingServiceAdapter) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("workflow instance store is required")
-	}
-	previous, err := normalizeStandingServiceCandidates(previous)
-	if err != nil {
-		return nil, fmt.Errorf("validate predecessor standing declarations: %w", err)
-	}
-	candidates, err = normalizeStandingServiceCandidates(candidates)
-	if err != nil {
-		return nil, fmt.Errorf("validate replacement standing declarations: %w", err)
-	}
-
-	retained := make(map[string]struct{}, len(candidates))
-	results := make([]runtimepipeline.StandingServiceReconciliation, 0, len(previous)+len(candidates))
-	signalQueued := false
-	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		for _, candidate := range candidates {
-			retained[candidate.ServiceID] = struct{}{}
-			result, err := s.reconcileStandingServiceTx(txctx, tx, candidate)
-			if err != nil {
-				return err
-			}
-			results = append(results, result)
-		}
-		for _, predecessor := range previous {
-			if _, ok := retained[predecessor.ServiceID]; ok {
-				continue
-			}
-			current, found, err := s.loadStandingServiceTx(txctx, tx, predecessor.ServiceID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("predecessor standing service %s is not persisted", predecessor.ServiceID)
-			}
-			if !current.DeclarationPresent {
 				continue
 			}
 			result, err := s.orphanStandingServiceTx(txctx, tx, current)

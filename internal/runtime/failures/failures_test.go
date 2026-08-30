@@ -215,7 +215,7 @@ func TestClassSpecificDetailValidation(t *testing.T) {
 
 func TestRunTerminalPersistenceUnconfirmedDetailIsClosed(t *testing.T) {
 	for _, status := range []string{"failed", "completed"} {
-		err := New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "builder.run_hub", "mark_run_terminal", map[string]any{"attempted_status": status})
+		err := New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "runtime.run_completion", "mark_run_terminal", map[string]any{"attempted_status": status})
 		failure, ok := As(err)
 		if !ok || failure.Failure.Class != ClassOutcomeUncertain {
 			t.Fatalf("status %s failure = %#v, want outcome_uncertain", status, failure)
@@ -226,7 +226,7 @@ func TestRunTerminalPersistenceUnconfirmedDetailIsClosed(t *testing.T) {
 		{"attempted_status": "cancelled"},
 		{"attempted_status": "failed", "cause": "raw"},
 	} {
-		err := New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "builder.run_hub", "mark_run_terminal", attributes)
+		err := New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "runtime.run_completion", "mark_run_terminal", attributes)
 		failure, ok := As(err)
 		if !ok || failure.Failure.Class != ClassInternalFailure || failure.Failure.Detail.Code != "invalid_failure_construction" {
 			t.Fatalf("attributes %#v failure = %#v, want invalid construction", attributes, failure)
@@ -275,7 +275,7 @@ func TestDeliveryRetryExhaustedDetailIsClosed(t *testing.T) {
 }
 
 func TestSemanticFingerprintExcludesPresentationAndIncludesTypedDetail(t *testing.T) {
-	failure, ok := EnvelopeFromError(New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "builder.run_hub", "mark_run_terminal", map[string]any{"attempted_status": "failed"}))
+	failure, ok := EnvelopeFromError(New(ClassOutcomeUncertain, "run_terminal_persistence_unconfirmed", "runtime.run_completion", "mark_run_terminal", map[string]any{"attempted_status": "failed"}))
 	if !ok {
 		t.Fatal("expected canonical failure")
 	}

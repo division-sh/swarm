@@ -594,7 +594,7 @@ func selectedContractExecutionBlockedSiblings() []runfork.RunForkSelectedContrac
 			Reason:      "full selected-contract boot/resume execution remains outside this non-mutating model",
 		},
 		{
-			Concept:     "builder_dashboard_ui",
+			Concept:     "dashboard_ui",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "operator UI is a later consumer and must not become the execution owner",
 		},

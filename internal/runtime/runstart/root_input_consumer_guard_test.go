@@ -17,13 +17,11 @@ import (
 
 var auditedRootInputConsumers = []string{
 	"internal/apiv1/operator_event_publish.go:validateEventPublication",
-	"internal/builder/handler_rpc.go:dispatchRPC",
 }
 
 var rootInputProjectionRequirements = map[string]string{
 	"internal/apiv1/operator_event_publish.go:validateEventPublication":  "rootInputApplicationError",
 	"internal/apiv1/operator_event_publish.go:rootInputApplicationError": "AsRootInputValidationError",
-	"internal/builder/handler_rpc.go:dispatchRPC":                        "AsRootInputValidationError",
 }
 
 func TestValidateInputEventsConsumersAreExhaustivelyRegistered(t *testing.T) {
@@ -59,12 +57,6 @@ func validateEventPublication() {
 	rootInputApplicationError()
 }
 func rootInputApplicationError() { runstart.AsRootInputValidationError() }
-`)
-	writeGuardFixture("internal/builder/handler_rpc.go", `package builder
-func dispatchRPC() {
-	runstart.ValidateInputEvents()
-	runstart.AsRootInputValidationError()
-}
 `)
 	writeGuardFixture("internal/cliapp/synthetic.go", `package cliapp
 func syntheticCommandConsumer() { runstart.ValidateInputEvents() }

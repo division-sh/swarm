@@ -462,27 +462,29 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 	return nil
 }
 
-// PreparedStaticSourceSetGenerationRefresh reserves one runtime generation and
-// all of its static lifecycle cells before process composition mutates the
-// complete source set. Commit and Abort both settle every held lock exactly
-// once.
-type PreparedStaticSourceSetGenerationRefresh struct {
+// PreparedSourceSetGenerationRefresh reserves one runtime generation and all
+// durable lifecycle survivors before process composition mutates the complete
+// source set. Commit, retry retention, and abort settle every held lock once.
+type PreparedSourceSetGenerationRefresh struct {
 	mu              sync.Mutex
 	runtime         *Runtime
 	plan            runtimeagenttopology.SourceSetPlan
 	current         runtimestartupownership.GenerationGrant
 	currentEvidence runtimestartupownership.GrantEvidence
-	topology        *runtimemanager.PreparedStaticTopologySourceSetRebind
+	topology        *runtimemanager.PreparedDurableTopologySourceSetRebind
 	done            bool
 }
 
-// PrepareStaticSourceSetGenerationRefresh validates the successor topology
-// against the live semantic source and reserves generation/static lifecycle
-// mutation. It performs no selected-store mutation.
-func (rt *Runtime) PrepareStaticSourceSetGenerationRefresh(
+// PrepareSourceSetGenerationRefresh validates the successor topology
+// against the live semantic source and reserves generation/lifecycle mutation.
+// It performs no selected-store mutation.
+func (rt *Runtime) PrepareSourceSetGenerationRefresh(
+	ctx context.Context,
 	plan runtimeagenttopology.SourceSetPlan,
 	source semanticview.Source,
-) (_ *PreparedStaticSourceSetGenerationRefresh, prepareErr error) {
+	transitionAdmission runtimemanager.SourceSetTransitionAdmission,
+	resume bool,
+) (_ *PreparedSourceSetGenerationRefresh, prepareErr error) {
 	if rt == nil || rt.Manager == nil || source == nil {
 		return nil, errors.New("runtime source-set generation refresh requires runtime, manager, and semantic source")
 	}
@@ -516,23 +518,47 @@ func (rt *Runtime) PrepareStaticSourceSetGenerationRefresh(
 		evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return nil, errors.New("runtime source-set generation refresh grant differs from runtime coordinate")
 	}
+	currentBinding, err := current.ProcessExecutionBinding()
+	if err != nil {
+		return nil, fmt.Errorf("runtime source-set generation refresh process binding: %w", err)
+	}
+	predecessorBinding := currentBinding
+	if resume {
+		var found bool
+		predecessorBinding, found = transitionAdmission.PredecessorProcessBinding(currentBinding)
+		if !found {
+			return nil, errors.New("runtime source-set generation refresh is missing exact predecessor binding")
+		}
+	} else if err := transitionAdmission.RecordPredecessorProcessBinding(currentBinding); err != nil {
+		return nil, err
+	}
 	admission, err := runtimeagenttopology.StaticAdmission(
 		plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		return nil, err
 	}
-	topology, err := rt.Manager.PrepareStaticTopologySourceSetRebind(admission, plan, source)
+	topology, err := rt.Manager.PrepareDurableTopologySourceSetRebind(
+		ctx,
+		admission,
+		plan,
+		source,
+		currentBinding,
+		predecessorBinding,
+		evidence.SourceSetRevision == plan.Revision,
+		transitionAdmission,
+		resume,
+	)
 	if err != nil {
 		return nil, err
 	}
 	keepLock = true
-	return &PreparedStaticSourceSetGenerationRefresh{
+	return &PreparedSourceSetGenerationRefresh{
 		runtime: rt, plan: plan, current: current, currentEvidence: evidence, topology: topology,
 	}, nil
 }
 
-func (p *PreparedStaticSourceSetGenerationRefresh) Abort() {
+func (p *PreparedSourceSetGenerationRefresh) Abort() {
 	if p == nil {
 		return
 	}
@@ -548,11 +574,29 @@ func (p *PreparedStaticSourceSetGenerationRefresh) Abort() {
 	p.runtime.generationMu.Unlock()
 }
 
+// RetainForRetry releases local locks after the source-set head may have
+// committed while preserving the shared aggregate admission fence.
+func (p *PreparedSourceSetGenerationRefresh) RetainForRetry() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return
+	}
+	p.done = true
+	if p.topology != nil {
+		p.topology.RetainForRetry()
+	}
+	p.runtime.generationMu.Unlock()
+}
+
 // Commit rotates the selected-store generation grant and persists every
-// static topology admission through the locks acquired by Prepare. The
-// successor remains installed on a persistence failure so a later prepared
-// retry can replay the deterministic lifecycle transitions.
-func (p *PreparedStaticSourceSetGenerationRefresh) Commit(
+// durable survivor's topology and process binding through the locks acquired
+// by Prepare. The successor remains installed on a persistence failure so a
+// later prepared retry can replay the deterministic lifecycle transitions.
+func (p *PreparedSourceSetGenerationRefresh) Commit(
 	ctx context.Context,
 	capability runtimestartupownership.ProcessCapability,
 ) (commitErr error) {
@@ -1934,10 +1978,6 @@ func (rt *Runtime) Shutdown() error {
 }
 
 func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
-	return rt.stopWithOptions(opts)
-}
-
-func (rt *Runtime) QuiesceForReplacement(opts ShutdownOptions) error {
 	return rt.stopWithOptions(opts)
 }
 

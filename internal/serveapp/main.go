@@ -1148,7 +1148,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	closeUnactivatedStore = false
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
 	var runtimeContextManager *runtime.RuntimeContextManager
-	var supervisor *runtimeProjectSupervisor
+	var supervisor *processLifecycleSupervisor
 	var workspaces cliapp.ServeWorkspaceLifecycle
 	var processCapability runtimestartupownership.ProcessCapability
 	cancelOwnershipWatch := func() {}
@@ -1290,7 +1290,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	source = primaryContext.loaded.source
-	bundle := primaryContext.loaded.bundle
 	contractsRoot := primaryContext.loaded.contractsRoot
 	bootBundleIdentity := primaryContext.bootIdentity
 	workspaces = primaryContext.workspaces
@@ -1374,27 +1373,11 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor = newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt)
-	supervisor.noticePresentation = noticePresentation
-	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
+	supervisor = newProcessLifecycleSupervisor(runtimePersistence, ready, rt)
 	supervisor.SetProcessCapability(processCapability)
-	supervisor.SetRuntimeConfigLoader(func() (cliapp.RuntimeConfigLoadResult, error) {
-		return cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
-			RepoRoot: repo, ExplicitPath: opts.ConfigPath, BackendOverride: opts.Backend,
-		})
-	})
-	supervisor.SetBundlePackRuntimeLoader(func(loadCtx context.Context, candidateConfig cliapp.RuntimeConfigLoadResult, candidateBundle *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
-		return cliapp.LoadBundlePackRuntime(loadCtx, candidateConfig, candidateBundle, providerCredentialStore, managedCredentialStore)
-	})
-	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
-	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
-	if opts.Dev && !opts.LocalRun {
-		supervisor.DisableSourceReplacement("one swarm serve --dev scratch epoch owns exactly one source generation")
-	}
-	if len(pinnedBundleHashes) > 0 {
-		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
-	}
+	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact)
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
@@ -1486,14 +1469,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
-	supervisor.SetRuntimeRetiredHook(func(retireCtx context.Context, retired runtime.BundleContext) error {
-		bundleHash, bundleSource := retired.BundleSourceFact.StorageValues()
-		publication := retired.PublicationGeneration
-		requestKey := operatorchannel.Hash("channel-context-retirement-key-v1", bundleHash, bundleSource, fmt.Sprint(publication))
-		requestHash := operatorchannel.Hash("channel-context-retirement-request-v1", bundleHash, bundleSource, fmt.Sprint(publication))
-		_, retireErr := channelDestructive.RetireContext(retireCtx, bundleHash, bundleSource, publication, requestKey, requestHash, "runtime_context_retired")
-		return retireErr
-	})
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
@@ -1636,34 +1611,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			}
 			return reconcilePublicIngress(refreshCtx, generation)
 		}
-		supervisor.SetRuntimePublishedHook(func(hookCtx context.Context) error {
-			generation := publicExposure.Generation()
-			if generation.ID == "" {
-				return fmt.Errorf("public exposure generation is unavailable after runtime publication")
-			}
-			if err := publicExposure.Renew(hookCtx); err != nil {
-				return err
-			}
-			return reconcilePublicIngress(hookCtx, generation)
-		})
-		supervisor.SetStartupOwnershipHandoffBarrier(registrationController.PrepareStartupHandoff)
 	}
-	supervisor.AddRuntimePublishedHook(func(hookCtx context.Context) error {
-		current, _ := supervisor.PublicIngressState()
-		if current == nil {
-			return errors.New("published runtime is unavailable for operator-channel interface projection")
-		}
-		publishedContexts := append([]serveRuntimeBundleContext(nil), runtimeContexts...)
-		publishedContexts[0].runtime = current
-		identities, err := serveOperatorChannelInterfaces(publishedContexts)
-		if err != nil {
-			return err
-		}
-		if err := operatorChannels.ReplaceInterfaces(identities); err != nil {
-			return err
-		}
-		return channelActivationRefresher.RefreshChannelActivations(hookCtx)
-	})
 	presenter.recordBootWarnings(bootReport)
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
@@ -2391,14 +2339,14 @@ func serveLifecycleWorkspaceLabels(bundles []serveRuntimeBundle) []string {
 	return labels
 }
 
-func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts cliapp.ServeOptions, workspaces cliapp.ServeWorkspaceLifecycle, deadlines ...time.Time) error {
+func closeServeRuntime(ctx context.Context, supervisor *processLifecycleSupervisor, opts cliapp.ServeOptions, workspaces cliapp.ServeWorkspaceLifecycle, deadlines ...time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var shutdownErr error
 	if supervisor != nil {
 		shutdownOpts := runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}
-		_, shutdownErr = supervisor.ShutdownProcessWithOptions(ctx, shutdownOpts)
+		shutdownErr = supervisor.ShutdownProcessWithOptions(ctx, shutdownOpts)
 	}
 	var cleanupErr error
 	if opts.Dev && workspaces != nil {

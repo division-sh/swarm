@@ -1181,7 +1181,7 @@ const (
 	RunForkSelectedContractReadinessFactCurrentStateSnapshots       = "current_state_materialization_snapshots"
 	RunForkSelectedContractReadinessFactNonAgentNodeSystemWork      = "non_agent_node_system_work"
 	RunForkSelectedContractReadinessFactRestartRecovery             = "restart_recovery"
-	RunForkSelectedContractReadinessFactOperatorConsumers           = "cli_api_dashboard_builder_consumers"
+	RunForkSelectedContractReadinessFactOperatorConsumers           = "cli_api_dashboard_operator_consumers"
 )
 
 type RunForkSelectedContractReadiness struct {

@@ -22,8 +22,8 @@ type SourceBootEffectReachability struct {
 	unreachableOutboundTools  map[string]struct{}
 }
 
-// SourceBootEffectContext is the canonical boot projection shared by Builder,
-// verify/serve validation, and local preflight.
+// SourceBootEffectContext is the canonical boot projection shared by
+// verify/serve validation and local preflight.
 type SourceBootEffectContext struct {
 	Source                 semanticview.Source
 	MockConnectorResponses *providerconnectors.MockResponsePlan

@@ -503,49 +503,11 @@ func (rt *Runtime) EnsureStandingServiceTargets(ctx context.Context, serviceID s
 	return targets, activations, err
 }
 
-// EnsureStandingReplacementTargets atomically reconciles a hot replacement's
-// declaration set before publishing its process-local standing targets.
-func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predecessor *Runtime) ([]StandingTarget, []StandingActivation, error) {
-	if rt == nil {
-		return nil, nil, fmt.Errorf("replacement runtime is required")
-	}
-	candidates, err := rt.PlanStandingServiceCandidates()
-	if err != nil {
-		return nil, nil, err
-	}
-	var previous []runtimepipeline.StandingServiceCandidate
-	if predecessor != nil {
-		previous, err = predecessor.PlanStandingServiceCandidates()
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	if len(previous) == 0 && len(candidates) == 0 {
-		return nil, nil, nil
-	}
-	if rt.workOccurrence == nil {
-		return nil, nil, fmt.Errorf("replacement runtime work occurrence is required")
-	}
-	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
-	owner := rt.Pipeline
-	if owner == nil {
-		return nil, nil, fmt.Errorf("standing replacement requires pipeline store")
-	}
-	if len(previous) > 0 && predecessor.Pipeline == nil {
-		return nil, nil, fmt.Errorf("standing predecessor requires pipeline store")
-	}
-	targets, activations, err := rt.ensureStandingTargetsMutation(ctx, "", previous, true)
-	if err == nil {
-		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
-	}
-	return targets, activations, err
-}
-
 func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
-	return rt.ensureStandingTargetsMutation(ctx, serviceID, nil, false)
+	return rt.ensureStandingTargetsMutation(ctx, serviceID)
 }
 
-func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID string, previous []runtimepipeline.StandingServiceCandidate, replace bool) ([]StandingTarget, []StandingActivation, error) {
+func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
 	if rt == nil {
 		return nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
@@ -598,7 +560,7 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 		})
 	}
 	results, err := rt.Pipeline.CommitStandingTargets(ctx, runtimepipeline.StandingTargetMutationRequest{
-		Previous: previous, Targets: mutations, Replace: replace, ObservedAt: observedAt,
+		Targets: mutations, ObservedAt: observedAt,
 	}, rt.Manager)
 	if err != nil {
 		return nil, nil, fmt.Errorf("activate standing targets: %w", err)

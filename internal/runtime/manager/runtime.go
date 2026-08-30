@@ -141,6 +141,9 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := am.lifecycle.sourceSetTransitionConflict("shutdown_manager"); err != nil {
+		return err
+	}
 	transition := am.lifecycle.requestShutdownTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -469,7 +472,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	req.RunID = strings.TrimSpace(req.RunID)
 	req.Source = strings.TrimSpace(req.Source)
 	if req.Source == "" {
-		req.Source = runtimeagentcontrol.DirectiveSourceBuilderRuntime
+		req.Source = runtimeagentcontrol.DirectiveSourceInternalRuntime
 	}
 	req.OperatorID = strings.TrimSpace(req.OperatorID)
 	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
@@ -1262,6 +1265,9 @@ func platformResetSourceAuthorized(source string) bool {
 }
 
 func (am *AgentManager) resetRuntimeState(source string) error {
+	if err := am.lifecycle.sourceSetTransitionConflict("reset_manager"); err != nil {
+		return err
+	}
 	shutdown, reset := am.lifecycle.requestResetTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(shutdown, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -1437,6 +1443,8 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
 ) (replaceExecutionResult, error) {
+	am.lifecycle.sourceSetPublishMu.RLock()
+	defer am.lifecycle.sourceSetPublishMu.RUnlock()
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
 	cell, err := am.lifecycle.lockIdentityOperation(identity)

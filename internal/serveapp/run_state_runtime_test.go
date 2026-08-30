@@ -436,10 +436,10 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		t.Fatalf("count active deliveries after timeout window: %v", err)
 	}
 	if activeDeliveries == 0 {
-		t.Fatal("expected same-run active delivery after builder timeout window")
+		t.Fatal("expected same-run active delivery after shutdown timeout window")
 	}
 	if got := workOwner.ActiveCount(); got == 0 {
-		t.Fatal("expected runtime occurrence to retain active manager work after builder timeout window")
+		t.Fatal("expected runtime occurrence to retain active manager work after shutdown timeout window")
 	}
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)

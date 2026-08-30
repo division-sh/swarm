@@ -29,7 +29,6 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 	}
 	for _, required := range []string{
 		"registrationPhaseOutcomeUncertain",
-		"PrepareStartupHandoff",
 		"terminalizePendingReadback",
 	} {
 		if !strings.Contains(string(registrationSource), required) {
@@ -79,13 +78,6 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 		}
 	}
 
-	supervisorSource, err := os.ReadFile(filepath.Join(repo, "internal", "serveapp", "builder_project_supervisor.go"))
-	if err != nil {
-		t.Fatalf("read startup handoff owner: %v", err)
-	}
-	if !strings.Contains(string(supervisorSource), "release, err := beforeStartupHandoff(ctx)") {
-		t.Fatal("runtime replacement can commit startup ownership without the registration barrier")
-	}
 	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)

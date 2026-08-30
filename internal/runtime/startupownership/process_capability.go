@@ -116,9 +116,7 @@ type ProcessCapability interface {
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
 	IssueGenerationGrant(context.Context, GrantRequest) (GenerationGrant, error)
 	InstallCompleteSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
-	ReplaceSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
-	RemoveBundleSource(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error)
 	ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
@@ -267,16 +265,8 @@ func (p *processCapability) InstallCompleteSourceSet(ctx context.Context, req ru
 	return p.commitSourceSet(ctx, runtimeagenttopology.OperationInstallCompleteSourceSet, req)
 }
 
-func (p *processCapability) ReplaceSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
-	return p.commitSourceSet(ctx, runtimeagenttopology.OperationReplaceSourceSet, req)
-}
-
 func (p *processCapability) RestoreSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	return p.commitSourceSet(ctx, runtimeagenttopology.OperationRestoreSourceSet, req)
-}
-
-func (p *processCapability) RemoveBundleSource(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
-	return p.commitSourceSet(ctx, runtimeagenttopology.OperationRemoveBundleSource, req)
 }
 
 func (p *processCapability) ApplyBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {

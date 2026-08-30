@@ -12,7 +12,6 @@ type SourceSetOperation string
 
 const (
 	OperationInstallCompleteSourceSet      SourceSetOperation = "install_complete_source_set"
-	OperationReplaceSourceSet              SourceSetOperation = "replace_source_set"
 	OperationRestoreSourceSet              SourceSetOperation = "restore_source_set"
 	OperationRemoveBundleSource            SourceSetOperation = "remove_bundle_source"
 	OperationApplyDestructiveResetTopology SourceSetOperation = "apply_destructive_reset_topology"
@@ -28,7 +27,7 @@ type SourceSetCommitRequest struct {
 
 func (r SourceSetCommitRequest) Validate() error {
 	switch r.Operation {
-	case OperationInstallCompleteSourceSet, OperationReplaceSourceSet, OperationRestoreSourceSet,
+	case OperationInstallCompleteSourceSet, OperationRestoreSourceSet,
 		OperationRemoveBundleSource, OperationApplyDestructiveResetTopology:
 	default:
 		return fmt.Errorf("agent topology source-set operation %q is invalid", r.Operation)
@@ -53,7 +52,7 @@ func (r SourceSetCommitRequest) Validate() error {
 		}
 	default:
 		if strings.TrimSpace(r.ExpectedRevision) == "" || r.RemovedSource != nil {
-			return errors.New("source-set replacement requires one expected revision and no removed-source fact")
+			return fmt.Errorf("source-set operation %q requires one expected revision and no removed-source fact", r.Operation)
 		}
 	}
 	return nil

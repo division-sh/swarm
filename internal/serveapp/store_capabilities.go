@@ -49,7 +49,7 @@ type selectedAPICapabilityRequest struct {
 	RunningPlatformSpecPath string
 	LoadedBundle            serveRuntimeBundle
 	RuntimeContextManager   *runtime.RuntimeContextManager
-	RuntimeSupervisor       *runtimeProjectSupervisor
+	RuntimeSupervisor       *processLifecycleSupervisor
 	Source                  semanticview.Source
 	ContractsRoot           string
 	Config                  *config.Config

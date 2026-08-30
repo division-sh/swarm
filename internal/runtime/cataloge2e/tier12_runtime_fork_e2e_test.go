@@ -264,7 +264,7 @@ func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *
 	if plan.Revision == current.Revision {
 		return
 	}
-	if _, err := h.processTopology.ReplaceSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+	if _, err := h.processTopology.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
 		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan,
 	}); err != nil {
 		t.Fatalf("commit selected-contract complete source set: %v", err)
