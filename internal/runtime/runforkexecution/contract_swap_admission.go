@@ -202,7 +202,7 @@ func contractSwapBootResumeBlockedSiblings() []runfork.RunForkSelectedContractEx
 			Reason:      "node/system/non-agent replay remains separately gated and is not admitted through contract-swap readiness",
 		},
 		{
-			Concept:     "builder_dashboard_api",
+			Concept:     "dashboard_api",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "operator surfaces may consume this admission but must not own contract-swap readiness semantics",
 		},

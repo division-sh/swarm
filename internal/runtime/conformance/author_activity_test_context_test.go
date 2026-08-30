@@ -254,7 +254,7 @@ func installConformanceRuntimeStartupGeneration(
 	commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 	if exists {
 		commit.ExpectedRevision = current.Revision
-		_, err = capability.ReplaceSourceSet(ctx, commit)
+		_, err = capability.RestoreSourceSet(ctx, commit)
 	} else {
 		_, err = capability.InstallCompleteSourceSet(ctx, commit)
 	}

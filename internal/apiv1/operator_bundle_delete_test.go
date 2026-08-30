@@ -505,9 +505,10 @@ type testBundleRuntimeQuiescer struct {
 	manager *swruntime.RuntimeContextManager
 }
 
-func (q testBundleRuntimeQuiescer) QuiesceBundleRuntime(ctx context.Context, bundleHash string) (bundledelete.RuntimeQuiescence, error) {
-	if _, err := q.manager.BeginBundleRuntimeQuiescence(ctx, bundleHash); err != nil {
-		return nil, err
+func (q testBundleRuntimeQuiescer) QuiesceBundleRuntime(_ context.Context, bundleHash string) (bundledelete.RuntimeQuiescence, error) {
+	result := q.manager.DeactivateBundleHash(bundleHash, swruntime.RuntimeContextCauseBundleDelete)
+	if !result.Found || !result.Changed || result.ShutdownErr != nil {
+		return nil, fmt.Errorf("deactivate test runtime context: found=%t changed=%t: %w", result.Found, result.Changed, result.ShutdownErr)
 	}
 	return noopBundleRuntimeQuiescence{}, nil
 }

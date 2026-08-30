@@ -3,7 +3,7 @@
   "info": {
     "title": "Swarm User-Facing JSON-RPC API",
     "version": "1.0.0",
-    "description": "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nbuilder, CLI, and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal — Empire as the only consumer at\nspec time) but Phase-2-publishable by construction: no internal jargon in\nmethod names, no [PROPOSED] placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\nYAML is the OpenRPC source-of-truth — the openrpc.json artifact is\ngenerated mechanically from method_catalog + components."
+    "description": "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nCLI, and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal — Empire as the only consumer at\nspec time) but Phase-2-publishable by construction: no internal jargon in\nmethod names, no [PROPOSED] placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\nYAML is the OpenRPC source-of-truth — the openrpc.json artifact is\ngenerated mechanically from method_catalog + components."
   },
   "servers": [
     {
@@ -10921,7 +10921,7 @@
     {
       "name": "run.start",
       "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. No alternate bundle identity input is accepted.\n",
+      "description": "Deprecated wrapper over event.publish retained for older API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. No alternate bundle identity input is accepted.\n",
       "params": [
         {
           "name": "bundle_hash",

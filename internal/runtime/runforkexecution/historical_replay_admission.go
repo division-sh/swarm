@@ -264,7 +264,7 @@ func historicalReplayFactAdmissions(replay runfork.RunForkReplayResumeAdmission)
 		historicalReplayNonAgentAdmission(replay),
 		historicalReplaySourceAdvancedAdmission(replay),
 		historicalReplaySplitFact(runfork.RunForkHistoricalReplayFactRuntimeRestartRecovery, "runtime restart recovery remains a consumer/sibling and cannot reconstruct historical replay state from current rows", "#564"),
-		historicalReplaySplitFact(runfork.RunForkHistoricalReplayFactCLIApiDashboardOperator, "CLI, API, dashboard, and Builder surfaces are consumers only and must not compute historical replay admission independently", "#549"),
+		historicalReplaySplitFact(runfork.RunForkHistoricalReplayFactCLIApiDashboardOperator, "CLI, API, and dashboard surfaces are consumers only and must not compute historical replay admission independently", "#549"),
 	}
 }
 
@@ -664,7 +664,7 @@ func historicalReplayRequiredConsumers() []runfork.RunForkSelectedContractExecut
 		{
 			Concept:     "operator_surfaces",
 			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Reason:      "CLI, API, dashboard, and Builder may display this admission but must not own replay/resume semantics",
+			Reason:      "CLI, API, and dashboard may display this admission but must not own replay/resume semantics",
 		},
 	}
 }
@@ -699,7 +699,7 @@ func historicalReplayBlockedSiblings() []runfork.RunForkSelectedContractExecutio
 			Reason:      "non-agent replay requires its own handler/idempotency/receipt owner",
 		},
 		{
-			Concept:     "api_dashboard_builder_mutation",
+			Concept:     "api_dashboard_mutation",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "operator surfaces remain consumers only",
 		},

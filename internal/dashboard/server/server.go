@@ -138,7 +138,6 @@ type Options struct {
 	Runtime       RuntimeController
 	AuthToken     string
 	Version       string
-	Builder       http.Handler
 }
 
 type Handler struct {
@@ -151,7 +150,6 @@ type Handler struct {
 	runtime       RuntimeController
 	authToken     string
 	version       string
-	builder       http.Handler
 	mux           *http.ServeMux
 }
 

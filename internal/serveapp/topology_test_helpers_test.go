@@ -13,11 +13,9 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -129,69 +127,6 @@ func (s *supervisorTestRetainedSession) Release(context.Context) error {
 		callback(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	}
 	return nil
-}
-
-func bindSupervisorTestRuntimeTopology(
-	t testing.TB,
-	rt *runtimepkg.Runtime,
-	source semanticview.Source,
-	fact runtimecorrelation.BundleSourceFact,
-	workOwner *worklifetime.RuntimeOccurrence,
-	runtimeInstanceID string,
-) {
-	t.Helper()
-	if rt == nil || rt.Bus == nil {
-		t.Fatal("supervisor topology test runtime and event bus are required")
-	}
-	rt.Options.WorkflowModule = stubWorkflowModule{source: source}
-	rt.Options.BundleSourceFact = fact
-	rt.Options.RuntimeInstanceID = runtimeInstanceID
-	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		SemanticSource:    source,
-		WorkOwner:         workOwner,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-	})
-}
-
-func installSupervisorTestProcessCapability(
-	t testing.TB,
-	supervisor *runtimeProjectSupervisor,
-	manager *runtimemanager.AgentManager,
-	source semanticview.Source,
-	fact runtimecorrelation.BundleSourceFact,
-	runtimeInstanceID string,
-) runtimeagenttopology.SourceSetPlan {
-	t.Helper()
-	bundleHash, bundleSource := fact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
-	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
-	if err != nil {
-		t.Fatalf("compile supervisor test source set: %v", err)
-	}
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
-	if err != nil {
-		t.Fatalf("construct supervisor test source set: %v", err)
-	}
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "supervisor-test-process", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	}, "supervisor_test")
-	if err != nil {
-		t.Fatalf("construct supervisor test process authority: %v", err)
-	}
-	capability, err := runtimestartupownership.NewProcessCapability(&supervisorTestRetainedSession{authority: authority})
-	if err != nil {
-		t.Fatalf("construct supervisor test process capability: %v", err)
-	}
-	if _, err := capability.InstallCompleteSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), Plan: plan,
-	}); err != nil {
-		t.Fatalf("install supervisor test source set: %v", err)
-	}
-	t.Cleanup(func() { _ = capability.Release(context.Background()) })
-	supervisor.runtimeInstanceID = runtimeInstanceID
-	supervisor.SetProcessCapability(capability)
-	return plan
 }
 
 func installSelectedStoreTestProcessTopology(

@@ -1018,10 +1018,6 @@ func (s *PostgresStore) ReconcileStandingService(ctx context.Context, candidate 
 	return s.pipelinePostgresOwner.ReconcileStandingService(ctx, candidate)
 }
 
-func (s *PostgresStore) ReconcileStandingServiceReplacement(ctx context.Context, previous []pipeline.StandingServiceCandidate, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {
-	return s.pipelinePostgresOwner.ReconcileStandingServiceReplacement(ctx, previous, candidates)
-}
-
 func (s *PostgresStore) ReconcileStandingServiceSet(ctx context.Context, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {
 	return s.pipelinePostgresOwner.ReconcileStandingServiceSet(ctx, candidates)
 }
@@ -2220,10 +2216,6 @@ func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context
 
 func (s *SQLiteRuntimeStore) ReconcileStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelineSQLiteOwner.ReconcileStandingService(ctx, candidate)
-}
-
-func (s *SQLiteRuntimeStore) ReconcileStandingServiceReplacement(ctx context.Context, previous []pipeline.StandingServiceCandidate, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {
-	return s.pipelineSQLiteOwner.ReconcileStandingServiceReplacement(ctx, previous, candidates)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileStandingServiceSet(ctx context.Context, candidates []pipeline.StandingServiceCandidate) ([]pipeline.StandingServiceReconciliation, error) {

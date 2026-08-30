@@ -27,7 +27,6 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"internal/runtime/runtime.go",
 		"internal/runtime/tools/channel_runtime.go",
 		"internal/runtime/workflow_validation.go",
-		"internal/serveapp/builder_project_supervisor.go",
 		"internal/serveapp/main.go",
 		"internal/serveapp/public_ingress.go",
 	}

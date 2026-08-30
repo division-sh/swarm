@@ -298,7 +298,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	requireManagedNativeLifecycleSurface(t, managerStore, authority.ProbeSurfaceIDs[0], "recovered-native-agent", authority)
 }
 
-func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
+func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	ctx := testAuthorActivityContext(context.Background())
 	predecessorStore := newManagedNativeLifecycleStore(t)
@@ -324,8 +324,8 @@ func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmissi
 	if err := predecessor.Start(ctx); err != nil {
 		t.Fatalf("Start(predecessor): %v", err)
 	}
-	if err := predecessor.QuiesceForReplacement(DefaultShutdownOptions()); err != nil {
-		t.Fatalf("QuiesceForReplacement(predecessor): %v", err)
+	if err := predecessor.ShutdownWithOptions(DefaultShutdownOptions()); err != nil {
+		t.Fatalf("ShutdownWithOptions(predecessor): %v", err)
 	}
 
 	managerStore := newManagedNativeLifecycleStore(t)

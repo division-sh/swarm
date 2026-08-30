@@ -135,7 +135,6 @@ type StandingServicePersistence interface {
 	ReconcileStandingService(context.Context, StandingServiceCandidate) (StandingServiceReconciliation, error)
 	LoadReconciledStandingService(context.Context, StandingServiceCandidate) (StandingServiceReconciliation, bool, error)
 	ReconcileStandingServiceSet(context.Context, []StandingServiceCandidate) ([]StandingServiceReconciliation, error)
-	ReconcileStandingServiceReplacement(context.Context, []StandingServiceCandidate, []StandingServiceCandidate) ([]StandingServiceReconciliation, error)
 	SuspendStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
 	ResumeStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
 	ResetStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
@@ -166,15 +165,6 @@ func (s *workflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context,
 		return nil, errors.New("standing service persistence owner is required")
 	}
 	results, err := s.standingServices.ReconcileStandingServiceSet(ctx, candidates)
-	s.consumeStandingServiceCommits(results, err)
-	return results, err
-}
-
-func (s *workflowInstanceStore) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
-	if s == nil || s.standingServices == nil {
-		return nil, errors.New("standing service persistence owner is required")
-	}
-	results, err := s.standingServices.ReconcileStandingServiceReplacement(ctx, previous, candidates)
 	s.consumeStandingServiceCommits(results, err)
 	return results, err
 }

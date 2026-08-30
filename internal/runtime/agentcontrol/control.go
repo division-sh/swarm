@@ -81,7 +81,7 @@ const (
 	RunResolutionNewRunAllocated   = "new_run_allocated"
 	DirectiveSourceV1RPC           = "v1_rpc"
 	DirectiveSourceDashboardLegacy = "dashboard_legacy_adapter"
-	DirectiveSourceBuilderRuntime  = "builder_runtime_adapter"
+	DirectiveSourceInternalRuntime = "internal_runtime"
 )
 
 type ActiveSessionTarget struct {
@@ -176,7 +176,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
-		source = DirectiveSourceBuilderRuntime
+		source = DirectiveSourceInternalRuntime
 	}
 	operatorID := strings.TrimSpace(req.OperatorID)
 	if now.IsZero() {

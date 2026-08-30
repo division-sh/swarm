@@ -385,7 +385,7 @@ func selectedContractReadinessRequiredConsumers() []runfork.RunForkSelectedContr
 			Reason:      "supported explain output must consume the canonical readiness classifier and must not synthesize the matrix in CLI code",
 		},
 		{
-			Concept:     "future_api_dashboard_builder_consumers",
+			Concept:     "future_api_dashboard_consumers",
 			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Owner:       runfork.RunForkSelectedContractReadinessClassifierOwner,
 			Reason:      "operator surfaces may display the classifier matrix later, but they cannot own readiness semantics",

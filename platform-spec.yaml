@@ -1004,7 +1004,7 @@ contract_formats:
             - {path: internal/events/construction_test.go, test: TestProductionEventConstructionUsesPublicAPI}
         runtime.event.root_run_intent_explicit_at_construction:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
-          rule: Every root producer explicitly chooses whether the event may create its exact run or requires an already-active run. Builder and API new-run roots are run-creating; standing-provider roots are existing-run. Canonical readback always reconstructs existing-run intent, and manager identity binding preserves the private fresh intent without inference.
+          rule: Every root producer explicitly chooses whether the event may create its exact run or requires an already-active run. Public API new-run roots are run-creating; standing-provider roots are existing-run. Canonical readback always reconstructs existing-run intent, and manager identity binding preserves the private fresh intent without inference.
           executable_proofs:
             - {path: internal/events/construction_test.go, test: TestProductionEventConstructionUsesPublicAPI}
         runtime.event.routing_source_typed_at_construction:
@@ -5902,7 +5902,7 @@ engine:
         - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when the selected owner failed to provide the opaque WorkflowPersistence value.
         - The public internal/store package is a typed facade. It MUST NOT import database/sql, retain a raw backend member, export a raw handle/accessor, or expose a generic query, execution, or transaction callback.
         - Test-only construction and readback authority MUST remain in internal/store/storetest and MUST NOT be available from the production facade.
-        - API, dashboard, builder, monitoring, digest, bundle-delete, and destructive-reset consumers MUST NOT accept raw SQL, concrete selected stores, generic query executors, or transaction callbacks.
+        - API, dashboard, monitoring, digest, bundle-delete, and destructive-reset consumers MUST NOT accept raw SQL, concrete selected stores, generic query executors, or transaction callbacks.
       public_read_projection_contract:
         canonical_models: internal/operatorread
         public_capability_ports:
@@ -5922,7 +5922,6 @@ engine:
         consumers:
         - internal/apiv1 exact handler families
         - internal/dashboard typed projections
-        - internal/builder run/entity/debug consumers
         - internal/serveapp run-stalled monitor
         - internal/cliapp fork-chat admission
         rules:
@@ -6283,14 +6282,13 @@ engine:
         multi-writer SQLite semantics. One process capability
         owns the complete source set and issues one revocable grant per
         admitted runtime generation. Shared-store consumers execute only under those grants: pipeline maintenance, system
-        nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. Live replacement MUST
-        quiesce and join the predecessor consumer set while the process capability and predecessor grant remain current; only
-        then may the complete source set change and the candidate grant be admitted. Candidate preparation before quiescence is limited
-        to local construction and strict validation and MUST NOT start shared-store loops or publish runtime events. A
-        pre-visibility candidate failure quiesces the candidate, restores the predecessor source set and survivor grants,
-        and starts a fresh runtime from the predecessor's admitted source before restoring manager visibility. Issuing two
-        live grants for the same runtime coordinate/generation is prohibited. Candidate and restored runtime loops inherit the serve-process lifetime context; bounded
-        replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner. A committed handoff is
+        nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. Bundle-source deletion
+        MUST quiesce and join the exact retiring consumer set while the process capability and predecessor grant remain current;
+        only then may its named final mutation remove that source from the complete source set. Every survivor is reserved before
+        the mutation and receives only its exact admitted successor grant after commit. A pre-commit failure restores the exact
+        same retiring runtime occurrence without changing source authority. Issuing two live grants for the same runtime
+        coordinate/generation is prohibited. Restored runtime loops inherit the serve-process lifetime context; bounded
+        bundle-delete and recovery operation contexts MUST NOT become their post-commit lifetime owner. A committed handoff is
         retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable;
         retry consumes the same handoff and cannot reacquire, infer, roll forward through metadata-only publication, or
         expose the candidate before the typed authority transition is final. PostgreSQL startup ownership retains one
@@ -6512,8 +6510,8 @@ engine:
       A persisted or replayed live fact under mock_only is rejected before mutation or execution and is never converted,
       settled, migrated, or retried as mock.
     root_admission: >
-      Every independent process root consumes Posture.RootMode before construction: event.publish and run.start, Builder run
-      input, signed normalized/raw provider ingress, agent directives, runtime boot/control/diagnostic/session events, budget
+      Every independent process root consumes Posture.RootMode before construction: event.publish and run.start,
+      signed normalized/raw provider ingress, agent directives, runtime boot/control/diagnostic/session events, budget
       and stalled-run signals, and true boot-owned schedules. Root mode is live under live and mock under mock_only. Callers
       cannot submit execution_mode. Child, node/connect, activity-result, and other causal events preserve exact lineage mode.
     eventbus_admission: >
@@ -6529,7 +6527,7 @@ engine:
       transaction on SQLite and PostgreSQL.
     canonical_pre_mutation_owners: >
       Admission is performed by each canonical lifecycle owner, not deferred to a downstream EventBus, scanner, or effect
-      backstop. Persisted-agent reconstruction and replacement admit the exact selected actor config before factory, route,
+      backstop. Persisted-agent reconstruction and lifecycle-generation replacement admit the exact selected actor config before factory, route,
       generation, or registration work. Prepared-directive execution loads and admits the exact persisted directive event in
       the selected-store transaction before changing operation state. run.continue and runtime.resume preflight the complete
       selected-store queue before changing run/runtime state or opening dispatch. That resume census includes every pending
@@ -6556,19 +6554,18 @@ engine:
       a live intent is rejected even when restored durable state or a lower-level adapter would otherwise admit it.
     source_readiness: >
       internal/runtime/bootverify.ResolveSourceBootEffectReachability is the sole source-level provider-connector credential
-      readiness projection consumed by verify, doctor, Builder validation/replacement, serve validation, and final runtime
+      readiness projection consumed by verify, doctor, serve validation, and final runtime
       boot. live retains conservative declarative activity reachability. mock_only requires every effective agent to resolve
       exact mock and every provider-connector activity site to have an exact compiled mock response; only those unreachable
       outbound transport credentials are waived. Signing, listener, MCP, native, exec, workspace, and other independent
       requirements remain fail-closed.
-    replacement_and_readback: >
-      Project replacement fully validates the candidate against the predecessor's exact process posture before quiescence,
-      startup, standing activation, or context publication. A candidate cannot change posture. health.check and health
-      subscription readback always expose execution_posture from the same immutable runtime fact. RuntimeContextManager also
-      publishes one atomic current-publication snapshot containing every selectable BundleSourceFact and the semantic primary
-      bundle identity. runtime.identity, health.check, and every health subscription observation consume that snapshot at
-      observation time. Changed-hash publication moves the primary slot to the successor; rollback restores it to the
-      predecessor; replacement downtime and primary unload/delete expose no stale or lexical-hash fallback identity.
+    publication_and_readback: >
+      health.check and health subscription readback always expose execution_posture from the same immutable runtime fact.
+      RuntimeContextManager publishes one atomic current-publication snapshot containing every selectable BundleSourceFact
+      and the semantic primary bundle identity. runtime.identity, health.check, and every health subscription observation
+      consume that snapshot at observation time. Boot installation selects the initial primary. Authoritative bundle deletion
+      removes the exact retiring context and selects an exact surviving loaded context, or no primary when none survives;
+      observations never expose a stale or lexical-hash fallback identity. A process epoch does not replace a loaded source.
     no_legacy_rule: >
       Old configs without runtime.execution_posture and old selected stores containing live work selected under mock_only are
       unsupported. No default, migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
@@ -6577,7 +6574,7 @@ engine:
       Source-boundary ratchets forbid posture-owned live literals and profile-derived process mode. Supported proof covers
       root producers, exact source readiness, replay/fork, decision/defer, schedules/timers, activity/effect launch,
       standing and queued-work restart on SQLite/PostgreSQL, immediate and future-due resume obligations, all retained
-      external-effect recovery states for generic and provider-turn effects, immutable replacement, and health readback.
+      external-effect recovery states for generic and provider-turn effects, immutable process posture, and health readback.
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.
@@ -6962,8 +6959,6 @@ engine:
               consumers:
                 - internal/runtime/workflow_validation.go for swarm verify and serve validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
-                - internal/serveapp/builder_project_supervisor.go for Builder project validation
-                - internal/builder/handler_state.go for Builder validation RPC
                 - internal/runtime/runtime.go for final runtime boot credential admission
               diagnostics: >
                 Mixed-source failures name the exact surviving tool requirement and the sorted live-selected declarations
@@ -7048,7 +7043,7 @@ engine:
           A real served bundle, without LLM or unreachable outbound connector credentials, must exercise mock text, visible
           internal tool calls, emitted events, exact provider-connector response materialization, decision-card/mailbox
           rendering, memory continuity across restart, hypothetical usage, and the pre-launch external effect fence on both
-          SQLite and Postgres. Builder validation, swarm verify, serve validation, and final runtime boot must accept that
+          SQLite and Postgres. swarm verify, serve validation, and final runtime boot must accept that
           same source, while mixed sources and independent inbound signing, native, exec, MCP, listener, and workspace
           requirements remain fail-closed.
       native_openai_responses_source_authority:
@@ -7364,7 +7359,7 @@ engine:
       (write-only audit table) and agent_turns (per-turn append-only log). The transcript is NEVER loaded
       back for subsequent invocations. Each event invocation starts with a fresh context. Memory false means
       "no memory between invocations" AND "no live session row." The persisted audit snapshot enables the
-      builder Run tab to show agent reasoning details. Rows may be archived per retention policy.'
+      operator run-trace surfaces to show agent reasoning details. Rows may be archived per retention policy.'
     provider_session_ids: 'External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in
       runtime_state.provider_session_id in agent_sessions for memory-enabled invocations. Stateless execution does not
       retain provider conversation state. NOT in session_id or audit_id. Those are platform-owned
@@ -8158,7 +8153,7 @@ engine:
           remediation_template: Reconcile the authoritative operation state before retrying (%s).
           detail_contracts:
             run_terminal_persistence_unconfirmed:
-              owner: internal/runtime/failures plus internal/builder run terminal adapter
+              owner: internal/runtime/failures plus the v1 run terminal adapter
               attributes:
                 attempted_status:
                   required: true
@@ -8830,7 +8825,7 @@ engine:
           already owned by the verifier diagnostic renderer and AST guard; future renderer-bypass guards belong to the broader CLI
           output-conformance lane, not this verifier finding authoring guideline.
       always_on: All checks run on every boot. There is no mechanism to disable individual checks. Acknowledged warnings
-        (builder feature) are a UI concern, not a runtime concern.
+        are an operator UI concern, not a runtime concern.
       scope_meaning: per-flow checks run once per flow in the tree. per-node checks run once per node. per-agent checks run
         once per agent. global checks run once for the entire contract bundle.
 compliance:
@@ -9038,9 +9033,9 @@ tool_model:
     informational_notice_readback:
       count_owner: The selected mailbox read model owns one global count of pending, unacknowledged operator_notice rows produced by notify_human. Decision cards, acknowledged notices, list filters, and page length are excluded.
       projections: The same count is returned by mailbox.list, rendered by swarm mailbox list, and rendered in initial serve ready output. Renderers never recount pages or query raw tables.
-      process_presentation: One process-scoped sink is created beside the serve lifecycle presenter and shared by initial, replacement, and selected-fork runtimes. After a durable notify_human commit it receives only mailbox_id and the exact count and emits the channel-less teaching note at most once per serve process generation.
+      process_presentation: One process-scoped sink is created beside the serve lifecycle presenter and shared by boot-selected and selected-fork execution. After a durable notify_human commit it receives only mailbox_id and the exact count and emits the channel-less teaching note at most once per serve process generation.
       delivery_readiness: Until #2079 provides an exact connected operator-delivery fact, delivery is unavailable and the first committed notice teaching note is unconditional. Ingress packs, provider bindings, credentials, and authored config never infer readiness.
-      failure_rule: Presentation failure never rolls back, duplicates, or reinterprets the committed notice. Process restart may emit the teaching note again; runtime replacement may not.
+      failure_rule: Presentation failure never rolls back, duplicates, or reinterprets the committed notice. Process restart may emit the teaching note again; in-process source mutation is unsupported and cannot duplicate it.
     handler_actions:
       description: These are handler/rules-branch ACTION field values, not agent-callable tools. They are invoked via the
         action field in node handlers without rules or in selected handler.rules branches. The platform ships the handler code.
@@ -9678,7 +9673,7 @@ tool_model:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
       platform provides a typed interface with a layered resolution model.
     interface:
-      get: Retrieve a credential value by key. Runtime-only — never exposed via builder API.
+      get: Retrieve a credential value by key. Runtime-only; never exposed through the public API.
       set: Store a credential value by key to the writable store layer.
       list: List credential keys with metadata (source, writable, shadowed, present, updated_at, required_by where
         source context is available). Never returns values.
@@ -9707,8 +9702,8 @@ tool_model:
         it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source)
         and shadowed is true to show that a file-tier value exists but is ignored by env precedence.
     metadata:
-      description: The list interface returns metadata about each credential, never the value itself. This is what the builder
-        displays.
+      description: The list interface returns metadata about each credential, never the value itself. Operator surfaces may
+        display only this projection.
       fields:
         key: string — credential key name
         source: string — env | file (which tier the effective value comes from)
@@ -9721,7 +9716,7 @@ tool_model:
       local_dev: JSON file at os.UserConfigDir()/swarm/credentials.json, mode 0600, atomic writes, overridden by
         `SWARM_CREDENTIALS_FILE` when set. Plaintext for simplicity — encryption is a future enhancement. File contains a
         map of key → value with per-entry updated_at.
-      docker: Environment variables (env tier). File store optionally mounted as a volume for builder access.
+      docker: Environment variables (env tier). A file store may be mounted only for an explicitly specified runtime consumer.
       production: Environment variables for secrets, or external secrets manager (Vault, AWS Secrets Manager) via a custom
         store tier implementation. The overlay model supports additional tiers — the platform resolves top-down.
     write_coordination:
@@ -9919,7 +9914,7 @@ tool_model:
       request paths, identifier topology, transport limits, credentials, ingress targets, signing, callback registration,
       operator binding, or provider-specific branches. One accepted trigger generation, one accepted connector generation,
       and one accepted channel generation compile into one immutable structural plan; verify, preflight, doctor, runtime
-      construction and reload, human/JSON capability readback, selected constraints, and outbound status consume that plan.
+      construction, human/JSON capability readback, selected constraints, and outbound status consume that plan.
       A configured runtime exposes only channel.<binding>.<operation> with the provider-neutral input/output schemas. The
       channel handler is the sole operation adapter: it validates that input, injects the immutable bound destination,
       applies the exact recursive mapping, and lowers one private
@@ -10036,9 +10031,9 @@ tool_model:
         unbound, or revoked from one exact retained lifecycle projection: the union of current admitted interfaces, local
         bindings/fences, machine proofs, and nonterminal operations. New connect, reconnect, and rebind admission resolves
         only the current admitted interface set. Readback, unbind, and proof revocation resolve the retained projection so
-        project replacement cannot make listed predecessor state impossible to inspect or remove. Project replacement
-        changes the active interface projection atomically; predecessor state remains loud stale evidence and cannot
-        authorize delivery. User-facing readback masks opaque account/conversation references and presentation values; when
+        authoritative bundle deletion cannot make retained predecessor state impossible to inspect or remove. Source
+        retirement updates the active interface projection atomically; predecessor state remains loud stale evidence and
+        cannot authorize delivery. User-facing readback masks opaque account/conversation references and presentation values; when
         provider presentation is absent, claimant display falls back to the safely masked external-account reference and
         never exposes the raw reference. Stale or absent channels never drop notices; downstream delivery falls back to the
         mailbox.
@@ -10190,7 +10185,7 @@ tool_model:
         exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
         authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
-        fails. Public project.close, explicit unload/source removal, and completed replacement are semantic retirement;
+        fails. Authoritative bundle deletion and explicit runtime-context unload/source removal are semantic retirement;
         ordinary serve process shutdown only quiesces process work and withdraws the live occurrence, and must not invoke
         context retirement or terminalize its durable onboarding responsibility. Proofless revocation fails before mutation because no proof authority exists.
         Rebind successor publication is also the selected-store transaction that retires every current activation sharing
@@ -10574,12 +10569,11 @@ tool_model:
         lookup, body interpretation, marker persistence, or publish.
       bundle_generation: >
         Each loaded BundleContext owns the immutable trigger catalog, connector registry, channel plans, installed subjects,
-        and effective subjects derived from that bundle's exact EffectivePackInventory. Boot and reload compile a candidate
-        only from its own selected base digest, project pack bytes, and selection receipt. RuntimeContextManager validates
-        and atomically publishes that bundle generation without recompiling or reinterpreting surviving bundles against the
-        candidate inventory. Missing, remapped, tampered, or incompatible packs, base/project digest mismatch, target
-        collision, or projection failure rejects the candidate while every predecessor and unrelated bundle generation
-        remains authoritative.
+        and effective subjects derived from that bundle's exact EffectivePackInventory. Boot compiles each context only from
+        its own selected base digest, project pack bytes, and selection receipt. RuntimeContextManager validates and atomically
+        publishes that bundle generation without recompiling or reinterpreting other loaded bundles. Missing, remapped,
+        tampered, or incompatible packs, base/project digest mismatch, target collision, or projection failure rejects that
+        boot context before readiness.
       projections: >
         Verify, local preflight, serve readiness, and doctor consume `tool_model.provider_capability_surface` installed and
         effective subjects from the compiled owner. Basic describe and routing topology remain declaration-only and show
@@ -10605,7 +10599,7 @@ tool_model:
         development override and atomically replaces that complete base; it never overlays or falls back to embedded packs.
         A selected project may add only the exact project pack paths listed in strict `packs/manifest.yaml`; those current
         bytes, immutable embedded import receipts, and shadowed-base facts are bundle inputs. Effective precedence is one
-        exact project-local id over the selected embedded-or-development base id. `swarm serve`, Builder replacement,
+        exact project-local id over the selected embedded-or-development base id. `swarm serve`,
         registration, reconstruction, recovery, and fork all retain the same bundle-specific effective inventory and exact
         selected base receipt. Missing, extra, malformed, incompatible, tampered, colliding, traversing, symlinked, or
         digest-mismatched inputs fail before publication. No executable-relative, current-directory, source-checkout,
@@ -10618,7 +10612,7 @@ tool_model:
         one bundle-owned admitted projection. Pack import path resolution, inventory readback, hashing, bundle build and
         registration, verify, describe,
         describe routes, doctor schema inventory, secrets requirement discovery, serve, effective-source compilation,
-        replacement, recovery, and fork must receive that projection from the exact configured base before publishing,
+        recovery, and fork must receive that projection from the exact configured base before publishing,
         executing, or reporting the inventory. CLI workflow-module consumers must resolve the selected base through runtime
         configuration; a nil or default-base selector is not an authoritative fallback. Downstream consumers retrieve the
         stored projection and must not independently reparse an inventory body. Credential binding and deployment activation
@@ -10630,12 +10624,11 @@ tool_model:
         caller cannot mutate stored admission bytes, filesystem projections, or semantic fields while the inventory digest
         remains unchanged, and concurrent readers never share caller-mutable envelope collections.
       selected_base_generation_lifecycle: >
-        A serving process retains each immutable embedded or complete-development base it has selected, addressed by the
-        exact base digest in the bundle receipt. Reload prepares fresh effective config, base bytes, project bytes, and the
-        admitted projection as one candidate, then makes that base current only when candidate publication succeeds. A
-        rejected candidate does not change the current base or predecessor runtime. Same-process survivor reconstruction,
-        recovery, and fork resolve their receipt against the retained exact generation. This retention is not an archive,
-        migration, or compatibility promise across binary starts.
+        A serving process retains each immutable embedded or complete-development base selected at boot, addressed by the
+        exact base digest in the bundle receipt. A process epoch cannot replace that base or source generation. Survivor
+        reconstruction, recovery, and fork resolve their receipt against the retained exact generation. A changed source is
+        admitted only by a new process epoch; changed-bundle continuation within a process uses run.fork against an already
+        loaded target. This retention is not an archive, migration, or compatibility promise across binary starts.
       project_inventory_transaction: >
         Project pack mutation and validated reads share one project-scoped cross-process transaction/snapshot owner. A
         canonical-project-path shared/exclusive lock lives outside the project tree and is acquired before root admission;
@@ -10874,7 +10867,7 @@ tool_model:
       that declares it, and revalidated against its captured private epoch before return. The immutable target subject remains
       the lifecycle owner, and every loaded-target visibility mutation atomically rebuilds the manager's base capability census
       and advances its revision under the manager lock. Deployment truth is evaluated at read/admission time against both
-      credential and manager/target currentness, so removal, rotation, replacement, suppression, source-set fencing, and unload
+      credential and manager/target currentness, so removal, rotation, suppression, source-set fencing, and unload
       cannot retain stale or internally contradictory BOUND/READY state. Flow-instance config, store-entry presence alone,
       caller-computed booleans, and provider-specific runtime readers are non-authoritative. Secret values remain process-private
       and are never returned by webhook responses or readback surfaces; an external vault may back the deployment credential
@@ -11844,7 +11837,6 @@ flow_model:
         admission_plan: internal/providertriggers.InboundAdmissionPlan
         durable_identity_and_desired_state: private runtime/pipeline workflow persistence over standing_services plus standing_service_generations plus standing_service_journal
         startup_reconciliation: internal/runtime/pipeline.PipelineCoordinator.ReconcileStandingServiceSet
-        replacement_reconciliation: internal/runtime.Runtime.EnsureStandingReplacementTargets plus internal/runtime/pipeline.PipelineCoordinator.ReconcileStandingServiceReplacement
         lifecycle_materialization: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
         ingress_operation: internal/store.RunInboundPublicationMutation and internal/store.SQLiteRuntimeStore.RunInboundPublicationMutation
@@ -11899,7 +11891,7 @@ flow_model:
         standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
         source-equality validator, entity_state scan, or alternate route matcher is forbidden.
       process_routing: >
-        One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, replacement, and
+        One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, and
         deactivation visibility. It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
         Dispatch MUST use that selected context's source, immutable admission plan, credential store, ingress controller,
         store, EventBus, and runtime. Primary-runtime fallback, request-time provider catalog lookup, and parallel alias
@@ -11908,13 +11900,11 @@ flow_model:
         durable lifecycle mutation. New requests fail with service-unavailable semantics while that barrier is closed.
         A pre-commit failure restores manager visibility and reopens admission only after the drain; restoration failure
         leaves the service fail closed. Resume and an active reset publish committed targets before reopening admission.
-        Replacement and
-        deactivation atomically reject new predecessor admission while manager visibility is serialized. Before replacement
-        quiescence begins, the RuntimeContextManager marks the predecessor unavailable and process readiness becomes false;
-        `/readyz`, `/v1/rpc`, `/v1/ws`, and `/webhooks/...` fail with service-unavailable semantics until one loaded runtime
-        is published and readiness becomes true again. Already-admitted requests drain only within the configured shutdown
-        grace; expiry cancels their request contexts and returns within the configured bound. Requests that resolved the
-        predecessor but have not entered its gateway fail closed afterward.
+        Authoritative bundle deactivation atomically rejects new admission for the retiring context while manager visibility
+        is serialized. Before quiescence begins, RuntimeContextManager marks that context unavailable. Requests targeting it
+        fail with service-unavailable semantics; independently loaded contexts remain selectable. Already-admitted requests
+        drain only within the configured shutdown grace; expiry cancels their request contexts and returns within the
+        configured bound. Requests that resolved the retiring context but have not entered its gateway fail closed afterward.
       admission_order: >
         The selected provider manifest may authenticate a protocol challenge without delivery. For deliveries, the mapped
         canonical event name MUST match an exact external input pin on the selected flow before publication-ledger
@@ -11926,54 +11916,6 @@ flow_model:
         entity_id, service_id, generation, and publication sequence. Standing-provider root ingress MUST use the
         existing-run-root constructor, preserve that owner, and admit as require-active; it MUST NOT mint a run per webhook.
         An exact committed retry returns the same operation without invoking EventBus or replanning.
-      replacement_policy: >
-        The replacement project is rebuilt into one candidate bundle-specific effective pack inventory. Its exact selected
-        base receipt, project bytes, trigger catalog, connector registry, and channel plans must validate before readiness
-        changes. Surviving loaded contexts retain their own admitted inventory generations and are never recompiled against
-        the candidate.
-        Replacement first rejects new predecessor admission and quiesces predecessor shared-store/background consumers under
-        the configured grace while retaining the process capability and predecessor grant. RuntimeContextManager compiles the
-        complete successor declaration source set through its private runtime owners; public context snapshots never expose
-        runtime pointers as planning authority. Every untouched loaded context is fenced before the source-set commit, then
-        rebound to an admitted successor grant and exact lifecycle admission before any context is republished. Only after
-        quiescence and source-set reservation may candidate materialization begin. One selected-store transaction revises retained service ids, creates new ids, orphans omitted
-        predecessor ids, and materializes/publishes the replacement's standing targets. It MUST NOT inspect or mutate services
-        owned by unrelated loaded contexts. Bundle-hash or bundle-source change alone is a normal revision and MUST NOT reject
-        startup or reload. Duplicate identity, missing persisted predecessor identity, terminality outside the explicit repair
-        rule, or any durable/process publication failure fails closed and rolls back the scoped desired-state transaction.
-        Process-local agents, routes, handlers, timers, auto-emit, lifecycle cells, diagnostic projections, and runtime-context
-        publication are staged until their durable transaction commits. RuntimeContextManager then publishes the context set,
-        target plans, catalog generation, and installed/effective capability subjects as one process authority transition.
-        Predecessor withdrawal, candidate publication, and restored-predecessor publication consume its replacement protocol;
-        supervisor-local readiness or runtime pointers are not alternate visibility owners. A quiesce timeout or failed
-        candidate activation remains a mutating failure: recovery finishes quiescing, fully stops the failed candidate, restores
-        both the predecessor source-set head and every survivor grant/admission, and publishes a freshly restored predecessor
-        before readiness returns. Failure after candidate context publication first withdraws and drains that exact candidate
-        through RuntimeContextManager. Recovery then prepares and fences every survivor for the predecessor plan before restoring
-        the predecessor source-set head, commits every survivor generation/admission rebind under that restored head, and only
-        then publishes a fresh predecessor runtime. Once the candidate source-set head commits, every later candidate failure,
-        including generation installation, runtime startup, standing-target preparation, publication preparation, and survivor
-        commit, enters one typed rollback owner before any restoration attempt. That owner retains the exact candidate plan,
-        predecessor plan, and idempotent restore operation
-        through preparation or source-set restoration failure. Preparation failure leaves the candidate head and matching survivor
-        authority current until the next serialized recovery boundary resumes that exact rollback; it cannot restore the head
-        first, forget the continuation, or reopen candidate-authority survivors under a predecessor head. A survivor
-        commit failure under the restored predecessor head retains every survivor fenced, immediately adopts that exact pending
-        predecessor transition, and retries it before predecessor publication. A repeated failure retains one supervisor-owned
-        rollback finalizer carrying the predecessor restoration and startup-handoff freeze; reload, replacement, and close must
-        complete that finalizer before enumerating runtime contexts or releasing the selected store. If predecessor publication
-        then fails, that finalizer retains and resumes the exact prepared publication; it cannot construct a second predecessor
-        or replace the pending publication identity. Runtime replacement rollback discards a preparation that never published and
-        withdraws only a publication that RuntimeContextManager successfully made visible. Failure of either terminal operation
-        retains one supervisor-owned replacement rollback finalizer carrying that exact publication phase, candidate shutdown,
-        predecessor project snapshot, source-set and survivor restoration, predecessor publication, and startup-handoff freeze.
-        Reload, replacement, and close retry the complete finalizer before admitting new work; they never resume forward candidate
-        publication from a rollback phase or clear only the publication while leaving later rollback phases unowned. After publication, the supervisor retains
-        that exact pending operation until its captured public-ingress reconciliation succeeds; retry resumes reconciliation without
-        publishing the runtime context again. The failed transition and
-        rollback continuation are never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
-        capability remains retained. Manager-backed deactivation propagates the caller's
-        configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
       - duplicate aliases within a bundle or across loaded runtime contexts
       - duplicate providers within one alias
@@ -11981,12 +11923,12 @@ flow_model:
       - missing provider, required signing-secret reference, verified pack for pack-required admission, valid compiled admission plan, or compatible external event pin
       - raw admission selected by omission, fallback, provider-pack collision, partial policy, or heuristic request interpretation
       - unsigned pack without `acknowledge: unsigned_webhook`, invalid acknowledgement token, or acknowledgement on authenticated admission
-      - catalog-generation mismatch or incomplete all-context recompilation during boot/reload
+      - catalog-generation mismatch or incomplete all-context compilation during boot
       - unknown or unloaded alias/provider target
       - unbound signing-secret value at request time
       - duplicate standing service_id or package_key/flow_id owner
       - standing identity conflict between service_id, package/flow owner, instance_id, or entity_id
-      - missing selected-store desired-state owner or missing persisted predecessor during replacement
+      - missing selected-store desired-state owner or missing persisted lifecycle predecessor during restart/reset
       - current generation terminal outside explicit restart-abandon repair or operator reset
       - stale standing generation, run status, or publication sequence during inbound publication
       readback: >
@@ -11999,8 +11941,7 @@ flow_model:
         projects each authored alias/provider/admission binding and target flow as admission provenance; it is not a producer,
         edge, or third delivery scope. No surface exposes secret values or creates a second target model.
       legacy_paths_removed:
-      - treating bundle_hash or bundle_source equality as standing identity or reload admission
-      - rejecting a changed-source cold start or hot replacement instead of journaling a revision
+      - treating bundle_hash or bundle_source equality as standing identity
       - discovering standing ownership by scanning entity_state activation metadata
       - scanning entity_state by route alias as ingress target authority
       - reading webhook signing values from flow-instance config
@@ -14093,8 +14034,8 @@ platform_tables:
         process-global, last-writer-wins, fallback, and current-bundle classifiers are forbidden.
       event_descriptor_lifecycle: >-
         Static descriptors register before a bundle runtime starts or recovery can mutate and remain leased until that
-        exact runtime/bundle context is quiescent. Replacement registers the incoming scope before activation; rollback
-        removes only that incoming lease; identical overlap is reference-safe so stale teardown cannot remove a live scope.
+        exact runtime/bundle context is quiescent. Boot registers an exact incoming scope before activation; bundle deletion
+        removes only the exact retiring lease after quiescence. Identical overlap is reference-safe so stale teardown cannot remove a live scope.
         Concrete template-instance event identities that do not exist before materialization travel with the source mutation
         as one typed descriptor fact resolved from the canonical semantic source. The selected store may consume that fact
         only under the matching live exact-scope lease and must reject missing, stale, mismatched, or conflicting facts.
@@ -14746,7 +14687,7 @@ platform_tables:
       ddl: |
         CREATE TABLE agent_topology_source_set_operations (
             operation_id       UUID PRIMARY KEY,
-            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('install_complete_source_set','replace_source_set','restore_source_set','remove_bundle_source','apply_destructive_reset_topology')),
+            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('install_complete_source_set','restore_source_set','remove_bundle_source','apply_destructive_reset_topology')),
             request_hash       TEXT NOT NULL,
             previous_revision TEXT,
             current_revision  TEXT NOT NULL,
@@ -15826,8 +15767,8 @@ platform_tables:
         );
     agent_conversation_audits:
       description: 'Write-only audit table for memory-false conversation snapshots. One row per stateless
-        agent invocation. The conversation transcript is persisted here after each invocation for debugging
-        and the builder Run tab. This table is NEVER read back for subsequent invocations — it is purely
+        agent invocation. The conversation transcript is persisted here after each invocation for operator debugging.
+        This table is NEVER read back for subsequent invocations — it is purely
         for audit/debug. Dashboard/readers distinguish live memory (agent_sessions) from stateless audits
         (agent_conversation_audits) by table, not by convention.'
       ddl: |
@@ -16259,7 +16200,7 @@ platform_tables:
     run_control_state:
       description: 'Durable per-run operator lifecycle-control state owned by the canonical run-control owner. It distinguishes
         operator-paused runs from fork-materialized paused rows, records stop/pause/continue transition reason and actor, and
-        is consumed by run.stop, run.pause, run.continue, EventBus run-scoped dispatch gating, and legacy Builder adapters.
+        is consumed by run.stop, run.pause, run.continue, and EventBus run-scoped dispatch gating.
         Runtime ingress pause/resume does not consume this owner. reason is the sole non-failure cancellation/control-reason
         owner; it never names or reconstructs a runtime failure class.'
       ddl: "CREATE TABLE run_control_state (\n    run_id         UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n\
@@ -16632,7 +16573,7 @@ platform_tables:
           status vocabularies. A
           standalone runtime run consumes its typed durable creation evidence and delivery summary only. When all
           required summaries are terminally eligible, the executor commits completed status, ended_at, terminal side
-          effects, author activity, and candidate absorption atomically. Local runtime or builder quiescence is
+          effects, author activity, and candidate absorption atomically. Local runtime quiescence is
           observational only and cannot derive or write completed.
         completion_candidate:
           canonical_owner: internal/runtime/runlifecycle domain and generation-owned executor plus private PostgreSQL and SQLite selected-store adapters
@@ -16753,7 +16694,7 @@ platform_tables:
           rule: The current runs shape contains only the typed failure envelope. A selected store containing legacy terminal-evidence columns or another non-current runs shape fails canonical schema admission unchanged.
           forbidden: [row conversion, text inference, backfill, compatibility reader, dual write]
       terminal_event_identity:
-        owner: internal/runtime/failures.SemanticFingerprint consumed by Builder run debug projection
+        owner: internal/runtime/failures.SemanticFingerprint consumed by canonical run diagnostics
         fields:
         - schema_version
         - class
@@ -17257,7 +17198,7 @@ run_model:
         binding, and recovery writers admit the active child; source columns remain lineage only. The selected
         source-advanced divergence path remains source-preserving and never writes continued_as_run_id.
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
-      Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
+      dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
     selected_contract_lifecycle_owner: >
       Selected-contract materialization, activation, and discard are each interpreted once by the backend-neutral
@@ -17368,7 +17309,7 @@ run_model:
       receipts, dead letters, idempotency state, emitted follow-ups, or API/UI state. It MUST NOT copy source rows, use
       source outcomes as fork suppressors, recompute historical fact-family semantics owned by historical replay
       admission, recompute contract-swap readiness, or weaken materialization, execution, activation, or recovery
-      fail-closed gates. CLI, API, dashboard, and Builder are consumers only and may display the classifier output, but
+      fail-closed gates. CLI, API, and dashboard are consumers only and may display the classifier output, but
       they are not readiness owners.'
     selected_contract_execution_model: 'Selected-contract fork execution ownership is a non-mutating model until
       separately approved for runtime mutation. The canonical owner consumes contract_frontier_admission output only as
@@ -17488,8 +17429,8 @@ run_model:
       platform.runtime_log and platform.inbound_recorded. This policy is selected-contract frontier admission only. It
       MUST NOT route diagnostic platform events through selected contracts, synthesize selected recipients, copy source
       events, event_deliveries, event_receipts, or dead_letters into the fork, use diagnostic source outcomes as
-      selected-fork suppressors, change generic non-agent/dead-letter replay policy, or make CLI, API, dashboard, or
-      Builder surfaces semantic owners. Non-diagnostic platform/node/system event outcomes remain fail-closed or split
+      selected-fork suppressors, change generic non-agent/dead-letter replay policy, or make CLI, API, or dashboard
+      surfaces semantic owners. Non-diagnostic platform/node/system event outcomes remain fail-closed or split
       unless a separate approved owner changes that policy.'
     selected_contract_platform_activity_frontier_policy: 'Selected-contract frontier admission names
       runtime.run_fork.contract_frontier_admission.platform_activity_runtime as the canonical runtime owner for
@@ -17610,7 +17551,7 @@ run_model:
       container owner may be consumed by contract-swap/historical replay execution only after that path has independently
       admitted executable selected work; it must not become a generic historical replay owner. Source events, source
       deliveries, source recipients, source outcomes, source runtime/platform rows, live subscriptions, normal
-      AgentManager current state, EventBus descriptors alone, readiness JSON, CLI/API/dashboard/Builder output, and
+      AgentManager current state, EventBus descriptors alone, readiness JSON, CLI/API/dashboard output, and
       produced_by_type alone are invalid as runtime-container truth. Restart/recovery of fork-local containers,
       current-state snapshot ownership, session/turn/audit reconstruction, non-agent replay, retry/idempotency/follow-up
       policy beyond normal selected-fork output, and operator consumers remain separate owners or split siblings unless
@@ -17703,7 +17644,7 @@ run_model:
       recovery, or any missing/stale selected binding/source evidence. It
       MUST NOT run handlers, create fork-local events or event_deliveries, copy source rows, write receipts, dead
       letters, idempotency state, emitted follow-up events, timers, sessions, turns, route rows, API/UI state, or
-      otherwise implement mutating source-run resume. CLI, API, dashboard, Builder, route helpers, delivery
+      otherwise implement mutating source-run resume. CLI, API, dashboard, route helpers, delivery
       writers, and pipeline boot paths may consume this owner but MUST NOT compute contract-swap boot/resume readiness
       independently.'
     historical_replay_execution_admission: 'Bounded fork re-execution admission is owned by
@@ -17722,7 +17663,7 @@ run_model:
       store.run_fork.replay_resume_admission. This owner MUST NOT run handlers, create or copy events or
       event_deliveries, write receipts, dead letters, retry/idempotency state, emitted follow-up events, timers,
       sessions, turns, route rows, API/UI/dashboard state, suppress fork work from source outcomes, or treat selected
-      frontier execution as proof of broader source-run resumption. CLI, API, dashboard, Builder, route helpers, delivery
+      frontier execution as proof of broader source-run resumption. CLI, API, dashboard, route helpers, delivery
       writers, runtime recovery, and pipeline boot paths may consume this owner but MUST NOT compute historical replay
       execution admission independently.'
     historical_replay_execution: 'Mutating bounded fork re-execution authority is owned by
@@ -17757,11 +17698,11 @@ run_model:
       and record fork-local lineage without copying source event IDs or source delivery rows. Source delivery
       subscriber identity, source receipts, source dead letters, source retry/idempotency, emitted source follow-ups,
       timers, source/current routes, sessions, turns, audits, non-agent/node/system work, source-advanced/post-revision facts,
-      runtime restart state, and CLI/API/dashboard/Builder state are lineage-only, fail-closed blockers, split siblings,
+      runtime restart state, and CLI/API/dashboard state are lineage-only, fail-closed blockers, split siblings,
       or consumers; they MUST NOT become selected-fork recipient truth, executable fork work, or fork suppressors. This
       child MUST NOT use store.run_fork.delivery_event_replay as-is when that writer preserves source subscriber
       recipients, MUST NOT treat runtime.run_fork.selected_contract_execution as broader source-run replay proof, and MUST NOT
-      make CLI/API/dashboard/Builder semantic owners. This bounded selected-frontier contract-swap child is not a
+      make CLI/API/dashboard semantic owners. This bounded selected-frontier contract-swap child is not a
       promise of broader source-run resumption; #564 closes through the fact matrix and successor issues #1721/#1722.'
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
@@ -17830,7 +17771,7 @@ run_model:
         and blocker or split tracker when applicable. The classifier is an explanation/read model only: it does not
         authorize materialization, activation, selected execution, route recovery, historical replay, contract-swap
         execution, restart recovery, or API/UI behavior. Mutation owners and activation gates must continue to consume
-        their own canonical owners and fail closed. CLI/API/dashboard/Builder surfaces may consume the matrix but MUST
+        their own canonical owners and fail closed. CLI/API/dashboard surfaces may consume the matrix but MUST
         NOT compute readiness semantics independently.'
       3c_selected_contract_source_advanced_branch: 'For selected-contract mutating fork execution, source advancement
         after the materialized source revision is explicit branch divergence evidence when the selected execution owner can regenerate
@@ -17918,7 +17859,7 @@ run_model:
         container may be consumed
         by the contract-swap historical replay path only after that path has independently admitted executable selected
         work, and it must preserve source rows/outcomes as lineage or blocker evidence only. EventBus descriptors,
-        normal AgentManager current state, readiness JSON, CLI/API/dashboard/Builder output, and produced_by_type alone
+        normal AgentManager current state, readiness JSON, CLI/API/dashboard output, and produced_by_type alone
         are not container truth. Restart recovery, current-state snapshot ownership, session/turn/audit reconstruction,
         non-agent replay, retry/idempotency/follow-up policy beyond normal selected output, and operator consumers remain
         split siblings.'
@@ -18123,20 +18064,6 @@ run_model:
     entity_timeline: 'To see one entity''s full history across runs:
       SELECT * FROM entity_mutations WHERE entity_id = :entity_id ORDER BY created_at.
       This shows every domain/path change, who made it, and which event caused it.'
-  builder_api:
-    runs_list: 'GET /runs — list runs with status filter. Returns run_id, status, event_count, entity_count,
-      started_at, ended_at.'
-    run_detail: 'GET /runs/:run_id — full run metadata including fork lineage.'
-    run_events: 'GET /runs/:run_id/events — paginated event stream for the run.'
-    run_mutations: 'GET /runs/:run_id/mutations — paginated mutation log for the run.'
-    run_trace: 'GET /runs/:run_id/trace — run-centric joined trace rows linking event, delivery, session, and turn identity
-      for operator debugging. This is a persisted joined trace surface built on canonical run-bound diagnostics, not a
-      separate observability store.'
-    run_fork: 'POST /runs/:run_id/fork — fork a run at a specific event. Body: {event_id: uuid}.
-      Returns the new run_id.'
-    run_pause: 'POST /runs/:run_id/pause — pause a running run.'
-    run_resume: 'POST /runs/:run_id/resume — resume a paused run.'
-    run_cancel: 'POST /runs/:run_id/cancel — cancel a running run. Drains in-flight events.'
 agent_identity_model:
   status: concrete_route_identity_promoted_source_authority
   promoted_by: '#2133'
@@ -18562,7 +18489,6 @@ multi_bundle_persistence:
       source_fact_owner: internal/serveapp.prepareLoadedServeBundleSource
       runtime_context_manager_owner: internal/runtime.RuntimeContextManager
       bundle_context_owner: internal/runtime.BundleContext
-      source_replacement_guard: internal/serveapp.runtimeProjectSupervisor.DisableSourceReplacement
       supported_surface:
         - One or more canonical bundle_hash values may be pinned at process boot by repeating --bundle-hash. Values must be canonical, non-empty, duplicate-free, and mutually exclusive with --contracts and --dev.
         - The mode is Postgres-only and all-or-nothing before API readiness. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, duplicate hash, and noncanonical hash fail closed before any runtime context is served.
@@ -18577,7 +18503,6 @@ multi_bundle_persistence:
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
         - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction or predecessor-completed desired-source transition. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact and observes its three disjoint sets. Malformed or invalid-route state, current ordinary pending without replay authority, or predecessor-pending source transition without replay authority refuses the all-or-nothing serve before cross-context mutation. A predecessor-completed transition is mandatory exact-context work, not completed topology: Runtime.Start revalidates the complete source transition set, derives every desired plan from that context's semantic source before mutation, and consumes one selected-store observed-state batch transaction that compares every row and commits every replacement or none before Manager run. A one-row set is still a batch; no singular writer or process-side source filter survives. Runtime.Start reloads to require no transition or unauthorized pending, never reconstructs a predecessor plan, then starts Manager and prepares every completed or authorized pending agent/generation/flow route before any pending finalizer may arm or publish. A fresh exact-source reload and route/loop verification closes completed topology before optional recovery, continuation execution, or autonomous schedule/timer/maintenance/run-lifecycle work. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT canonicalize, adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve consumes the same three-class, batch, and producer-fence policy.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
-        - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
         - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
         - External executable code, tools, container images, credentials, and host environment dependencies remain environment-owned and are not stored in the bundles row.
       split_boundaries:
@@ -18734,16 +18659,16 @@ multi_bundle_persistence:
           join that BundleContext before force cleanup or the non-force final bundle/topology mutation. Static agents
           self-release to the non-running registered state while their predecessor source-set revision is still current;
           before classifying the target BundleContext as loaded or unloaded, the runtime quiescence owner MUST settle
-          every retained replacement rollback, source-set rollback, and predecessor publication under one serialized
-          supervisor operation. That operation remains owned until the returned quiescence token is restored or committed,
-          so concurrent reload/replacement cannot recreate a withdrawn or fenced context between recovery and lookup;
+          every retained bundle-delete survivor transition under one serialized process-lifecycle operation. That operation
+          remains owned until the returned quiescence token is restored or committed, so a later bundle deletion or process
+          shutdown cannot detach a withdrawn or fenced context between recovery and lookup;
           only then may the selected-store finalizer atomically remove the source and bundle. Before that deletion can
           report completion, process composition MUST rotate every surviving loaded runtime to an admitted successor
-          generation grant and rebind every surviving static lifecycle cell to the committed complete source-set
-          revision without changing its execution generation, phase, run mode, or config revision. Survivors remain
+          generation grant and rebind every surviving static or flow-readiness lifecycle cell to the committed complete
+          source-set revision without changing its execution generation, sealed admission, phase, run mode, or config revision. Survivors remain
           unselectable until the complete set converges; partial rebind failure MUST NOT publish stale runtime authority
           or report completed deletion. A committed deletion with an incomplete survivor refresh leaves those contexts fenced
-          under RuntimeContextManager ownership. Reload, replacement, later bundle deletion, and process close MUST adopt and
+          under RuntimeContextManager ownership. Later bundle deletion and process shutdown MUST adopt and
           complete that exact pending refresh before context enumeration or shutdown; failed adoption fails closed and MUST NOT
           detach or stop a pending survivor. The atomic bundle/source-set mutation MUST retain its exact final result in the
           source-set operation ledger together with the exact API request hash. The same final selected-store transaction
@@ -18757,7 +18682,7 @@ multi_bundle_persistence:
           grant; it MUST NOT reconstruct the
           removed source coordinate as mutation authority, and an already terminated identity is an inert historical row.
           Quiescence returns one typed recoverable ownership token. Every failure before durable final-mutation commit MUST
-          restore and republish the exact withdrawn BundleContext through the runtime supervisor, including generation,
+          restore and republish the exact withdrawn BundleContext through the process-lifecycle supervisor, including generation,
           standing-target, and public-ingress reconciliation; restoring a non-primary loaded bundle MUST NOT replace the
           supervisor's primary project identity. A committed final mutation is terminal evidence: the token MUST NOT restore
           the deleted context even when survivor refresh or API-result persistence fails after commit. Restoration failure is
@@ -18777,7 +18702,7 @@ multi_bundle_persistence:
         - leaving a quiesced loaded context unavailable after a pre-commit delete failure
         - restoring a deleted context after the final mutation reports durable commit evidence
         - reconstructing a replayed coordinator result from only the final mutation or current topology
-        - classifying a bundle runtime as unloaded before retained replacement or source-set rollback finalization
+        - classifying a bundle runtime as unloaded before retained survivor-transition finalization
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash
@@ -19009,7 +18934,6 @@ multi_bundle_persistence:
         - internal/runtime/contracts.LoadBundleCatalogRuntimeSource
         - internal/serveapp.loadServeRuntimeBundleFromCatalog
         - internal/serveapp.prepareLoadedServeBundleSource
-        - internal/serveapp.runtimeProjectSupervisor.DisableSourceReplacement
         - internal/runtime.RuntimeContextManager
         - internal/runtime.BundleContext
       reason: >
@@ -20868,8 +20792,8 @@ workspace_model:
     implementation_status: implemented_capability_driven_first_slice
     canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
     scope: >
-      Defines the capability-derived effective workspace backend requirement for `swarm serve` boot, dynamic Builder project
-      reload, selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`, `swarm
+      Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
+      selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`, `swarm
       verify`, `swarm describe`, and the `conversation.fork_chat` sandbox runtime. The loaded contract and effective runtime
       backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
       Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
@@ -20960,7 +20884,6 @@ workspace_model:
     consumers:
     - swarm serve boot workspace lifecycle
     - local foreground `swarm run start` startup through the serve startup owner
-    - dynamic Builder project reload workspace lifecycle
     - selected-contract run-fork workspace lifecycle
     - swarm verify isolation diagnostics
     - swarm describe isolation diagnostics
@@ -22295,9 +22218,9 @@ test_specification:
           attempt/credential/transport, overlays the admitted responses through the existing response plan, and never reads
           current scenario files or process-global response state.
       temporal_semantics: >-
-        Restart and replacement publish the effective-source identity and profile catalog atomically with the runtime context.
-        A predecessor run cannot execute under a same-base but different effective identity. Failed replacement leaves the
-        predecessor authoritative. An already-admitted runtime context supplies its exact module/source/identity to selected-
+        Boot and process restart publish the effective-source identity and profile catalog atomically with the runtime context.
+        A previously admitted run cannot execute under a same-base but different effective identity. An already-admitted
+        runtime context supplies its exact module/source/identity to selected-
           contract execution; disk/catalog loaders compile through the same projection and fail closed when required external
           provenance is unavailable. PostgreSQL and SQLite selected-contract forks inherit exact profile bytes only when
           effective identities match before materialization.
@@ -22854,7 +22777,7 @@ cli_specification:
         action: >
           `swarm forkchat new|resume|list|view|delete` is promoted as a bounded CLI consumer over the
           `conversation.fork|fork_chat|fork_list|fork_view|fork_delete` APIs. Full `--include-forks`
-          cross-surface conversation behavior, Dashboard/Builder views, and sharing/ACL/pinning remain
+          cross-surface conversation behavior, dashboard views, and sharing/ACL/pinning remain
           split. The public run-fork CLI is implemented as `swarm run fork` (CLI v2.2; the pre-v2.2
           top-level `swarm fork` spelling is retired fail-closed).
     platform_spec_refinements_not_cleanly_present_in_review_artifact:
@@ -23368,7 +23291,7 @@ cli_specification:
             A `run.start` EVENT_NOT_DECLARED rejection with reason `not_declared_root_input` or
             `declared_root_input_not_routable` MUST consume the server-owned root-input facts. Human output defines a
             root input as an event declared in the root flow's `pins.inputs.events`, renders the declared and routable
-            domains with `none` for an empty domain, and gives a contract-field remediation. CLI and Builder consumers
+            domains with `none` for an empty domain, and gives a contract-field remediation. CLI consumers
             MUST NOT reload contracts, infer the domains independently, normalize malformed server facts, or flatten the
             structured facts to raw error text. The CLI renders `none` only from an explicit canonical empty array; missing,
             null, non-canonical scalar or domain, or reason-inconsistent facts fall back to the generic application-error
@@ -25705,12 +25628,12 @@ cli_specification:
           /v1/rpc event.publish request. Normalized provider-event schemas are one-way and cannot authorize reconstruction of raw
           webhook bodies, signatures, delivery ids, predicates, or provider envelopes.
         served_effective_source_retention: >-
-          Runtime construction is the admission owner for the effective workflow module/source. Initial served BundleContexts and
-          project replacement BundleContexts retain the exact module/source admitted in Runtime.Options.WorkflowModule; API
-          selection, runtime-context planning/registration, replacement/restoration, run-fork/readback, stalled-run policy,
-          lifecycle accounting, and runtime execution consume that retained source. Replacement failure restores the predecessor
-          BundleContext source unchanged. Serve must not recompose, fall back to the pre-runtime source, or mutate the authored
-          bundle. Missing runtime, admitted module, or admitted semantic source fails closed before publication.
+          Runtime construction is the admission owner for the effective workflow module/source. Every boot-selected served
+          BundleContext retains the exact module/source admitted in Runtime.Options.WorkflowModule; API selection,
+          runtime-context planning/registration, run-fork/readback, stalled-run policy, lifecycle accounting, and runtime
+          execution consume that retained source. Bundle deletion may retire an exact context but cannot recompose or mutate a
+          surviving source. Serve must not fall back to the pre-runtime source or mutate the authored bundle. Missing runtime,
+          admitted module, or admitted semantic source fails closed before publication.
         s3_s6_boundary: >-
           S3 guarantees deterministic schema-valid input for an explicitly requested exact pin. It does not promise provider
           meaning or downstream traversal for unconstrained values. Generated-base `set` overrides, automatic scenario derivation,
@@ -25766,7 +25689,7 @@ cli_specification:
         through entity.get
       - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
       - derived execution persists exact canonical profile bytes and effective-source digest through event.publish or
-        test.setup_entities on SQLite and PostgreSQL; mismatches fail before mutation, restart/replacement cannot substitute a
+        test.setup_entities on SQLite and PostgreSQL; mismatches fail before mutation, process restart cannot substitute a
         current profile, and PostgreSQL fork inheritance compares the exact effective identity
       - every admitted swarm new archetype verifies, boots, and completes its public mock-only smoke scenario without
         credentials or Docker in less than 60 seconds
@@ -25968,7 +25891,6 @@ cli_specification:
         consumers:
         - serve boot workspace lifecycle
         - local foreground `swarm run start` startup through the serve startup owner
-        - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
       workspace_backend_selection:
         promoted_by: '#1138'
@@ -25988,7 +25910,6 @@ cli_specification:
         consumers:
         - serve boot workspace lifecycle
         - local foreground run start
-        - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
         - verify/describe/doctor diagnostics
         - conversation.fork_chat sandbox LLM runtime admission
@@ -26402,8 +26323,8 @@ cli_specification:
               therefore run only after completed topology, pipeline recovery to exhaustion, and delivery-continuation start and
               synchronization. No second pre-continuation pipeline sweep is required because these producers remain closed until
               both exact receivers and the continuation consumer are live. Global workflow-timer restoration excludes standing-service
-              run IDs because standing reconciliation owns their route, agent, generation, and publication boundary. EnsureStandingTargets,
-              EnsureStandingServiceTargets, or EnsureStandingReplacementTargets restores each admitted standing run's
+              run IDs because standing reconciliation owns their route, agent, generation, and publication boundary. EnsureStandingTargets
+              or EnsureStandingServiceTargets restores each admitted standing run's
               exact active workflow timers only after that standing mutation commits and its runtime route is installed.
           - step: 12
             name: static_agents_bootstrap
@@ -27897,7 +27818,7 @@ cli_specification:
         EventBus, dashboard, Builder, conversation_forks tables, conversation_fork_snapshots, or conversation_fork_turns.
       split_out:
         include_forks_cross_surface: '#749 parent tail; normal conversation/dashboard surfaces do not consume fork-local turns in this slice.'
-        dashboard_builder: '#749 parent tail.'
+        dashboard: '#749 parent tail.'
         sharing_acl_pinning: '#749 parent tail; fixed TTL/delete lifecycle only.'
         run_fork_swarm_fork: '#989/#1023 implemented separately as the distinct run.fork/swarm fork concept (pre-v2.2 spelling; the public command is now `swarm run fork`).'
         direct_storage_or_runtime_reads: forbidden for the CLI consumer.
@@ -28492,8 +28413,8 @@ cli_specification:
 
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
-    \ subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nbuilder,\
-    \ CLI, and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal \u2014 Empire as\
+    \ subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nCLI,\
+    \ and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal \u2014 Empire as\
     \ the only consumer at\nspec time) but Phase-2-publishable by construction: no internal jargon in\nmethod names, no [PROPOSED]\
     \ placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\n\
     YAML is the OpenRPC source-of-truth \u2014 the openrpc.json artifact is\ngenerated mechanically from method_catalog +\
@@ -33866,7 +33787,6 @@ api_specification:
         absent_root_schema_rule: A workflow with no root schema has an empty declared and routable root-input domain; absence is not a validator failure.
         lossless_consumers:
         - internal/apiv1 run.start application-error adapter
-        - internal/builder run.start RPC adapter while that in-process consumer remains live
         - swarm run start human diagnostic renderer
         rule: >
           Every consumer preserves the rejected event plus the deterministically sorted declared_events and
@@ -35345,7 +35265,7 @@ api_specification:
     run.start:
       tier: must_have
       deprecated: true
-      description: 'Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call
+      description: 'Deprecated wrapper over event.publish retained for older API callers. New clients should call
         event.publish directly.
 
         Start a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash
@@ -37518,8 +37438,8 @@ api_specification:
       - credentials.set
       - credentials.delete
       - credentials.test
-      rationale: Existing Builder API methods kept as-is in their current location. Re-spec under v1 in a follow-on if a unified
-        credentials story is needed.
+      rationale: The retired Builder credential methods have no live transport. A future credentials story requires a new
+        v1 product owner and specification.
     runtime_admin:
       methods:
       - runtime.reset_state
@@ -37556,9 +37476,10 @@ api_specification:
   migration:
     description: How the previous dual-API surface is retired in favor of v1.
     builder_api_disposition:
+      package: "internal/builder is removed. No production or test-only constructor, adapter, handler, controller contract,\
+        \ run/debug stream, or WebSocket frame remains."
       transport: "JSON-RPC at /rpc and /api/rpc, plus Builder WebSocket at /ws and /api/ws, are retired operator-facing\
-        \ compatibility surfaces. They MUST NOT remain reachable in production; v1 /v1/rpc and /v1/ws are the only user-facing\
-        \ operator API transports."
+        \ surfaces and do not exist. v1 /v1/rpc and /v1/ws are the only user-facing operator API transports."
       methods:
       - "project.open / project.reload / project.close \u2192 retired with the legacy Builder transport. A future bundle_lifecycle\
         \ namespace requires a new product owner and spec."
@@ -37575,9 +37496,10 @@ api_specification:
       - "[PROPOSED] methods that were never implemented \u2192 either v1 method on the equivalent namespace, deferred namespace,\
         \ or removed from spec entirely. None remain as [PROPOSED] in v1."
       source_replacement: >
-        Retired Builder project reload/source replacement is not reachable from production serve construction or test
-        hooks. A project-local dev scratch epoch loads exactly one source generation; changing files on disk does not mutate
-        that running generation. Any future reload product requires a new lifecycle owner and specification.
+        The retired Builder package and its project reload/source-replacement implementation do not exist. A process epoch
+        loads exactly one generation for each boot-selected source; changing files on disk does not mutate that generation.
+        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an already loaded
+        target bundle. Any future reload product requires a new lifecycle owner and specification.
     operator_api_disposition:
       transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
         \ production; consumers use /v1/rpc or /v1/ws."
@@ -37704,7 +37626,7 @@ process_local_work_lifetime_authority:
   queue_carriers:
     event_bus: Every exact-agent and internal EventBus item is an opaque owned carrier from send through buffer, dequeue, execution, or handoff. Production agent subscription and delivery require an exact lifecycle route handle; internal subscription and delivery require an exact internal-subscription handle. Tokenless Subscribe, SubscribeAgent, Unsubscribe, and no-handle send fallback APIs do not exist. A queued callback owns a lease at registration, including time between commit and callback start. Internal subscriptions are lifecycle generations with one send/retirement linearization boundary, a distinct retire signal, receiver completion, and readiness acknowledgement. Reset retires and joins each predecessor receiver, restarts requested generations, and waits for their readiness before completing. A restart acknowledgement remains expected only while the exact subscription lifecycle context is live; cancellation before replacement readiness withdraws that process-local generation and reset must not wait on an impossible readiness signal.
     route_generation: A route delivery acquires the exact route occurrence and, when its producer context carries a distinct fixed occurrence, one lease on that complete contextual occurrence before the delivery becomes reachable. Manager-composed standing delivery therefore retains route, Manager generation, and exact standing generation through one settlement. Nested publication consumes the same contextual occurrence, and duplicate delivery completion cannot settle any owner twice. Route replacement retires and joins only the predecessor route. Late predecessor completion cannot mutate or unblock its successor.
-    standing_composition: Work admitted from a standing context carries the exact standing occurrence as its nested producer authority. The closed occurrence model exposes one canonical exact-standing projection for direct standing and Manager-composed standing owners; it exposes neither a raw companion nor a generic parent hierarchy. Long-lived scheduler tasks retain their full execution owner and this separate exact parkable standing projection, so transition parking never substitutes pointer equality on the composite owner. The scheduler is the sole owner of an opaque parked projection carrying the exact original execution owner, standing projection, schedule fact, and armed/firing/settled state. Timer fire and park linearize under the scheduler lock. Parking an armed task prevents its callback from starting; a firing one-shot is consumed; and a firing cron is restorable only after its predecessor callback settles. Event deliveries and routes retain the complete contextual owner, so suspend/reset/replacement cannot finish while any non-durably-discharged standing descendant remains live.
+    standing_composition: Work admitted from a standing context carries the exact standing occurrence as its nested producer authority. The closed occurrence model exposes one canonical exact-standing projection for direct standing and Manager-composed standing owners; it exposes neither a raw companion nor a generic parent hierarchy. Long-lived scheduler tasks retain their full execution owner and this separate exact parkable standing projection, so transition parking never substitutes pointer equality on the composite owner. The scheduler is the sole owner of an opaque parked projection carrying the exact original execution owner, standing projection, schedule fact, and armed/firing/settled state. Timer fire and park linearize under the scheduler lock. Parking an armed task prevents its callback from starting; a firing one-shot is consumed; and a firing cron is restorable only after its predecessor callback settles. Event deliveries and routes retain the complete contextual owner, so suspend/reset cannot finish while any non-durably-discharged standing descendant remains live.
     manager_run_composition: An idle constructed AgentManager owns no work occurrence. Its first admitted Manager operation or Run start atomically creates one current Manager run occurrence and reserves one distinct standing executor from the parent runtime occurrence before the work becomes reachable. Every AgentManager flow, pipeline, direct execution, and event execution acquires a finite Manager lease and composes any exact standing, delivery, route, or selected-fork occurrence carried by its caller. Re-admission from the same Manager projection normalizes to its exact ambient companion rather than nesting a second copy of the Manager generation. The retry and agent execution loops acquire typed standing Manager leases. Manager quiescence therefore joins finite operations without waiting for those loops to terminate, while shutdown/reset atomically fences and cancels the Manager run occurrence and joins both classes. A running Manager's watcher consumes the pre-reserved executor; a pre-Run transition consumes it directly. The executor cannot own a Manager lease or be admitted after the parent runtime fence. No ambient runtime occurrence, lifecycle phase predicate, or successor Manager generation may admit or settle predecessor work.
     reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. A snapshotted sender either completes admission before retirement drains it or observes the retired handle and admits nothing. Clearing memory never manufactures quiescence.
   durable_handoff:
@@ -37713,9 +37635,8 @@ process_local_work_lifetime_authority:
     coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
     boundary: The durable handoff proof itself carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics. Those remain governed by the delivery lifecycle owner and are rechecked at every selected-store boundary.
     failure: Missing, forged, wrong-event, wrong-route, wrong-authority, or unreadable proof fails closed and leaves local ownership unsettled. The exact retained owner remains reachable until a typed transfer or terminal settlement succeeds.
-  replacement_and_standing:
+  standing_lifecycle:
     fence: Admission fencing is reversible only while the occurrence is not retired and has drained. Retirement is irreversible.
-    runtime_replacement: Runtime selection and occurrence acquisition are atomic under the runtime-context selector lock. Normal, restored, and process-admission-aware replacement use one staged publication that installs metadata, the exact executable runtime occurrence, fresh standing occurrences, and catalog authority atomically. A context is loaded only when acquisition can begin on that exact candidate. A drain timeout never reopens or republishes a partially fenced predecessor. Every failure after predecessor retirement restores, if possible, through a fully started fresh runtime occurrence from immutable predecessor metadata; it never republishes the retired occurrence. Failed compensation remains unavailable.
     standing_recovery: >
       Persisted pipeline recovery reads the run's immutable typed origin before execution. Work for a
       standing_generation run is admitted only to the exact loaded {service_id, run_id, generation} occurrence and
@@ -37729,7 +37650,21 @@ process_local_work_lifetime_authority:
       exclusion and restores domain admission rather than waiting indefinitely behind a blocked recovery scan.
       Parent terminalization therefore never races the claim-before-origin-read interval and does not poll, infer an
       owner, override a current admitted claim, or weaken the selected-store fail-busy contract.
-    standing_service: Suspend/reset and same-hash or changed-hash runtime replacement first close domain admission and fence the exact standing occurrence, then park and join every exact-owner process-local scheduler projection, including future one-shot and recurring timers, before draining active descendants. One opaque scheduler-owned parked authority remains reachable through timeout, rollback, and replacement; bare schedule values are not transition authority. Pre-commit failure waits for every predecessor callback to settle, reopens the same unretired occurrence, restores each eligible projection under its exact original complete execution owner, and only then republishes ingress. Restore reserves every exact target key, retires and joins the exact armed or firing incumbent, and rejects concurrent register, cancel, park, restore, rebind, scheduler stop, or competing transition until that reservation settles. A fenced or retired original owner makes rollback fail closed with ingress still suppressed; rollback never weakens Manager-composed ownership to the standing projection. Successful suspend retires the occurrence with no local timer projection. Resume and reset prepare a fresh, unselectable process occurrence from the committed service/run/generation identity; canonical activation and timer producers execute under that exact owner, then targets and occurrence publish atomically. They rehydrate only the new generation's canonical durable timer facts and never copy predecessor run-bound schedule structs. Same-run runtime replacement rebinds the complete eligible parked service set through one scheduler-owned aggregate transaction before that candidate becomes selectable, even when bundle hash is unchanged; predecessor Manager ownership never crosses that generation boundary. The transaction validates and pre-admits the complete successor lease set, reserves every exact target key, retires and joins every exact target incumbent, commits all rebound tasks dormant, publishes runtime metadata, then activates every rebound task and settles every source authority together. No per-service caller loop is publication authority. First, middle, or last successor failure leaves zero rebound candidate tasks and every source parked authority pending for a distinct fresh-candidate retry; an unavailable candidate is discarded rather than repaired by schedule values. A started one-shot is consumed, while a recurring projection may rebind only after its predecessor callback joins. A timeout or failed compensation remains unavailable rather than publishing a fenced or partially restored occurrence.
+    standing_service: >
+      Suspend and reset first close domain admission and fence the exact standing occurrence, then park and join every
+      exact-owner process-local scheduler projection, including future one-shot and recurring timers, before draining active
+      descendants. One opaque scheduler-owned parked authority remains reachable through timeout and rollback; bare schedule
+      values are not transition authority. Pre-commit failure waits for every predecessor callback to settle, reopens the same
+      unretired occurrence, restores each eligible projection under its exact original complete execution owner, and only then
+      republishes ingress. Restore reserves every exact target key, retires and joins the exact armed or firing incumbent, and
+      rejects concurrent register, cancel, park, restore, scheduler stop, or competing transition until that reservation
+      settles. A fenced or retired original owner makes rollback fail closed with ingress still suppressed; rollback never
+      weakens Manager-composed ownership to the standing projection. Successful suspend retires the occurrence with no local
+      timer projection. Resume and reset prepare a fresh, unselectable process occurrence from the committed
+      service/run/generation identity; canonical activation and timer producers execute under that exact owner, then targets
+      and occurrence publish atomically. They rehydrate only the new generation's canonical durable timer facts and never copy
+      predecessor run-bound schedule structs. A timeout or failed compensation remains unavailable rather than publishing a
+      fenced or partially restored occurrence.
   shutdown_and_store_release:
     manager_transition: AgentManager shutdown and reset use one retained transition object under the lifecycle coordinator lock. The first Manager admission creates the Manager run occurrence and one distinct parent-runtime transition-executor lease atomically; idle construction creates neither. Explicit shutdown/reset never admits an executor after the runtime fence. A running Manager's watcher already owns the reserved executor and claims the retained transition after run cancellation; a pre-Run shutdown/reset claims and consumes the same reserved executor directly. The executor joins Manager work without owning a Manager lease itself, settles before transition completion, and is released on startup abort or construction rollback. The runtime watcher, explicit shutdown, reset, runtime cancellation, and auth-breaker requests select the same completion and result. Reset is one shared successor transition that starts cleanup only after terminal shutdown. Duplicate callers join rather than interpreting a phase flag, and a shutdown arriving during reset joins the reset transition. Startup abort completes every already-issued shutdown/reset transition with the startup error before clearing its authority, then retires and joins the aborted Manager run occurrence; no caller may retain an open completion that startup discards.
     ordering:
@@ -38056,58 +37991,60 @@ agent_topology_authority:
     owner: agent_topology_source_set_head
     rule: >-
       One complete, sorted StaticDeclarationPlan covers every currently admitted loaded
-      bundle source. InstallCompleteSourceSet, ReplaceSourceSet, RestoreSourceSet,
-      RemoveBundleSource, and ApplyDestructiveResetTopology are the only writers. Each
-      operation owns its transaction and returns a typed exact diff. Omission means removal;
-      partial per-runtime or per-bundle desired writers are forbidden. Each logical operation
-      receives one fresh opaque operation identity before orchestration, carries that exact
-      identity through retries of the same occurrence, and never reuses a content-derived
-      identity for a later identical transition.
+      bundle source. InstallCompleteSourceSet and boot-only RestoreSourceSet establish the
+      process source set; the bundle-delete final mutation may apply RemoveBundleSource;
+      ApplyDestructiveResetTopology may clear it after quiescence. Each operation owns its
+      transaction and returns a typed exact diff. Omission means removal; partial per-runtime
+      or per-bundle desired writers are forbidden. Live ReplaceSourceSet, project reload,
+      same-process source hot reload, and speculative Dynamic Load are not supported operations.
+      Each logical operation receives one fresh opaque operation identity before orchestration,
+      carries that exact identity through retries of the same occurrence, and never reuses a
+      content-derived identity for a later identical transition.
     ordering: >-
-      Process composition compiles and commits the complete source set, reconciles durable
-      lifecycle cells, and verifies convergence before any agent hydration, route publication,
-      readiness publication, provider call, or managed execution. Bundle-source removal first
-      quiesces and joins the matching runtime generation while its agents retain the predecessor
-      source-set revision, then reserves every surviving runtime generation and static lifecycle
-      cell before committing the source-set removal with the named destructive mutation. After
-      commit, one source_set_rebind transition preserves each survivor's execution generation,
-      phase, run mode, and config revision while replacing its admission and lifecycle persistence
-      grant with the admitted successor. All surviving contexts publish together only after complete
-      convergence; stale or partially rebound survivors remain unselectable and deletion cannot
-      report completion. The same retained transaction records the exact bundle-delete final
-      mutation, exact API request hash, opaque keyed replay-authority digest, and original request
-      time in the independent bundle-delete final-mutation replay owner. This evidence is mandatory
-      even when deleting an unloaded catalog bundle requires no source-set operation. Every API invocation receives a fresh operation
-      identity. If final API completion fails after commit, a keyed retry may recover exactly one
-      matching committed record only within the API's 24-hour idempotency window; an unkeyed retry,
-      an expired authority, a conflicting request, or ambiguous evidence fails closed. If planning
-      observes the bundle already absent, exact replay adopts only survivors still fenced by the
-      committed source-set transition. A replay with no pending survivor is a no-op and must not
-      rotate a loaded generation or repeat lifecycle
-      persistence. On later startup, a persisted static lifecycle identity absent from the
-      complete current plan is terminalized only through the current runtime generation grant and
-      its matching admission; a removed source coordinate is never reconstructed as lifecycle
-      authority. A desired failed static identity is advanced to a fresh registered generation during
-      startup rather than accepted as hydrated execution. During source-set changes, failed but still
-      desired identities consume the same topology-only rebind owner as running or registered identities;
-      termination remains excluded. Already terminated identities are inert and cannot be terminalized again.
-      Runtime replacement uses RuntimeContextManager as the complete-plan compiler because it owns the
-      private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
-      each survivor to the committed plan, and republishes the complete survivor set only after convergence.
-      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. After the
-      candidate head commits, its typed finalizer is retained for every later candidate failure before predecessor survivor
-      preparation or durable restoration and carries both exact plans plus the idempotent restore
-      operation, so preparation or source-set restoration failure remains resumable at every later serialized operation boundary.
-      If survivor generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
-      retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before
-      any later reload/replacement compiles from loaded contexts and before close may release the selected store; it cannot discard
-      the transition, forget predecessor restoration, or publish only the predecessor. Once restored-predecessor publication is
-      prepared, the finalizer retains and resumes that exact publication across transient failure instead of reconstructing it.
-      A pre-publication failure is discarded rather than withdrawn. A successfully published predecessor remains the exact pending
-      continuation until its captured public-ingress reconciliation succeeds; retry resumes that reconciliation without republishing.
-      A transient discard or withdrawal failure retains the complete typed replacement rollback operation, and every later reload,
-      replacement, bundle-delete, or close boundary resumes its exact remaining candidate-shutdown, supervisor-snapshot,
-      source-set/survivor, and predecessor-publication phases before normal operation.
+      Process composition compiles and commits the complete boot source set, reconciles durable
+      lifecycle cells, and verifies convergence before agent hydration, route publication,
+      readiness publication, provider calls, or managed execution. A loaded source generation is
+      immutable for that process epoch. Existing runs retain their exact bundle authority;
+      changed-bundle continuation creates separately bundle-bound work through run.fork and never
+      mutates the source authority of an existing run.
+
+      Bundle-source deletion first quiesces and joins the exact retiring runtime generation while
+      its agents retain the predecessor source-set revision. It then reserves every surviving
+      runtime generation and every nonterminated durable static or flow-readiness lifecycle cell
+      before committing source-set removal in the named bundle-delete final mutation. After commit,
+      one source_set_rebind transition preserves each survivor's execution generation, sealed
+      topology variant, phase, run mode, config revision, and exact admission while replacing only
+      its source-set admission revision and lifecycle persistence grant with the exact admitted
+      successor. Exact predecessor and successor grant identities are persisted evidence; ordinal
+      rank or adjacent-generation arithmetic never substitutes for identity. Failed but still
+      desired survivors consume this topology-only rebind; terminated identities are inert.
+
+      RuntimeContextManager owns the aggregate bundle-delete survivor operation because it owns the
+      private runtime managers. Preparation closes aggregate execution admission and process
+      selection before source-set mutation. Registration, direct execution, dequeued EventBus work,
+      lifecycle release, shutdown, and reset cannot bypass that gate. Gate lifetime is owned by the
+      retained process operation rather than a cancelable manager run context. Per-cell durable
+      progress is deterministic and resumable, but no survivor context is republished and bundle
+      deletion cannot report completion until every prepared survivor and process-local projection
+      converges. A pre-commit failure restores exact predecessor visibility without durable rebind;
+      a post-commit or partial-progress failure retains the typed transition and all gates for exact
+      retry. Foreign grants, changed topology/config evidence, non-exact operation identity, and
+      non-adjacent lifecycle evidence fail closed.
+
+      The bundle-delete final transaction records the exact mutation, API request hash, opaque keyed
+      replay-authority digest, original request time, and source-set operation identity. This evidence
+      is mandatory even when an unloaded catalog bundle requires no source-set change. If final API
+      completion fails after commit, a keyed retry may recover exactly one matching committed record
+      only within the API's 24-hour idempotency window; unkeyed, expired, conflicting, or ambiguous
+      replay fails closed. If planning observes the bundle already absent, replay adopts only an exact
+      retained survivor transition. With no pending survivor transition it is a no-op and cannot rotate
+      a generation or repeat persistence.
+
+      On later startup, a persisted static lifecycle identity absent from the complete current plan is
+      terminalized only through its exact current runtime-generation grant and matching admission; a
+      removed source coordinate is never reconstructed as lifecycle authority. Boot-only
+      RestoreSourceSet repairs the retained process head before runtime publication and is not a live
+      reload primitive.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
@@ -38170,8 +38107,9 @@ agent_topology_authority:
       execution-hydration projections and status filters cannot define that census, so terminated cells remain in
       scope while ephemeral cells remain excluded. The census enumerates canonical persisted lifecycle rows rather
       than filtering duplicated admission JSON, reads both topology_authority_kind and execution_lifetime, and fails
-      closed unless each exactly equals the decoded topology admission. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
-      removed source cell whose execution grant changes at terminalization. A complete source-set rebind publishes
+      closed unless each exactly equals the decoded topology admission. Bundle-source deletion uses source_set_rebind for
+      survivors and one atomic source_set_retire for a removed source cell whose execution grant changes at terminalization.
+      A complete source-set rebind publishes
       each survivor's topology and process binding together under the lifecycle coordinator only after every durable
       rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
       is deterministic, idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.

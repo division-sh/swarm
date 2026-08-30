@@ -374,7 +374,7 @@ func UpsertStatic(t testing.TB, ctx context.Context, selected Store, rec runtime
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 		if exists {
 			commit.ExpectedRevision = current.Revision
-			_, err = session.capability.ReplaceSourceSet(ctx, commit)
+			_, err = session.capability.RestoreSourceSet(ctx, commit)
 		} else {
 			_, err = session.capability.InstallCompleteSourceSet(ctx, commit)
 		}
@@ -511,7 +511,7 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 		if exists {
 			commit.ExpectedRevision = current.Revision
-			_, err = session.capability.ReplaceSourceSet(ctx, commit)
+			_, err = session.capability.RestoreSourceSet(ctx, commit)
 		} else {
 			_, err = session.capability.InstallCompleteSourceSet(ctx, commit)
 		}
@@ -619,7 +619,7 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 			commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 			if exists {
 				commit.ExpectedRevision = current.Revision
-				_, err = session.capability.ReplaceSourceSet(ctx, commit)
+				_, err = session.capability.RestoreSourceSet(ctx, commit)
 			} else {
 				_, err = session.capability.InstallCompleteSourceSet(ctx, commit)
 			}

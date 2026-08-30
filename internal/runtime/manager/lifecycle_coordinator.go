@@ -136,6 +136,9 @@ func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runti
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.sourceSetTransitionConflictLocked("verify_executable_readiness", identity); err != nil {
+		return executableAgentReadiness{}, err
+	}
 	cell := c.cells[identity]
 	if cell == nil || cell.execution == nil || cell.execution.agent == nil {
 		return executableAgentReadiness{}, fmt.Errorf("agent %s has no executable lifecycle projection", identity.Description())
@@ -253,32 +256,140 @@ func (l *agentExecutionLease) Release() {
 }
 
 type agentLifecycleCoordinator struct {
-	mu                 sync.Mutex
-	storeMu            sync.RWMutex
-	workMu             sync.Mutex
-	executionPublishMu sync.Mutex
-	store              AgentLifecyclePersistence
-	stateReader        AgentLifecycleStateReader
-	effectsStore       runtimeeffects.Store
-	sessions           runtimesessions.LifecycleProjection
-	phase              runtimeLifecyclePhase
-	runMode            AgentRunMode
-	runCtx             context.Context
-	baseContext        context.Context
-	cancelRun          context.CancelFunc
-	runParentContext   context.Context
-	runParent          worklifetime.Occurrence
-	runOwner           *worklifetime.ManagerRunOccurrence
-	transitionExecutor *worklifetime.Lease
-	runGeneration      uint64
-	workRetiring       bool
-	watcherExpected    bool
-	transition         *runtimeLifecycleTransition
-	pendingReset       *runtimeLifecycleTransition
-	retryDone          <-chan struct{}
-	cells              map[runtimeagentidentity.Identity]*agentLifecycleCell
-	routes             AgentRouteBus
-	executionPosture   executionposture.Posture
+	mu                  sync.Mutex
+	storeMu             sync.RWMutex
+	workMu              sync.Mutex
+	executionPublishMu  sync.Mutex
+	sourceSetPublishMu  sync.RWMutex
+	store               AgentLifecyclePersistence
+	stateReader         AgentLifecycleStateReader
+	effectsStore        runtimeeffects.Store
+	sessions            runtimesessions.LifecycleProjection
+	phase               runtimeLifecyclePhase
+	runMode             AgentRunMode
+	runCtx              context.Context
+	baseContext         context.Context
+	cancelRun           context.CancelFunc
+	runParentContext    context.Context
+	runParent           worklifetime.Occurrence
+	runOwner            *worklifetime.ManagerRunOccurrence
+	transitionExecutor  *worklifetime.Lease
+	runGeneration       uint64
+	workRetiring        bool
+	watcherExpected     bool
+	transition          *runtimeLifecycleTransition
+	pendingReset        *runtimeLifecycleTransition
+	retryDone           <-chan struct{}
+	sourceSetTransition SourceSetTransitionAdmission
+	cells               map[runtimeagentidentity.Identity]*agentLifecycleCell
+	routes              AgentRouteBus
+	executionPosture    executionposture.Posture
+}
+
+func sourceSetTransitionPending(admission SourceSetTransitionAdmission) bool {
+	if admission == nil || admission.Done() == nil {
+		return false
+	}
+	select {
+	case <-admission.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+func validateSourceSetTransitionAdmission(admission SourceSetTransitionAdmission) error {
+	if admission == nil {
+		return errors.New("source-set transition admission is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(admission.TransitionID())); err != nil {
+		return fmt.Errorf("source-set transition identity is invalid: %w", err)
+	}
+	if strings.TrimSpace(admission.SourceSetRevision()) == "" {
+		return errors.New("source-set transition revision is required")
+	}
+	if admission.Done() == nil {
+		return errors.New("source-set transition completion is required")
+	}
+	return nil
+}
+
+func (c *agentLifecycleCoordinator) installSourceSetTransitionAdmission(admission SourceSetTransitionAdmission, resume bool) error {
+	if c == nil {
+		return errors.New("agent lifecycle coordinator is required")
+	}
+	if err := validateSourceSetTransitionAdmission(admission); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current := c.sourceSetTransition
+	if sourceSetTransitionPending(current) {
+		if !resume || current.TransitionID() != admission.TransitionID() ||
+			current.SourceSetRevision() != admission.SourceSetRevision() {
+			return runtimefailures.New(
+				runtimefailures.ClassLifecycleConflict,
+				"source_set_transition_conflict",
+				"agent-lifecycle",
+				"prepare_source_set_transition",
+				map[string]any{"source_set_revision": admission.SourceSetRevision()},
+			)
+		}
+		return nil
+	}
+	if resume {
+		return runtimefailures.New(
+			runtimefailures.ClassLifecycleConflict,
+			"source_set_transition_not_pending",
+			"agent-lifecycle",
+			"resume_source_set_transition",
+			map[string]any{"source_set_revision": admission.SourceSetRevision()},
+		)
+	}
+	c.sourceSetTransition = admission
+	return nil
+}
+
+func (c *agentLifecycleCoordinator) sourceSetTransitionConflictLocked(action string, identity runtimeagentidentity.Identity) error {
+	admission := c.sourceSetTransition
+	if !sourceSetTransitionPending(admission) {
+		return nil
+	}
+	detail := map[string]any{
+		"transition_id":       admission.TransitionID(),
+		"source_set_revision": admission.SourceSetRevision(),
+	}
+	if identity.Validate() == nil {
+		detail["agent"] = identity.Description()
+	}
+	return runtimefailures.New(
+		runtimefailures.ClassLifecycleConflict,
+		"source_set_transition_pending",
+		"agent-lifecycle",
+		strings.TrimSpace(action),
+		detail,
+	)
+}
+
+func (c *agentLifecycleCoordinator) sourceSetTransitionConflict(action string) error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sourceSetTransitionConflictLocked(action, runtimeagentidentity.Identity{})
+}
+
+func (c *agentLifecycleCoordinator) waitForSourceSetTransition() error {
+	for {
+		c.mu.Lock()
+		admission := c.sourceSetTransition
+		c.mu.Unlock()
+		if !sourceSetTransitionPending(admission) {
+			return nil
+		}
+		<-admission.Done()
+	}
 }
 
 func (c *agentLifecycleCoordinator) installPersistence(store AgentLifecyclePersistence) error {
@@ -614,6 +725,10 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
 	}
+	c.sourceSetPublishMu.RLock()
+	defer c.sourceSetPublishMu.RUnlock()
+	c.executionPublishMu.Lock()
+	defer c.executionPublishMu.Unlock()
 	if err := topology.Validate(); err != nil {
 		return fmt.Errorf("agent lifecycle topology admission: %w", err)
 	}
@@ -632,6 +747,9 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.sourceSetTransitionConflictLocked("register_execution", identity); err != nil {
+		return err
+	}
 	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
@@ -780,10 +898,15 @@ func (c *agentLifecycleCoordinator) terminatedLifecycleState(
 }
 
 func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {
+	c.sourceSetPublishMu.RLock()
+	defer c.sourceSetPublishMu.RUnlock()
 	c.executionPublishMu.Lock()
 	defer c.executionPublishMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.sourceSetTransitionConflictLocked("begin_manager_run", runtimeagentidentity.Identity{}); err != nil {
+		return nil, false, err
+	}
 	if c.phase != runtimeLifecycleStopped {
 		return c.runCtx, false, nil
 	}
@@ -1082,7 +1205,6 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 		c.cancelRun = nil
 	}
 	done := make([]<-chan struct{}, 0, len(c.cells))
-	routeTokens := make([]runtimeeffects.LifecycleToken, 0, len(c.cells))
 	for _, cell := range c.cells {
 		execution := cell.execution
 		if execution == nil {
@@ -1091,9 +1213,6 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 		execution.fenced = true
 		if execution.cancelGeneration != nil {
 			execution.cancelGeneration()
-		}
-		if c.routes != nil && execution.routeToken.Valid() {
-			routeTokens = append(routeTokens, execution.routeToken)
 		}
 		if execution.loopDone != nil {
 			done = append(done, execution.loopDone)
@@ -1110,9 +1229,6 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 	}
 	ctx := c.runCtx
 	c.mu.Unlock()
-	for _, token := range routeTokens {
-		c.routes.RemoveAgentRoute(token)
-	}
 	return ctx, done
 }
 
@@ -1199,7 +1315,7 @@ func (c *agentLifecycleCoordinator) prepareLoopTokenLocked(identity runtimeagent
 }
 
 func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
-	return c.lockIdentityOperationWithFailed(identity, false)
+	return c.lockIdentityOperationMode(identity, false, false, false)
 }
 
 // lockIdentityTopologyOperation admits failed durable cells because topology
@@ -1207,15 +1323,30 @@ func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagenti
 // treating failed cells as terminal until startup explicitly reintroduces a
 // still-declared identity as a fresh registered generation.
 func (c *agentLifecycleCoordinator) lockIdentityTopologyOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
-	return c.lockIdentityOperationWithFailed(identity, true)
+	return c.lockIdentityOperationMode(identity, true, false, false)
 }
 
-func (c *agentLifecycleCoordinator) lockIdentityOperationWithFailed(identity runtimeagentidentity.Identity, includeFailed bool) (*agentLifecycleCell, error) {
+func (c *agentLifecycleCoordinator) lockIdentitySourceSetOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
+	return c.lockIdentityOperationMode(identity, true, true, true)
+}
+
+func (c *agentLifecycleCoordinator) lockIdentityOperationMode(
+	identity runtimeagentidentity.Identity,
+	includeFailed bool,
+	includeDraining bool,
+	ignoreSourceSetTransition bool,
+) (*agentLifecycleCell, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
+	if !ignoreSourceSetTransition {
+		if err := c.sourceSetTransitionConflictLocked("lifecycle_mutation", identity); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	cell := c.cells[identity]
 	c.mu.Unlock()
 	if cell == nil {
@@ -1224,7 +1355,16 @@ func (c *agentLifecycleCoordinator) lockIdentityOperationWithFailed(identity run
 	cell.opMu.Lock()
 	c.mu.Lock()
 	current := c.cells[identity]
-	valid := current == cell && current.phase != AgentLifecycleDraining && current.phase != AgentLifecycleTerminated && (includeFailed || current.phase != AgentLifecycleFailed)
+	valid := current == cell && current.phase != AgentLifecycleTerminated &&
+		(includeDraining || current.phase != AgentLifecycleDraining) &&
+		(includeFailed || current.phase != AgentLifecycleFailed)
+	if valid && !ignoreSourceSetTransition {
+		if err := c.sourceSetTransitionConflictLocked("lifecycle_mutation", identity); err != nil {
+			c.mu.Unlock()
+			cell.opMu.Unlock()
+			return nil, err
+		}
+	}
 	c.mu.Unlock()
 	if !valid {
 		cell.opMu.Unlock()
@@ -1297,19 +1437,30 @@ func (c *agentLifecycleCoordinator) acquireExecutionIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	return c.acquireExecutionLocked(ctx, cell, identity.Description(), purpose, requireRunning, runtimeeffects.LifecycleToken{})
+	return c.acquireExecutionLocked(ctx, cell, identity.Description(), purpose, requireRunning, runtimeeffects.LifecycleToken{}, false)
 }
 
 func (c *agentLifecycleCoordinator) acquireDeliveryExecution(ctx context.Context, token runtimeeffects.LifecycleToken) (*agentExecutionLease, error) {
 	if !token.Valid() {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_execution_token_invalid", "agent-lifecycle", "admit_delivery_execution", nil)
 	}
-	cell, err := c.lockIdentityOperation(token.Identity)
-	if err != nil {
-		return nil, err
+	for {
+		if err := c.waitForSourceSetTransition(); err != nil {
+			return nil, err
+		}
+		cell, err := c.lockIdentityOperationMode(token.Identity, false, false, true)
+		if err != nil {
+			return nil, err
+		}
+		lease, err := c.acquireExecutionLocked(ctx, cell, token.Identity.Description(), "admit_delivery_execution", true, token, true)
+		if errors.Is(err, errSourceSetTransitionAdmissionPending) {
+			continue
+		}
+		return lease, err
 	}
-	return c.acquireExecutionLocked(ctx, cell, token.Identity.Description(), "admit_delivery_execution", true, token)
 }
+
+var errSourceSetTransitionAdmissionPending = errors.New("source-set transition admission pending")
 
 func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	ctx context.Context,
@@ -1317,13 +1468,24 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	target, purpose string,
 	requireRunning bool,
 	exactRouteToken runtimeeffects.LifecycleToken,
+	waitForSourceSetTransition bool,
 ) (*agentExecutionLease, error) {
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
+	if sourceSetTransitionPending(c.sourceSetTransition) {
+		if waitForSourceSetTransition {
+			c.mu.Unlock()
+			return nil, errSourceSetTransitionAdmissionPending
+		}
+		err := c.sourceSetTransitionConflictLocked(purpose, cell.identity)
+		c.mu.Unlock()
+		return nil, err
+	}
 	execution := cell.execution
 	running := cell.phase == AgentLifecycleRunning
 	exactRoute := !exactRouteToken.Valid() || (execution != nil && execution.token == exactRouteToken && execution.routeToken == exactRouteToken)
-	if execution == nil || execution.agent == nil || execution.fenced || (requireRunning && !running) || !exactRoute {
+	generationLive := execution != nil && execution.generationCtx != nil && execution.generationCtx.Err() == nil
+	if execution == nil || execution.agent == nil || execution.fenced || !generationLive || (requireRunning && !running) || !exactRoute {
 		c.mu.Unlock()
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", purpose, map[string]any{"agent": strings.TrimSpace(target)})
 	}
@@ -1576,17 +1738,36 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	if c == nil {
 		return nil
 	}
+	var cell *agentLifecycleCell
+	for {
+		if err := c.waitForSourceSetTransition(); err != nil {
+			return err
+		}
+		// Source-set preparation takes the exclusive side before publishing its
+		// admission fence. The shared side keeps the recheck and loop settlement
+		// atomic without blocking an ordinary replacement that is joining this loop.
+		c.sourceSetPublishMu.RLock()
+		c.mu.Lock()
+		pending := sourceSetTransitionPending(c.sourceSetTransition)
+		c.mu.Unlock()
+		if !pending {
+			break
+		}
+		c.sourceSetPublishMu.RUnlock()
+	}
 	if c.routes != nil {
 		c.routes.RemoveAgentRoute(token)
 	}
 	close(done)
 	c.mu.Lock()
-	cell := c.cells[token.Identity.Normalize()]
+	cell = c.cells[token.Identity.Normalize()]
 	c.mu.Unlock()
 	if cell == nil {
+		c.sourceSetPublishMu.RUnlock()
 		return nil
 	}
 	cell.opMu.Lock()
+	c.sourceSetPublishMu.RUnlock()
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
 	cell = c.cells[token.Identity.Normalize()]
@@ -1841,14 +2022,10 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 		return models.AgentConfig{}, err
 	}
 	agentID := identity.AgentID()
-	c.mu.Lock()
-	cell := c.cells[identity]
-	if cell == nil || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
-		c.mu.Unlock()
-		return models.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+	cell, err := c.lockIdentityOperation(identity)
+	if err != nil {
+		return models.AgentConfig{}, err
 	}
-	c.mu.Unlock()
-	cell.opMu.Lock()
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
 	cell = c.cells[identity]

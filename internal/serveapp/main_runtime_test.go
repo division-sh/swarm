@@ -375,7 +375,7 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 	if command.PromotedBy != "#2295" || command.Owner != "durable_data_resources.workspace_projection" || !strings.Contains(command.Rule, "immutable resource pins") {
 		t.Fatalf("serve command data projection authority = %#v", command)
 	}
-	for _, want := range []string{"serve boot", "local foreground `swarm run start`", "Builder project reload", "selected-contract run-fork"} {
+	for _, want := range []string{"serve boot", "local foreground `swarm run start`", "selected-contract run-fork"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command data projection consumers missing %q: %#v", want, command.Consumers)
 		}
@@ -393,14 +393,9 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	shutdownErr := fmt.Errorf("shutdown timed out")
 	cleanupErr := fmt.Errorf("cleanup failed")
 	var order []string
-	supervisor := &runtimeProjectSupervisor{
+	supervisor := &processLifecycleSupervisor{
 		currentRT: &runtimepkg.Runtime{},
 	}
-	retiredHookCalls := 0
-	supervisor.SetRuntimeRetiredHook(func(context.Context, runtimepkg.BundleContext) error {
-		retiredHookCalls++
-		return nil
-	})
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
 		order = append(order, "shutdown")
 		return shutdownErr
@@ -425,8 +420,43 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	if got := supervisor.CurrentRuntime(); got != nil {
 		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
 	}
-	if retiredHookCalls != 0 {
-		t.Fatalf("closeServeRuntime retirement hook calls = %d, want 0", retiredHookCalls)
+}
+
+type terminalSourceSetCapability struct {
+	runtimestartupownership.ProcessCapability
+	err error
+}
+
+func (c terminalSourceSetCapability) CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
+	return runtimeagenttopology.SourceSetPlan{}, false, c.err
+}
+
+func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.TerminalResult, bool) {
+	return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}, true
+}
+
+func TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailure(t *testing.T) {
+	settlementErr := errors.New("ownership session is terminal")
+	stopped := false
+	supervisor := &processLifecycleSupervisor{
+		processCapability: terminalSourceSetCapability{err: settlementErr},
+		runtimeContexts:   &runtimepkg.RuntimeContextManager{},
+		currentRT:         &runtimepkg.Runtime{},
+		shutdownRuntime: func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+			stopped = true
+			return nil
+		},
+	}
+
+	err := supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
+	if !errors.Is(err, settlementErr) {
+		t.Fatalf("shutdown error = %v, want settlement error", err)
+	}
+	if !stopped {
+		t.Fatal("terminal ownership settlement failure prevented runtime shutdown")
+	}
+	if supervisor.CurrentRuntime() != nil {
+		t.Fatal("terminal ownership shutdown retained the runtime projection")
 	}
 }
 
