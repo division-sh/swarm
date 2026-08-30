@@ -82,7 +82,7 @@ type PipelineCoordinator struct {
 	effectiveSource        scenarioexecution.EffectiveSourceIdentity
 	channelActivations     *runtimechannelactivation.Owner
 	artifactRoot           string
-	bundleSourceFact       runtimecorrelation.BundleSourceFact
+	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
 	runBundleAvailability  RunBundleAvailabilityReader
 	decisionCardCadence    decisioncard.CadencePolicy
 	executionPosture       executionposture.Posture
@@ -130,7 +130,7 @@ type PipelineCoordinatorOptions struct {
 	EffectiveSourceIdentity          scenarioexecution.EffectiveSourceIdentity
 	ChannelActivations               *runtimechannelactivation.Owner
 	ArtifactRoot                     string
-	BundleSourceFact                 runtimecorrelation.BundleSourceFact
+	SourceArtifactFact               runtimecorrelation.SourceArtifactFact
 	RunBundleAvailability            RunBundleAvailabilityReader
 	DecisionCardCadence              decisioncard.CadencePolicy
 	TestEntityStateHook              func(entityID, state string)
@@ -303,7 +303,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		effectiveSource:                  opts.EffectiveSourceIdentity,
 		channelActivations:               opts.ChannelActivations,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
-		bundleSourceFact:                 opts.BundleSourceFact,
+		sourceArtifactFact:               opts.SourceArtifactFact,
 		runBundleAvailability:            opts.RunBundleAvailability,
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),
 		executionPosture:                 opts.ExecutionPosture,
@@ -524,8 +524,8 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if evt.Type() == workflowGateDecisionEventType {
-		emitted, outcome, _ := pc.handleWorkflowGateDecisionEvent(ctx, evt)
-		return false, emitted, outcome, nil
+		emitted, outcome, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
+		return false, emitted, outcome, err
 	}
 	if evt.Type() == decisionCardDeferredEventType {
 		emitted, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
@@ -662,7 +662,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	}
 	nodeFlowID := strings.TrimSpace(resolved.FlowID)
 	if nodeFlowID == "" {
-		nodeFlowID = node.FlowID()
+		nodeFlowID = node.FlowPath()
 	}
 	handlerFact, err := NewDeliveryTargetHandler(node)
 	if err != nil {

@@ -15,19 +15,18 @@ import (
 )
 
 const (
-	runtimeContextTestHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	runtimeContextTestHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	runtimeContextTestHashC = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	runtimeContextTestHashA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	runtimeContextTestHashB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	runtimeContextTestHashC = "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
 func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
-				RunID:            "run-b",
-				BundleHash:       runtimeContextTestHashB,
-				BundleSource:     runbundle.AvailabilitySourcePersisted,
-				BundleRowPresent: true,
+				RunID:                 "run-b",
+				BundleHash:            runtimeContextTestHashB,
+				SourceArtifactPresent: true,
 			},
 		},
 	}
@@ -81,7 +80,6 @@ func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
 		`duplicate runtime context agent_id "shared-worker"`,
 		runtimeContextTestHashA,
 		runtimeContextTestHashB,
-		"bundle_source=ephemeral",
 		"workflow=review@1.0.0",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -161,10 +159,9 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
-				RunID:            "run-b",
-				BundleHash:       runtimeContextTestHashB,
-				BundleSource:     runbundle.AvailabilitySourcePersisted,
-				BundleRowPresent: true,
+				RunID:                 "run-b",
+				BundleHash:            runtimeContextTestHashB,
+				SourceArtifactPresent: true,
 			},
 		},
 	}
@@ -385,19 +382,19 @@ func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName strin
 	source := semanticviewtest.WrapRootAgents(bundle)
 	workOwner := runtimeTestOccurrence(t, bundleHash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
-		WorkOwner:        workOwner,
-		ContractBundle:   source,
-		BundleSourceFact: testBundleSourceFact(t, bundleHash),
+		WorkOwner:          workOwner,
+		ContractBundle:     source,
+		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	return BundleContext{
-		BundleSourceFact: testBundleSourceFact(t, bundleHash),
-		BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
-		Source:           source,
-		WorkOwner:        workOwner,
-		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
+		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
+		BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
+		Source:             source,
+		WorkOwner:          workOwner,
+		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
 	}
 }
 
@@ -410,8 +407,8 @@ func (f fakeRunBundleAvailability) LoadRunBundleAvailability(_ context.Context, 
 	if !ok {
 		return runbundle.Availability{}, runbundle.ErrRunNotFound
 	}
-	if row.ErrorCode == "" && row.BundleSource == runbundle.AvailabilitySourcePersisted && !row.BundleRowPresent {
-		return row, errors.New("invalid fake persisted row without bundle")
+	if row.ErrorCode == "" && !row.SourceArtifactPresent {
+		return row, errors.New("invalid fake row without source artifact")
 	}
 	return row, nil
 }

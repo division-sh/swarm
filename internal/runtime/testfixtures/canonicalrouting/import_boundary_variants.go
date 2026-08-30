@@ -1,7 +1,6 @@
 package canonicalrouting
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -22,10 +21,6 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 	removeInheritedScenarios(t, root)
-	if err := os.RemoveAll(filepath.Join(root, "flows")); err != nil {
-		t.Fatalf("remove inherited canonical flows: %v", err)
-	}
-
 	parentSubscription := "parent.lead_enriched"
 	connected := false
 	mode := "static"
@@ -52,9 +47,11 @@ connect:
   - event: parent.lead_captured
     from: .
     to: worker
-  - event: parent.lead_enriched
+    rename: work.requested
+  - event: work.completed
     from: worker
     to: .
+    rename: parent.lead_enriched
 `
 		rootSchema = `
 name: import-boundary-alias
@@ -68,21 +65,8 @@ pins:
 `
 		rootEvents = "\nparent.lead_captured: {}\n"
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: import-boundary-alias
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: `+mode+`
-    bind:
-      inputs:
-        work.requested: parent.lead_captured
-      outputs:
-        work.completed: parent.lead_enriched
-`+connect)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+connect)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 parent-listener:
@@ -92,14 +76,8 @@ parent-listener:
   event_handlers:
     parent.lead_enriched: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
-name: worker
-version: "1.0.0"
-requires:
-  inputs: [work.requested]
-  outputs: [work.completed]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), `
 name: worker
 mode: `+mode+`
 pins:
@@ -110,7 +88,7 @@ pins:
     events:
       - work.completed
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "work.completed: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "events.yaml"), "work.completed: {}\n")
 	workerNodes := `
 worker-node:
   id: worker-node
@@ -131,85 +109,9 @@ worker-output-observer:
     work.completed: {}
 `
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), workerNodes)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "nodes.yaml"), workerNodes)
 	return root
 }
-
-type ImportBoundaryWildcardVariant uint8
-
-const (
-	ImportBoundaryWildcardDenied ImportBoundaryWildcardVariant = iota + 1
-	ImportBoundaryWildcardObserveGranted
-)
 
 // CopyImportBoundaryWildcard creates the closed imported-package wildcard
 // variants used to prove denied raw matching and typed observe grants.
-func CopyImportBoundaryWildcard(t testing.TB, variant ImportBoundaryWildcardVariant) string {
-	t.Helper()
-	root := CopyExample(t, ParentConnect)
-	removeInheritedScenarios(t, root)
-	if err := os.RemoveAll(filepath.Join(root, "flows")); err != nil {
-		t.Fatalf("remove inherited canonical flows: %v", err)
-	}
-
-	workerBind := ""
-	switch variant {
-	case ImportBoundaryWildcardDenied:
-	case ImportBoundaryWildcardObserveGranted:
-		workerBind = `    bind:
-      observe:
-        - source: producer
-          events: [task.done]
-`
-	default:
-		t.Fatalf("unsupported import-boundary wildcard variant %d", variant)
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: import-boundary-wildcard
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-`+workerBind+`  - id: producer
-    flow: producer
-    mode: static
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-wildcard\n")
-	writeImportBoundaryWildcardFlow(t, root, "worker", true)
-	writeImportBoundaryWildcardFlow(t, root, "producer", false)
-	return root
-}
-
-func writeImportBoundaryWildcardFlow(t testing.TB, root, flowID string, listener bool) {
-	t.Helper()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "package.yaml"), "name: "+flowID+"\nversion: \"1.0.0\"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
-name: `+flowID+`
-mode: static
-initial_state: active
-terminal_states: [done]
-states: [active, done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "test_entity: {}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "task.done: {}\n")
-	nodes := ""
-	if listener {
-		nodes = `
-worker-listener:
-  id: worker-listener
-  execution_type: system_node
-  subscribes_to: ["**/task.done"]
-  event_handlers:
-    "**/task.done":
-      clear_gates: [sibling_gate]
-`
-	}
-	if nodes != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), nodes)
-	}
-}

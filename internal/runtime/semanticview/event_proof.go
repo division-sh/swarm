@@ -22,7 +22,7 @@ type FlowEventProof struct {
 
 func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.ExecutableNode, eventType string) FlowEventProof {
 	authored := runtimeeventidentity.Normalize(eventType)
-	proof := FlowEventProof{Node: node, FlowID: node.FlowID(), Authored: authored, Local: authored, Canonical: authored}
+	proof := FlowEventProof{Node: node, FlowID: node.FlowPath(), Authored: authored, Local: authored, Canonical: authored}
 	if source == nil || !node.Valid() || authored == "" {
 		return proof
 	}
@@ -153,20 +153,6 @@ func (p FlowEventProof) IsAuthored(source Source) bool {
 			}
 		}
 	}
-	for _, scope := range source.ProjectScopes() {
-		for eventType := range scope.Events {
-			if _, ok := authored[runtimeeventidentity.Normalize(eventType)]; !ok {
-				continue
-			}
-			declared := runtimeeventidentity.Normalize(eventType)
-			if strings.TrimSpace(scope.OwningFlowID) != "" {
-				declared = runtimeeventidentity.Normalize(source.ResolveFlowEventReference(scope.OwningFlowID, eventType))
-			}
-			if declared == canonical {
-				return true
-			}
-		}
-	}
 	for eventType := range authored {
 		if runtimeeventidentity.Normalize(eventType) == canonical {
 			return true
@@ -185,11 +171,6 @@ func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
 	}
 	flowID := strings.TrimSpace(p.FlowID)
 	if flowID == "" {
-		for _, output := range source.FlowOutputEvents("") {
-			if source.ResolveFlowEventReference("", output) == canonical {
-				return true
-			}
-		}
 		return false
 	}
 	for _, output := range source.FlowOutputEvents(flowID) {
@@ -209,7 +190,7 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 		return ""
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "" || flowID == "." {
 		return canonical
 	}
 	scope, ok := FlowScopeByID(source, flowID)

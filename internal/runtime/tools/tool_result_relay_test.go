@@ -205,14 +205,14 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write schema.yaml: %v", err)
 	}
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
-		WorkspaceRoot:       workspaceRoot,
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: workspace.LogicalContractsMount,
+		WorkspaceRoot:    workspaceRoot,
+		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceMountPoint: workspace.LogicalSourceMount,
 	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(ctx, source); err != nil {

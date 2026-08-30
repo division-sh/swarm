@@ -195,7 +195,7 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 			owner.releaseError[eventID] = tc.failure
 			bus := &EventBus{
 				pipelineObligations: owner,
-				bundleSourceFact:    sourceMutationFact(t, "9"),
+				sourceArtifactFact:  sourceMutationFact(t, "9"),
 			}
 			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
 			if err != nil {
@@ -550,11 +550,11 @@ func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing
 		claim,
 		nil,
 	)
-	foreign, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	foreign, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err != nil {
 		t.Fatalf("construct foreign source fact: %v", err)
 	}
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
 
 	if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 		Event: event,

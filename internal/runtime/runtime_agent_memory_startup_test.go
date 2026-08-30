@@ -12,17 +12,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
+func TestRuntimeStart_DirectFilesystemFlowAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
 	source := loadPackageBackedRuntimeAgentMemorySource(t)
-	assertRuntimeStartCarriesMemoryIdentity(t, source)
+	assertRuntimeStartCarriesMemoryIdentity(t, source, "support")
 }
 
-func TestRuntimeStart_StructurallyNestedProjectAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
+func TestRuntimeStart_StructurallyNestedFlowAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
 	source := loadNestedProjectRuntimeAgentMemorySource(t)
-	assertRuntimeStartCarriesMemoryIdentity(t, source)
+	assertRuntimeStartCarriesMemoryIdentity(t, source, "support/extras")
 }
 
-func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.Source) {
+func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.Source, flowPath string) {
 	t.Helper()
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Options: RuntimeOptions{
 		SelfCheck:      false,
@@ -41,15 +41,15 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 		t.Fatalf("Start: %v", err)
 	}
 
-	cfg, err := rt.Manager.ResolveAgentConfig("backend", "support")
+	cfg, err := rt.Manager.ResolveAgentConfig("backend", flowPath)
 	if err != nil {
 		t.Fatalf("resolve package-backed static flow agent config: %v", err)
 	}
-	if cfg.FlowPath != "support" {
-		t.Fatalf("FlowPath = %q, want support", cfg.FlowPath)
+	if cfg.FlowPath != flowPath {
+		t.Fatalf("FlowPath = %q, want %s", cfg.FlowPath, flowPath)
 	}
-	if cfg.FlowID != "support" {
-		t.Fatalf("FlowID = %q, want support", cfg.FlowID)
+	if cfg.FlowID != flowPath {
+		t.Fatalf("FlowID = %q, want %s", cfg.FlowID, flowPath)
 	}
 	if cfg.Memory != agentmemory.Authored(true) {
 		t.Fatalf("Memory = %#v, want authored true", cfg.Memory)
@@ -59,7 +59,7 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 func loadPackageBackedRuntimeAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryDirectFlow)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

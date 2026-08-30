@@ -256,7 +256,7 @@ func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.C
 }
 
 func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (result pendingOutboxDispatch, err error) {
-	ctx, err = d.bus.admitBundleSourceFact(ctx)
+	ctx, err = d.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -286,7 +286,7 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 }
 
 func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim) (err error) {
-	ctx, err = d.bus.admitBundleSourceFact(ctx)
+	ctx, err = d.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -566,7 +566,7 @@ func (eb *EventBus) clearPendingOutboxOperation(ctx context.Context, eventID str
 		return nil
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}

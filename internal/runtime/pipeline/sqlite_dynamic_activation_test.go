@@ -16,11 +16,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -55,7 +55,7 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 		StorageRef:      parentPath,
 		EntityID:        parentEntityID,
 		EntityType:      "parent",
-		WorkflowName:    "root",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
@@ -64,7 +64,7 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
-	parentNode := pipelineSourceNode(t, pc.SemanticSource(), "", "fanout-node")
+	parentNode := pipelineSourceNode(t, pc.SemanticSource(), ".", "fanout-node")
 	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, parentNode)
 	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testWorkflowInstanceRoute(parentPath), identity.NormalizeEntityID(parentEntityID))
 	if err != nil {
@@ -99,10 +99,10 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 		t.Fatalf("runtime logs = %#v, want none", logs)
 	}
 
-	var deliveryID, packageKey, elementID, bundleHash, semanticDigest string
+	var deliveryID, flowPath, family, semanticPath, bundleHash, semanticDigest string
 	var capsuleRaw []byte
-	if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,capsule FROM fan_out_intents WHERE run_id=?`, runtimecorrelation.RunIDFromContext(ctx)).Scan(
-		&deliveryID, &packageKey, &elementID, &bundleHash, &semanticDigest, &capsuleRaw,
+	if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,capsule FROM fan_out_intents WHERE run_id=?`, runtimecorrelation.RunIDFromContext(ctx)).Scan(
+		&deliveryID, &flowPath, &family, &semanticPath, &bundleHash, &semanticDigest, &capsuleRaw,
 	); err != nil {
 		t.Fatalf("load durable fan-out execution identity: %v", err)
 	}
@@ -115,10 +115,10 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 			Key: fanoutobligation.IntentKey{
 				RunID:                runtimecorrelation.RunIDFromContext(ctx),
 				TriggeringDeliveryID: deliveryID,
-				ElementRef:           runtimecontracts.FanOutElementRef{PackageKey: packageKey, ElementID: elementID},
+				ElementRef:           runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath},
 			},
 			PlanRef: runtimecontracts.FanOutPlanRef{
-				BundleHash: bundleHash, ElementRef: runtimecontracts.FanOutElementRef{PackageKey: packageKey, ElementID: elementID}, SemanticDigest: semanticDigest,
+				BundleHash: bundleHash, ElementRef: runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath}, SemanticDigest: semanticDigest,
 			},
 			Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: parent.ID(), Field: "components"},
 			Cardinality: 2,
@@ -141,7 +141,7 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 			Trigger: parent,
 		},
 	}
-	pc.bundleSourceFact = mustPipelineTestBundleSourceFact(bundleHash)
+	pc.sourceArtifactFact = mustPipelineTestSourceArtifactFact(bundleHash)
 	pc.workflowStore.fanOutObligations = owner
 	contextProbe := &fanOutMaintenanceContextProbe{
 		recordingPipelineBus: bus,
@@ -249,7 +249,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 	entityID := uuid.NewString()
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, EntityType: "parent",
-		WorkflowName: "root", WorkflowVersion: "v-test", CurrentState: "pending", Fields: map[string]any{},
+		WorkflowName: ".", WorkflowVersion: "v-test", CurrentState: "pending", Fields: map[string]any{},
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	})); err != nil {
 		t.Fatalf("seed nested fan-out parent: %v", err)
@@ -259,7 +259,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 		mustJSON(map[string]any{"components": []any{map[string]any{"component_id": "component-a"}}}),
 		0, runID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), time.Now().UTC(),
 	)
-	parentNode := pipelineSourceNode(t, pc.SemanticSource(), "", "fanout-node")
+	parentNode := pipelineSourceNode(t, pc.SemanticSource(), ".", "fanout-node")
 	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, parentNode)
 	if handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, parentRoute), parent); err != nil || !handled {
 		t.Fatalf("dispatch parent fan-out = handled:%v err:%v", handled, err)
@@ -270,7 +270,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 		Items:        []any{map[string]any{"component_id": "component-a"}},
 		Trigger:      parent,
 	}}
-	pc.bundleSourceFact = mustPipelineTestBundleSourceFact(parentIntent.Request.PlanRef.BundleHash)
+	pc.sourceArtifactFact = mustPipelineTestSourceArtifactFact(parentIntent.Request.PlanRef.BundleHash)
 	pc.workflowStore.fanOutObligations = parentOwner
 	if more, err := pc.serveFanOutTurn(ctx, time.Now().UTC()); err != nil || more {
 		t.Fatalf("serve parent fan-out = more:%v err:%v", more, err)
@@ -287,7 +287,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 		t.Fatalf("parent publication nested items = %#v", childPayload["nested_items"])
 	}
 
-	nestedNode := pipelineSourceNode(t, pc.SemanticSource(), "", "nested-fanout-node")
+	nestedNode := pipelineSourceNode(t, pc.SemanticSource(), ".", "nested-fanout-node")
 	nestedRoute := seedExactOnceEventDelivery(t, pc, ctx, child, nestedNode)
 	if handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, nestedRoute), child); err != nil || !handled {
 		t.Fatalf("dispatch nested fan-out = handled:%v err:%v", handled, err)
@@ -329,23 +329,23 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 
 func loadSQLiteFanOutIntentForTrigger(t *testing.T, ctx context.Context, db *sql.DB, trigger events.Event, node identity.ExecutableNode) fanoutobligation.Intent {
 	t.Helper()
-	var deliveryID, packageKey, elementID, bundleHash, semanticDigest, sourceKind, sourceEventID, sourceField string
+	var deliveryID, flowPath, family, semanticPath, bundleHash, semanticDigest, sourceKind, sourceEventID, sourceField string
 	var cardinality int
 	var capsuleRaw []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT i.triggering_delivery_id,i.package_key,i.element_id,i.bundle_hash,i.semantic_digest,
+			SELECT i.triggering_delivery_id,i.flow_path,i.declaration_family,i.semantic_path,i.bundle_hash,i.semantic_digest,
 		       i.source_kind,i.source_event_id,i.source_field,i.cardinality,i.capsule
 		FROM fan_out_intents i
 		JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id
 		WHERE i.run_id=? AND d.event_id=? AND d.subscriber_id=?
-	`, trigger.RunID(), trigger.ID(), node.Key()).Scan(&deliveryID, &packageKey, &elementID, &bundleHash, &semanticDigest, &sourceKind, &sourceEventID, &sourceField, &cardinality, &capsuleRaw); err != nil {
+	`, trigger.RunID(), trigger.ID(), node.Key()).Scan(&deliveryID, &flowPath, &family, &semanticPath, &bundleHash, &semanticDigest, &sourceKind, &sourceEventID, &sourceField, &cardinality, &capsuleRaw); err != nil {
 		t.Fatalf("load fan-out intent for trigger %s: %v", trigger.ID(), err)
 	}
 	var capsule fanoutobligation.Capsule
 	if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
 		t.Fatalf("decode fan-out capsule for trigger %s: %v", trigger.ID(), err)
 	}
-	ref := runtimecontracts.FanOutElementRef{PackageKey: packageKey, ElementID: elementID}
+	ref := runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath}
 	source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceKind(sourceKind), EventID: sourceEventID, Field: sourceField}
 	return fanoutobligation.Intent{
 		Request: fanoutobligation.IntentRequest{
@@ -511,16 +511,16 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 			}, nil),
 			workflowNodes: []WorkflowNode{
 				{
-					Node:          pipelineNode(t, "", "fanout-node"),
+					Node:          pipelineNode(t, ".", "fanout-node"),
 					Subscriptions: []events.EventType{"component_scaffold.batch_requested"},
 					Produces:      []events.EventType{"component_scaffold.spawn_requested"},
 				},
 				{
-					Node:          pipelineNode(t, "", "spawn-node"),
+					Node:          pipelineNode(t, ".", "spawn-node"),
 					Subscriptions: []events.EventType{"component_scaffold.spawn_requested"},
 				},
 				{
-					Node:          pipelineNode(t, "", "nested-fanout-node"),
+					Node:          pipelineNode(t, ".", "nested-fanout-node"),
 					Subscriptions: []events.EventType{"component_scaffold.spawn_requested"},
 					Produces:      []events.EventType{"component_scaffold.task_requested"},
 				},
@@ -534,7 +534,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	reviewFlow := &runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -544,6 +544,8 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
+				Path:     ".",
+				Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
 				Children: []runtimecontracts.FlowContractView{*reviewFlow},
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"component_scaffold.batch_requested": {
@@ -566,6 +568,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 				},
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":      nil,
 				"review": reviewFlow,
 			},
 		},
@@ -632,40 +635,41 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 			},
 		},
 	}
-	elementID := contractelementidentity.MintContractElementID()
+	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
 	fanOutHandler := bundle.Semantics.NodeHandlers["fanout-node"]["component_scaffold.batch_requested"]
-	fanOutHandler.FanOut.ElementID = elementID
-	fanOutOwner, err := identity.AdmitExecutableNodeDeclaration(identity.RootPackageKey, "", "fanout-node")
+	fanOutOwner, err := identity.AdmitExecutableNodeDeclaration(".", "fanout-node")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fanOutHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefs(fanOutOwner, fanOutHandler)
+	fanOutHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(fanOutOwner, "component_scaffold.batch_requested", fanOutHandler)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bundle.Semantics.NodeHandlers["fanout-node"]["component_scaffold.batch_requested"] = fanOutHandler
-	nestedElementID := contractelementidentity.MintContractElementID()
 	nestedHandler := bundle.Semantics.NodeHandlers["nested-fanout-node"]["component_scaffold.spawn_requested"]
-	nestedHandler.FanOut.ElementID = nestedElementID
-	nestedOwner, err := identity.AdmitExecutableNodeDeclaration(identity.RootPackageKey, "", "nested-fanout-node")
+	nestedOwner, err := identity.AdmitExecutableNodeDeclaration(".", "nested-fanout-node")
 	if err != nil {
 		t.Fatal(err)
 	}
-	nestedHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefs(nestedOwner, nestedHandler)
+	nestedHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(nestedOwner, "component_scaffold.spawn_requested", nestedHandler)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bundle.Semantics.NodeHandlers["nested-fanout-node"]["component_scaffold.spawn_requested"] = nestedHandler
 	root := t.TempDir()
-	packageFile := filepath.Join(root, "package.yaml")
-	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(packageFile, []byte("name: sqlite-dynamic-activation-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: sqlite-dynamic-activation-test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	platformFile := filepath.Join(t.TempDir(), "platform-spec.yaml")
 	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bundle.Paths = runtimecontracts.ContractPaths{ContractsRoot: root, ProjectPackageFile: packageFile, PlatformSpecFile: platformFile}
+	bundle.SourceArtifact = artifact
+	bundle.Paths = runtimecontracts.ContractPaths{PlatformSpecFile: platformFile}
 	for _, nodeID := range []string{"fanout-node", "spawn-node", "nested-fanout-node"} {
 		node := bundle.Nodes[nodeID]
 		node.EventHandlers = bundle.Semantics.NodeHandlers[nodeID]

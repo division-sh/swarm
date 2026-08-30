@@ -617,8 +617,8 @@ func rateLimitedNativeWebSearchSiblingFlowSource(serverURL string) semanticview.
 	root := runtimecontracts.FlowContractView{
 		Policy: rootPolicy,
 		Children: []runtimecontracts.FlowContractView{
-			{Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"}, Path: "alpha"},
-			{Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"}, Path: "beta"},
+			{Paths: runtimecontracts.FlowContractPaths{FlowPath: "alpha"}, Path: "alpha"},
+			{Paths: runtimecontracts.FlowContractPaths{FlowPath: "beta"}, Path: "beta"},
 		},
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -717,7 +717,7 @@ func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(strin
 		t.Fatalf("observe rate-limit test capability surface: %v", err)
 	}
 	admission, err := managedexecution.New(
-		managedexecution.KindNormalRuntime, actor.ID, 1, "", "rate-limit-test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", []string{surface.ID},
+		managedexecution.KindNormalRuntime, actor.ID, 1, "", "rate-limit-test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", []string{surface.ID},
 	)
 	if err != nil {
 		t.Fatalf("build rate-limit test execution admission: %v", err)

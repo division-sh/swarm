@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
@@ -22,11 +23,18 @@ type finalFlowInstanceAuthoringLifecycleStore struct {
 	flowInstances               []ActiveFlowInstanceDescriptor
 	flowInstanceDescriptorCalls int
 	activations                 []runtimepipeline.FlowInstanceActivationRequest
+	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	workflowVersion             string
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
-	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
+	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact), nil
+}
+
+func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
+	s.sourceArtifactFact = fact
+	s.workflowVersion = workflowVersion
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {

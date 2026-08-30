@@ -69,39 +69,10 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			defer provider.Close()
 
 			persistence, db := tc.open(t)
-			bundle := mailboxWriteSupportedSurfaceBundle(t)
-			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"text": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))}), runtimecontracts.ToolSchemaRequired("text")),
-
-					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-					Method: http.MethodPost, URL: provider.URL,
-					Body: map[string]any{"text": "{{input.text}}"},
-				})),
-			}
-			activityNode := runtimecontracts.SystemNodeContract{
-				ID: "activity-runtime", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-				SubscribesTo: []string{"mailbox.card_decided", "platform.activity_requested"},
-				Produces:     []string{"send_support_reply.succeeded", "send_support_reply.failed"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.card_decided":        {},
-					"platform.activity_requested": {},
-				},
-			}
-			bundle.Nodes[activityNode.ID] = activityNode
-			bundle.Events["send_support_reply.succeeded"] = runtimecontracts.EventCatalogEntry{}
-			bundle.Events["send_support_reply.failed"] = runtimecontracts.EventCatalogEntry{}
-			if bundle.Semantics.NodeHandlers == nil {
-				bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
-			}
-			bundle.Semantics.NodeHandlers[activityNode.ID] = activityNode.EventHandlers
-			if bundle.Semantics.EventOwners == nil {
-				bundle.Semantics.EventOwners = map[string][]string{}
-			}
-			bundle.Semantics.EventOwners["platform.activity_requested"] = []string{activityNode.ID}
-			bundle.Semantics.EventOwners["mailbox.card_decided"] = []string{activityNode.ID}
+			bundle := proposedEffectSupportedSurfaceBundle(t, provider.URL)
 
 			source := semanticview.Wrap(bundle)
-			fact := bundleSourceFactForTestBundle(t, bundle)
+			fact := sourceArtifactFactForTestBundle(t, bundle)
 			handler, bus := newProposedEffectMailboxHandler(t, persistence, db, source, fact)
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
@@ -166,13 +137,13 @@ func newProposedEffectMailboxHandler(
 	persistence any,
 	db *sql.DB,
 	source semanticview.Source,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
-		ContractBundle:   source,
-		BundleSourceFact: fact,
+		ContractBundle:     source,
+		SourceArtifactFact: fact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -200,7 +171,7 @@ func newProposedEffectMailboxHandler(
 		Module: newRunCompletionSystemNodeModule(t, source), Persistence: workflowPersistence,
 		DecisionCards: cards, ProposedEffects: persistence.(decisioncard.ProposedEffectStore),
 		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
-		RunLifecycle: runLifecycle, BundleSourceFact: fact,
+		RunLifecycle: runLifecycle, SourceArtifactFact: fact,
 	}))
 
 	mailbox, ok := persistence.(MailboxAPIStore)
@@ -235,15 +206,15 @@ func newProposedEffectMailboxHandler(
 	return handler, bus
 }
 
-func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecorrelation.BundleSourceFact, workflowVersion string) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
+func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecorrelation.SourceArtifactFact, workflowVersion string) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
 	t.Helper()
 	now := time.Date(2026, 7, 14, 23, 0, 0, 0, time.UTC)
 	sourceEventID := uuid.NewString()
-	activityNode := identitytest.RootNode(t, "activity-runtime")
+	activityNode := identitytest.RootNode(t, "support-agent")
 	activityOwner := activityidentity.MustNodeOwner(activityNode)
 	requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 		RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
-		Owner: activityOwner, ExecutionFlowID: "root", HandlerEventKey: "support.reply_drafted",
+		Owner: activityOwner, ExecutionFlowID: ".", HandlerEventKey: "support.reply_drafted",
 		ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 	})
 	input, err := canonicaljson.FromGo(map[string]any{"text": "Exact operator-approved content"})
@@ -258,7 +229,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: "root", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
+		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()
@@ -272,7 +243,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	}
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID}, Source: eventtest.RootRoutingSource(entityID),
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: runID, EntityID: entityID}, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -297,12 +268,73 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	return card, continuation
 }
 
+func proposedEffectSupportedSurfaceBundle(t *testing.T, providerURL string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writeRunCompletionFixtureFile(t, root+"/schema.yaml", `name: proposed-effect-supported-surface
+initial_state: new
+terminal_states: [done]
+states: [new, done]
+pins:
+  inputs:
+    events: [thing.created]
+`)
+	writeRunCompletionFixtureFile(t, root+"/events.yaml", `thing.created:
+  text: text
+`)
+	writeRunCompletionFixtureFile(t, root+"/entities.yaml", `review:
+  text: text
+`)
+	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", `support-agent:
+  id: support-agent
+  execution_type: system_node
+  subscribes_to: [thing.created]
+  event_handlers:
+    thing.created:
+      create_entity: true
+      advances_to: done
+      activity:
+        id: send_support_reply
+        tool: provider_write
+        input:
+          text: {ref: payload.text}
+        approval: {decision: support_reply}
+`)
+	writeRunCompletionFixtureFile(t, root+"/tools.yaml", fmt.Sprintf(`provider_write:
+  description: Send the exact approved support reply.
+  handler_type: http
+  effect_class: non_idempotent_write
+  http:
+    method: POST
+    url: %q
+    body: {text: "{{input.text}}"}
+  input_schema:
+    type: object
+    required: [text]
+    properties: {text: {type: string}}
+  output_schema:
+    type: object
+    required: [message_id]
+    properties: {message_id: {type: string}}
+`, providerURL))
+	repoRoot := runCompletionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load proposed-effect supported-surface bundle: %v", err)
+	}
+	return bundle
+}
+
 func insertProposedEffectAPIRun(
 	t *testing.T,
 	ctx context.Context,
 	db *sql.DB,
 	backend, runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) {
 	t.Helper()
 	if backend == "postgres" {

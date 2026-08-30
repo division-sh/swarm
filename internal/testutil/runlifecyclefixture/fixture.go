@@ -14,9 +14,11 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-const defaultBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const defaultBundleHash = sourceartifactfixture.BundleHash
 const defaultRuntimeInstanceID = "00000000-0000-4000-8000-000000000001"
 
 type Dialect string
@@ -27,12 +29,12 @@ const (
 )
 
 type Fixture struct {
-	RunID        string
-	Origin       runtimerunlifecycle.RunOrigin
-	Source       runtimecorrelation.BundleSourceFact
-	BundleHash   string
-	BundleSource string
-	StartedAt    time.Time
+	RunID      string
+	Origin     runtimerunlifecycle.RunOrigin
+	Source     runtimecorrelation.SourceArtifactFact
+	Artifact   *sourceartifact.AdmittedSourceArtifact
+	BundleHash string
+	StartedAt  time.Time
 }
 
 func ScenarioSetupOrigin() runtimerunlifecycle.RunOrigin {
@@ -79,7 +81,7 @@ func RunSQLiteMutation(
 }
 
 type ActiveRunSourceOwner interface {
-	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 }
 
 // PostgresCreateRunInMutation gives runtime-package tests a semantic lifecycle
@@ -104,7 +106,7 @@ func PostgresRequireActiveRunSourceInMutation(
 	ctx context.Context,
 	tx *sql.Tx,
 	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	return (sqlMutation{tx: tx, dialect: DialectPostgres}).RequireActiveSource(ctx, runID)
 }
 
@@ -163,7 +165,7 @@ func RevisePostgresSource(
 	ctx context.Context,
 	db *sql.DB,
 	runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) error {
 	return reviseSource(ctx, db, DialectPostgres, runID, source)
 }
@@ -172,7 +174,7 @@ func ReviseSQLiteSource(
 	ctx context.Context,
 	db *sql.DB,
 	runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) error {
 	return reviseSource(ctx, db, DialectSQLite, runID, source)
 }
@@ -181,7 +183,6 @@ type CorruptSnapshot struct {
 	RunID             string
 	State             string
 	BundleHash        string
-	BundleSource      string
 	OriginKind        string
 	TriggerEventID    string
 	TriggerEventType  string
@@ -222,20 +223,19 @@ func AttemptCorruptPostgresSnapshot(
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, origin_kind,
+			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, $4, $5,
-			NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, '')::uuid, NULLIF($9, 0),
-			NULLIF($10, '')::uuid, NULLIF($11, '')::uuid, NULLIF($12, '')::uuid,
-			$13, $14, NULLIF($15, '')::jsonb, $16, $17
+			$1::uuid, $2, $3, $4,
+			NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
+			NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, '')::uuid,
+			$12, $13, NULLIF($14, '')::jsonb, $15, $16
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
-		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.BundleSource),
-		strings.TrimSpace(snapshot.OriginKind),
+		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
 		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
@@ -269,20 +269,19 @@ func AttemptCorruptSQLiteSnapshot(
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, origin_kind,
+			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
-			?, ?, ?, ?, ?,
+			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
 			?, ?, NULLIF(?, ''), ?, ?
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
-		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.BundleSource),
-		strings.TrimSpace(snapshot.OriginKind),
+		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
 		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
@@ -450,14 +449,13 @@ func CorruptPostgresSource(
 	db *sql.DB,
 	runID string,
 	bundleHash string,
-	bundleSource string,
 ) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = $2, bundle_source = $3
+		SET bundle_hash = $2
 		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID), strings.TrimSpace(bundleHash), strings.TrimSpace(bundleSource)); err != nil {
+	`, strings.TrimSpace(runID), strings.TrimSpace(bundleHash)); err != nil {
 		t.Fatalf("corrupt PostgreSQL run source %s: %v", runID, err)
 	}
 }
@@ -468,14 +466,13 @@ func CorruptSQLiteSource(
 	db *sql.DB,
 	runID string,
 	bundleHash string,
-	bundleSource string,
 ) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = ?, bundle_source = ?
+		SET bundle_hash = ?
 		WHERE run_id = ?
-	`, strings.TrimSpace(bundleHash), strings.TrimSpace(bundleSource), strings.TrimSpace(runID)); err != nil {
+	`, strings.TrimSpace(bundleHash), strings.TrimSpace(runID)); err != nil {
 		t.Fatalf("corrupt SQLite run source %s: %v", runID, err)
 	}
 }
@@ -524,7 +521,7 @@ func reviseSource(
 	db *sql.DB,
 	dialect Dialect,
 	runID string,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) error {
 	return runMutation(ctx, db, dialect, func(txctx context.Context, tx *sql.Tx) error {
 		_, err := (sqlMutation{tx: tx, dialect: dialect}).ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
@@ -544,20 +541,28 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 		return errors.New("semantic run fixture requires run_id")
 	}
 	source := fixture.Source
+	artifact := fixture.Artifact
+	if artifact != nil {
+		artifactHash := artifact.BundleHash()
+		if bundleHash := strings.TrimSpace(fixture.BundleHash); bundleHash != "" && bundleHash != artifactHash {
+			return fmt.Errorf("semantic run fixture bundle_hash %s contradicts artifact %s", bundleHash, artifactHash)
+		}
+		if err := source.Validate(); err == nil && source.BundleHash() != artifactHash {
+			return fmt.Errorf("semantic run fixture source %s contradicts artifact %s", source.BundleHash(), artifactHash)
+		}
+		var sourceErr error
+		source, sourceErr = runtimecorrelation.NewSourceArtifactFact(artifactHash)
+		if sourceErr != nil {
+			return sourceErr
+		}
+	}
 	if err := source.Validate(); err != nil {
 		bundleHash := strings.TrimSpace(fixture.BundleHash)
 		if bundleHash == "" {
 			bundleHash = defaultBundleHash
 		}
 		var sourceErr error
-		switch strings.TrimSpace(fixture.BundleSource) {
-		case "", runtimerunlifecycle.BundleSourceEphemeral:
-			source, sourceErr = runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-		case runtimerunlifecycle.BundleSourcePersisted:
-			source, sourceErr = runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-		default:
-			return fmt.Errorf("semantic run fixture forbids bundle_source %q", fixture.BundleSource)
-		}
+		source, sourceErr = runtimecorrelation.NewSourceArtifactFact(bundleHash)
 		if sourceErr != nil {
 			return sourceErr
 		}
@@ -565,7 +570,7 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 	if fixture.StartedAt.IsZero() {
 		fixture.StartedAt = time.Now().UTC()
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); !ok {
 		ctx = runtimeauthoractivity.WithScope(
 			ctx,
@@ -588,6 +593,12 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 			_ = tx.Rollback()
 		}
 	}()
+	if artifact == nil && source.BundleHash() == defaultBundleHash {
+		artifact = sourceartifactfixture.Artifact()
+	}
+	if err := ensureFixtureSourceArtifact(ctx, tx, dialect, source.BundleHash(), artifact); err != nil {
+		return err
+	}
 	if _, err := (sqlMutation{tx: tx, dialect: dialect}).Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: fixture.RunID, Origin: fixture.Origin,
 		Source: source, StartedAt: fixture.StartedAt.UTC(),
@@ -601,12 +612,60 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 	return nil
 }
 
+func ensureFixtureSourceArtifact(ctx context.Context, tx *sql.Tx, dialect Dialect, bundleHash string, artifact *sourceartifact.AdmittedSourceArtifact) error {
+	query := `SELECT source_blob, member_count, total_bytes FROM source_artifacts WHERE bundle_hash = ?`
+	if dialect == DialectPostgres {
+		query = `SELECT source_blob, member_count, total_bytes FROM source_artifacts WHERE bundle_hash = $1`
+	}
+	var persisted sourceartifact.Persisted
+	persisted.BundleHash = bundleHash
+	err := tx.QueryRowContext(ctx, query, bundleHash).Scan(
+		&persisted.SourceBlob,
+		&persisted.MemberCount,
+		&persisted.TotalBytes,
+	)
+	if err == nil {
+		persisted.CreatedAt = time.Now().UTC()
+		if err := persisted.Validate(); err != nil {
+			return fmt.Errorf("validate semantic fixture source artifact %s: %w", bundleHash, err)
+		}
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read semantic fixture source artifact %s: %w", bundleHash, err)
+	}
+	if artifact == nil {
+		return fmt.Errorf("semantic run fixture requires exact admitted source artifact %s", bundleHash)
+	}
+	persisted, err = sourceartifact.PersistedFromArtifact(artifact, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("project semantic fixture source artifact %s: %w", bundleHash, err)
+	}
+	if persisted.BundleHash != bundleHash {
+		return fmt.Errorf("semantic run fixture source artifact %s contradicts requested %s", persisted.BundleHash, bundleHash)
+	}
+	insert := `
+		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`
+	if dialect == DialectPostgres {
+		insert = `
+			INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes, created_at)
+			VALUES ($1, $2, $3, $4, $5)
+		`
+	}
+	if _, err := tx.ExecContext(ctx, insert, persisted.BundleHash, persisted.SourceBlob, persisted.MemberCount, persisted.TotalBytes, persisted.CreatedAt); err != nil {
+		return fmt.Errorf("persist semantic fixture source artifact %s: %w", bundleHash, err)
+	}
+	return nil
+}
+
 type sqlMutation struct {
 	tx      *sql.Tx
 	dialect Dialect
 }
 
-func (m sqlMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m sqlMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.RequireActiveSource(ctx, runID)
 }
 
@@ -623,7 +682,7 @@ func (m sqlMutation) RequireActive(ctx context.Context, runID string) error {
 func (m sqlMutation) RequirePresentSource(
 	ctx context.Context,
 	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	_, source, _, err := m.load(ctx, runID, false)
 	return source, err
 }
@@ -631,7 +690,7 @@ func (m sqlMutation) RequirePresentSource(
 func (m sqlMutation) RequireActiveSource(
 	ctx context.Context,
 	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	_, source, _, err := m.load(ctx, runID, true)
 	return source, err
 }
@@ -646,7 +705,7 @@ func (m sqlMutation) Create(
 	if err := m.requirePersistedSource(ctx, request.Source); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
 	var (
 		result sql.Result
@@ -656,33 +715,33 @@ func (m sqlMutation) Create(
 	case DialectPostgres:
 		result, err = m.tx.ExecContext(ctx, `
 			INSERT INTO runs (
-				run_id, status, bundle_hash, bundle_source, origin_kind,
+				run_id, status, bundle_hash, origin_kind,
 				trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 				forked_from_run_id, forked_from_event_id, started_at
 			)
 			VALUES (
-				$1::uuid, 'running', $2, $3, $4,
-				NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
-				NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, $11
+				$1::uuid, 'running', $2, $3,
+				NULLIF($4, '')::uuid, NULLIF($5, ''), NULLIF($6, '')::uuid, NULLIF($7, 0),
+				NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10
 			)
 			ON CONFLICT (run_id) DO NOTHING
-		`, request.RunID, bundleHash, bundleSource, origin.Kind(),
+		`, request.RunID, bundleHash, origin.Kind(),
 			origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 			origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
 	case DialectSQLite:
 		result, err = m.tx.ExecContext(ctx, `
 			INSERT INTO runs (
-				run_id, status, bundle_hash, bundle_source, origin_kind,
+				run_id, status, bundle_hash, origin_kind,
 				trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
 				forked_from_run_id, forked_from_event_id, started_at
 			)
 			VALUES (
-				?, 'running', ?, ?, ?,
+				?, 'running', ?, ?,
 				NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
 				NULLIF(?, ''), NULLIF(?, ''), ?
 			)
 			ON CONFLICT (run_id) DO NOTHING
-		`, request.RunID, bundleHash, bundleSource, origin.Kind(),
+		`, request.RunID, bundleHash, origin.Kind(),
 			origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 			origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
 	default:
@@ -793,37 +852,23 @@ func (m sqlMutation) ReviseSource(
 	if current == request.Source {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
-	if request.Source.IsPersisted() {
-		query := `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)`
-		if m.dialect == DialectPostgres {
-			query = `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`
-		}
-		var exists bool
-		if err := m.tx.QueryRowContext(ctx, query, bundleHash).Scan(&exists); err != nil {
-			return "", err
-		}
-		if !exists {
-			return "", &runtimerunlifecycle.PersistedBundleUnavailableError{
-				BundleHash:   bundleHash,
-				BundleSource: bundleSource,
-				Cause:        "persisted_missing_bundle_row",
-			}
-		}
+	bundleHash := request.Source.BundleHash()
+	if err := m.requirePersistedSource(ctx, request.Source); err != nil {
+		return "", err
 	}
 	query := `
 		UPDATE runs
-		SET bundle_hash = ?, bundle_source = ?
+		SET bundle_hash = ?
 		WHERE run_id = ?
 	`
-	args := []any{bundleHash, bundleSource, request.RunID}
+	args := []any{bundleHash, request.RunID}
 	if m.dialect == DialectPostgres {
 		query = `
 			UPDATE runs
-			SET bundle_hash = $2, bundle_source = $3
+			SET bundle_hash = $2
 			WHERE run_id = $1::uuid
 		`
-		args = []any{request.RunID, bundleHash, bundleSource}
+		args = []any{request.RunID, bundleHash}
 	}
 	result, err := m.tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -886,16 +931,16 @@ func (m sqlMutation) load(
 	requireActive bool,
 ) (
 	runtimerunlifecycle.State,
-	runtimecorrelation.BundleSourceFact,
+	runtimecorrelation.SourceArtifactFact,
 	runtimerunlifecycle.RunOrigin,
 	error,
 ) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, errors.New("semantic run fixture requires run_id")
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, errors.New("semantic run fixture requires run_id")
 	}
 	query := `
-		SELECT status, bundle_hash, bundle_source, origin_kind,
+		SELECT status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, '')
@@ -904,7 +949,7 @@ func (m sqlMutation) load(
 	`
 	if m.dialect == DialectPostgres {
 		query = `
-			SELECT status, bundle_hash, bundle_source, origin_kind,
+			SELECT status, bundle_hash, origin_kind,
 			       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, '')
@@ -913,13 +958,12 @@ func (m sqlMutation) load(
 			FOR UPDATE
 		`
 	}
-	var statusRaw, bundleHash, bundleSource, originKind string
+	var statusRaw, bundleHash, originKind string
 	var eventID, eventType, serviceID, sourceRunID, sourceEventID string
 	var generation int64
 	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(
 		&statusRaw,
 		&bundleHash,
-		&bundleSource,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -929,71 +973,57 @@ func (m sqlMutation) load(
 		&sourceEventID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+			return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 		}
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	state, err := runtimerunlifecycle.ParseState(statusRaw)
 	if err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	if requireActive && !state.Active() {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, &runtimerunlifecycle.RunNotActiveError{
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, &runtimerunlifecycle.RunNotActiveError{
 			RunID: runID,
 			State: state,
 		}
 	}
-	source, err := sourceFact(bundleHash, bundleSource)
+	source, err := sourceFact(bundleHash)
 	if err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	if err := m.requirePersistedSource(ctx, source); err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	origin, err := runtimerunlifecycle.DecodeRunOrigin(
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
 	)
 	if err != nil {
-		return "", runtimecorrelation.BundleSourceFact{}, runtimerunlifecycle.RunOrigin{}, err
+		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	return state, source, origin, nil
 }
 
 func (m sqlMutation) requirePersistedSource(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) error {
-	if !source.IsPersisted() {
-		return nil
-	}
-	query := `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)`
+	query := `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)`
 	if m.dialect == DialectPostgres {
-		query = `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`
+		query = `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`
 	}
 	var exists bool
 	if err := m.tx.QueryRowContext(ctx, query, source.BundleHash()).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
-		return &runtimerunlifecycle.PersistedBundleUnavailableError{
-			BundleHash:   source.BundleHash(),
-			BundleSource: runtimerunlifecycle.BundleSourcePersisted,
-			Cause:        "persisted_missing_bundle_row",
+		return &runtimerunlifecycle.SourceArtifactUnavailableError{
+			BundleHash: source.BundleHash(),
+			Cause:      "missing_source_artifact",
 		}
 	}
 	return nil
 }
 
-func sourceFact(bundleHash, bundleSource string) (runtimecorrelation.BundleSourceFact, error) {
-	switch strings.TrimSpace(bundleSource) {
-	case runtimerunlifecycle.BundleSourceEphemeral:
-		return runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
-	case runtimerunlifecycle.BundleSourcePersisted:
-		return runtimecorrelation.NewPersistedBundleSourceFact(strings.TrimSpace(bundleHash))
-	default:
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf(
-			"semantic run fixture has unsupported bundle_source %q",
-			bundleSource,
-		)
-	}
+func sourceFact(bundleHash string) (runtimecorrelation.SourceArtifactFact, error) {
+	return runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 }

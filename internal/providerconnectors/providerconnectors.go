@@ -508,13 +508,6 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 	}
 	toolID = strings.TrimSpace(toolID)
 	flowIDs := map[string]struct{}{}
-	for _, scope := range source.ProjectScopes() {
-		if scopedToolMatches(scope.Tools, toolID, tool) {
-			if flowID := strings.TrimSpace(scope.OwningFlowID); flowID != "" {
-				flowIDs[flowID] = struct{}{}
-			}
-		}
-	}
 	for _, scope := range source.FlowScopes() {
 		if scopedToolMatches(scope.Tools, toolID, tool) {
 			if flowID := strings.TrimSpace(scope.ID); flowID != "" {

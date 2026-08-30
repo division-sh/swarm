@@ -49,7 +49,8 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 	emitGate := filepath.Join(fakeRoot, "release-mcp-emit")
 	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), fakeDockerMCPEmitGateEnv+"="+emitGate)
-	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify")
+	contracts := filepath.Join(releaseRoot, "contracts")
+	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
 	if verify.err != nil {
 		t.Fatalf("release overflow fixture verification failed: %v\n%s", verify.err, verify.output)
 	}
@@ -68,6 +69,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		ctx,
 		binaryPath,
 		"run", "start",
+		contracts,
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "task.assigned",
@@ -98,7 +100,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	}
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
-	if err := waitForReleasePath(ctx, emitGate+".ready"); err != nil {
+	if err := waitForReleasePath(ctx, emitGate+".ready", waitDone); err != nil {
 		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
 		t.Fatalf("wait for managed Claude emit gate: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
 	}
@@ -171,7 +173,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 }
 
-func waitForReleasePath(ctx context.Context, path string) error {
+func waitForReleasePath(ctx context.Context, path string, exited <-chan error) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -183,6 +185,8 @@ func waitForReleasePath(ctx context.Context, path string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-exited:
+			return fmt.Errorf("release process exited before %s: %v", filepath.Base(path), err)
 		case <-ticker.C:
 		}
 	}
@@ -294,7 +298,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 		t.Fatal(err)
 	}
 	writeReleaseFile(t, filepath.Join(root, "payload.json"), string(payload))
-	flowRoot := filepath.Join(root, "contracts", "flows", "worker")
+	flowRoot := filepath.Join(root, "contracts", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: \"[text]\"\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "agent.requested:\n  request: \"[text]?\"\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nmode: singleton\nstages:\n  pending:\n    initial: true\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    terminal: true\npins:\n  inputs:\n    events:\n      - task.assigned\n")
@@ -322,7 +326,6 @@ worker-completion:
   event_handlers:
     agent.completed:
       fan_out:
-        element_id: 5701b215-b826-4535-a076-c23628d87121
         items_from: entity.requests
         as: completed_request
         identity: completed_request

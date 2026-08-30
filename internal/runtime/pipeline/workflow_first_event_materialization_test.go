@@ -67,7 +67,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				0,
 				runID,
 				"",
-				testWorkflowSourceEnvelope("first-event-transition", runID, entityID),
+				testWorkflowSourceEnvelope(".", runID, entityID),
 				occurredAt,
 			)
 			dialect := authoractivityfixture.DialectPostgres
@@ -75,7 +75,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			engine := newCoordinatorHandlerExecutionEngine(pc, pipelineSourceNode(t, pc.SemanticSource(), "first-event-transition", "acceptor"))
+			engine := newCoordinatorHandlerExecutionEngine(pc, pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor"))
 			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
 			}, evt, "request.accepted")

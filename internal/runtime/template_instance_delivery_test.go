@@ -209,15 +209,15 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
-		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
+		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	bus.SetInterceptors(pc)
 
@@ -313,15 +313,15 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
-		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
+		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	bus.SetInterceptors(pc)
 
@@ -406,14 +406,14 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999940",
@@ -491,15 +491,15 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
-		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
+		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	mailbox := eventtest.ExistingRunRootIngress(
@@ -613,15 +613,15 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: pc,
-		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
-		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        ctx,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances:  pc,
+		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
+		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	mailbox := eventtest.ExistingRunRootIngress(
@@ -774,27 +774,23 @@ func loadRuntimeBundleRoot(t *testing.T, root string) *runtimecontracts.Workflow
 
 func templateInstanceDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
-		"flows/operating/schema.yaml": `name: operating
+		"schema.yaml": "name: test\n",
+		"operating/schema.yaml": `name: operating
+mode: template
+instance: instance_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"flows/operating/entities.yaml": "operating_state: {}\n",
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string?
 opco.ceo_ready:
   entity_id: string?
 `,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+		"operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
@@ -808,13 +804,7 @@ opco.ceo_ready:
 
 func templateInstanceEmpireStyleFixtureFiles() map[string]string {
 	return map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
+		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
   instance_id: string?
@@ -832,20 +822,22 @@ flows:
       config_from:
         product_id: payload.product_id
 `,
-		"flows/operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `name: operating
+mode: template
+instance: instance_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"flows/operating/entities.yaml": "operating_state: {}\n",
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/events.yaml": `opco.product_initialization_requested:
   product_id: string?
 component_scaffold.spawn_requested:
   product_id: string?
 `,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+		"operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
@@ -863,13 +855,7 @@ component_scaffold.spawn_requested:
 
 func templateInstanceActivationConfigSubscriberFixtureFiles() map[string]string {
 	return map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
+		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
   instance_id: string?
@@ -887,22 +873,24 @@ flows:
       config_from:
         product_id: payload.product_id
 `,
-		"flows/operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `name: operating
+mode: template
+instance: instance_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"flows/operating/entities.yaml": "operating_state: {}\n",
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string?
   template_id: string?
   flow_path: string?
   parent_entity_id: string?
   product_id: string?
 `,
-		"flows/operating/agents.yaml": `ceo:
+		"operating/agents.yaml": `ceo:
   type: generic
   role: ceo
   intent: {inline: "Initialize the product for this operating instance."}

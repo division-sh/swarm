@@ -28,7 +28,7 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 
 func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 	review := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Path:  "review",
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"sla_hours": {Value: 2},

@@ -72,7 +72,7 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 			return map[string]any{"kind": decisioncard.KindNotice, "notice": detail}, nil
 		}
 	}
-	if opts.Cards != nil && opts.Authority != nil && opts.BundleSource != nil && opts.Idempotency != nil {
+	if opts.Cards != nil && opts.Authority != nil && opts.SourceArtifact != nil && opts.Idempotency != nil {
 		for name, handler := range map[string]MethodHandler{
 			"mailbox.decide": func(ctx context.Context, req Request) (any, error) {
 				fields, err := optionalSemanticObject(req.SemanticParams, "fields")
@@ -122,7 +122,7 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 			handlers[name] = handler
 		}
 	}
-	if opts.Cards != nil && opts.NoticeAcknowledgment != nil && opts.BundleSource != nil && opts.Idempotency != nil {
+	if opts.Cards != nil && opts.NoticeAcknowledgment != nil && opts.SourceArtifact != nil && opts.Idempotency != nil {
 		handlers["mailbox.acknowledge"] = func(ctx context.Context, req Request) (any, error) {
 			id := strings.TrimSpace(stringParam(req.Params, "mailbox_id"))
 			return executeIdempotentMailboxNoticeAcknowledgment(ctx, req, opts, id, opts.NoticeAcknowledgment)
@@ -275,7 +275,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		return nil, decisionCardAPIError(cardID, err)
 	}
 	authority := opts.Authority
-	bundleSource := opts.BundleSource
+	bundleSource := opts.SourceArtifact
 	if err == nil && runtimeContextManager(opts.RuntimeContexts) != nil {
 		var selected selectedRuntimeContext
 		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
@@ -294,7 +294,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if bundleSource == nil {
 		return nil, fmt.Errorf("decision card bundle source owner is required for the selected runtime")
 	}
-	ctx, err = bundleSource.AdmitBundleSourceFact(ctx)
+	ctx, err = bundleSource.AdmitSourceArtifactFact(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -354,11 +354,11 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 	if opts.Idempotency == nil {
 		return nil, fmt.Errorf("mailbox notice idempotency owner is required")
 	}
-	if opts.BundleSource == nil {
+	if opts.SourceArtifact == nil {
 		return nil, fmt.Errorf("mailbox notice bundle source owner is required")
 	}
 	var err error
-	ctx, err = opts.BundleSource.AdmitBundleSourceFact(ctx)
+	ctx, err = opts.SourceArtifact.AdmitSourceArtifactFact(ctx)
 	if err != nil {
 		return nil, err
 	}

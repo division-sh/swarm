@@ -16,8 +16,3 @@ func testFlowNode(t testing.TB, flowID, nodeID string) runtimeidentity.Executabl
 	t.Helper()
 	return identitytest.FlowNode(t, flowID, nodeID)
 }
-
-func testPackageNode(t testing.TB, packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
-	t.Helper()
-	return identitytest.ExecutableNode(t, packageKey, flowID, nodeID)
-}

@@ -123,7 +123,7 @@ func TestDeliveryContinuationSignalWithoutTransactionAuthorityFailsClosed(t *tes
 
 func deliveryContinuationSignalTestAuthority(t *testing.T, generation uint64) runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
+	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatalf("build signal test source: %v", err)
 	}

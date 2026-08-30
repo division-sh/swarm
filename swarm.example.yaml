@@ -53,7 +53,6 @@
 # Project config may use these only as relative paths that stay inside the project root.
 # paths:
 #   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
-#   contracts_path: ./contracts # Project-contained contract bundle root.
 #   platform_spec_path: platform-spec.yaml # Project-contained platform spec path override.
 #   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
 #   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.

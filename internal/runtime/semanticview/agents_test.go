@@ -8,13 +8,13 @@ import (
 )
 
 func TestResolveAgentRegistryEntryRoleFallbackUsesFlowID(t *testing.T) {
-	const owner = "test://semanticview/flows/support/agents/flow-responder"
+	const owner = "test://semanticview/support/agents/flow-responder"
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "support",
-			Mode: "singleton",
+			FlowPath: "support",
 		},
-		Path: "support",
+		Path:   "support",
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: "singleton"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"flow-responder": {
 				ID:   "authored-responder",

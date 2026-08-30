@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -205,12 +204,11 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		ElementID contractelementidentity.ContractElementID `yaml:"element_id"`
-		ItemsFrom string                                    `yaml:"items_from"`
-		As        string                                    `yaml:"as"`
-		Identity  string                                    `yaml:"identity"`
-		MaxItems  *int                                      `yaml:"max_items"`
-		Emit      EmitSpec                                  `yaml:"emit"`
+		ItemsFrom string   `yaml:"items_from"`
+		As        string   `yaml:"as"`
+		Identity  string   `yaml:"identity"`
+		MaxItems  *int     `yaml:"max_items"`
+		Emit      EmitSpec `yaml:"emit"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -227,7 +225,6 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 		maxItems = *aux.MaxItems
 	}
 	*f = FanOutSpec{
-		ElementID:   aux.ElementID,
 		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
 		As:          strings.TrimSpace(aux.As),
 		Identity:    strings.TrimSpace(aux.Identity),
@@ -256,6 +253,8 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 			continue
 		}
 		switch key {
+		case "element_id":
+			return fmt.Errorf("RETIRED: fan_out.element_id is no longer authored; identity derives from the canonical declaration site")
 		case "target":
 			return fmt.Errorf("RETIRED: fan_out field %q is retired; route fan_out.emit through typed consumers, output pins, and parent connect", key)
 		case "emit_per_item":
@@ -271,7 +270,6 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 }
 
 var fanOutFieldOptions = map[string]struct{}{
-	"element_id": {},
 	"items_from": {},
 	"as":         {},
 	"identity":   {},

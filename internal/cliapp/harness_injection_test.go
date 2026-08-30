@@ -38,7 +38,7 @@ func TestVerifyHarnessInjectionLabelsNonProductionBundle(t *testing.T) {
 
 func TestVerifyHarnessInjectionJSONMarksNonProductionBundle(t *testing.T) {
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
+	opts.sourceRoot = canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	var stdout, stderr bytes.Buffer

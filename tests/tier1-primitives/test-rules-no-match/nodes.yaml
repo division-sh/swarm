@@ -7,8 +7,6 @@ test-node:
     item.received:
       rules:
         type_a:
-          element_id: 8359203d-c95f-4488-a526-8f198d43c23e
           condition: "payload.kind == 'a'"
         type_b:
-          element_id: 4c9617dd-7edf-45a3-a5e0-66e763af7f9e
           condition: "payload.kind == 'b'"

@@ -62,24 +62,10 @@ func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixture
 		rename = ""
 	}
 	consumerMode := valueOr(opts.consumerMode, "static")
-	writeClosedVariantFile(t, root, "package.yaml", `name: composition-connect
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: `+consumerMode+`
-connect:
-  - event: `+valueOr(opts.connectEvent, "deploy.done")+`
-    from: `+valueOr(opts.connectFrom, "producer")+`
-    to: `+valueOr(opts.connectTo, "consumer")+`
-`+rename)
-	rootSchema := "name: composition-connect\n"
+
+	rootSchema := "name: composition-connect\nconnect:\n  - event: " + valueOr(opts.connectEvent, "deploy.done") + "\n    from: " + valueOr(opts.connectFrom, "producer") + "\n    to: " + valueOr(opts.connectTo, "consumer") + "\n" + rename
 	if opts.rootReceiver {
-		rootSchema = "name: composition-connect\npins:\n  inputs:\n    events:\n      - deploy.completed\n"
+		rootSchema += "pins:\n  inputs:\n    events:\n      - deploy.completed\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
@@ -139,27 +125,10 @@ func CopyCompositionConnectTopology(t testing.TB) string {
 func CopyCompositionConnectAmbiguity(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	writeClosedVariantFile(t, root, "package.yaml", `name: composition-connect-ambiguity
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer_a
-    flow: producer_a
-    mode: static
-  - id: producer_b
-    flow: producer_b
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - event: ticket.ready
-    from: producer_a
-    to: consumer
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: composition-connect-ambiguity\n")
 	removeClosedVariantFiles(t, root,
-		"flows/consumer/agents.yaml", "flows/consumer/entities.yaml", "flows/consumer/events.yaml", "flows/consumer/nodes.yaml",
+		"consumer/agents.yaml", "consumer/entities.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
 	)
 	for _, flowID := range []string{"producer_a", "producer_b"} {
 		writeLegacyInstanceFlow(t, root, flowID, "name: "+flowID+"\nmode: static\npins:\n  outputs:\n    events:\n      - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
@@ -182,21 +151,12 @@ func CopyCompositionConnectReceiverFanout(t testing.TB, variant CompositionConne
 		t.Fatalf("unsupported composition-connect receiver fanout variant %d", variant)
 	}
 	root := CopyExample(t, ParentConnect)
-	packageBody := `name: composition-connect-receiver-fanout
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: static
-`
-	if includeDynamic {
-		packageBody += "  - id: dynamic\n    flow: dynamic\n    mode: template\n"
-	}
-	packageBody += `connect:
+	rootSchema := `name: composition-connect-receiver-fanout
+pins:
+  inputs:
+    events:
+      - work.ready
+connect:
   - event: work.ready
     from: producer
     to: .
@@ -206,10 +166,10 @@ flows:
     rename: consumer.work.ready
 `
 	if includeDynamic {
-		packageBody += "  - event: work.ready\n    from: producer\n    to: dynamic\n    rename: dynamic.work.ready\n"
+		rootSchema += "  - event: work.ready\n    from: producer\n    to: dynamic\n    rename: dynamic.work.ready\n"
 	}
-	writeClosedVariantFile(t, root, "package.yaml", packageBody)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: composition-connect-receiver-fanout\npins:\n  inputs:\n    events:\n      - work.ready\n")
+
+	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-node:
   id: root-node
   execution_type: system_node
@@ -224,7 +184,8 @@ flows:
     inline: Consume connected root work events.
   subscriptions: [work.ready]
 `)
-	writeClosedVariantFile(t, root, "flows/producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\nmode: static\npins:\n  outputs:\n    events:\n      - work.ready\n")
 	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\nmode: static\npins:\n  inputs:\n    events:\n      - consumer.work.ready\n", "", "", `consumer-node:
   id: consumer-node
   execution_type: system_node

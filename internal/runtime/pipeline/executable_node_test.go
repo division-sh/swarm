@@ -17,16 +17,24 @@ func pipelineNode(t testing.TB, flowID, nodeID string) runtimeidentity.Executabl
 }
 
 func mustPipelineNode(flowID, nodeID string) runtimeidentity.ExecutableNode {
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, flowID, nodeID)
+	flowPath := pipelineDeclarationFlowPath(flowID)
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowPath, nodeID)
 	if err != nil {
 		panic(err)
 	}
 	return node
 }
 
-func pipelinePackageNode(t testing.TB, packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
+func pipelineDeclarationFlowPath(flowID string) string {
+	if flowID == "" {
+		return "."
+	}
+	return flowID
+}
+
+func pipelineFlowPathNode(t testing.TB, flowPath, nodeID string) runtimeidentity.ExecutableNode {
 	t.Helper()
-	return identitytest.ExecutableNode(t, packageKey, flowID, nodeID)
+	return identitytest.ExecutableNode(t, flowPath, nodeID)
 }
 
 func pipelineSourceNode(t testing.TB, source semanticview.Source, flowID, nodeID string) runtimeidentity.ExecutableNode {
@@ -34,11 +42,11 @@ func pipelineSourceNode(t testing.TB, source semanticview.Source, flowID, nodeID
 	var match runtimeidentity.ExecutableNode
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || node.FlowID() != flowID || node.NodeID() != nodeID {
+		if err != nil || node.FlowPath() != flowID || node.NodeID() != nodeID {
 			continue
 		}
 		if !match.Empty() {
-			t.Fatalf("executable node %s/%s is package-ambiguous", flowID, nodeID)
+			t.Fatalf("executable node %s/%s is ambiguous", flowID, nodeID)
 		}
 		match = node
 	}

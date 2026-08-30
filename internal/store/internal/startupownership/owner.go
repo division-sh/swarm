@@ -11,7 +11,6 @@ import (
 	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -30,7 +29,6 @@ type StartupPostgresOwner struct {
 	schemaGuard      func() error
 	catalogEmpty     func(context.Context) (bool, error)
 	agents           *storeagent.AgentPostgresOwner
-	bundleDelete     *storeadmin.BundleDeletePostgresOwner
 	destructiveReset *storeadmin.DestructiveResetPostgresOwner
 }
 
@@ -44,11 +42,11 @@ type StartupSQLiteOwner struct {
 	ownerMu         sync.Mutex
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || bundleDelete == nil || destructiveReset == nil {
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || destructiveReset == nil {
 		return nil, errors.New("startup/topology PostgreSQL owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, bundleDelete: bundleDelete, destructiveReset: destructiveReset}, nil
+	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, destructiveReset: destructiveReset}, nil
 }
 
 func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
@@ -248,190 +246,6 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 	return result, err
 }
 
-func (s *postgresSession) ApplyBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	var result runtimebundledelete.FinalMutationResult
-	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if topology == nil {
-			stored, found, err := loadBundleDeleteFinalMutationTx(txctx, tx, req)
-			if err != nil {
-				return err
-			}
-			if found {
-				result = stored.FinalMutation
-				return nil
-			}
-		}
-		if topology != nil {
-			if _, err := commitSourceSetTx(txctx, tx, *topology, false); err != nil {
-				return err
-			}
-		}
-		var err error
-		result, err = storeadmin.ApplyBundleDeleteFinalMutationInRetainedTransaction(s.owner.bundleDelete, txctx, tx, req)
-		if err == nil {
-			result.SourceAuthorityOwner = "process_capability.ApplyBundleDeleteFinalMutation"
-			if topology != nil {
-				result.TransactionOrderProof = append([]string{"commit_agent_topology_source_set"}, result.TransactionOrderProof...)
-			}
-			completion, completionErr := runtimebundledelete.CompleteFinalMutation(req, result)
-			if completionErr != nil {
-				return completionErr
-			}
-			if err = storeBundleDeleteFinalMutationTx(txctx, tx, req, completion); err != nil {
-				return err
-			}
-		}
-		return err
-	})
-	return result, err
-}
-
-func (s *postgresSession) ReplayBundleDeleteResult(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	var result runtimebundledelete.Result
-	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		stored, found, err := loadBundleDeleteFinalMutationTx(txctx, tx, req)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return runtimebundledelete.ErrBundleNotFound
-		}
-		result = stored
-		return nil
-	})
-	return result, err
-}
-
-type bundleDeleteFinalMutationReplayRecord struct {
-	OperationID   string
-	RequestHash   string
-	ReplayKeyHash string
-	RequestedAt   time.Time
-	Result        runtimebundledelete.Result
-}
-
-func storeBundleDeleteFinalMutationTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	req runtimebundledelete.FinalMutationRequest,
-	result runtimebundledelete.Result,
-) error {
-	if tx == nil {
-		return errors.New("bundle delete replay record requires retained transaction")
-	}
-	requestHash := strings.TrimSpace(req.RequestHash)
-	if requestHash == "" {
-		return errors.New("bundle delete replay record requires request hash")
-	}
-	if req.RequestedAt.IsZero() {
-		return errors.New("bundle delete replay record requires requested_at")
-	}
-	replayKeyHash := strings.TrimSpace(req.ReplayKeyHash)
-	raw, err := canonicaljson.Bytes(result)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO bundle_delete_final_mutation_replays (
-			operation_id, request_hash, replay_key_hash, requested_at, result, created_at
-		) VALUES ($1::uuid,$2,$3,$4,$5::jsonb,$6)
-	`, strings.TrimSpace(req.OperationID), requestHash, replayKeyHash, req.RequestedAt.UTC(), string(raw), time.Now().UTC())
-	if err != nil {
-		return fmt.Errorf("store bundle delete final mutation replay record: %w", err)
-	}
-	return nil
-}
-
-func loadBundleDeleteFinalMutationTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	req runtimebundledelete.FinalMutationRequest,
-) (runtimebundledelete.Result, bool, error) {
-	if tx == nil {
-		return runtimebundledelete.Result{}, false, errors.New("bundle delete replay requires retained transaction")
-	}
-	var stored bundleDeleteFinalMutationReplayRecord
-	var raw []byte
-	err := tx.QueryRowContext(ctx, `
-		SELECT operation_id::text,request_hash,replay_key_hash,requested_at,result
-		FROM bundle_delete_final_mutation_replays
-		WHERE operation_id = $1::uuid
-	`, strings.TrimSpace(req.OperationID)).Scan(&stored.OperationID, &stored.RequestHash, &stored.ReplayKeyHash, &stored.RequestedAt, &raw)
-	if err == nil {
-		if err := json.Unmarshal(raw, &stored.Result); err != nil {
-			return runtimebundledelete.Result{}, false, fmt.Errorf("decode bundle delete final mutation replay result: %w", err)
-		}
-		result, err := decodeBundleDeleteFinalMutation(req, stored, false)
-		return result, err == nil, err
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return runtimebundledelete.Result{}, false, fmt.Errorf("load bundle delete final mutation replay record: %w", err)
-	}
-	replayKeyHash := strings.TrimSpace(req.ReplayKeyHash)
-	if replayKeyHash == "" {
-		return runtimebundledelete.Result{}, false, nil
-	}
-	if req.RequestedAt.IsZero() {
-		return runtimebundledelete.Result{}, false, errors.New("bundle delete replay requires requested_at")
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT operation_id::text,request_hash,replay_key_hash,requested_at,result
-		FROM bundle_delete_final_mutation_replays
-		WHERE replay_key_hash = $1
-		  AND requested_at > $2
-		  AND requested_at <= $3
-		ORDER BY requested_at DESC, created_at DESC
-		LIMIT 2
-	`, replayKeyHash, req.RequestedAt.Add(-runtimebundledelete.FinalMutationReplayWindow).UTC(), req.RequestedAt.UTC())
-	if err != nil {
-		return runtimebundledelete.Result{}, false, fmt.Errorf("find bundle delete final mutation replay authority: %w", err)
-	}
-	defer rows.Close()
-	var candidates []bundleDeleteFinalMutationReplayRecord
-	for rows.Next() {
-		var candidate bundleDeleteFinalMutationReplayRecord
-		var candidateRaw []byte
-		if err := rows.Scan(&candidate.OperationID, &candidate.RequestHash, &candidate.ReplayKeyHash, &candidate.RequestedAt, &candidateRaw); err != nil {
-			return runtimebundledelete.Result{}, false, fmt.Errorf("scan bundle delete final mutation replay authority: %w", err)
-		}
-		if err := json.Unmarshal(candidateRaw, &candidate.Result); err != nil {
-			return runtimebundledelete.Result{}, false, fmt.Errorf("decode bundle delete final mutation replay result: %w", err)
-		}
-		candidates = append(candidates, candidate)
-	}
-	if err := rows.Err(); err != nil {
-		return runtimebundledelete.Result{}, false, fmt.Errorf("iterate bundle delete final mutation replay authority: %w", err)
-	}
-	if len(candidates) == 0 {
-		return runtimebundledelete.Result{}, false, nil
-	}
-	if len(candidates) != 1 {
-		return runtimebundledelete.Result{}, false, errors.New("bundle delete replay authority is ambiguous")
-	}
-	result, err := decodeBundleDeleteFinalMutation(req, candidates[0], true)
-	return result, err == nil, err
-}
-
-func decodeBundleDeleteFinalMutation(req runtimebundledelete.FinalMutationRequest, stored bundleDeleteFinalMutationReplayRecord, requireReplayAuthority bool) (runtimebundledelete.Result, error) {
-	if strings.TrimSpace(stored.RequestHash) == "" || strings.TrimSpace(stored.RequestHash) != strings.TrimSpace(req.RequestHash) {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay conflicts with stored request hash")
-	}
-	if strings.TrimSpace(stored.ReplayKeyHash) != strings.TrimSpace(req.ReplayKeyHash) {
-		return runtimebundledelete.Result{}, errors.New("bundle delete replay conflicts with stored replay authority")
-	}
-	if requireReplayAuthority {
-		if stored.RequestedAt.IsZero() || req.RequestedAt.Before(stored.RequestedAt) ||
-			!req.RequestedAt.Before(stored.RequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)) {
-			return runtimebundledelete.Result{}, errors.New("bundle delete replay authority is outside its validity window")
-		}
-	}
-	result := stored.Result
-	if err := runtimebundledelete.ValidateReplayedResult(req, result); err != nil {
-		return runtimebundledelete.Result{}, err
-	}
-	return result, nil
-}
-
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -596,14 +410,6 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 		return err
 	})
 	return result, err
-}
-
-func (s *sqliteSession) ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	return runtimebundledelete.FinalMutationResult{}, errors.New("bundle deletion is unsupported by the SQLite selected-store composition")
-}
-
-func (s *sqliteSession) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	return runtimebundledelete.Result{}, errors.New("bundle deletion is unsupported by the SQLite selected-store composition")
 }
 
 func (s *sqliteSession) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
@@ -926,9 +732,9 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 		return err
 	}
 	if sqlite {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,bundle_source,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.BundleSource, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
 	} else {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,bundle_source,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12::jsonb,$13)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.BundleSource, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::uuid,$9,$10,$11::jsonb,$12)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
 	}
 	return err
 }
@@ -987,12 +793,6 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		}
 	} else if !hasPrevious || req.ExpectedRevision != previous.Revision {
 		return runtimeagenttopology.SourceSetCommitResult{}, errors.New("agent topology source-set predecessor changed")
-	}
-	if req.Operation == runtimeagenttopology.OperationRemoveBundleSource {
-		removed := req.RemovedSource.Normalize()
-		if sourceSetContains(req.Plan, removed) || !sourceSetContains(previous, removed) {
-			return runtimeagenttopology.SourceSetCommitResult{}, errors.New("bundle-source removal does not exactly remove the declared source")
-		}
 	}
 	changes, err := runtimeagenttopology.Diff(previous, req.Plan)
 	if err != nil {

@@ -110,7 +110,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					"per_entity_monthly_cap": 10,
 				},
 			}}, selected, nil, source, executionposture.Live)
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology plan: %v", err)
@@ -127,7 +127,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				t.Fatalf("install budget recovery source set: %v", err)
 			}
 			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-				BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+				BundleHash:        coordinate.BundleHash,
 				RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 			})
 			if err != nil {
@@ -140,7 +140,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				Budget:         tracker,
 				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
-			topologyAdmission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+			topologyAdmission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology admission: %v", err)
 			}
@@ -156,7 +156,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				}
 			})
 
-			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 			if err != nil {
 				t.Fatalf("managedexecution.New: %v", err)
 			}

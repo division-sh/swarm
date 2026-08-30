@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -27,7 +26,7 @@ type ActivitySite struct {
 	HandlerEventKey string
 	Source          string
 	RuleID          string
-	RuleRef         contractelementidentity.ContractElementRef
+	RuleRef         runtimeidentity.DeclarationIdentity
 	RuleIndex       int
 	Spec            ActivitySpec
 	RevisionField   string
@@ -115,7 +114,7 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 			if rule.Activity.Empty() {
 				continue
 			}
-			ruleRef, _ := rule.ContractElementRef()
+			ruleRef, _ := rule.DeclarationIdentity()
 			out = append(out, ActivitySite{
 				Node:            node,
 				HandlerEventKey: handlerEventKey,
@@ -136,8 +135,8 @@ func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 		activityID = DefaultActivityID(site.Node.NodeID(), site.HandlerEventKey, site.RuleID, site.RuleIndex, site.Spec.Tool)
 	}
 	base := activityID
-	flowID := site.Node.FlowID()
-	if flowID != "" && !strings.HasPrefix(base, flowID+"/") {
+	flowID := site.Node.FlowPath()
+	if flowID != "" && flowID != "." && !strings.HasPrefix(base, flowID+"/") {
 		base = flowID + "/" + base
 	}
 	base = eventidentity.Normalize(base)
@@ -411,7 +410,7 @@ func (b *WorkflowContractBundle) ActivitySites() []ActivitySite {
 				_, loopID, err := handler.Loop.Operation()
 				if err == nil {
 					for _, plan := range b.WorkflowLoops() {
-						if strings.TrimSpace(plan.FlowID) == node.FlowID() && strings.TrimSpace(plan.ID) == loopID {
+						if strings.TrimSpace(plan.FlowID) == node.FlowPath() && strings.TrimSpace(plan.ID) == loopID {
 							site.RevisionField = strings.TrimSpace(plan.RevisionField)
 							break
 						}

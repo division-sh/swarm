@@ -44,11 +44,11 @@ func TestCLIAPIResponseBudgetErrorNamesMethodAndBudget(t *testing.T) {
 
 func TestCLIAPIResponseBudgetErrorRendersThroughFormatCLIAPIError(t *testing.T) {
 	err := &cliAPIResponseBudgetError{
-		Method: "bundle.get", Surface: "runtime API", Transport: "http",
+		Method: "uncatalogued.example", Surface: "runtime API", Transport: "http",
 		Budget: cliAPIResponseBudget, Overrun: cliAPIResponseBudget + 1,
 	}
 	rendered := FormatCLIAPIError(err)
-	for _, want := range []string{"bundle.get", "1 MiB", "no bounded form", "#2016 census"} {
+	for _, want := range []string{"uncatalogued.example", "1 MiB", "unbounded by contract", "absent from the method catalog"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered error missing %q: %s", want, rendered)
 		}
@@ -62,8 +62,8 @@ func TestResponseBudgetRemediationDerivesFromCatalog(t *testing.T) {
 			t.Fatalf("bounded remediation missing %q: %s", want, bounded)
 		}
 	}
-	unbounded := responseBudgetRemediation("bundle.get")
-	if !strings.Contains(unbounded, "no bounded form") || !strings.Contains(unbounded, "#2016 census") {
+	unbounded := responseBudgetRemediation("uncatalogued.example")
+	if !strings.Contains(unbounded, "unbounded by contract") || !strings.Contains(unbounded, "absent from the method catalog") {
 		t.Fatalf("unbounded remediation = %q", unbounded)
 	}
 }

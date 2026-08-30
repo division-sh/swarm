@@ -3,10 +3,8 @@ package apiv1
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
@@ -50,8 +47,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 78 {
-		t.Fatalf("method count = %d, want 78", len(openRPCNames))
+	if len(openRPCNames) != 73 {
+		t.Fatalf("method count = %d, want 73", len(openRPCNames))
 	}
 	if _, ok := registry.Method("test.setup_entities"); !ok {
 		t.Fatal("test.setup_entities missing from generated registry")
@@ -59,8 +56,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if _, ok := registry.Method("run.fork"); !ok {
 		t.Fatal("run.fork missing from generated registry")
 	}
-	if _, ok := registry.Method("bundle.register"); !ok {
-		t.Fatal("bundle.register missing from generated registry")
+	if _, ok := registry.Method("bundle.register"); ok {
+		t.Fatal("retired bundle.register remains in generated registry")
 	}
 	if _, ok := registry.Method("rpc.unsubscribe"); !ok {
 		t.Fatal("rpc.unsubscribe missing from generated registry")
@@ -650,16 +647,15 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				BundleHash:      "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			},
 			RuntimeIdentity: RuntimeIdentityResult{
 				RuntimeInstanceID:   "runtime-instance-1",
 				StartedAt:           now.Format(time.RFC3339Nano),
 				APIVersion:          "v1",
 				SupportedTransports: []string{"tcp"},
-				BundleSources: []RuntimeBundleSourceIdentity{{
-					BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-					BundleSource: "persisted",
+				SourceArtifacts: []RuntimeSourceArtifactIdentity{{
+					BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				}},
 			},
 		}),
@@ -685,7 +681,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("health.check execution_posture = %#v, want mock_only", healthResult["execution_posture"])
 	}
 	bundle := asMap(t, healthResult["bundle"])
-	if bundle["bundle_hash"] != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if bundle["bundle_hash"] != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("bundle identity = %#v", bundle)
 	}
 	if raw, _ := json.Marshal(healthResult); strings.Contains(string(raw), "/") {
@@ -703,8 +699,8 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	if identityResult["runtime_instance_id"] == bundle["bundle_hash"] {
 		t.Fatalf("runtime.identity reused bundle hash: %#v", identityResult)
 	}
-	if sources, ok := identityResult["bundle_sources"].([]any); !ok || len(sources) != 1 {
-		t.Fatalf("runtime.identity bundle_sources = %#v, want one exact source fact", identityResult["bundle_sources"])
+	if sources, ok := identityResult["source_artifacts"].([]any); !ok || len(sources) != 1 {
+		t.Fatalf("runtime.identity source_artifacts = %#v, want one exact source fact", identityResult["source_artifacts"])
 	}
 
 	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":"run-1"}}`)
@@ -716,7 +712,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("run.get origin = %#v, want event %s", origin, eventID)
 	}
 
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"run.list","params":{"bundle_hash":"`+bundleHash+`","limit":1}}`)
 	if list.Error != nil {
 		t.Fatalf("run.list error = %#v", list.Error)
@@ -761,7 +757,7 @@ func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				BundleHash:      "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				BundleHash:      "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			},
 		}),
 	})
@@ -796,7 +792,7 @@ func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				BundleHash:      "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				BundleHash:      "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 			},
 		}),
 	})
@@ -832,580 +828,33 @@ func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 	}
 }
 
-func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
-	now := time.Unix(1700000100, 0).UTC()
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	catalog := &fakeBundleCatalogReadStore{
-		listResult: bundlecatalog.ListResult{
-			Bundles: []bundlecatalog.Summary{{
-				BundleHash:    bundleHash,
-				AgentCount:    1,
-				HasData:       true,
-				DataSizeBytes: 4,
-				Metadata:      map[string]any{"source": "test"},
-				IngestedAt:    now,
-			}},
-			NextCursor: "cursor-2",
-		},
-		details: map[string]bundlecatalog.Detail{
-			bundleHash: {
-				BundleHash:    bundleHash,
-				ContentYAML:   "name: test",
-				ParsedJSON:    map[string]any{"agents": map[string]any{}},
-				Metadata:      map[string]any{"source": "test"},
-				AgentCount:    1,
-				HasData:       true,
-				DataSizeBytes: 4,
-				IngestedAt:    now,
-			},
-		},
-		agents: map[string]bundlecatalog.AgentsResult{
-			bundleHash: {
-				Agents: []bundlecatalog.AgentDefinition{{
-					AgentID:           "researcher",
-					AgentNameOwner:    "swarm://flows/research/agent/researcher",
-					Role:              "research",
-					Type:              "managed",
-					Model:             "cheap",
-					LLMBackend:        "claude",
-					Memory:            true,
-					MemorySource:      "authored",
-					FlowInstance:      "research/inst-1",
-					IntentKind:        "local",
-					IntentSource:      "prompts/researcher.md",
-					IntentProvenance:  "flows/research/agents.yaml#agents.researcher.intent",
-					IntentContentHash: "sha256:test",
-					IntentIdentity:    "agent-intent:v1:sha256:test",
-					IntentContent:     "Research the requested market.",
-					Subscriptions:     []string{"scan.requested"},
-					Tools:             []string{"web_search"},
-				}},
-			},
-		},
-	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Ready:         func() bool { return true },
-			Database:      fakePinger{err: nil},
-			BundleCatalog: catalog,
-		}),
-	})
-
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"bundle.list","params":{"limit":1,"cursor":"cursor-1"}}`)
-	if list.Error != nil {
-		t.Fatalf("bundle.list error = %#v", list.Error)
-	}
-	if catalog.lastList.Limit != 1 || catalog.lastList.Cursor != "cursor-1" {
-		t.Fatalf("bundle.list opts = %#v", catalog.lastList)
-	}
-	listResult := asMap(t, list.Result)
-	if listResult["next_cursor"] != "cursor-2" {
-		t.Fatalf("bundle.list next_cursor = %#v", listResult["next_cursor"])
-	}
-	bundles, ok := listResult["bundles"].([]any)
-	if !ok || len(bundles) != 1 {
-		t.Fatalf("bundle.list bundles = %#v", listResult["bundles"])
-	}
-	if asMap(t, bundles[0])["bundle_hash"] != bundleHash {
-		t.Fatalf("bundle.list bundle row = %#v", bundles[0])
-	}
-
-	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"bundle.get","params":{"bundle_hash":"`+bundleHash+`"}}`)
-	if get.Error != nil {
-		t.Fatalf("bundle.get error = %#v", get.Error)
-	}
-	if got := asMap(t, get.Result)["bundle_hash"]; got != bundleHash {
-		t.Fatalf("bundle.get bundle_hash = %#v", got)
-	}
-
-	agents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agents","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`","limit":1,"cursor":"agent-cursor"}}`)
-	if agents.Error != nil {
-		t.Fatalf("bundle.agents error = %#v", agents.Error)
-	}
-	agentRows := asMap(t, agents.Result)["agents"].([]any)
-	agent := asMap(t, agentRows[0])
-	if agent["agent_id"] != "researcher" || agent["model"] != "cheap" {
-		t.Fatalf("bundle.agents row = %#v", agent)
-	}
-	if catalog.lastAgents.Limit != 1 || catalog.lastAgents.Cursor != "agent-cursor" {
-		t.Fatalf("bundle.agents opts = %#v", catalog.lastAgents)
-	}
-	for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
-		if _, ok := agent[runtimeKey]; ok {
-			t.Fatalf("bundle.agents leaked runtime key %q: %#v", runtimeKey, agent)
-		}
-	}
-}
-
-func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	catalog := &fakeBundleCatalogReadStore{
-		missing: map[string]bool{bundleHash: true},
-		listErr: bundlecatalog.ErrInvalidCursor,
-	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			BundleCatalog: catalog,
-		}),
-	})
-
-	badHash := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"bad","method":"bundle.get","params":{"bundle_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`)
-	if badHash.Error == nil || badHash.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.get invalid hash error = %#v, want invalid params", badHash.Error)
-	}
-
-	missing := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"missing","method":"bundle.get","params":{"bundle_hash":"`+bundleHash+`"}}`)
-	if missing.Error == nil {
-		t.Fatal("bundle.get missing error = nil, want BUNDLE_NOT_FOUND")
-	}
-	if data := asMap(t, missing.Error.Data); data["code"] != BundleNotFoundCode {
-		t.Fatalf("bundle.get missing error data = %#v", data)
-	}
-
-	badCursor := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"cursor","method":"bundle.list","params":{"cursor":"bad"}}`)
-	if badCursor.Error == nil || badCursor.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.list invalid cursor error = %#v, want invalid params", badCursor.Error)
-	}
-
-	catalog.missing = nil
-	catalog.agentsErr = bundlecatalog.ErrInvalidCursor
-	badAgentCursor := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-cursor","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`","cursor":"bad"}}`)
-	if badAgentCursor.Error == nil || badAgentCursor.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.agents invalid cursor error = %#v, want invalid params", badAgentCursor.Error)
-	}
-
-	catalog.agentsErr = &bundlecatalog.AgentDefinitionTooLargeError{
-		BundleHash: bundleHash, AgentNameOwner: "swarm://agent/oversized", AgentID: "oversized",
-		EncodedRowBytes: 800000, ResultByteCeiling: bundlecatalog.AgentListResultByteCeiling,
-	}
-	oversized := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"oversized","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`)
-	if oversized.Error == nil || asMap(t, oversized.Error.Data)["code"] != BundleAgentDefinitionTooLargeCode {
-		t.Fatalf("bundle.agents oversized error = %#v", oversized.Error)
-	}
-}
-
-func TestOperatorBundleAgentsJSONRPCEnvelopeStaysBelowCLIBudget(t *testing.T) {
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	catalog := &fakeBundleCatalogReadStore{agents: map[string]bundlecatalog.AgentsResult{
-		bundleHash: {
-			Agents: []bundlecatalog.AgentDefinition{{
-				AgentID: "large", AgentNameOwner: "swarm://agent/large", MemorySource: "platform_default",
-				IntentKind: "inline", IntentSource: "inline", IntentProvenance: "agents.yaml#agents.large.intent",
-				IntentContentHash: "sha256:test", IntentIdentity: "agent-intent:v1:sha256:test", IntentContent: strings.Repeat("x", 700_000),
-			}},
-		},
-	}}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{BundleCatalog: catalog})})
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"large","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`))
-	request.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(recorder, testAuthorActivityRequest(request))
-	if recorder.Code != http.StatusOK || recorder.Body.Len() >= 1<<20 {
-		t.Fatalf("bundle.agents envelope status=%d bytes=%d", recorder.Code, recorder.Body.Len())
-	}
-}
-
-func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency(t *testing.T) {
-	catalog := &fakeBundleCatalogReadStore{
-		details: map[string]bundlecatalog.Detail{},
-		agents:  map[string]bundlecatalog.AgentsResult{},
-	}
-	platformSpec := testBundleRegistrationPlatformSpec(t)
-	platformHash, err := fileSHA256Hex(platformSpec)
-	if err != nil {
-		t.Fatalf("hash platform spec: %v", err)
-	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Now:              func() time.Time { return time.Unix(1700000200, 0).UTC() },
-			RepoRoot:         t.TempDir(),
-			PlatformSpecPath: platformSpec,
-			BundleCatalog:    catalog,
-			Idempotency:      newRecordingAPIIdempotencyStore(),
-		}),
-	})
-	envelope := testBundleRegistrationEnvelope()
-
-	first := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"register","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"idem-register"}}`, envelope))
-	if first.Error != nil {
-		t.Fatalf("bundle.register error = %#v", first.Error)
-	}
-	result := asMap(t, first.Result)
-	bundleHash, ok := result["bundle_hash"].(string)
-	if !ok || runtimecontracts.ValidateBundleHash(bundleHash) != nil {
-		t.Fatalf("bundle.register bundle_hash = %#v", result["bundle_hash"])
-	}
-	if result["registered"] != true || result["has_data"] != false || result["data_size_bytes"] != float64(0) {
-		t.Fatalf("bundle.register result = %#v", result)
-	}
-	if _, ok := result["idempotency_replayed"]; ok {
-		t.Fatalf("bundle.register result must not expose idempotency_replayed: %#v", result)
-	}
-	if len(catalog.upserts) != 1 {
-		t.Fatalf("upserts = %d, want 1", len(catalog.upserts))
-	}
-	upsert := catalog.upserts[0]
-	if upsert.BundleHash != bundleHash || !strings.Contains(upsert.ContentYAML, "bundle/package.yaml") || !strings.Contains(upsert.ContentYAML, "platform/platform-spec.yaml") {
-		t.Fatalf("bundle.register upsert = %#v", upsert)
-	}
-	if upsert.Metadata["registered_by"] != "bundle.register" || upsert.Metadata["platform_spec_hash"] != "sha256:"+platformHash || upsert.Metadata["platform_spec_source"] != "server_effective" {
-		t.Fatalf("bundle.register metadata = %#v", upsert.Metadata)
-	}
-	if upsert.Metadata["package_license"] != "MIT" || upsert.Metadata["package_repository"] != "https://github.com/division-sh/swarm" {
-		t.Fatalf("bundle.register package metadata = %#v", upsert.Metadata)
-	}
-	if got, want := upsert.Metadata["package_keywords"], []string{"registered", "catalog"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("bundle.register package keywords metadata = %#v, want %#v", got, want)
-	}
-	if got, want := upsert.Metadata["package_extra"], map[string]string{"colony.division.sh/display_name": "Registered"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("bundle.register package extra metadata = %#v, want %#v", got, want)
-	}
-	pkg := asMap(t, upsert.ParsedJSON["package"])
-	if pkg["license"] != "MIT" || pkg["repository"] != "https://github.com/division-sh/swarm" {
-		t.Fatalf("bundle.register package projection = %#v", pkg)
-	}
-	agents, ok := upsert.ParsedJSON["agents"].([]any)
-	if !ok || len(agents) != 1 {
-		t.Fatalf("bundle.register agents projection = %#v, want one ordered definition", upsert.ParsedJSON["agents"])
-	}
-	researcher := asMap(t, agents[0])
-	if researcher["model"] != "regular" || researcher["memory"] != false || researcher["memory_source"] != "platform_default" {
-		t.Fatalf("projected researcher = %#v", researcher)
-	}
-
-	replay := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"replay","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"idem-register"}}`, envelope))
-	if replay.Error != nil {
-		t.Fatalf("bundle.register replay error = %#v", replay.Error)
-	}
-	replayResult := asMap(t, replay.Result)
-	if replayResult["bundle_hash"] != bundleHash || replayResult["registered"] != true || replayResult["has_data"] != false {
-		t.Fatalf("bundle.register replay result = %#v", replayResult)
-	}
-	if len(catalog.upserts) != 1 {
-		t.Fatalf("upserts after replay = %d, want 1", len(catalog.upserts))
-	}
-
-	duplicate := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"duplicate","method":"bundle.register","params":{"content_yaml":%q}}`, envelope))
-	if duplicate.Error != nil {
-		t.Fatalf("bundle.register duplicate error = %#v", duplicate.Error)
-	}
-	if duplicateResult := asMap(t, duplicate.Result); duplicateResult["registered"] != false || duplicateResult["has_data"] != false {
-		t.Fatalf("bundle.register duplicate result = %#v", duplicateResult)
-	}
-
-	dataBlob := map[string]any{
-		"api_version": "swarm.bundle.data.v1",
-		"entries": []any{
-			map[string]any{"path": "flows/alpha/data/payload.bin", "data_base64": base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03})},
-		},
-	}
-	dataBlobRaw, err := json.Marshal(dataBlob)
-	if err != nil {
-		t.Fatalf("marshal data_blob: %v", err)
-	}
-	withData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":%s}}`, testBundleRegistrationEnvelopeWithFlowData(), dataBlobRaw))
-	if withData.Error != nil {
-		t.Fatalf("bundle.register with data error = %#v", withData.Error)
-	}
-	withDataResult := asMap(t, withData.Result)
-	if withDataResult["registered"] != true || withDataResult["has_data"] != true {
-		t.Fatalf("bundle.register with data result = %#v", withDataResult)
-	}
-	if got := withDataResult["data_size_bytes"].(float64); got <= 0 {
-		t.Fatalf("bundle.register data_size_bytes = %v, want >0", got)
-	}
-
-	localRoot := t.TempDir()
-	writeBundleRegistrationLocalContractsFixture(t, localRoot)
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(t.TempDir(), localRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
-	}
-	packagedParams := map[string]any{"content_yaml": upload.ContentYAML}
-	if upload.DataBlob != nil {
-		packagedParams["data_blob"] = upload.DataBlob
-	}
-	packagedRequest, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "packaged-directory",
-		"method":  "bundle.register",
-		"params":  packagedParams,
-	})
-	if err != nil {
-		t.Fatalf("marshal packaged directory request: %v", err)
-	}
-	packaged := rpcCall(t, handler, string(packagedRequest))
-	if packaged.Error != nil {
-		t.Fatalf("bundle.register packaged directory error = %#v\ncontent_yaml:\n%s", packaged.Error, upload.ContentYAML)
-	}
-	packagedResult := asMap(t, packaged.Result)
-	if packagedResult["registered"] != true || packagedResult["has_data"] != true {
-		t.Fatalf("bundle.register packaged directory result = %#v", packagedResult)
-	}
-}
-
-func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
-	catalog := &fakeBundleCatalogReadStore{
-		details: map[string]bundlecatalog.Detail{},
-		agents:  map[string]bundlecatalog.AgentsResult{},
-	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			RepoRoot:         t.TempDir(),
-			PlatformSpecPath: testBundleRegistrationPlatformSpec(t),
-			BundleCatalog:    catalog,
-			Idempotency:      newRecordingAPIIdempotencyStore(),
-		}),
-	})
-	presentZero := `api_version: swarm.bundle.register.v1
-files:
-  - path: package.yaml
-    text: |
-      name: present-zero-registration
-      version: "1.0.0"
-      platform_version: ">=0.7.0 <0.8.0"
-      flows: []
-  - path: schema.yaml
-    text: |
-      name: present-zero-registration
-  - path: agents.yaml
-    text: |
-      {}
-`
-	rejected := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"present-zero","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"present-zero"}}`, presentZero))
-	if rejected.Error == nil || rejected.Error.Code != codeInvalidParams || !strings.Contains(fmt.Sprint(rejected.Error.Data), "agents.yaml declares nothing") {
-		t.Fatalf("bundle.register present-zero error = %#v, want typed invalid params", rejected.Error)
-	}
-	if len(catalog.upserts) != 0 {
-		t.Fatalf("upserts after present-zero registration = %d, want 0", len(catalog.upserts))
-	}
-
-	unconsumed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unconsumed","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/missing/data/unreferenced.bin","data_base64":"AQI="}]}}}`, testBundleRegistrationEnvelope()))
-	if unconsumed.Error == nil || unconsumed.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.register unconsumed error = %#v, want invalid params", unconsumed.Error)
-	}
-	if len(catalog.upserts) != 0 {
-		t.Fatalf("upserts after invalid registration = %d, want 0", len(catalog.upserts))
-	}
-
-	incompatible := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"incompatible","method":"bundle.register","params":{"content_yaml":%q}}`, testBundleRegistrationEnvelopeWithPlatformVersion(">=0.8.0")))
-	if incompatible.Error == nil || incompatible.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.register incompatible platform_version error = %#v, want invalid params", incompatible.Error)
-	}
-	incompatibleData := asMap(t, incompatible.Error.Data)
-	incompatibleDetails := asMap(t, incompatibleData["details"])
-	if incompatibleDetails["reason"] != "bundle registration envelope declares incompatible platform_version" {
-		t.Fatalf("bundle.register incompatible error data = %#v", incompatibleData)
-	}
-	if !strings.Contains(fmt.Sprint(incompatibleDetails["error"]), `platform_version range ">=0.8.0" does not include running platform "0.7.0"`) {
-		t.Fatalf("bundle.register incompatible error data = %#v, want compatibility detail", incompatibleData)
-	}
-
-	catalog.conflict = true
-	conflict := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"conflict","method":"bundle.register","params":{"content_yaml":%q}}`, testBundleRegistrationEnvelope()))
-	if conflict.Error == nil {
-		t.Fatal("bundle.register conflict error = nil")
-	}
-	if data := asMap(t, conflict.Error.Data); data["code"] != BundleRegisterConflictCode {
-		t.Fatalf("bundle.register conflict data = %#v", data)
-	}
-
-	malformed := map[string]string{
-		"legacy envelope version": `version: swarm.bundle.registration.v1
-files:
-  - path: package.yaml
-    content: "name: legacy\nversion: \"1.0.0\"\nflows: []\n"
-`,
-		"dot segment": `api_version: swarm.bundle.register.v1
-files:
-  - path: ./package.yaml
-    text: "name: bad\nversion: \"1.0.0\"\nflows: []\n"
-`,
-		"case collision": `api_version: swarm.bundle.register.v1
-files:
-  - path: package.yaml
-    text: "name: bad\nversion: \"1.0.0\"\nflows: []\n"
-  - path: Package.yaml
-    text: "name: bad\n"
-`,
-		"non nfc path": "api_version: swarm.bundle.register.v1\nfiles:\n  - path: cafe\u0301.yaml\n    text: \"name: bad\\n\"\n",
-	}
-	for name, content := range malformed {
-		t.Run(name, func(t *testing.T) {
-			got := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad","method":"bundle.register","params":{"content_yaml":%q}}`, content))
-			if got.Error == nil || got.Error.Code != codeInvalidParams {
-				t.Fatalf("bundle.register malformed error = %#v, want invalid params", got.Error)
-			}
-		})
-	}
-
-	badData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad-data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"flows/alpha/data/payload.bin":"AQI="}}}`, testBundleRegistrationEnvelope()))
-	if badData.Error == nil || badData.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.register bad data_blob error = %#v, want invalid params", badData.Error)
-	}
-
-	unsortedData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unsorted-data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/beta/data/payload.bin","data_base64":"AQI="},{"path":"flows/alpha/data/payload.bin","data_base64":"AQI="}]}}}`, testBundleRegistrationEnvelope()))
-	if unsortedData.Error == nil || unsortedData.Error.Code != codeInvalidParams {
-		t.Fatalf("bundle.register unsorted data_blob error = %#v, want invalid params", unsortedData.Error)
-	}
-}
-
-func testBundleRegistrationEnvelope() string {
-	return testBundleRegistrationEnvelopeWithPlatformVersion(">=0.7.0 <0.8.0")
-}
-
-func testBundleRegistrationEnvelopeWithPlatformVersion(platformVersion string) string {
-	return `api_version: swarm.bundle.register.v1
-files:
-  - path: package.yaml
-    text: |
-      name: registered
-      version: "1.0.0"
-      platform_version: "` + platformVersion + `"
-      keywords: [registered, catalog]
-      license: MIT
-      repository: https://github.com/division-sh/swarm
-      extra:
-        colony.division.sh/display_name: Registered
-      flows: []
-  - path: agents.yaml
-    text: |
-      researcher:
-        id: researcher
-        role: research
-        intent: {inline: "Research the requested subject."}
-        model: regular
-        subscriptions:
-          - scan.requested
-`
-}
-
-func testBundleRegistrationEnvelopeWithFlowData() string {
-	return `api_version: swarm.bundle.register.v1
-files:
-  - path: package.yaml
-    text: |
-      name: registered-data
-      version: "1.0.0"
-      platform_version: ">=0.7.0 <0.8.0"
-      flows:
-        - id: alpha
-          flow: alpha
-  - path: flows/alpha/schema.yaml
-    text: |
-      initial_state: start
-      states:
-        - start
-        - done
-`
-}
-
-func writeBundleRegistrationLocalContractsFixture(t *testing.T, root string) {
-	t.Helper()
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: registered-local-directory
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/foo
-flows:
-  - id: alpha
-    flow: alpha
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "schema.yaml"), `
-initial_state: start
-states:
-  - start
-  - done
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
-name: nested-flow-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: gamma
-    flow: gamma
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "schema.yaml"), `
-initial_state: start
-states:
-  - start
-  - done
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "package.yaml"), `
-name: child-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: beta
-    flow: beta
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "flows", "beta", "schema.yaml"), `
-initial_state: start
-states:
-  - start
-  - done
-`)
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), "")
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), "\x01\x02\x03")
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "data", "nested.bin"), "\x09")
-	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "flows", "beta", "data", "child.bin"), "\x04\x05")
-}
-
-func writeBundleRegistrationLocalFixtureFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-func testBundleRegistrationPlatformSpec(t *testing.T) string {
-	t.Helper()
-	raw, err := os.ReadFile(compliancePlatformSpecPath(repoRoot(t)))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "platform-spec.yaml")
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		t.Fatalf("write temp platform spec: %v", err)
-	}
-	return path
-}
-
 func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	handler.ServeHTTP(rec, testAuthorActivityRequest(req))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(recorder, testAuthorActivityRequest(request))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", recorder.Code, recorder.Body.String())
 	}
-	var resp rpcResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode rpc response: %v body=%s", err, rec.Body.String())
+	var response rpcResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode rpc response: %v body=%s", err, recorder.Body.String())
 	}
-	return resp
+	return response
 }
 
 func captureProcessLog(t *testing.T, fn func()) string {
 	t.Helper()
-	var buf bytes.Buffer
+	var buffer bytes.Buffer
 	previousWriter := log.Writer()
 	previousFlags := log.Flags()
-	log.SetOutput(&buf)
+	log.SetOutput(&buffer)
 	log.SetFlags(0)
 	defer log.SetOutput(previousWriter)
 	defer log.SetFlags(previousFlags)
 	fn()
-	return buf.String()
+	return buffer.String()
 }
 
 type fakePinger struct {
@@ -1456,85 +905,6 @@ func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _
 	}
 	return report, nil
 }
-
-type fakeBundleCatalogReadStore struct {
-	listResult bundlecatalog.ListResult
-	listErr    error
-	lastList   bundlecatalog.ListOptions
-	lastAgents bundlecatalog.AgentListOptions
-	agentsErr  error
-	details    map[string]bundlecatalog.Detail
-	agents     map[string]bundlecatalog.AgentsResult
-	missing    map[string]bool
-	upserts    []bundlecatalog.Upsert
-	conflict   bool
-}
-
-func (s *fakeBundleCatalogReadStore) ListBundleCatalog(_ context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
-	s.lastList = opts
-	if s.listErr != nil {
-		return bundlecatalog.ListResult{}, s.listErr
-	}
-	return s.listResult, nil
-}
-
-func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundleHash string) (bundlecatalog.Detail, error) {
-	if s.missing[bundleHash] {
-		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
-	}
-	detail, ok := s.details[bundleHash]
-	if !ok {
-		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
-	}
-	return detail, nil
-}
-
-func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
-	s.lastAgents = opts
-	if s.agentsErr != nil {
-		return bundlecatalog.AgentsResult{}, s.agentsErr
-	}
-	if s.missing[bundleHash] {
-		return bundlecatalog.AgentsResult{}, bundlecatalog.ErrNotFound
-	}
-	result, ok := s.agents[bundleHash]
-	if !ok {
-		return bundlecatalog.AgentsResult{}, bundlecatalog.ErrNotFound
-	}
-	return result, nil
-}
-
-func (s *fakeBundleCatalogReadStore) UpsertBundleCatalogWithData(_ context.Context, req bundlecatalog.Upsert, _ durabledata.Catalog) (bundlecatalog.UpsertResult, error) {
-	if s.conflict {
-		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
-	}
-	if s.details == nil {
-		s.details = map[string]bundlecatalog.Detail{}
-	}
-	if s.agents == nil {
-		s.agents = map[string]bundlecatalog.AgentsResult{}
-	}
-	_, exists := s.details[req.BundleHash]
-	s.upserts = append(s.upserts, req)
-	detail := bundlecatalog.Detail{
-		BundleHash:    req.BundleHash,
-		ContentYAML:   req.ContentYAML,
-		ParsedJSON:    req.ParsedJSON,
-		Metadata:      req.Metadata,
-		AgentCount:    1,
-		HasData:       len(req.DataBlob) > 0,
-		DataSizeBytes: int64(len(req.DataBlob)),
-		IngestedAt:    time.Unix(1700000200, 0).UTC(),
-	}
-	if exists {
-		detail = s.details[req.BundleHash]
-	}
-	s.details[req.BundleHash] = detail
-	return bundlecatalog.UpsertResult{Detail: detail, Registered: !exists}, nil
-}
-
-var _ BundleCatalogReadStore = (*fakeBundleCatalogReadStore)(nil)
-var _ BundleCatalogRegisterStore = (*fakeBundleCatalogReadStore)(nil)
 
 func testHandler(t *testing.T, opts Options) *Handler {
 	t.Helper()

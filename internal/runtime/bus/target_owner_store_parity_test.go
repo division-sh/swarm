@@ -37,8 +37,6 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 	canonicalrouting.Prove(t, canonicalrouting.ParentConnect)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
-			selected := newTargetOwnerParityStore(t, backend, ctx)
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 				repo,
@@ -49,10 +47,12 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				t.Fatalf("load root-to-singleton target-owner fixture: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
+			ctx := testAuthorActivityContextForSource(context.Background(), source)
+			selected := newTargetOwnerParityStore(t, backend, ctx)
 			runID := uuid.NewString()
 			sourceEntityID := uuid.NewString()
 			rootOwner := events.RouteIdentity{
-				FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: sourceEntityID,
+				FlowID: ".", FlowInstance: runID, EntityID: sourceEntityID,
 			}.Normalized()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
@@ -101,7 +101,7 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			}
 			deliveries := subscribeInternalDeliveriesForTest(t, restarted, persisted[0].Recipient.ID())
 			duplicateCtx := runtimedelivery.WithRoute(
-				runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID),
+				runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID),
 				events.DeliveryRoute{Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: "foreign", FlowInstance: "foreign/changed-topology", EntityID: uuid.NewString(),
 				})},

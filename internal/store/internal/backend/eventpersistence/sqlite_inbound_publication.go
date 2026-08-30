@@ -139,7 +139,7 @@ func loadSQLiteInboundPublicationTx(ctx context.Context, db inboundPublicationQu
 const sqliteInboundPublicationSelect = `
 	SELECT p.publication_id, p.provider, p.entity_id, p.provider_event_id,
 	       p.request_fingerprint, p.request_projection_version,
-	       p.stable_service_id, p.package_key, p.flow_id, p.instance_id,
+	       p.stable_service_id, p.flow_path, p.instance_id,
 	       p.target_alias, p.target_flow_instance, p.expected_generation, p.expected_publication_sequence,
 	       p.resolved_run_id, COALESCE(p.marker_event_id, ''), p.acknowledgement_mode,
 	       p.output_count, p.original_received_at, p.original_user_agent, p.original_transport_metadata,
@@ -155,7 +155,7 @@ func scanSQLiteInboundPublication(row inboundPublicationRowScanner) (runtimeinbo
 	err := row.Scan(
 		&record.PublicationID, &record.Provider, &record.EntityID, &record.ProviderEventID,
 		&record.RequestFingerprint, &record.RequestProjectionVersion,
-		&record.StableServiceID, &record.PackageKey, &record.FlowID, &record.InstanceID,
+		&record.StableServiceID, &record.FlowPath, &record.InstanceID,
 		&record.TargetAlias, &record.TargetFlowInstance, &record.ExpectedGeneration, &record.ExpectedPublicationSequence,
 		&record.ResolvedRunID, &record.MarkerEventID, &ackMode, &record.OutputCount,
 		&originalReceivedAt, &record.OriginalUserAgent, &transportMetadata,
@@ -230,20 +230,20 @@ func loadSQLiteInboundPublicationChildren(ctx context.Context, db inboundPublica
 }
 
 func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner, tx *sql.Tx, request runtimeinbound.Request) error {
-	var packageKey, flowID, instanceID, entityID, runID, publicationState string
+	var flowPath, instanceID, entityID, runID, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT package_key, flow_id, instance_id, entity_id, current_run_id,
+		SELECT flow_path, instance_id, entity_id, current_run_id,
 		       current_generation, publication_sequence, publication_state
 		FROM standing_services WHERE service_id = ?
-	`, request.StableServiceID).Scan(&packageKey, &flowID, &instanceID, &entityID, &runID, &generation, &publicationSequence, &publicationState)
+	`, request.StableServiceID).Scan(&flowPath, &instanceID, &entityID, &runID, &generation, &publicationSequence, &publicationState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
 	}
 	if err != nil {
 		return fmt.Errorf("lock sqlite inbound standing service: %w", err)
 	}
-	if packageKey != request.PackageKey || flowID != request.FlowID || instanceID != request.InstanceID || entityID != request.EntityID || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
+	if flowPath != request.FlowPath || instanceID != request.InstanceID || entityID != request.EntityID || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
 		return fmt.Errorf("stale or conflicting sqlite inbound standing target")
 	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, request.ResolvedRunID)
@@ -271,12 +271,12 @@ func insertSQLiteInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx, r
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO inbound_publications (
 			publication_id, provider, entity_id, provider_event_id, request_fingerprint, request_projection_version,
-			stable_service_id, package_key, flow_id, instance_id, target_alias, target_flow_instance,
+			stable_service_id, flow_path, instance_id, target_alias, target_flow_instance,
 			expected_generation, expected_publication_sequence, resolved_run_id, acknowledgement_mode,
 			original_received_at, original_user_agent, original_transport_metadata, state, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)
 	`, request.PublicationID, request.Provider, request.EntityID, request.ProviderEventID, request.RequestFingerprint, request.RequestProjectionVersion,
-		request.StableServiceID, request.PackageKey, request.FlowID, request.InstanceID, request.TargetAlias, request.TargetFlowInstance,
+		request.StableServiceID, request.FlowPath, request.InstanceID, request.TargetAlias, request.TargetFlowInstance,
 		request.ExpectedGeneration, request.ExpectedPublicationSequence, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata), now)
 	if err != nil {
 		return fmt.Errorf("insert prepared sqlite inbound publication: %w", err)

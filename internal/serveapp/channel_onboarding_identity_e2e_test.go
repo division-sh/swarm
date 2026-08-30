@@ -162,7 +162,7 @@ func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			addSecondChannelOnboardingTarget(t, harness.opts.ContractsPath)
+			addSecondChannelOnboardingTarget(t, harness.opts.SourceRoot)
 			harness.start(t)
 
 			choices := requireAmbiguousChannelOnboardingChoices(t, harness, 2)
@@ -386,10 +386,10 @@ func requireChannelOnboardingTargetRow(t *testing.T, harness *channelOnboardingE
 	return channelOnboardingJourneyReadback{}
 }
 
-func addSecondChannelOnboardingTarget(t *testing.T, contractsRoot string) {
+func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 	t.Helper()
-	sourceDir := filepath.Join(contractsRoot, "flows", "telegram-ingress")
-	targetDir := filepath.Join(contractsRoot, "flows", "telegram-ingress-alt")
+	sourceDir := filepath.Join(sourceRoot, "telegram-ingress")
+	targetDir := filepath.Join(sourceRoot, "telegram-ingress-alt")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("create second channel onboarding target: %v", err)
 	}
@@ -399,40 +399,11 @@ func addSecondChannelOnboardingTarget(t *testing.T, contractsRoot string) {
 			t.Fatalf("read second channel onboarding target source %s: %v", name, err)
 		}
 		if name == "schema.yaml" {
-			contents = []byte(strings.Replace(string(contents), "name: telegram-ingress", "name: telegram-ingress-alt", 1))
+			contents = []byte(strings.ReplaceAll(strings.Replace(string(contents), "name: telegram-ingress", "name: telegram-ingress-alt", 1), "alias: chat", "alias: support"))
 		}
 		if err := os.WriteFile(filepath.Join(targetDir, name), contents, 0o644); err != nil {
 			t.Fatalf("write second channel onboarding target %s: %v", name, err)
 		}
-	}
-	rootPackage := `name: telegram-agent
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - id: bot
-    path: bot
-flows:
-  - id: telegram-ingress
-    flow: telegram-ingress
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-  - id: telegram-ingress-alt
-    flow: telegram-ingress-alt
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: support
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-`
-	if err := os.WriteFile(filepath.Join(contractsRoot, "package.yaml"), []byte(rootPackage), 0o644); err != nil {
-		t.Fatalf("write multi-context channel onboarding package: %v", err)
 	}
 }
 
@@ -455,12 +426,12 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 	provider := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(provider)
 	t.Cleanup(telegram.Close)
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
-	disableChannelOnboardingBusinessConsumers(t, contractsRoot)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, AbandonActiveRuns: true, Verbose: true,
+		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	if publicIngress {

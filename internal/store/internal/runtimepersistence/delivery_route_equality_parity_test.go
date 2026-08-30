@@ -59,8 +59,8 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 				event := deliveryRouteEqualityEvent(runID, "package-node-siblings")
 				target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"})
 				routes := []events.DeliveryRoute{
-					{Recipient: events.MustNodeDeliveryRecipient(mustPersistencePackageNode("packages/a", "review", "shared")), Target: target},
-					{Recipient: events.MustNodeDeliveryRecipient(mustPersistencePackageNode("packages/b", "review", "shared")), Target: target},
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceNode("packages/a/review", "shared")), Target: target},
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceNode("packages/b/review", "shared")), Target: target},
 				}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes); err != nil {
 					t.Fatalf("commit package-qualified node routes: %v", err)

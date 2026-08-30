@@ -48,8 +48,8 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	}
 	selectedRuntime := use.Runtime()
 	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), runtime.InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, PackageKey: target.PackageKey,
-		FlowID: target.FlowID, RunID: target.RunID, Generation: target.Generation,
+		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
+		RunID: target.RunID, Generation: target.Generation,
 		PublicationSequence: target.PublicationSequence, InstanceID: target.InstanceID,
 		FlowInstance: target.FlowInstance, EntityID: target.EntityID, EntitySlug: target.Alias,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
@@ -59,8 +59,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 func sameRuntimeRegistrationTarget(registration runtimepublicingress.RegistrationTarget, target runtime.StandingTarget) bool {
 	return strings.TrimSpace(registration.BundleHash) == strings.TrimSpace(target.BundleHash) &&
 		strings.TrimSpace(registration.ServiceID) == strings.TrimSpace(target.ServiceID) &&
-		strings.TrimSpace(registration.PackageKey) == strings.TrimSpace(target.PackageKey) &&
-		strings.TrimSpace(registration.FlowID) == strings.TrimSpace(target.FlowID) &&
+		strings.TrimSpace(registration.FlowPath) == strings.TrimSpace(target.FlowPath) &&
 		strings.TrimSpace(registration.Alias) == strings.TrimSpace(target.Alias) &&
 		strings.TrimSpace(registration.Provider) == strings.TrimSpace(target.Provider) &&
 		registration.Generation == target.Generation &&

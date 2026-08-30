@@ -1,0 +1,4 @@
+name: test-reduce-operation-count
+version: 1.0.0
+description: Reduce with operation count counts all items in list without condition filter.
+platform_version: ">=0.7.0 <0.8.0"

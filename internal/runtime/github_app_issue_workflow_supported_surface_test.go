@@ -37,7 +37,7 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 		const (
 			runID        = "9c000000-0000-0000-0000-000000000001"
 			entityID     = "9c000000-0000-0000-0000-000000000002"
-			flowInstance = "github-app-issue-workflow-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -66,7 +66,7 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 		const (
 			runID        = "9d000000-0000-0000-0000-000000000001"
 			entityID     = "9d000000-0000-0000-0000-000000000002"
-			flowInstance = "github-app-issue-workflow-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -530,8 +530,13 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issues": addLabelsHandler},
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{
+				{Provider: "github", Tool: "github.add_labels_to_issue"},
+				{Provider: "github", Tool: "github.create_issue"},
+				{Provider: "github", Tool: "github.create_issue_comment"},
+			}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment"}, {Event: "inbound.github.issues"}},
@@ -570,24 +575,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 			},
 		},
 	}))
-	importSource := slackManagedConnectorPackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{
-							{Provider: "github", Tool: "github.add_labels_to_issue"},
-							{Provider: "github", Tool: "github.create_issue"},
-							{Provider: "github", Tool: "github.create_issue_comment"},
-						},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, githubAppIssueWorkflowPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, githubAppIssueWorkflowPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}

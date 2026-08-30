@@ -11,8 +11,7 @@ import (
 func TestAdmissionEqualComparesTypedFactsAcrossReadback(t *testing.T) {
 	original, err := StaticAdmission(
 		strings.Repeat("a", 64),
-		"bundle-v1:sha256:"+strings.Repeat("b", 64),
-		"persisted",
+		"bundle-v2:sha256:"+strings.Repeat("b", 64),
 		LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -32,8 +31,7 @@ func TestAdmissionEqualComparesTypedFactsAcrossReadback(t *testing.T) {
 
 	different, err := StaticAdmission(
 		strings.Repeat("c", 64),
-		"bundle-v1:sha256:"+strings.Repeat("b", 64),
-		"persisted",
+		"bundle-v2:sha256:"+strings.Repeat("b", 64),
 		LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -47,16 +45,16 @@ func TestAdmissionEqualComparesTypedFactsAcrossReadback(t *testing.T) {
 func TestAdmissionSealedAuthorityAndLifetimeMatrix(t *testing.T) {
 	const (
 		revision   = "source-set-v1"
-		bundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		bundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
 	runID := uuid.NewString()
 	executionID := uuid.NewString()
 
-	staticDurable, err := StaticAdmission(revision, bundleHash, "persisted", LifetimeDurableManaged)
+	staticDurable, err := StaticAdmission(revision, bundleHash, LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("static durable admission: %v", err)
 	}
-	staticEphemeral, err := StaticAdmission(revision, bundleHash, "persisted", LifetimeEphemeral)
+	staticEphemeral, err := StaticAdmission(revision, bundleHash, LifetimeEphemeral)
 	if err != nil {
 		t.Fatalf("static ephemeral admission: %v", err)
 	}

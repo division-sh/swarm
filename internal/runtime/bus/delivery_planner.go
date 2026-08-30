@@ -282,7 +282,6 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients) {
@@ -908,12 +907,12 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(source semanticview.Sour
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() || subscriber.routeSource.importBoundaryWildcard() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+		if !subscriber.Recipient.IsNode() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
 		targetFlowInstance := flowInstance
 		if node, ok := subscriber.Recipient.Node(); ok && source != nil {
-			if scope, found := source.FlowScopeByID(node.FlowID()); found {
+			if scope, found := source.FlowScopeByID(node.FlowPath()); found {
 				switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
 				case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
 					targetFlowInstance = strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -927,28 +926,6 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(source semanticview.Sour
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
-}
-
-func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(routed))
-	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() || !subscriber.routeSource.importBoundaryWildcard() {
-			continue
-		}
-		flowInstance := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		if flowInstance == "" {
-			continue
-		}
-		out = append(out, plannedDeliveryRoute{
-			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(flowInstance),
-			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
-		})
-	}
-	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerScopedNodeRoute)
 }
 
 func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticview.Source, evt events.Event, routed []Subscriber, plan RoutePlan) error {
@@ -1059,7 +1036,7 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 	if intent.Producer != routeIntentProducerConcreteNodeRoute {
 		return false
 	}
-	handlerFlowID := subscriber.handlerNode.FlowID()
+	handlerFlowID := subscriber.handlerNode.FlowPath()
 	if handlerFlowID == "" {
 		handlerFlowID = target.FlowID
 	}
@@ -1137,7 +1114,7 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, source se
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		flowID := subscriber.handlerNode.FlowID()
+		flowID := subscriber.handlerNode.FlowPath()
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: subscriber.Recipient,
 			TargetBlueprint: events.RouteIdentity{
@@ -1163,7 +1140,7 @@ func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, source s
 		return false
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowID := subscriber.handlerNode.FlowID()
+	flowID := subscriber.handlerNode.FlowPath()
 	switch subscriber.routeSource {
 	case subscriberRouteSourceSubscription:
 		return admission.kind == apiEventPublicationEndpointOrdinaryFlow && flowID == admission.flowID && path == admission.flowPath
@@ -1194,7 +1171,8 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	if subscriber.routeSource != subscriberRouteSourceRootInputFlow {
 		return false
 	}
-	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	if path == "" || path == "." {
 		return false
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
@@ -1206,10 +1184,10 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber,
 	if !subscriber.Recipient.IsNode() {
 		return false
 	}
-	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
+	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "." {
 		return false
 	}
-	handlerFlowID := subscriber.handlerNode.FlowID()
+	handlerFlowID := subscriber.handlerNode.FlowPath()
 	if handlerFlowID == "" {
 		handlerFlowID = strings.TrimSpace(rootFlowID)
 	}
@@ -1369,8 +1347,11 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 		return false
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	if path == "" {
+	if path == "." {
 		return exactRootTarget(route, root)
+	}
+	if path == "" {
+		return false
 	}
 	if route.FlowInstance == "" {
 		return false

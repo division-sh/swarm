@@ -19,8 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -44,13 +46,17 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 				t.Fatalf("initialize workflow state stores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
-			facts := []runtimecorrelation.BundleSourceFact{
-				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("a")),
-				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("b")),
+			artifacts := []*sourceartifact.AdmittedSourceArtifact{
+				sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# dynamic-context-a\n")),
+				sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# dynamic-context-b\n")),
+			}
+			facts := []runtimecorrelation.SourceArtifactFact{
+				sourceartifactfixture.FactFor(artifacts[0]),
+				sourceartifactfixture.FactFor(artifacts[1]),
 			}
 			paths := []string{"worker/context-a", "worker/context-b"}
 			for index, fact := range facts {
-				seedServeDynamicTopologyReadiness(t, db, fact, uuid.NewString(), paths[index], index == 0)
+				seedServeDynamicTopologyReadiness(t, db, fact, artifacts[index], uuid.NewString(), paths[index], index == 0)
 			}
 			if foreign.malformed {
 				if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE instance_id = $1`, paths[1]); err != nil {
@@ -70,7 +76,7 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 					DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog:           providerRegistry,
 					ProcessWorkOwner:                 process,
-					BundleSourceFact:                 fact,
+					SourceArtifactFact:               fact,
 					RuntimeInstanceID:                runtimeInstanceID,
 				}))
 				if err != nil {
@@ -97,8 +103,8 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 			}
 			before := snapshotServeDynamicTopologyReadiness(t, db)
 			contexts := []serveRuntimeBundleContext{
-				{runtime: runtimes[0], bundleSourceFact: facts[0]},
-				{runtime: runtimes[1], bundleSourceFact: facts[1]},
+				{runtime: runtimes[0], sourceArtifactFact: facts[0]},
+				{runtime: runtimes[1], sourceArtifactFact: facts[1]},
 			}
 			err = startServeRuntimeContexts(context.Background(), contexts, nil)
 			if err == nil {
@@ -127,22 +133,22 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 func seedServeDynamicTopologyReadiness(
 	t *testing.T,
 	db *sql.DB,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
+	artifact *sourceartifact.AdmittedSourceArtifact,
 	runID string,
 	instancePath string,
 	complete bool,
 ) {
 	t.Helper()
 	runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), source)
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, source.BundleHash()))
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin:       runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID:        runID,
-		BundleHash:   bundleHash,
-		BundleSource: bundleSource,
+		Origin:   runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:    runID,
+		Artifact: artifact,
 	})
 	parts := strings.SplitN(instancePath, "/", 2)
 	if len(parts) != 2 {
@@ -154,7 +160,7 @@ func seedServeDynamicTopologyReadiness(
 			TemplateID: parts[0], ScopeKey: parts[0], InstanceID: parts[1], InstancePath: instancePath,
 			EntityID: entityID, HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+		RunID: runID, BundleHash: bundleHash,
 		WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 	}).Normalized()
 	if err != nil {
@@ -197,7 +203,7 @@ func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	rows, err := db.Query(`
 		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan::text,
 		       COALESCE(readiness.topology_ready_at::text, ''), readiness.updated_at::text,
-		       run.bundle_hash, run.bundle_source, run.status
+		       run.bundle_hash, run.status
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		ORDER BY readiness.instance_id
@@ -208,11 +214,11 @@ func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	defer rows.Close()
 	var snapshot []string
 	for rows.Next() {
-		var runID, path, plan, readyAt, updatedAt, bundleHash, bundleSource, runStatus string
-		if err := rows.Scan(&runID, &path, &plan, &readyAt, &updatedAt, &bundleHash, &bundleSource, &runStatus); err != nil {
+		var runID, path, plan, readyAt, updatedAt, bundleHash, runStatus string
+		if err := rows.Scan(&runID, &path, &plan, &readyAt, &updatedAt, &bundleHash, &runStatus); err != nil {
 			t.Fatalf("scan readiness snapshot: %v", err)
 		}
-		snapshot = append(snapshot, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s", runID, path, plan, readyAt, updatedAt, bundleHash, bundleSource, runStatus))
+		snapshot = append(snapshot, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s", runID, path, plan, readyAt, updatedAt, bundleHash, runStatus))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read readiness snapshot: %v", err)

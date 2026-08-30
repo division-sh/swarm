@@ -226,7 +226,7 @@ func workflowHarnessInputDeclarations(source semanticview.Source) []string {
 				continue
 			}
 			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" {
+			if flowID != "" && flowID != "." {
 				location = strings.TrimSpace(flowID) + "." + location
 			}
 			declarations = append(declarations, location)
@@ -241,7 +241,7 @@ func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
 		return nil
 	}
 	var declarations []string
-	flowIDs := []string{""}
+	flowIDs := make([]string, 0, len(source.FlowSchemaEntries()))
 	for flowID := range source.FlowSchemaEntries() {
 		if strings.TrimSpace(flowID) != "" {
 			flowIDs = append(flowIDs, flowID)
@@ -253,7 +253,7 @@ func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
 				continue
 			}
 			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" {
+			if flowID != "" && flowID != "." {
 				location = strings.TrimSpace(flowID) + "." + location
 			}
 			declarations = append(declarations, location)
@@ -268,7 +268,7 @@ func workflowInvalidOutputSinkDeclarations(source semanticview.Source) []string 
 		return nil
 	}
 	var declarations []string
-	flowIDs := []string{""}
+	flowIDs := make([]string, 0, len(source.FlowSchemaEntries()))
 	for flowID := range source.FlowSchemaEntries() {
 		if strings.TrimSpace(flowID) != "" {
 			flowIDs = append(flowIDs, flowID)
@@ -280,7 +280,7 @@ func workflowInvalidOutputSinkDeclarations(source semanticview.Source) []string 
 				continue
 			}
 			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" {
+			if flowID != "" && flowID != "." {
 				location = strings.TrimSpace(flowID) + "." + location
 			}
 			declarations = append(declarations, location)

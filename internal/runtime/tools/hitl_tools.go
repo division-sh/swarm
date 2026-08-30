@@ -110,13 +110,6 @@ func ValidateHITLIdentityLifecycleReferences(source semanticview.Source) []error
 		policy runtimecontracts.PolicyDocument
 	}
 	scopes := []authoredScope{{label: "root", tools: source.ToolEntries(), policy: source.ResolvedPolicyForFlow("")}}
-	for _, project := range semanticview.ProjectScopes(source) {
-		scopes = append(scopes, authoredScope{
-			label:  "project " + strings.TrimSpace(project.Key),
-			tools:  project.Tools,
-			policy: project.Policy,
-		})
-	}
 	for _, flow := range semanticview.FlowScopes(source) {
 		scopes = append(scopes, authoredScope{
 			label:  "flow " + strings.TrimSpace(flow.ID),

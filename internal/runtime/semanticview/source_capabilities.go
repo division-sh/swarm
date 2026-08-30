@@ -215,7 +215,7 @@ type ProviderTriggerEventProvenance struct {
 	ManifestHash     string
 	SourceProvenance string
 	Generation       triggergeneration.Generation
-	ProjectScopes    []string
+	FlowScopes       []string
 }
 
 func (p ProviderTriggerEventProvenance) Valid() bool {
@@ -316,7 +316,7 @@ func (c Capabilities) WithProviderTriggerEventProvenance(provenance []ProviderTr
 		item.PackVersion = strings.TrimSpace(item.PackVersion)
 		item.ManifestHash = strings.TrimSpace(item.ManifestHash)
 		item.SourceProvenance = strings.TrimSpace(item.SourceProvenance)
-		item.ProjectScopes = append([]string(nil), item.ProjectScopes...)
+		item.FlowScopes = append([]string(nil), item.FlowScopes...)
 		if !item.Valid() || !item.Generation.Equal(providerTrigger.generation) {
 			out.providerTrigger = nil
 			return out
@@ -334,7 +334,7 @@ func (c Capabilities) ProviderTriggerEventProvenance() []ProviderTriggerEventPro
 	}
 	out := make([]ProviderTriggerEventProvenance, len(c.providerTrigger.provenance))
 	for index, item := range c.providerTrigger.provenance {
-		item.ProjectScopes = append([]string(nil), item.ProjectScopes...)
+		item.FlowScopes = append([]string(nil), item.FlowScopes...)
 		out[index] = item
 	}
 	return out

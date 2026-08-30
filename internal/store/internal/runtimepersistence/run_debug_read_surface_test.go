@@ -73,9 +73,8 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 
 	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: olderRunID, State: "completed",
-		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral",
-		StartedAt:    now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
+		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		StartedAt:  now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
 	})
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: newerRunID, StartedAt: now.Add(-time.Hour),
@@ -127,8 +126,8 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	})
 	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: olderRunID, State: "completed",
-		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", StartedAt: now.Add(-time.Hour),
+		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		StartedAt:  now.Add(-time.Hour),
 	})
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: emptyRunID, StartedAt: now.Add(time.Hour),

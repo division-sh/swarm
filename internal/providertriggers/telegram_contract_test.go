@@ -388,7 +388,7 @@ func TestTelegramInstalledAndEffectiveSubjectsCarryExactSelectedDescriptors(t *t
 	}
 	effective, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{
 		BundleHash: strings.Repeat("a", 64), Alias: "chat",
-		SigningSecret: "webhook_signing.telegram", SourcePath: "package.yaml",
+		SigningSecret: "webhook_signing.telegram", SourcePath: "schema.yaml",
 	})
 	if err != nil {
 		t.Fatalf("EffectiveCapabilitySubject: %v", err)

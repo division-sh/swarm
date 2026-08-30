@@ -14,6 +14,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -31,20 +32,24 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	newerEntityB := uuid.NewString()
 	olderEntity := uuid.NewString()
 	olderEventOnly := uuid.NewString()
-	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	bundleAArtifact := sourceartifactfixture.Artifact()
+	bundleBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  readback_b: {}\n"))
+	bundleA := bundleAArtifact.BundleHash()
+	bundleB := bundleBArtifact.BundleHash()
+	sourceartifactfixture.RequireArtifact(t, ctx, sqliteStore, bundleAArtifact)
+	sourceartifactfixture.RequireArtifact(t, ctx, sqliteStore, bundleBArtifact)
 	runtimeLogFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "proof_failure", nil))
 	runtimeLogPayload := `{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","failure":` + runtimeLogFailure + `}}`
 
 	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
 		{
-			RunID: newer, State: "running", BundleHash: bundleA, BundleSource: "ephemeral",
+			RunID: newer, State: "running", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
 			EntityCount: 3, StartedAt: now,
 		},
 		{
-			RunID: older, State: "running", BundleHash: bundleB, BundleSource: "ephemeral",
+			RunID: older, State: "running", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
 			EntityCount: 5, StartedAt: now.Add(-time.Hour),
@@ -67,11 +72,15 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		{olderEvent, older, "scan.completed", olderEntity, now.Add(-time.Hour + time.Second)},
 		{uuid.NewString(), older, "scan.replayed", olderEventOnly, now.Add(-time.Hour + 2*time.Second)},
 	} {
+		eventCtx := ctx
+		if fixture.runID == older {
+			eventCtx = testAuthorActivityContextForBundle(bundleB)
+		}
 		envelope := events.EventEnvelope{}
 		if fixture.entityID != "" {
 			envelope = events.EnvelopeForEntityID(envelope, fixture.entityID)
 		}
-		if err := commitSemanticEventFixtureWithRoutes(ctx, sqliteStore, eventtest.PersistedProjection(
+		if err := commitSemanticEventFixtureWithRoutes(eventCtx, sqliteStore, eventtest.PersistedProjection(
 			fixture.id, events.EventType(fixture.name), "test", "", json.RawMessage(`{}`), 0,
 			fixture.runID, "", envelope, fixture.at,
 		), deliveryRoutesByEvent[fixture.id]); err != nil {

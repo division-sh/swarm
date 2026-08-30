@@ -71,7 +71,7 @@ func hostileCompiledSourcePathReader(root string, performance mockperformance.Pe
 func allowedMockPerformanceCoordinateReaders() map[string]string {
 	return map[string]string{
 		"internal/runtime/contracts/bundle_hash.go::(*bundleHashEntryBuilder).addAgentMockModuleFiles::SourcePath":          "canonical compiled path identity and exact-byte bundle input owner",
-		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformance::Module":                   "sole authored module filesystem interpreter",
+		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformancesFromSource::Module":        "sole admitted-artifact module-label interpreter",
 		"internal/runtime/core/actors/agent_config.go::(*AgentConfig).NormalizeRuntimeDescriptor::Module":                   "immutable runtime carrier normalization",
 		"internal/runtime/core/actors/agent_config.go::(*AgentConfig).NormalizeRuntimeDescriptor::SourcePath":               "immutable runtime carrier normalization",
 		"internal/runtime/llm/mock_runtime.go::executeMockCompletionWithExecutor::SourcePath":                               "diagnostic Python row identity; executes captured Source and Digest",

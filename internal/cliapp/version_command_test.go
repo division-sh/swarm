@@ -81,7 +81,7 @@ func TestVersionServerUsesHealthCheck(t *testing.T) {
 		"Go:",
 		"Server:",
 		"alive=true ready=false db_ok=true runtime_ok=false",
-		"bundle_hash=bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"bundle_hash=bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -208,7 +208,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := validVersionHealthResult()
 				result["bundle"] = map[string]any{
-					"bundle_hash":    "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					"bundle_hash":    "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 					"workflow_name":  "workflow",
 					"workflow_extra": "ignored",
 				}
@@ -266,7 +266,7 @@ func validVersionHealthResult() map[string]any {
 		"db_ok":      true,
 		"runtime_ok": false,
 		"bundle": map[string]any{
-			"bundle_hash":      "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"bundle_hash":      "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			"workflow_name":    "workflow",
 			"workflow_version": "v1",
 		},

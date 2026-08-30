@@ -1,0 +1,4 @@
+name: test-clear-state
+version: 1.0.0
+description: Clear handler resets accumulator state.
+platform_version: ">=0.7.0 <0.8.0"

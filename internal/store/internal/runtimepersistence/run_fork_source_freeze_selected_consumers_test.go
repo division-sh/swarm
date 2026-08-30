@@ -27,7 +27,7 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 				surface = base.sqlite
 				fixture = newSelectedCompletionFixture(t, surface, base.db, true)
 			}
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			issued, err := surface.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatal(err)
@@ -70,7 +70,7 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, now time.Time) {
 	t.Helper()
 	continuedRunID := uuid.NewString()
-	ctx := testAuthorActivityBundleSourceContext()
+	ctx := testAuthorActivitySourceArtifactContext()
 	var selected any
 	if fixture.sqlite {
 		selected = NewSQLiteRuntimeStoreForTest(fixture.db)
@@ -93,7 +93,7 @@ func TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence(t *testing
 	insertForkedConsumerEvent(t, fixture, eventID, "selected.route.source", fixture.forkedAt.Add(-time.Minute))
 	fixture.freeze(t)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivityBundleSourceContext(), runfork.RunForkSelectedContractRouteRecoveryRequest{
+	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivitySourceArtifactContext(), runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID: fixture.continued, SourceRunID: fixture.sourceRun, ForkEventID: eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	})

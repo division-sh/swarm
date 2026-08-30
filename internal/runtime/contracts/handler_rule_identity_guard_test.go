@@ -66,7 +66,7 @@ func TestHandlerRuleDisplayLabelReaderBoundary(t *testing.T) {
 	}
 	sort.Strings(problems)
 	if len(problems) > 0 {
-		t.Fatalf("HandlerRuleEntry.ID reader boundary changed:\n%s\nThe field is presentation-only except the explicitly deferred transition-lowering seam; use ContractElementRef for semantic identity.", strings.Join(problems, "\n"))
+		t.Fatalf("HandlerRuleEntry.ID reader boundary changed:\n%s\nThe field is presentation-only except explicitly tracked generated-name seams; use DeclarationIdentity for authored semantic identity.", strings.Join(problems, "\n"))
 	}
 }
 
@@ -117,7 +117,7 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/contracts/workflow_contract_emit.go::HandlerDeclarativeEmitSites":                                        {Count: 6, Reason: "emit-site presentation label"},
 		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":                                       {Count: 1, Reason: "emit-template presentation label"},
 		"internal/runtime/contracts/workflow_contract_policy_sheet.go::lowerPolicySheetRuleNode":                                   {Count: 9, Reason: "decode diagnostics and presentation metadata"},
-		"internal/runtime/contracts/workflow_contract_rule_identity.go::QualifySystemNodeHandlerRuleRefs":                          {Count: 2, Reason: "identity-admission diagnostics only"},
+		"internal/runtime/contracts/workflow_contract_rule_identity.go::QualifySystemNodeHandlerRuleRefsForEvent":                  {Count: 1, Reason: "path-derived identity-admission diagnostic label only"},
 		"internal/runtime/contracts/workflow_contract_semantics.go::deriveRuleTransitions":                                         {Count: 2, Reason: "deferred transition identity authority tracked by #1769/#1775"},
 		"internal/runtime/contracts/workflow_contract_yaml_handlers.go::decodeHandlerRuleEntriesNode":                              {Count: 2, Reason: "keyed-map presentation projection"},
 		"internal/runtime/contracts/workflow_contract_yaml_handlers.go::decodeHandlerRuleEntryNode":                                {Count: 1, Reason: "non-empty presentation field check"},

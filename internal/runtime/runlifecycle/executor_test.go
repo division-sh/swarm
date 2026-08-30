@@ -12,7 +12,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
-const executorTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const executorTestBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type executorTestStore struct {
 	list    func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error)
@@ -533,7 +533,7 @@ func TestExecutorAllowsDifferentRunsToExecuteConcurrently(t *testing.T) {
 
 func TestExecutorCrossBundleSameRevisionRetainsNewScopeRepresentation(t *testing.T) {
 	oldCandidate := executorTestCandidate(1)
-	newBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	newBundleHash := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	newCandidate := oldCandidate
 	newCandidate.BundleHash = newBundleHash
 	oldStarted := make(chan struct{})

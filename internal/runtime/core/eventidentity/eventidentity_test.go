@@ -147,17 +147,20 @@ func TestScopeResolveEvent_LeavesUndeclaredDescendantEventUnchanged(t *testing.T
 	}
 }
 
-func TestScopeMatches_TreatsLocalAndScopedInputEventsAsEquivalent(t *testing.T) {
+func TestScopeMatches_TreatsLocalAndOwnFlowInputEventsAsEquivalent(t *testing.T) {
 	scope := Scope{
 		Path:        "discovery",
 		InputEvents: []string{"scan.requested"},
 	}
 
-	if !scope.Matches("scan.requested", "producer/scan.requested", nil) {
-		t.Fatal("expected local subscription to match scoped event")
+	if !scope.Matches("scan.requested", "discovery/scan.requested", nil) {
+		t.Fatal("expected local subscription to match own-flow event")
 	}
 	if !scope.Matches("scan.requested", "scan.requested", nil) {
 		t.Fatal("expected local subscription to match local event")
+	}
+	if scope.Matches("scan.requested", "producer/scan.requested", nil) {
+		t.Fatal("sibling-qualified event matched by leaf-name coincidence")
 	}
 }
 

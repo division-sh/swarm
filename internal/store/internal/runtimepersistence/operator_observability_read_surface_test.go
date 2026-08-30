@@ -454,16 +454,17 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 
-	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	artifactA := storeTestSourceArtifact("operator-observability-a")
+	artifactB := storeTestSourceArtifact("operator-observability-b")
+	bundleA := artifactA.BundleHash()
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-		RunID: runA, BundleHash: bundleA, StartedAt: base,
+		RunID: runA, Artifact: artifactA, StartedAt: base,
 	})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-		RunID: runB, BundleHash: bundleB, StartedAt: base,
+		RunID: runB, Artifact: artifactB, StartedAt: base,
 	})
 	insertLog := func(runID, code string, createdAt time.Time) string {
 		t.Helper()

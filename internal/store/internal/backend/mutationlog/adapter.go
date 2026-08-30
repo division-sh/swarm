@@ -19,7 +19,7 @@ import (
 )
 
 type ActiveRunSourceOwner interface {
-	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 }
 
 func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, rec runtimemutationlog.Record) error {
@@ -51,7 +51,7 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	if err != nil {
 		return err
 	}
-	contextFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("mutation log bundle source fact is required")
 	}
@@ -141,7 +141,7 @@ func InsertSQLiteWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveR
 	if err != nil {
 		return err
 	}
-	contextFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("mutation log bundle source fact is required")
 	}

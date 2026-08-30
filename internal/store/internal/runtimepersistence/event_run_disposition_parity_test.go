@@ -227,6 +227,7 @@ func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			requireDefaultSourceArtifactForTest(t, ctx, fixture.store)
 			store := fixture.store.(runtimeagentcontrol.DirectiveOperationStore)
 			req := newRunDispositionDirectiveRequest(t, runtimeagentcontrol.RunResolutionNewRunAllocated)
 			seedTestAgentRow(

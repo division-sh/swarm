@@ -14,7 +14,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -115,7 +114,7 @@ func TestExecutionToolsForActorUsesScopedDeclarationWithLiteralPublicName(t *tes
 	}
 	alpha := runtimecontracts.FlowContractView{
 		Path:  "alpha",
-		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "alpha"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"local-worker": {ID: "alpha-worker", Tools: []string{"shared-tool", "infra.ping"}},
 		},
@@ -129,7 +128,7 @@ func TestExecutionToolsForActorUsesScopedDeclarationWithLiteralPublicName(t *tes
 	}
 	beta := runtimecontracts.FlowContractView{
 		Path:  "beta",
-		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "beta"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool", "infra.ping"}},
 		},
@@ -563,175 +562,6 @@ func mustHTTPExecution(t *testing.T, rawURL string) runtimecontracts.ToolHTTPExe
 	return execution
 }
 
-func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
-	var sawAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth = r.Header.Get("Authorization")
-		if want := "Bearer tenant-secret"; sawAuth != want {
-			t.Fatalf("Authorization = %q, want %q", sawAuth, want)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
-	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
-		serverURL:      server.URL,
-		credentialBind: "        provider_key: tenant_provider_key\n",
-	})
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "tenant-secret"); err != nil {
-		t.Fatalf("Set tenant_provider_key: %v", err)
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker-agent",
-		Tools:         []string{"send_provider"},
-	})
-
-	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
-	if err != nil {
-		t.Fatalf("Execute(send_provider): %v", err)
-	}
-	if got := out.(map[string]any)["ok"]; got != true {
-		t.Fatalf("result ok = %#v, want true", got)
-	}
-}
-
-func TestExecutor_HTTPToolUsesImportedPackageCredentialBindingForRenderedActorID(t *testing.T) {
-	var sawAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth = r.Header.Get("Authorization")
-		if want := "Bearer tenant-secret"; sawAuth != want {
-			t.Fatalf("Authorization = %q, want %q", sawAuth, want)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
-	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
-		serverURL:      server.URL,
-		credentialBind: "        provider_key: tenant_provider_key\n",
-	})
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "tenant-secret"); err != nil {
-		t.Fatalf("Set tenant_provider_key: %v", err)
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker-agent-rendered",
-		FlowPath:      "worker/instance-1",
-		Tools:         []string{"send_provider"},
-	})
-
-	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
-	if err != nil {
-		t.Fatalf("Execute(send_provider): %v", err)
-	}
-	if got := out.(map[string]any)["ok"]; got != true {
-		t.Fatalf("result ok = %#v, want true", got)
-	}
-}
-
-func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("HTTP server should not be called when imported credential binding is missing")
-	}))
-	defer server.Close()
-
-	source := loadToolImportDependencySource(t, toolImportDependencyOptions{serverURL: server.URL})
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(unmanagedToolTestContext(), "provider_key", "ambient-secret"); err != nil {
-		t.Fatalf("Set provider_key: %v", err)
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker-agent",
-		Tools:         []string{"send_provider"},
-	})
-
-	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
-}
-
-func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("HTTP server should not be called when imported credential dependency is undeclared")
-	}))
-	defer server.Close()
-
-	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
-		serverURL:              server.URL,
-		omitCredentialRequires: true,
-	})
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(unmanagedToolTestContext(), "provider_key", "ambient-secret"); err != nil {
-		t.Fatalf("Set provider_key: %v", err)
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker-agent",
-		Tools:         []string{"send_provider"},
-	})
-
-	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
-}
-
-func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testing.T) {
-	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
-		credentialBind: "        provider_key: tenant_provider_key\n",
-		policyRequires: `  policy:
-    web_search_provider:
-      default:
-        provider: brave
-        credentials_key: provider_key
-        max_results_default: 3
-`,
-	})
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "native-secret"); err != nil {
-		t.Fatalf("Set tenant_provider_key: %v", err)
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	actor := models.AgentConfig{ExecutionMode: "live", ID: "worker-agent-rendered", FlowPath: "worker/instance-1", NativeTools: models.NativeToolConfig{WebSearch: true}}
-
-	cfg, err := exec.resolveWebSearchProviderConfig(actor)
-	if err != nil {
-		t.Fatalf("resolveWebSearchProviderConfig: %v", err)
-	}
-	if cfg.Provider != "brave" || cfg.CredentialsKey != "provider_key" || cfg.MaxResultsDefault != 3 {
-		t.Fatalf("web search cfg = %+v, want imported policy default provider_key", cfg)
-	}
-	creds, err := exec.resolveToolCredentialsForActor(unmanagedToolTestContext(), actor, []string{cfg.CredentialsKey})
-	if err != nil {
-		t.Fatalf("resolveToolCredentialsForActor: %v", err)
-	}
-	if got := creds["provider_key"]; got != "native-secret" {
-		t.Fatalf("provider_key credential = %#v, want native-secret from bound deployment key", got)
-	}
-}
-
 func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
@@ -931,84 +761,6 @@ func writeMCPResult(t *testing.T, w http.ResponseWriter, id any, result any) {
 		"id":      id,
 		"result":  result,
 	})
-}
-
-type toolImportDependencyOptions struct {
-	serverURL              string
-	credentialBind         string
-	policyRequires         string
-	omitCredentialRequires bool
-}
-
-func loadToolImportDependencySource(t *testing.T, opts toolImportDependencyOptions) semanticview.Source {
-	t.Helper()
-	repoRoot := toolsRepoRootForTest(t)
-	root := t.TempDir()
-	bindCredentials := ""
-	if strings.TrimSpace(opts.credentialBind) != "" {
-		bindCredentials = "      credentials:\n" + opts.credentialBind
-	}
-	policyRequires := opts.policyRequires
-	if strings.TrimSpace(policyRequires) == "" {
-		policyRequires = "  policy: [web_search_provider]\n"
-	}
-	credentialRequires := "  credentials: [provider_key]\n"
-	if opts.omitCredentialRequires {
-		credentialRequires = ""
-	}
-	serverURL := strings.TrimSpace(opts.serverURL)
-	if serverURL == "" {
-		serverURL = "https://provider.example.test"
-	}
-	writeToolFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: tool-import-dependencies
-version: "1.0.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-    bind:
-`+bindCredentials)
-	writeToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: tool-import-dependencies\n")
-	writeToolFixtureFile(t, filepath.Join(root, "policy.yaml"), `
-web_search_provider:
-  provider: brave
-  credentials_key: provider_key
-`)
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
-name: worker-package
-version: "1.0.0"
-requires:
-`+policyRequires+credentialRequires+`
-`)
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
-worker-agent:
-  id: worker-agent
-  role: worker
-  intent: {inline: "Invoke only the provider tools declared by this contract."}
-  model: regular
-  tools: [send_provider]
-`)
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), `
-send_provider:
-  handler_type: http
-  credentials: [provider_key]
-  input_schema:
-    type: object
-  http:
-    method: GET
-    url: `+serverURL+`
-    headers:
-      Authorization: Bearer {{credentials.provider_key}}
-  response_mapping:
-    ok: '{{response.body.ok}}'
-`)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
 }
 
 func toolsRepoRootForTest(t *testing.T) string {

@@ -43,7 +43,6 @@ type AuthoredEventEndpoint struct {
 	Kind           EventEndpointKind                        `json:"kind"`
 	FlowID         string                                   `json:"flow_id,omitempty"`
 	FlowPath       string                                   `json:"flow_path,omitempty"`
-	PackageKey     string                                   `json:"package_key,omitempty"`
 	Event          FlowEventProof                           `json:"event"`
 	Pattern        bool                                     `json:"pattern,omitempty"`
 	NodeID         string                                   `json:"node_id,omitempty"`
@@ -72,29 +71,29 @@ const (
 type TypedPubSubBoundary string
 
 const (
-	TypedPubSubBoundarySameFlow       TypedPubSubBoundary = "same_flow"
-	TypedPubSubBoundaryImportBoundary TypedPubSubBoundary = "import_boundary"
+	TypedPubSubBoundarySameFlow TypedPubSubBoundary = "same_flow"
+	TypedPubSubBoundaryFlowTree TypedPubSubBoundary = "flow_tree"
 )
 
 const TypedPubSubFailureAuthorizationAmbiguous = "typed_pubsub_authorization_ambiguous"
 
 type TypedPubSubAuthorizationProof struct {
-	ParentPackageKey string `json:"parent_package_key,omitempty"`
-	ChildPackageKey  string `json:"child_package_key"`
-	ImportLabel      string `json:"import_label,omitempty"`
-	Source           string `json:"source,omitempty"`
-	EventPattern     string `json:"event_pattern"`
-	MatchPattern     string `json:"match_pattern"`
-	LocalizedEvent   string `json:"localized_event"`
-	RouteSource      string `json:"route_source"`
+	SourceFlowPath string `json:"source_flow_path,omitempty"`
+	TargetFlowPath string `json:"target_flow_path"`
+	RouteLabel     string `json:"route_label,omitempty"`
+	Source         string `json:"source,omitempty"`
+	EventPattern   string `json:"event_pattern"`
+	MatchPattern   string `json:"match_pattern"`
+	LocalizedEvent string `json:"localized_event"`
+	RouteSource    string `json:"route_source"`
 }
 
 func (p TypedPubSubAuthorizationProof) Identity() string {
 	return strings.Join([]string{
 		strings.TrimSpace(p.RouteSource),
-		strings.TrimSpace(p.ParentPackageKey),
-		strings.TrimSpace(p.ChildPackageKey),
-		strings.TrimSpace(p.ImportLabel),
+		strings.TrimSpace(p.SourceFlowPath),
+		strings.TrimSpace(p.TargetFlowPath),
+		strings.TrimSpace(p.RouteLabel),
 		strings.TrimSpace(p.Source),
 		eventidentity.Normalize(p.EventPattern),
 		eventidentity.Normalize(p.MatchPattern),
@@ -285,46 +284,7 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubRelations() TypedPubSubRe
 }
 
 func (c AuthoredEventEndpointCensus) resolveDeclaredEventTypedPubSubAuthorizationConflicts() []TypedPubSubConsumerIssue {
-	if c.source == nil {
-		return nil
-	}
-	proofs := authoredTypedPubSubEventProofs(c.source)
-	issues := make([]TypedPubSubConsumerIssue, 0)
-	for _, consumer := range c.consumers {
-		if !consumer.Pattern {
-			continue
-		}
-		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(
-			c.source,
-			consumer.PackageKey,
-			consumer.FlowID,
-			"",
-			nil,
-			consumer.Event.Authored,
-		)
-		if !resolution.Scoped {
-			continue
-		}
-		for _, proof := range proofs {
-			if strings.TrimSpace(proof.FlowID) == strings.TrimSpace(consumer.FlowID) {
-				continue
-			}
-			authorizations := matchingTypedPubSubAuthorizations(resolution.Patterns, proof)
-			if len(authorizations) < 2 {
-				continue
-			}
-			issues = append(issues, TypedPubSubConsumerIssue{
-				Failure:        TypedPubSubFailureAuthorizationAmbiguous,
-				Consumer:       consumer,
-				Event:          proof,
-				Authorizations: authorizations,
-			})
-		}
-	}
-	sort.SliceStable(issues, func(i, j int) bool {
-		return typedPubSubConsumerIssueSortKey(issues[i]) < typedPubSubConsumerIssueSortKey(issues[j])
-	})
-	return issues
+	return nil
 }
 
 func authoredTypedPubSubEventProofs(source Source) []FlowEventProof {
@@ -341,9 +301,6 @@ func authoredTypedPubSubEventProofs(source Source) []FlowEventProof {
 			}
 			byIdentity[flowID+"\x00"+proof.EventKey()] = proof
 		}
-	}
-	for _, scope := range source.ProjectScopes() {
-		appendEvents(scope.OwningFlowID, scope.Events)
 	}
 	for _, scope := range source.FlowScopes() {
 		appendEvents(scope.ID, scope.Events)
@@ -394,47 +351,21 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 		if admission, classified := endpointSubscriptionAdmission(c.source, consumer); classified && !admission.Admitted() {
 			continue
 		}
-		if strings.TrimSpace(producer.FlowID) == strings.TrimSpace(consumer.FlowID) {
-			if !endpointMatchesProof(c.source, consumer, proof) {
-				continue
-			}
-			kind := TypedPubSubMatchExact
-			if consumer.Pattern {
-				kind = TypedPubSubMatchPattern
-			}
-			matches = append(matches, TypedPubSubConsumerMatch{
-				Producer:           producer,
-				Consumer:           consumer,
-				Event:              proof,
-				Kind:               kind,
-				Boundary:           TypedPubSubBoundarySameFlow,
-				AuthorizationProof: string(TypedPubSubBoundarySameFlow),
-			})
+		if !endpointMatchesProof(c.source, consumer, proof) {
 			continue
 		}
-
-		if !consumer.Pattern {
-			continue
+		kind := TypedPubSubMatchExact
+		if consumer.Pattern {
+			kind = TypedPubSubMatchPattern
 		}
-		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(
-			c.source,
-			consumer.PackageKey,
-			consumer.FlowID,
-			"",
-			nil,
-			consumer.Event.Authored,
-		)
-		if !resolution.Scoped {
-			continue
+		boundary := TypedPubSubBoundarySameFlow
+		if strings.TrimSpace(producer.FlowID) != strings.TrimSpace(consumer.FlowID) {
+			boundary = TypedPubSubBoundaryFlowTree
 		}
-		authorizations := matchingTypedPubSubAuthorizations(resolution.Patterns, proof)
-		match, issue := resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, authorizations)
-		if match != nil {
-			matches = append(matches, *match)
-		}
-		if issue != nil {
-			issues = append(issues, *issue)
-		}
+		matches = append(matches, TypedPubSubConsumerMatch{
+			Producer: producer, Consumer: consumer, Event: proof, Kind: kind,
+			Boundary: boundary, AuthorizationProof: string(boundary),
+		})
 	}
 
 	sort.SliceStable(matches, func(i, j int) bool {
@@ -444,73 +375,6 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 		return typedPubSubConsumerIssueSortKey(issues[i]) < typedPubSubConsumerIssueSortKey(issues[j])
 	})
 	return matches, issues
-}
-
-func resolveTypedPubSubCrossFlowRelation(producer, consumer AuthoredEventEndpoint, proof FlowEventProof, authorizations []TypedPubSubAuthorizationProof) (*TypedPubSubConsumerMatch, *TypedPubSubConsumerIssue) {
-	switch len(authorizations) {
-	case 0:
-		return nil, nil
-	case 1:
-		authorization := authorizations[0]
-		return &TypedPubSubConsumerMatch{
-			Producer:           producer,
-			Consumer:           consumer,
-			Event:              proof,
-			Kind:               TypedPubSubMatchPattern,
-			Boundary:           TypedPubSubBoundaryImportBoundary,
-			Authorization:      &authorization,
-			AuthorizationProof: authorization.Identity(),
-		}, nil
-	default:
-		return nil, &TypedPubSubConsumerIssue{
-			Failure:        TypedPubSubFailureAuthorizationAmbiguous,
-			Producer:       producer,
-			Consumer:       consumer,
-			Event:          proof,
-			Authorizations: append([]TypedPubSubAuthorizationProof(nil), authorizations...),
-		}
-	}
-}
-
-func matchingTypedPubSubAuthorizations(patterns []ImportBoundaryWildcardPattern, proof FlowEventProof) []TypedPubSubAuthorizationProof {
-	candidates := []string{proof.EventKey(), proof.Canonical, proof.Authored, proof.Local}
-	byIdentity := map[string]TypedPubSubAuthorizationProof{}
-	for _, pattern := range patterns {
-		matched := false
-		for _, candidate := range candidates {
-			if candidate = eventidentity.Normalize(candidate); candidate != "" && eventidentity.MatchPattern(pattern.EventPattern, candidate) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-		authorization := TypedPubSubAuthorizationProof{
-			ParentPackageKey: strings.TrimSpace(pattern.ParentPackageKey),
-			ChildPackageKey:  strings.TrimSpace(pattern.ChildPackageKey),
-			ImportLabel:      strings.TrimSpace(pattern.ImportLabel),
-			Source:           strings.TrimSpace(pattern.Source),
-			EventPattern:     eventidentity.Normalize(pattern.AuthorizationPattern),
-			MatchPattern:     eventidentity.Normalize(pattern.MatchPattern),
-			LocalizedEvent:   eventidentity.Normalize(pattern.LocalizedEvent),
-			RouteSource:      strings.TrimSpace(pattern.RouteSource),
-		}
-		if authorization.EventPattern == "" {
-			authorization.EventPattern = eventidentity.Normalize(pattern.EventPattern)
-		}
-		byIdentity[authorization.Identity()] = authorization
-	}
-	identities := make([]string, 0, len(byIdentity))
-	for identity := range byIdentity {
-		identities = append(identities, identity)
-	}
-	sort.Strings(identities)
-	out := make([]TypedPubSubAuthorizationProof, 0, len(identities))
-	for _, identity := range identities {
-		out = append(out, byIdentity[identity])
-	}
-	return out
 }
 
 func typedPubSubConsumerMatchSortKey(match TypedPubSubConsumerMatch) string {
@@ -560,9 +424,10 @@ func (c AuthoredEventEndpointCensus) matchingEndpoints(endpoints []AuthoredEvent
 	if c.source == nil || proof.EventKey() == "" {
 		return nil
 	}
+	wantFlowPath := canonicalEndpointFlowPath(c.source, flowID, "")
 	out := make([]AuthoredEventEndpoint, 0)
 	for _, endpoint := range endpoints {
-		if strings.TrimSpace(endpoint.FlowID) != flowID {
+		if canonicalEndpointFlowPath(c.source, endpoint.FlowID, endpoint.FlowPath) != wantFlowPath {
 			continue
 		}
 		if endpointMatchesProof(c.source, endpoint, proof) {
@@ -570,6 +435,23 @@ func (c AuthoredEventEndpointCensus) matchingEndpoints(endpoints []AuthoredEvent
 		}
 	}
 	return cloneEventEndpoints(out)
+}
+
+func canonicalEndpointFlowPath(source Source, flowID, flowPath string) string {
+	flowID = strings.TrimSpace(flowID)
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	if flowPath != "" {
+		return flowPath
+	}
+	if flowID == "" || flowID == "." {
+		return "."
+	}
+	if source != nil {
+		if resolved := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); resolved != "" {
+			return resolved
+		}
+	}
+	return flowID
 }
 
 func (c AuthoredEventEndpointCensus) matchingEndpointsAcrossFlows(endpoints []AuthoredEventEndpoint, flowID, eventType string) []AuthoredEventEndpoint {
@@ -689,7 +571,7 @@ func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(node runtimeide
 	if !node.Valid() {
 		return EndpointAssociationResult{Status: EndpointAssociationNotFound, Identity: eventidentity.Normalize(handlerEvent)}
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	handlerEvent = eventidentity.Normalize(handlerEvent)
 	candidates := make([]AuthoredEventEndpoint, 0)
 	for _, endpoint := range c.inputPins {
@@ -739,8 +621,7 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 	authoredByNodeEvent := map[string]struct{}{}
 	for _, site := range AuthoredEmitSites(b.source) {
 		eventType := site.Spec.EventType()
-		endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeHandler, site.FlowID(), eventType)
-		endpoint.PackageKey = site.PackageKey()
+		endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeHandler, site.FlowPathIdentity(), eventType)
 		endpoint.FlowPath = strings.TrimSpace(site.FlowPath)
 		endpoint.NodeID = site.NodeID()
 		endpoint.Node = site.Node
@@ -762,7 +643,7 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 		nodeID := nodeRef.NodeID()
 		node := record.Entry
 		source := record.Source
-		flowID := nodeRef.FlowID()
+		flowID := nodeRef.FlowPath()
 		b.assertions = append(b.assertions, NodeProducerAssertion{
 			NodeID:     nodeID,
 			FlowID:     flowID,
@@ -778,7 +659,6 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeGenerated, flowID, eventType)
 			endpoint.NodeID = nodeID
 			endpoint.Node = nodeRef
-			endpoint.PackageKey = strings.TrimSpace(source.PackageKey)
 			endpoint.SourceFile = strings.TrimSpace(source.File)
 			endpoint.SourceLocation = "effective generated producer"
 			b.add(endpoint)
@@ -795,7 +675,6 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			endpoint.NodeID = nodeID
 			endpoint.Node = nodeRef
 			endpoint.HandlerEvent = handlerEvent
-			endpoint.PackageKey = strings.TrimSpace(source.PackageKey)
 			endpoint.SourceFile = strings.TrimSpace(source.File)
 			endpoint.Pattern = strings.Contains(eventType, "*")
 			endpoint.SourceLocation = "event_handlers." + eventType
@@ -818,11 +697,11 @@ func (b *endpointCensusBuilder) addAgentEndpoints() {
 		if projection.OwnerFlowID != "" {
 			flowPath = strings.Trim(strings.TrimSpace(b.source.FlowPath(projection.OwnerFlowID)), "/")
 		}
-		b.addAgent(plan, declaration.Entry, projection.ContractSource.PackageKey, flowPath, projection.ContractSource.File)
+		b.addAgent(plan, declaration.Entry, flowPath, projection.ContractSource.File)
 	}
 }
 
-func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontracts.AgentRegistryEntry, packageKey, flowPath, sourceFile string) {
+func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontracts.AgentRegistryEntry, flowPath, sourceFile string) {
 	flowID := strings.TrimSpace(plan.OwnerFlowID)
 	role := strings.TrimSpace(agent.Role)
 	for _, eventType := range normalizedSortedStrings(agent.EmitEvents) {
@@ -830,7 +709,6 @@ func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontra
 		endpoint.AgentLocalID = plan.LocalID
 		endpoint.AgentID = plan.AgentID
 		endpoint.Role = role
-		endpoint.PackageKey = strings.TrimSpace(packageKey)
 		endpoint.FlowPath = strings.TrimSpace(flowPath)
 		endpoint.SourceFile = strings.TrimSpace(sourceFile)
 		endpoint.SourceLocation = "emit_events"
@@ -841,7 +719,6 @@ func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontra
 		endpoint.AgentLocalID = plan.LocalID
 		endpoint.AgentID = plan.AgentID
 		endpoint.Role = role
-		endpoint.PackageKey = strings.TrimSpace(packageKey)
 		endpoint.FlowPath = strings.TrimSpace(flowPath)
 		endpoint.SourceFile = strings.TrimSpace(sourceFile)
 		endpoint.SourceLocation = "subscriptions"
@@ -851,8 +728,11 @@ func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontra
 }
 
 func (b *endpointCensusBuilder) addRequiredAgentEndpoints() {
-	b.addRequiredAgentScope("", b.source.RequiredAgents())
+	b.addRequiredAgentScope(".", b.source.RequiredAgents())
 	for _, scope := range sortedFlowScopes(b.source.FlowScopes()) {
+		if strings.TrimSpace(scope.ID) == "." {
+			continue
+		}
 		b.addRequiredAgentScope(strings.TrimSpace(scope.ID), b.source.FlowRequiredAgents(scope.ID))
 	}
 }
@@ -891,7 +771,6 @@ func (b *endpointCensusBuilder) addTimerEndpoints() {
 			endpoint := b.endpoint(EventEndpointProducer, kind, flowID, eventType)
 			endpoint.TimerID = strings.TrimSpace(timer.ID)
 			if timer.Node.Valid() {
-				endpoint.PackageKey = timer.Node.PackageKey()
 				endpoint.NodeID = timer.Node.NodeID()
 			}
 			endpoint.SourceLocation = location
@@ -916,16 +795,20 @@ func (b *endpointCensusBuilder) addTimerEndpoints() {
 func (b *endpointCensusBuilder) addAutoEmitEndpoints() {
 	if bundle, ok := Bundle(b.source); ok && bundle != nil && bundle.RootSchema != nil {
 		if eventType := strings.TrimSpace(bundle.RootSchema.AutoEmitOnCreate.Event); eventType != "" {
-			endpoint := b.endpoint(EventEndpointProducer, EventEndpointAutoEmit, "", eventType)
-			endpoint.SourceFile = strings.TrimSpace(bundle.Paths.RootSchemaFile)
+			endpoint := b.endpoint(EventEndpointProducer, EventEndpointAutoEmit, ".", eventType)
+			if root, ok := bundle.FlowSources["."]; ok {
+				endpoint.SourceFile = strings.TrimSpace(root.Schema)
+			}
 			endpoint.SourceLocation = "auto_emit_on_create"
 			b.add(endpoint)
 		}
 	}
 	for _, scope := range sortedFlowScopes(b.source.FlowScopes()) {
+		if strings.TrimSpace(scope.ID) == "." {
+			continue
+		}
 		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
 			endpoint := b.endpoint(EventEndpointProducer, EventEndpointAutoEmit, scope.ID, eventType)
-			endpoint.PackageKey = strings.TrimSpace(scope.PackageKey)
 			endpoint.SourceLocation = "auto_emit_on_create"
 			b.add(endpoint)
 		}
@@ -933,7 +816,7 @@ func (b *endpointCensusBuilder) addAutoEmitEndpoints() {
 }
 
 func (b *endpointCensusBuilder) addPinEndpoints() {
-	flowIDs := []string{""}
+	flowIDs := make([]string, 0)
 	for _, scope := range sortedFlowScopes(b.source.FlowScopes()) {
 		flowIDs = append(flowIDs, strings.TrimSpace(scope.ID))
 	}
@@ -963,12 +846,12 @@ func (b *endpointCensusBuilder) addMetadataBoundaryEndpoints() {
 			if strings.HasPrefix(source, "platform") {
 				kind = EventEndpointPlatform
 			}
-			endpoint := b.endpoint(EventEndpointProducer, kind, "", eventType)
+			endpoint := b.endpoint(EventEndpointProducer, kind, ".", eventType)
 			endpoint.SourceLocation = "swarm.source"
 			b.add(endpoint)
 		}
 		if boundary := entry.AcceptedConsumerBoundary(); boundary != runtimecontracts.EventConsumerBoundaryNone {
-			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointExternal, "", eventType)
+			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointExternal, ".", eventType)
 			endpoint.Role = runtimecontracts.EventConsumerBoundaryCode(boundary)
 			endpoint.SourceLocation = "swarm.consumer"
 			b.add(endpoint)
@@ -979,18 +862,15 @@ func (b *endpointCensusBuilder) addMetadataBoundaryEndpoints() {
 func (b *endpointCensusBuilder) endpoint(direction EventEndpointDirection, kind EventEndpointKind, flowID, eventType string) AuthoredEventEndpoint {
 	flowID = strings.TrimSpace(flowID)
 	flowPath := ""
-	packageKey := ""
 	if scope, ok := b.source.FlowScopeByID(flowID); ok {
 		flowPath = strings.TrimSpace(scope.Path)
-		packageKey = strings.TrimSpace(scope.PackageKey)
 	}
 	return AuthoredEventEndpoint{
-		Direction:  direction,
-		Kind:       kind,
-		FlowID:     flowID,
-		FlowPath:   flowPath,
-		PackageKey: packageKey,
-		Event:      ResolveFlowEventProof(b.source, flowID, eventType),
+		Direction: direction,
+		Kind:      kind,
+		FlowID:    flowID,
+		FlowPath:  flowPath,
+		Event:     ResolveFlowEventProof(b.source, flowID, eventType),
 	}
 }
 
@@ -1050,11 +930,14 @@ func (b *endpointCensusBuilder) yamlFile(file string) yamlsource.Node {
 		return root
 	}
 	b.yamlFiles[file] = yamlsource.Node{}
-	source, err := yamlsource.LoadFile(file)
-	if err != nil {
+	bundle, ok := Bundle(b.source)
+	if !ok || bundle.SourceArtifact == nil {
 		return yamlsource.Node{}
 	}
-	root := source.Root()
+	root, ok := bundle.SourceArtifact.YAMLRoot(file)
+	if !ok {
+		return yamlsource.Node{}
+	}
 	b.yamlFiles[file] = root
 	return root
 }
@@ -1158,11 +1041,6 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 		_, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
 		return admission.MatchesReceiverInput(proof.EventKey(), flowPath, inputEvents)
 	}
-	if endpoint.Pattern {
-		if matched, scoped := ImportBoundaryWildcardSubscriptionMatches(source, endpoint.PackageKey, endpoint.FlowID, "", nil, endpoint.Event.Authored, proof.EventKey()); scoped {
-			return matched
-		}
-	}
 	return flowEventMatchesWithoutTopology(source, endpoint.FlowID, endpoint.Event.Authored, proof.EventKey()) ||
 		eventidentity.Normalize(endpoint.Event.Canonical) == eventidentity.Normalize(proof.Canonical)
 }
@@ -1186,9 +1064,9 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 	default:
 		return AuthoredSubscriptionAdmission{}, false
 	}
-	flowPath := eventidentity.Normalize(endpoint.FlowPath)
-	if flowPath == "" && source != nil {
-		flowPath = eventidentity.Normalize(source.FlowPath(endpoint.FlowID))
+	flowPath := eventidentity.Normalize(sourceFlowPath(source, endpoint.FlowID))
+	if flowPath == "" && strings.TrimSpace(endpoint.FlowID) != "." {
+		flowPath = eventidentity.Normalize(endpoint.FlowPath)
 	}
 	localEvents, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
@@ -1196,7 +1074,6 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 		ConsumerID:   consumerID,
 		FlowID:       endpoint.FlowID,
 		FlowPath:     flowPath,
-		PackageKey:   endpoint.PackageKey,
 		LocalEvents:  localEvents,
 		InputEvents:  inputEvents,
 		Authored:     endpoint.Event.Authored,
@@ -1272,7 +1149,7 @@ func eventEndpointID(endpoint AuthoredEventEndpoint) string {
 		eventKey = endpoint.Event.Authored
 	}
 	parts := []string{
-		string(endpoint.Direction), string(endpoint.Kind), endpoint.FlowID, endpoint.PackageKey, eventKey,
+		string(endpoint.Direction), string(endpoint.Kind), endpoint.FlowID, eventKey,
 		endpoint.NodeID, endpoint.HandlerEvent, endpoint.AgentID, endpoint.Role,
 		endpoint.TimerID, endpoint.PinName, endpoint.Site, endpoint.SourceLocation,
 	}

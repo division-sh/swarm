@@ -91,7 +91,7 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 		INSERT INTO run_fork_selected_contract_route_recoveries (
 			fork_run_id, source_run_id, fork_event_id,
 			owner, runtime_recovery_owner,
-			mode, contracts_root, bundle_hash, workflow_name, workflow_version,
+			mode, bundle_hash,
 			route_topology_owner, dynamic_topology_owner, recipient_planning_owner,
 			frontier_evidence_fingerprint, route_topology_fingerprint, recipient_planning_fingerprint,
 			static_route_event_count, dynamic_topology_proof_count, recipient_plan_event_count,
@@ -100,20 +100,17 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 		VALUES (
 			$1, $2, $3,
 			$4, $5,
-			$6, NULLIF($7, ''), NULLIF($8, ''), $9, $10,
-			$11, NULLIF($12, ''), $13,
+			$6, NULLIF($7, ''),
+			$8, NULLIF($9, ''), $10,
+			$11, $12, $13,
 			$14, $15, $16,
-			$17, $18, $19,
-			$20, $21, $22
+			$17, $18, $19
 		)
 		ON CONFLICT (fork_run_id) DO UPDATE
 		SET owner = EXCLUDED.owner,
 		    runtime_recovery_owner = EXCLUDED.runtime_recovery_owner,
 		    mode = EXCLUDED.mode,
-		    contracts_root = EXCLUDED.contracts_root,
 		    bundle_hash = EXCLUDED.bundle_hash,
-		    workflow_name = EXCLUDED.workflow_name,
-		    workflow_version = EXCLUDED.workflow_version,
 		    route_topology_owner = EXCLUDED.route_topology_owner,
 		    dynamic_topology_owner = EXCLUDED.dynamic_topology_owner,
 		    recipient_planning_owner = EXCLUDED.recipient_planning_owner,
@@ -128,7 +125,7 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 		    created_at = EXCLUDED.created_at
 	`, record.ForkRunID, record.SourceRunID, record.ForkEventID,
 		record.Owner, record.RuntimeRecoveryOwner,
-		record.ContractSelection.Mode, record.ContractSelection.ContractsRoot, record.ContractSelection.BundleHash, record.ContractSelection.WorkflowName, record.ContractSelection.WorkflowVersion,
+		record.ContractSelection.Mode, record.ContractSelection.BundleHash,
 		record.RouteTopologyOwner, record.DynamicTopologyOwner, record.RecipientPlanningOwner,
 		record.FrontierEvidenceFingerprint, record.RouteTopologyFingerprint, record.RecipientPlanningFingerprint,
 		record.StaticRouteEventCount, record.DynamicTopologyProofCount, record.RecipientPlanEventCount,
@@ -442,11 +439,7 @@ func validateRunForkSelectedContractRouteRecoverySelection(context string, left,
 	if err != nil {
 		return err
 	}
-	if left.Mode != right.Mode ||
-		left.ContractsRoot != right.ContractsRoot ||
-		left.BundleHash != right.BundleHash ||
-		left.WorkflowName != right.WorkflowName ||
-		left.WorkflowVersion != right.WorkflowVersion {
+	if left.Mode != right.Mode || left.BundleHash != right.BundleHash {
 		return fmt.Errorf("%s selected contract selection mismatch", strings.TrimSpace(context))
 	}
 	return nil
@@ -492,10 +485,7 @@ func runForkSelectedContractRouteRecoverySelect() string {
 			source_run_id,
 			fork_event_id,
 			mode,
-			COALESCE(contracts_root, ''),
 			COALESCE(bundle_hash, ''),
-			workflow_name,
-			workflow_version,
 			route_topology_owner,
 			COALESCE(dynamic_topology_owner, ''),
 			recipient_planning_owner,
@@ -535,10 +525,7 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 		&record.SourceRunID,
 		&record.ForkEventID,
 		&selection.Mode,
-		&selection.ContractsRoot,
 		&selection.BundleHash,
-		&selection.WorkflowName,
-		&selection.WorkflowVersion,
 		&record.RouteTopologyOwner,
 		&record.DynamicTopologyOwner,
 		&record.RecipientPlanningOwner,

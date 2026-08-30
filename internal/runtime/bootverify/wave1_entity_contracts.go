@@ -35,7 +35,7 @@ func wave1EntityContractForFlow(source semanticview.Source, flowID string) wave1
 	if !ok || bundle == nil {
 		return view
 	}
-	if view.FlowID == "" {
+	if view.FlowID == "." {
 		entityType, contract, ok := bundle.RootPrimaryEntityContract()
 		if ok {
 			view.EntityType = strings.TrimSpace(entityType)
@@ -73,7 +73,7 @@ func wave1RootFieldContract(source semanticview.Source, field string) (wave1Enti
 	if field == "" {
 		return wave1EntityContractView{}, false
 	}
-	root := wave1EntityContractForFlow(source, "")
+	root := wave1EntityContractForFlow(source, ".")
 	if !root.Defined {
 		return wave1EntityContractView{}, false
 	}
@@ -291,7 +291,7 @@ func wave1ListElementType(typeRef string) (string, bool) {
 
 func defaultFlowLabel(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return "root"
 	}
 	return flowID
@@ -302,11 +302,8 @@ func executableNodeDiagnostic(node runtimeidentity.ExecutableNode) string {
 		return "node <invalid>"
 	}
 	parts := make([]string, 0, 3)
-	if node.PackageKey() != runtimeidentity.RootPackageKey {
-		parts = append(parts, "package "+node.PackageKey())
-	}
-	if node.FlowID() != "" {
-		parts = append(parts, "flow "+node.FlowID())
+	if node.FlowPath() != "" {
+		parts = append(parts, "flow "+node.FlowPath())
 	}
 	parts = append(parts, "node "+node.NodeID())
 	return strings.Join(parts, " ")

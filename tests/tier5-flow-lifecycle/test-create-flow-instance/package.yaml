@@ -1,8 +1,0 @@
-name: test-create-flow-instance
-version: 1.0.0
-description: Action creates a new flow instance from template.
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker-flow
-    flow: worker-flow
-    mode: template

@@ -1,0 +1,4 @@
+name: test-guard-multi
+version: 1.0.0
+description: Two guards both pass — handler proceeds to advance state.
+platform_version: ">=0.7.0 <0.8.0"

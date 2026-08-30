@@ -1,9 +1,7 @@
 package contracts
 
 import (
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -79,24 +77,6 @@ func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 		if props == nil {
 			t.Fatalf("schema for %s has no properties", eventType)
 		}
-	}
-}
-
-func TestPhase1DefaultContractPathsAreMASOnly(t *testing.T) {
-	t.Parallel()
-
-	repoRoot := repoRootForContractsTest(t)
-	paths := ResolveWorkflowContractPaths(repoRoot)
-
-	got := filepath.ToSlash(DefaultWorkflowContractsDir(repoRoot))
-	if got != "" {
-		t.Fatalf("expected no implicit workflow contracts dir, got %q", got)
-	}
-	if strings.TrimSpace(paths.WorkflowDir) != "" {
-		t.Fatalf("expected empty workflow dir without explicit contracts root, got %q", paths.WorkflowDir)
-	}
-	if strings.TrimSpace(paths.ProjectPackageFile) != "" {
-		t.Fatalf("expected no project package file without explicit contracts root, got %q", paths.ProjectPackageFile)
 	}
 }
 

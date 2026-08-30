@@ -21,8 +21,8 @@ func BootBundleIdentity(bundle *WorkflowContractBundle) (BundleIdentity, error) 
 		return BundleIdentity{}, err
 	}
 	return BundleIdentity{
-		WorkflowName:    strings.TrimSpace(bundle.Semantics.Name),
-		WorkflowVersion: strings.TrimSpace(bundle.Semantics.Version),
+		WorkflowName:    strings.TrimSpace(bundle.WorkflowName()),
+		WorkflowVersion: strings.TrimSpace(bundle.WorkflowVersion()),
 		BundleHash:      bundleHash,
 	}, nil
 }

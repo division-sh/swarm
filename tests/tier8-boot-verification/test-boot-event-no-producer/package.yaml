@@ -1,7 +1,0 @@
-name: test-boot-event-no-producer
-version: 1.0.0
-description: >
-  Boot verification: node subscribes to event but nobody emits it.
-  Platform must warn EVENT-NO-PRODUCER.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

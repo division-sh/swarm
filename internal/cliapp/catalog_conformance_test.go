@@ -37,7 +37,7 @@ func TestCatalogRequiredVerifyAll(t *testing.T) {
 		t.Run(fixture.RelativePath, func(t *testing.T) {
 			t.Setenv("SWARM_BOOT_WARNINGS_FATAL", catalogWarningsFatal(fixture))
 			opts := defaultVerifyCommandOptions()
-			opts.contractsPath = fixture.Root
+			opts.sourceRoot = fixture.Root
 			opts.configPath = configPath
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
@@ -103,9 +103,12 @@ func TestCatalogRequiredVerifyGateMutationDiscoversAndNamesBrokenBundles(t *test
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			t.Fatalf("create broken bundle %s: %v", mutation.identity, err)
 		}
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: broken-example\n"), 0o600); err != nil {
+			t.Fatalf("write broken example manifest %s: %v", mutation.identity, err)
+		}
 		body := fmt.Sprintf("name: broken-example\n%s: true\n", mutation.field)
-		if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte(body), 0o600); err != nil {
-			t.Fatalf("write broken bundle %s: %v", mutation.identity, err)
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write broken example schema %s: %v", mutation.identity, err)
 		}
 	}
 	configPath := writeTestVerifyRuntimeConfig(t)
@@ -134,9 +137,9 @@ func TestCatalogRequiredVerifyGateRejectsDiscoveredPresentZeroOptionalFile(t *te
 		t.Fatalf("create mutated bundle: %v", err)
 	}
 	files := map[string]string{
-		"package.yaml": "name: present-zero\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"schema.yaml":  "name: present-zero\n",
-		"agents.yaml":  "{}\n",
+		"manifest.yaml": "name: present-zero\n",
+		"schema.yaml":   "name: present-zero\n",
+		"agents.yaml":   "{}\n",
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(bundleRoot, name), []byte(body), 0o600); err != nil {
@@ -186,7 +189,7 @@ func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredCo
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || entry.Name() != "package.yaml" {
+		if entry.IsDir() || entry.Name() != "manifest.yaml" {
 			return nil
 		}
 		root := filepath.Dir(path)
@@ -231,7 +234,7 @@ func verifyRequiredPassingBundles(ctx context.Context, repoRoot string, bundles 
 	var failures []string
 	for _, bundle := range bundles {
 		opts := defaultVerifyCommandOptions()
-		opts.contractsPath = bundle.Root
+		opts.sourceRoot = bundle.Root
 		opts.configPath = bundle.ConfigPath
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer

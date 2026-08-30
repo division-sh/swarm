@@ -254,7 +254,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, "mutation-flow", "research", map[string]any{"summary": "done"}); err != nil {
+	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
 		t.Fatalf("recordWorkflowEvidence: %v", err)
 	}
 
@@ -326,7 +326,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, "mutation-flow", "research", map[string]any{"summary": "done"})
+		err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
 		}
@@ -337,15 +337,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 	return &PipelineCoordinator{
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
-		module: &previewWorkflowModule{
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				RootEntities: testEntityContractsForType("test_entity"),
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					Name:    "mutation-flow",
-					Version: "1.0.0",
-				},
-			},
-		},
+		module:        &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("mutation-flow", "test_entity")},
 	}
 }
 
@@ -355,7 +347,7 @@ func seedMutationLoggingInstance(t *testing.T, store *workflowInstanceStore, ent
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
-		WorkflowName:    "mutation-flow",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
 		EntityType:      "test_entity",

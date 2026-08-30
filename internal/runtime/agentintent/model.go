@@ -450,7 +450,7 @@ func renderCriteriaParamValue(value any) string {
 	}
 }
 
-const runtimeEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nContracts: /opt/swarm/contracts (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
+const runtimeEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nSource: /opt/swarm/source (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
 
 // EnvironmentContext is an opaque generated fact so authored prompt content
 // cannot impersonate or suppress the platform-owned environment section.

@@ -17,6 +17,7 @@ import (
 func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	requireDefaultSourceArtifactForTest(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	req := pipeline.ScenarioSetupRequest{
@@ -56,7 +57,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 
 func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T) {
 	ctx := testAuthorActivityContext()
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test context bundle source fact is missing")
 	}
@@ -69,6 +70,7 @@ func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T
 		t.Fatal(err)
 	}
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	requireDefaultSourceArtifactForTest(t, ctx, store)
 	runID := uuid.NewString()
 	req := pipeline.ScenarioSetupRequest{
 		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),
@@ -109,7 +111,8 @@ func TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	requireDefaultSourceArtifactForTest(t, ctx, store)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test context bundle source fact is missing")
 	}

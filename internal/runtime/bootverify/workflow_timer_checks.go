@@ -177,7 +177,7 @@ func timerFlowDeclaresStageMapping(source semanticview.Source, flowID string) bo
 		return false
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		if provider, ok := source.(timerRootFlowSchemaProvider); ok {
 			schema, ok := provider.RootFlowSchema()
 			return ok && schema.StageDeclarations.Declared
@@ -422,7 +422,7 @@ func timerFlowInitialState(source semanticview.Source, flowID string) string {
 		return ""
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return strings.TrimSpace(source.WorkflowInitialStage())
 	}
 	return strings.TrimSpace(source.FlowInitialStage(flowID))
@@ -489,5 +489,5 @@ func flowStatesForTimer(source semanticview.Source, flowID string) []string {
 	if flowID != "" {
 		return source.FlowStates(flowID)
 	}
-	return source.FlowStates("")
+	return source.FlowStates(".")
 }

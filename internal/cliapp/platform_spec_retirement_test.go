@@ -12,14 +12,13 @@ func TestPlatformSpecFlagRetiredAcrossCommandSurface(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "serve", args: []string{"serve", "--platform-spec", "platform.yaml"}},
-		{name: "verify", args: []string{"verify", "--platform-spec", "platform.yaml"}},
-		{name: "run start", args: []string{"run", "start", "--platform-spec", "platform.yaml"}},
-		{name: "connections status", args: []string{"connections", "status", "--platform-spec", "platform.yaml"}},
-		{name: "describe", args: []string{"describe", "--platform-spec", "platform.yaml"}},
-		{name: "describe routes", args: []string{"describe", "routes", "--platform-spec", "platform.yaml"}},
+		{name: "serve", args: []string{"serve", ".", "--platform-spec", "platform.yaml"}},
+		{name: "verify", args: []string{"verify", ".", "--platform-spec", "platform.yaml"}},
+		{name: "run start", args: []string{"run", "start", ".", "--platform-spec", "platform.yaml"}},
+		{name: "describe", args: []string{"describe", ".", "--platform-spec", "platform.yaml"}},
+		{name: "describe routes", args: []string{"describe", "routes", ".", "--platform-spec", "platform.yaml"}},
 		{name: "doctor", args: []string{"doctor", "--platform-spec", "platform.yaml"}},
-		{name: "test", args: []string{"test", "--platform-spec", "platform.yaml"}},
+		{name: "test", args: []string{"test", ".", "--platform-spec", "platform.yaml"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -38,4 +37,12 @@ func TestPlatformSpecFlagRetiredAcrossCommandSurface(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("connections status has no compatibility flag", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"connections", "status", "--platform-spec", "platform.yaml"}, &stdout, &stderr, defaultRootCommandOptions())
+		if code != CLIExitValidation || !strings.Contains(stderr.String(), "unknown flag: --platform-spec") {
+			t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
 }

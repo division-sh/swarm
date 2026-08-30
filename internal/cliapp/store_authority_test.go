@@ -3,7 +3,6 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -276,54 +275,6 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 	}
 }
 
-func TestDoctorSeparatesContextDiscoveryFromProjectOwnership(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	unsetStoreSelectorEnv(t)
-	sqlitePath := filepath.Join(t.TempDir(), "selected.db")
-	configPath := writeStoreAuthorityConfig(t, sqlitePath)
-	bootstrapStoreAuthoritySQLite(t, configPath, sqlitePath)
-	seedValidAuthorityHead(t, sqlitePath, "durable-selected-store-owner")
-
-	swarmDir := filepath.Join(t.TempDir(), "state")
-	contractsPath := filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success")
-	projectRoot, canonicalStatus := canonicalizeDoctorTargetPath(contractsPath)
-	if canonicalStatus != "resolved" {
-		t.Fatalf("canonical project status = %q", canonicalStatus)
-	}
-	registry := newLocalContextRegistry(swarmDir)
-	first := startCLIAPIRuntimeIdentityServer(t, "context-runtime-one")
-	second := startCLIAPIRuntimeIdentityServer(t, "context-runtime-two")
-	writeCLIAPITestContext(t, registry, "one", "context-runtime-one", first.URL, projectRoot)
-	writeCLIAPITestContext(t, registry, "two", "context-runtime-two", second.URL, projectRoot)
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"--swarm-dir", swarmDir,
-		"doctor", "--target", "--json",
-		"--api-server", "http://127.0.0.1:19009",
-		"--contracts", contractsPath,
-		"--config", configPath,
-	}, &stdout, &stderr, defaultRootCommandOptions())
-	if code != cliExitOK || stderr.String() != "" {
-		t.Fatalf("doctor target = code:%d stdout:%s stderr:%s", code, stdout.String(), stderr.String())
-	}
-	var report doctorTargetReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("parse doctor target: %v\n%s", err, stdout.String())
-	}
-	if report.Context.ProjectScoped.Status != "multiple_live" || report.Context.ProjectScoped.Owner != localContextRegistryOwner {
-		t.Fatalf("project context = %#v, want distinct multiple-live discovery fact", report.Context.ProjectScoped)
-	}
-	if report.ProjectOwner.Status != string(runtimestartupownership.StateActive) ||
-		report.ProjectOwner.Owner != selectedStoreOwnerReader ||
-		!strings.Contains(report.ProjectOwner.Detail, "durable-selected-store-owner") {
-		t.Fatalf("project owner = %#v, want canonical selected-store fact", report.ProjectOwner)
-	}
-	if strings.Contains(report.ProjectOwner.Detail, "context-runtime") {
-		t.Fatalf("project owner inferred from endpoint context: %#v", report.ProjectOwner)
-	}
-}
-
 func TestStoreRepairAuthorityRequiresExactFindingsAndJournalsRepair(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), "selected.db")
@@ -388,11 +339,14 @@ func runStoreAuthorityCommandWithStore(t *testing.T, configPath, backend string,
 
 func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath string) {
 	t.Helper()
-	paths, err := ResolveCLIContractPlatformSpecPaths(RepoRoot(), CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
+	paths, err := ResolveCLISourcePlatformSpecPaths(RepoRoot(), CLISourcePlatformSpecPathOptions{
+		ConfigPath: configPath,
+		SourceRoot: filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success"),
+	})
 	if err != nil {
 		t.Fatalf("resolve selected-store schema paths: %v", err)
 	}
-	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), paths.ContractsPath, paths.PlatformSpecPath)
+	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), paths.SourceRoot, paths.PlatformSpecPath)
 	if err != nil {
 		t.Fatalf("load selected-store schema source: %v", err)
 	}
@@ -419,7 +373,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath string) 
 func writeStoreAuthorityConfig(t *testing.T, sqlitePath string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, path, fmt.Sprintf("paths:\n  contracts_path: tests/tier8-boot-verification/test-boot-success\nstore:\n  backend: sqlite\n  sqlite:\n    path: %q\n", sqlitePath))
+	writeRuntimeConfigText(t, path, fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", sqlitePath))
 	return path
 }
 

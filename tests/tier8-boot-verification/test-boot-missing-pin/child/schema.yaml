@@ -1,0 +1,11 @@
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, working, done]
+pins:
+  inputs:
+    events: [task.assigned, task.feedback]
+  outputs:
+    events:
+      - task.result
+mode: static

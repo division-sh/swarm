@@ -14,7 +14,6 @@ import (
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -22,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
@@ -117,7 +115,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	}
 }
 
-func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmissionJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -135,13 +133,15 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	repo := repoRootForTest()
+	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
-		"--contracts", filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated"),
+		"--bundle-hash", bundleHash,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -161,7 +161,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
 	}
-	alphaIntake := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "alpha-intake").Key()
+	alphaIntake := identitytest.ExecutableNode(t, "flow-a", "alpha-intake").Key()
 	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, alphaIntake) {
 		t.Fatalf("runtime event owners = %#v, want alpha-intake from selected contract", admission.FrontierEvents[0].RuntimeEventOwners)
 	}
@@ -274,37 +274,36 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	}
 }
 
-func TestRunForkRuntimeOwnerHarness_ActivateWithContractsReachesSelectedActivationGate(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateWithBundleHashReachesSelectedActivationGate(t *testing.T) {
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), t.TempDir(), []string{
 		"--activate",
-		"--contracts", t.TempDir(),
+		"--bundle-hash", storetest.SemanticFixtureBundleHash,
 		"--run", uuid.NewString(),
 	}, &buf)
 	if code != 1 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want runtime failure after parsing; output=%s", code, buf.String())
 	}
-	if strings.Contains(buf.String(), "--contracts is only supported") {
-		t.Fatalf("output = %q, want --activate to consume canonical selected activation gate rather than parse-level contract rejection", buf.String())
+	if strings.Contains(buf.String(), "invalid --bundle-hash") {
+		t.Fatalf("output = %q, want --activate to consume canonical selected activation gate rather than parse-level bundle rejection", buf.String())
 	}
 }
 
-func TestRunForkRuntimeOwnerHarness_SelectedContractsBorrowedDoNotRequireAmbientData(t *testing.T) {
-	dsn, _, _ := testutil.StartPostgres(t)
+func TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
 	borrowedRoot := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(borrowedRoot, "package.yaml"), `
-name: borrowed-selected-contracts
-version: 1.0.0
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+	copyReleaseFixtureTree(t, filepath.Join(repo, "tests", "tier1-primitives", "test-emits-multiple"), borrowedRoot)
+	bundleHash := registerRunForkCLIContractCatalog(t, context.Background(), db, borrowedRoot)
+	if err := os.RemoveAll(borrowedRoot); err != nil {
+		t.Fatalf("remove admitted source root: %v", err)
+	}
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--store", "postgres",
-		"--contracts", borrowedRoot,
+		"--bundle-hash", bundleHash,
 		"--run", uuid.NewString(),
 		"--at", uuid.NewString(),
 	}, &buf)
@@ -317,13 +316,13 @@ flows: []
 	if !strings.Contains(buf.String(), "source run") && !strings.Contains(buf.String(), "run not found") {
 		t.Fatalf("output = %q, want execution to pass data projection admission and reach source-run lookup", buf.String())
 	}
-	if _, err := os.Stat(filepath.Join(borrowedRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
-		t.Fatalf("borrowed contracts data stat error = %v, want no default data source created", err)
+	if _, err := os.Stat(borrowedRoot); !os.IsNotExist(err) {
+		t.Fatalf("admitted source root stat error = %v, want execution independent of removed ambient source", err)
 	}
 }
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal(t *testing.T) {
-	dsn, _, _ := testutil.StartPostgres(t)
+	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	configPath := os.Getenv("SWARM_CONFIG")
 	rawConfig, err := os.ReadFile(configPath)
@@ -331,11 +330,12 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 		t.Fatalf("read run-fork config: %v", err)
 	}
 	writeRuntimeConfigText(t, configPath, string(rawConfig)+"workspace:\n  backend: host\n")
+	bundleHash := registerRunForkCLIContractCatalog(t, context.Background(), db, filepath.Join(repoRootForTest(), doctorAgentContractsPath))
 	var out bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repoRootForTest(), []string{
 		"--store", "postgres",
 		"--config", configPath,
-		"--contracts", doctorAgentContractsPath,
+		"--bundle-hash", bundleHash,
 		"--run", uuid.NewString(),
 		"--at", uuid.NewString(),
 	}, &out)
@@ -349,20 +349,20 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
-	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
-	registerRunForkCLIContractCatalog(t, context.Background(), db, contractsRoot)
+	sourceRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
+	bundleHash := registerRunForkCLIContractCatalog(t, context.Background(), db, sourceRoot)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	diagnosticEventID := uuid.NewString()
 	at := time.Unix(1700000312, 0).UTC()
-	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, bundleHash, at)
 	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--store", "postgres",
-		"--contracts", contractsRoot,
+		"--bundle-hash", bundleHash,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
 		"--json",
@@ -455,14 +455,14 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
-	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
-	registerRunForkCLIContractCatalog(t, context.Background(), db, contractsRoot)
+	sourceRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
+	bundleHash := registerRunForkCLIContractCatalog(t, context.Background(), db, sourceRoot)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000313, 0).UTC()
-	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, bundleHash, at)
 	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
@@ -471,7 +471,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--store", "postgres",
-		"--contracts", contractsRoot,
+		"--bundle-hash", bundleHash,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
 		"--json",
@@ -507,8 +507,13 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	eventID := uuid.NewString()
 	at := time.Unix(1700000310, 0).UTC()
 	ctx := context.Background()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	registerRunForkCLIDataCatalog(t, ctx, db, serveRuntimeTestBundleHash)
+	repo := repoRootForTest()
+	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		BundleHash: bundleHash,
+	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.materialize",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
@@ -536,16 +541,13 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		t.Fatalf("seed entity_state: %v", err)
 	}
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	repo := repoRootForTest()
-	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
-	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
-		"--contracts", contractsRoot,
+		"--bundle-hash", bundleHash,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -568,7 +570,8 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		result.SelectedContractBinding.ForkRunID != result.ForkRunID ||
 		result.SelectedContractBinding.SourceRunID != runID ||
 		result.SelectedContractBinding.ForkEventID != eventID ||
-		result.SelectedContractBinding.ContractSelection.ContractsRoot != contractsRoot {
+		result.SelectedContractBinding.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
+		result.SelectedContractBinding.ContractSelection.BundleHash != bundleHash {
 		t.Fatalf("selected contract binding = %#v", result.SelectedContractBinding)
 	}
 	var forkState string
@@ -592,8 +595,8 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	`, result.ForkRunID, runID, eventID).Scan(&persistedBindingMode); err != nil {
 		t.Fatalf("load selected contract binding row: %v", err)
 	}
-	if persistedBindingMode != "selected_contracts" {
-		t.Fatalf("binding mode = %q, want selected_contracts", persistedBindingMode)
+	if persistedBindingMode != runfork.RunForkContractSelectionModeBundleHash {
+		t.Fatalf("binding mode = %q, want %s", persistedBindingMode, runfork.RunForkContractSelectionModeBundleHash)
 	}
 }
 
@@ -692,8 +695,8 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	ctx := context.Background()
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
 	repo := repoRootForTest()
-	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
-	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
+	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
 
 	var materializeOut bytes.Buffer
 	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
@@ -701,7 +704,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
-		"--contracts", contractsRoot,
+		"--bundle-hash", bundleHash,
 		"--json",
 	}, &materializeOut)
 	if materializeCode != 0 {
@@ -762,8 +765,8 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := repoRootForTest()
-	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
-	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
+	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
 
 	var materializeOut bytes.Buffer
 	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
@@ -771,7 +774,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
-		"--contracts", contractsRoot,
+		"--bundle-hash", bundleHash,
 		"--json",
 	}, &materializeOut)
 	if materializeCode != 0 {
@@ -829,7 +832,7 @@ func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClos
 	if code != 2 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want 2; output=%s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "mutating fork execution without --contracts is not implemented") {
+	if !strings.Contains(buf.String(), "mutating fork execution requires --bundle-hash") {
 		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())
 	}
 }
@@ -843,9 +846,12 @@ func seedRunForkCLIActivationSource(t *testing.T, db *sql.DB, runID, entityID, e
 func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	const bundleHash = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	registerRunForkCLIDataCatalog(t, ctx, db, bundleHash)
+	sourceRoot := filepath.Join(repoRootForTest(), "tests", "tier1-primitives", "test-emits-multiple")
+	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		BundleHash: bundleHash,
+	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
@@ -874,35 +880,27 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	}
 }
 
-func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
+func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash string, at time.Time) {
 	t.Helper()
-	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, "item.received", "test-node", "pending", "CLI Selected Execution Entity", "cli-selected-execution-test", at)
-	registerRunForkCLIDataCatalog(t, context.Background(), db, serveRuntimeTestBundleHash)
+	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, bundleHash, "item.received", "test-node", "pending", "CLI Selected Execution Entity", "cli-selected-execution-test", at)
 }
 
-func registerRunForkCLIDataCatalog(t *testing.T, ctx context.Context, db *sql.DB, bundleHash string) {
-	t.Helper()
-	storetest.RequireDurableDataCatalog(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), bundleHash)
-}
-
-func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, contractsRoot string) {
+func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) string {
 	t.Helper()
 	repo := repoRootForTest()
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, sourceRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatalf("load run-fork selected contracts %s: %v", contractsRoot, err)
+		t.Fatalf("load run-fork selected contracts %s: %v", sourceRoot, err)
 	}
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
-		t.Fatalf("project run-fork selected contracts %s: %v", contractsRoot, err)
+		t.Fatalf("project run-fork selected source data %s: %v", sourceRoot, err)
 	}
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	if _, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, ParsedJSON: projection.ParsedJSON,
-		DataBlob: projection.DataBlob, Metadata: projection.Metadata,
-	}, projection.DataCatalog); err != nil {
-		t.Fatalf("register run-fork selected contracts %s: %v", contractsRoot, err)
+	if _, err := selected.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+		t.Fatalf("register run-fork selected source %s: %v", sourceRoot, err)
 	}
+	return bundle.SourceArtifact.BundleHash()
 }
 
 func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {

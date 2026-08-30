@@ -4,6 +4,3 @@ states: [pending, done]
 pins:
   inputs:
     events: [item.requested]
-  outputs:
-    events:
-      - item.done

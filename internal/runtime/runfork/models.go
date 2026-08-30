@@ -104,11 +104,8 @@ func RunForkSelectedContractPlatformRuntimeOwner(eventName string) (string, bool
 }
 
 type RunForkContractSelection struct {
-	Mode            string `json:"mode"`
-	ContractsRoot   string `json:"contracts_root,omitempty"`
-	BundleHash      string `json:"bundle_hash,omitempty"`
-	WorkflowName    string `json:"workflow_name,omitempty"`
-	WorkflowVersion string `json:"workflow_version,omitempty"`
+	Mode       string `json:"mode"`
+	BundleHash string `json:"bundle_hash,omitempty"`
 }
 
 type RunForkContractFrontierAdmission struct {
@@ -271,7 +268,7 @@ type RunForkMaterializeRequest struct {
 	SourceRunID             string
 	At                      string
 	ContractSelection       *RunForkContractSelection
-	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
 	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
@@ -1077,7 +1074,7 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	SourceRunID             string
 	At                      string
 	ContractSelection       RunForkContractSelection
-	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	FrontierAdmission       RunForkContractFrontierAdmission
 	RouteTopology           RunForkSelectedContractRouteTopology

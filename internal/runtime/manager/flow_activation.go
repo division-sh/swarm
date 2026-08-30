@@ -38,8 +38,8 @@ type flowInstancePersistence interface {
 	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
-	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
+	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
+	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
 	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
@@ -428,7 +428,7 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 	lineage events.EventLineage,
 	occurredAt time.Time,
 ) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
-	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	bundleHash, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
@@ -436,7 +436,6 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 		Identity:        req.Instance,
 		RunID:           strings.TrimSpace(lineage.RunID),
 		BundleHash:      bundleHash,
-		BundleSource:    bundleSource,
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		ExecutionMode:   lineage.ExecutionMode,
 		Agents:          make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords)),
@@ -669,7 +668,7 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 	standingFlows := standingActivatedFlowIDs(source)
 	records := []PersistedAgent{}
 	if required := source.RequiredAgents(); len(required) > 0 {
-		scopeRecords, err := staticRequiredAgentsForDeclarations(source, "", "", required)
+		scopeRecords, err := staticRequiredAgentsForDeclarations(source, ".", "", required)
 		if err != nil {
 			return nil, err
 		}
@@ -698,12 +697,16 @@ func standingActivatedFlowIDs(source semanticview.Source) map[string]struct{} {
 	if !ok || bundle == nil {
 		return out
 	}
-	for _, pkg := range bundle.PackageTree {
-		for _, ref := range pkg.Manifest.Flows {
-			flowID := strings.TrimSpace(ref.ID)
-			if flowID != "" && ref.HasStandingActivation() {
-				out[flowID] = struct{}{}
-			}
+	for _, scope := range source.FlowScopes() {
+		if strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		schema, exists := bundle.FlowSchemaByID(scope.ID)
+		if !exists && strings.TrimSpace(scope.ID) == "." && bundle.RootSchema != nil {
+			schema, exists = *bundle.RootSchema, true
+		}
+		if exists && strings.EqualFold(strings.TrimSpace(schema.Activation), runtimecontracts.FlowActivationStanding) {
+			out[strings.TrimSpace(scope.ID)] = struct{}{}
 		}
 	}
 	return out

@@ -281,7 +281,7 @@ func TestProviderRegistrationRejectsUnusableSigningBeforeAnySideEffect(t *testin
 			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
 			readiness.SetRuntimeReady(true)
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
-			pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram:telegram")
+			pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram")
 			if err := controller.Reconcile(ctx, exposure, []RegistrationPair{pair}); err == nil {
 				t.Fatal("Reconcile succeeded with unusable target signing credential")
 			}
@@ -330,7 +330,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
-	predecessor := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram:telegram")
+	predecessor := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram")
 	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{predecessor}); err != nil {
 		t.Fatalf("reconcile predecessor: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 
 func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *testing.T) {
 	registration := loadTelegramRegistrationPlan(t)
-	candidate := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram:telegram")
+	candidate := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram")
 	publication, err := channelonboarding.NewChannelActivationPublication(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -477,10 +477,10 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
 	})
-	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
+	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
 
 	t.Run("duplicate slot rejects whole set before writes", func(t *testing.T) {
-		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram:telegram")
+		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram")
 		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
 		if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair, other}); err == nil || !strings.Contains(err.Error(), "selected by both") {
 			t.Fatalf("collision error = %v", err)
@@ -492,7 +492,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	})
 
 	t.Run("distinct provider resources reconcile independently", func(t *testing.T) {
-		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram:telegram")
+		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram")
 		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
 		distinctTransport := &telegramRegistrationTransport{t: t, resourceIDs: map[string]int64{"token-v1": 42, "token-other": 84}}
 		distinctReadiness := NewReadinessOwner(true)
@@ -797,7 +797,7 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 	})
-	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
+	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
 		t.Fatal("settlement acknowledgment loss returned nil")
 	}
@@ -889,7 +889,7 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 			readiness.SetRuntimeReady(true)
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
-			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
+			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
 
 			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
 				t.Fatal("launch marker failure returned nil")
@@ -962,7 +962,7 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 	}
 	onboardingID := uuid.NewString()
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), BundleSource: "persisted",
+		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("b", 64),
 		BundleIdentity: "bundle:test@sha256:registration", PackInventoryGeneration: "sha256:registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration, TargetGeneration: 1,
@@ -972,8 +972,8 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
-			Selector: selector, BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,
-			PackageKey: parsed.PackageKey, FlowID: parsed.FlowID, Alias: parsed.PackageKey, Provider: parsed.Provider,
+			Selector: selector, BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,
+			FlowPath: parsed.FlowPath, Alias: parsed.FlowPath, Provider: parsed.Provider,
 			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("admission-" + bindingID)), SigningCredentialKey: "signing",
 		},
 	}
@@ -983,7 +983,7 @@ func testStartupAuthority(t *testing.T, owner string) startupownership.GrantEvid
 	t.Helper()
 	authority := startupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: owner,
-		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), BundleSource: "ephemeral",
+		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64),
 		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "test-source-set",
 		StateVersion: 3, State: startupownership.GrantAdmitted,
 	}

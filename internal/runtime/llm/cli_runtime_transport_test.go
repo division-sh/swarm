@@ -242,7 +242,7 @@ func testConversationForkAuthority() runtimeeffects.Authority {
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
 			ForkTurnID:          forkTurnID,
 			ForkID:              uuid.NewString(),
-			BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
+			BundleHash:          "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			ActorTokenID:        "actor-token",
 			RequestOccurrenceID: uuid.NewString(),
 			RequestHash:         "request-hash",
@@ -598,7 +598,7 @@ func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObs
 func TestValidateCLIResponseToolCallsForTurn_ManagedTurnRejectsMissingCapabilitySurface(t *testing.T) {
 	identity := testMemoryIdentity("market-research-agent", "market/instance-1").Agent
 	actor := models.AgentConfig{ID: "market-research-agent", Identity: identity, FlowPath: identity.FlowInstance()}
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}

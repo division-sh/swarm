@@ -1,0 +1,11 @@
+name: automation
+imports:
+  connector_packs:
+    - {provider: telegram, tool: telegram.send_message}
+mode: static
+initial_state: ready
+states: [ready]
+pins:
+  inputs:
+    events:
+      - {event: automation.requested, source: external}

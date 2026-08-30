@@ -107,18 +107,15 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_event_id,
-			mode, contracts_root, bundle_hash, workflow_name, workflow_version, created_at
+			mode, bundle_hash, created_at
 		)
 		VALUES (
 			$1, $2, $3,
-			$4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9
+			$4, NULLIF($5, ''), $6
 		)
 	`, binding.ForkRunID, binding.SourceRunID, binding.ForkEventID,
 		binding.ContractSelection.Mode,
-		binding.ContractSelection.ContractsRoot,
 		binding.ContractSelection.BundleHash,
-		binding.ContractSelection.WorkflowName,
-		binding.ContractSelection.WorkflowVersion,
 		binding.CreatedAt); err != nil {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("insert selected contract binding: %w", err)
 	}
@@ -137,10 +134,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 			CAST(source_run_id AS TEXT),
 			CAST(fork_event_id AS TEXT),
 			mode,
-			COALESCE(contracts_root, ''),
 			COALESCE(bundle_hash, ''),
-			workflow_name,
-			workflow_version,
 			created_at
 		FROM run_fork_selected_contract_bindings
 		WHERE fork_run_id = $1
@@ -149,10 +143,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		&binding.SourceRunID,
 		&binding.ForkEventID,
 		&selection.Mode,
-		&selection.ContractsRoot,
 		&selection.BundleHash,
-		&selection.WorkflowName,
-		&selection.WorkflowVersion,
 		&createdAt,
 	)
 	if err != nil {
@@ -220,15 +211,9 @@ func normalizeRunForkSelectedContractSelection(selection runfork.RunForkContract
 	if selection.Mode == "" {
 		selection.Mode = runfork.RunForkContractSelectionModeSelectedContracts
 	}
-	selection.ContractsRoot = strings.TrimSpace(selection.ContractsRoot)
 	selection.BundleHash = strings.TrimSpace(selection.BundleHash)
-	selection.WorkflowName = strings.TrimSpace(selection.WorkflowName)
-	selection.WorkflowVersion = strings.TrimSpace(selection.WorkflowVersion)
 	switch selection.Mode {
 	case runfork.RunForkContractSelectionModeSelectedContracts:
-		if selection.ContractsRoot == "" {
-			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires contracts_root")
-		}
 		if selection.BundleHash != "" {
 			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding selected_contracts mode cannot carry bundle_hash")
 		}
@@ -237,19 +222,10 @@ func normalizeRunForkSelectedContractSelection(selection runfork.RunForkContract
 			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode requires bundle_hash")
 		}
 		if !bundleidentity.IsCanonicalHash(selection.BundleHash) {
-			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
-		}
-		if selection.ContractsRoot != "" {
-			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode cannot carry contracts_root")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 	default:
 		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
-	}
-	if selection.WorkflowName == "" {
-		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_name")
-	}
-	if selection.WorkflowVersion == "" {
-		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_version")
 	}
 	return selection, nil
 }

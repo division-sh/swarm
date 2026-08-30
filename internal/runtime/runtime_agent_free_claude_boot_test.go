@@ -156,19 +156,10 @@ func loadAgentFreeRuntimeWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: agent-free-runtime
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: agent-free-runtime
-initial_state: idle
-states:
-  - idle
-terminal_states:
-  - idle
+stages: []
 `)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -65,14 +64,14 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	}
 	out := destructivereset.CleanupResult{
 		OperationName: strings.TrimSpace(req.Result.OperationName), DryRun: req.Result.DryRun,
-		IncludeBundles: req.Result.IncludeBundles, AppliedAt: now,
+		IncludeSourceArtifacts: req.Result.IncludeSourceArtifacts, AppliedAt: now,
 	}
 	if out.OperationName == "" {
 		out.OperationName = destructivereset.DefaultOperationName
 	}
 	if req.Result.DryRun {
 		out.RunIDs = runIDs
-		out.Tables, err = destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeBundles)
+		out.Tables, err = destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts)
 		return out, err
 	}
 
@@ -88,8 +87,8 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	if err := guardDestructiveResetProviderAuthority(ctx, tx, runIDs); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
-	if req.Result.IncludeBundles {
-		if err := prepareDestructiveResetBundleCatalogDelete(ctx, tx, runIDs); err != nil {
+	if req.Result.IncludeSourceArtifacts {
+		if err := prepareDestructiveResetSourceArtifactDelete(ctx, tx, runIDs); err != nil {
 			return destructivereset.CleanupResult{}, err
 		}
 	}
@@ -97,7 +96,7 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 		return destructivereset.CleanupResult{}, err
 	}
 	out.RunIDs = runIDs
-	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeBundles)
+	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts)
 	if err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
@@ -105,7 +104,7 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 		if rows[i].TableKind == destructivereset.CleanupTableKindGenerated {
 			continue
 		}
-		deleted, err := destructiveResetCleanupDeleteTable(ctx, tx, rows[i].Table, runIDs, req.Result.IncludeBundles)
+		deleted, err := destructiveResetCleanupDeleteTable(ctx, tx, rows[i].Table, runIDs, req.Result.IncludeSourceArtifacts)
 		if err != nil {
 			return destructivereset.CleanupResult{}, err
 		}
@@ -126,8 +125,8 @@ func validateDestructiveResetCleanupRequest(req destructivereset.CleanupRequest,
 	if err != nil {
 		return nil, err
 	}
-	if req.Result.Plan.IncludeBundles != req.Result.IncludeBundles {
-		return nil, fmt.Errorf("%w: destructive reset include_bundles result and plan mismatch", destructivereset.ErrInvalidRequest)
+	if req.Result.Plan.IncludeSourceArtifacts != req.Result.IncludeSourceArtifacts {
+		return nil, fmt.Errorf("%w: destructive reset include_source_artifacts result and plan mismatch", destructivereset.ErrInvalidRequest)
 	}
 	if req.Result.DryRun {
 		return runIDs, nil
@@ -318,22 +317,28 @@ func guardDestructiveResetProviderAuthority(ctx context.Context, tx *sql.Tx, run
 	)
 }
 
-func prepareDestructiveResetBundleCatalogDelete(ctx context.Context, tx *sql.Tx, runIDs []string) error {
-	if err := lockBundleDeleteRunCreationTx(ctx, tx); err != nil {
-		return fmt.Errorf("lock runtime.nuke bundle catalog cleanup: %w", err)
+func prepareDestructiveResetSourceArtifactDelete(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+	if err := lockDestructiveResetRunCreationTx(ctx, tx); err != nil {
+		return fmt.Errorf("lock runtime.nuke source artifact cleanup: %w", err)
 	}
 	var outOfPlan int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM runs
-		WHERE bundle_source = $2
-		  AND NULLIF(bundle_hash, '') IS NOT NULL
+		WHERE NULLIF(bundle_hash, '') IS NOT NULL
 		  AND NOT (run_id = ANY($1::uuid[]))
-	`, pq.Array(runIDs), runtimerunlifecycle.BundleSourcePersisted).Scan(&outOfPlan); err != nil {
-		return fmt.Errorf("validate runtime.nuke bundle catalog cleanup run snapshot: %w", err)
+	`, pq.Array(runIDs)).Scan(&outOfPlan); err != nil {
+		return fmt.Errorf("validate runtime.nuke source artifact cleanup run snapshot: %w", err)
 	}
 	if outOfPlan > 0 {
-		return fmt.Errorf("%w: runtime.nuke include_bundles cannot delete bundle catalog with persisted bundle-source runs outside the cleanup plan", destructivereset.ErrInvalidRequest)
+		return fmt.Errorf("%w: runtime.nuke include_source_artifacts cannot delete admitted source with runs outside the cleanup plan", destructivereset.ErrInvalidRequest)
+	}
+	return nil
+}
+
+func lockDestructiveResetRunCreationTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE runs IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("lock destructive reset run creation: %w", err)
 	}
 	return nil
 }
@@ -446,8 +451,8 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 	return nil
 }
 
-func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs []string, includeBundles bool) ([]destructivereset.CleanupTableResult, error) {
-	catalog := destructivereset.CleanupCatalogForPolicy(destructivereset.CleanupPolicy{IncludeBundles: includeBundles})
+func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs []string, includeSourceArtifacts bool) ([]destructivereset.CleanupTableResult, error) {
+	catalog := destructivereset.CleanupCatalogForPolicy(destructivereset.CleanupPolicy{IncludeSourceArtifacts: includeSourceArtifacts})
 	out := make([]destructivereset.CleanupTableResult, 0, len(catalog))
 	for _, entry := range catalog {
 		result := destructivereset.CleanupTableResult{
@@ -461,7 +466,7 @@ func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs
 			out = append(out, result)
 			continue
 		}
-		count, err := destructiveResetCleanupCountTable(ctx, tx, entry, runIDs, includeBundles)
+		count, err := destructiveResetCleanupCountTable(ctx, tx, entry, runIDs, includeSourceArtifacts)
 		if err != nil {
 			return nil, err
 		}
@@ -476,8 +481,8 @@ func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs
 	return out, nil
 }
 
-func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeBundles bool) (int64, error) {
-	statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeBundles)
+func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeSourceArtifacts bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeSourceArtifacts)
 	if err != nil {
 		return 0, err
 	}
@@ -488,8 +493,8 @@ func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry de
 	return count, nil
 }
 
-func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table string, runIDs []string, includeBundles bool) (int64, error) {
-	statements, err := destructiveResetCleanupStatementsForTable(table, runIDs, includeBundles)
+func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table string, runIDs []string, includeSourceArtifacts bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(table, runIDs, includeSourceArtifacts)
 	if err != nil {
 		return 0, err
 	}
@@ -513,13 +518,13 @@ type destructiveResetCleanupStatements struct {
 	args   []any
 }
 
-func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeBundles bool) (destructiveResetCleanupStatements, error) {
+func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeSourceArtifacts bool) (destructiveResetCleanupStatements, error) {
 	table = strings.TrimSpace(table)
-	if destructiveResetCleanupPreservesTable(table, includeBundles) {
+	if destructiveResetCleanupPreservesTable(table, includeSourceArtifacts) {
 		return destructiveResetCleanupStatements{count: fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table))}, nil
 	}
-	if table == "bundles" && includeBundles {
-		return destructiveResetCleanupStatements{count: `SELECT COUNT(*) FROM bundles`, delete: `DELETE FROM bundles`}, nil
+	if table == "source_artifacts" && includeSourceArtifacts {
+		return destructiveResetCleanupStatements{count: `SELECT COUNT(*) FROM source_artifacts`, delete: `DELETE FROM source_artifacts`}, nil
 	}
 	switch table {
 	case "connected_channel_activations", "channel_onboarding_operations", "standing_service_journal", "standing_service_generations", "standing_services":
@@ -667,8 +672,8 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 	return statements, nil
 }
 
-func destructiveResetCleanupPreservesTable(table string, includeBundles bool) bool {
-	entry, ok := destructivereset.CleanupCatalogByTableForPolicy(destructivereset.CleanupPolicy{IncludeBundles: includeBundles})[strings.TrimSpace(table)]
+func destructiveResetCleanupPreservesTable(table string, includeSourceArtifacts bool) bool {
+	entry, ok := destructivereset.CleanupCatalogByTableForPolicy(destructivereset.CleanupPolicy{IncludeSourceArtifacts: includeSourceArtifacts})[strings.TrimSpace(table)]
 	if !ok {
 		return false
 	}

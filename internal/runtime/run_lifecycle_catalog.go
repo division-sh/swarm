@@ -24,7 +24,7 @@ func runLifecycleTerminalCatalog(source semanticview.Source) runtimerunlifecycle
 	if source == nil {
 		return runtimerunlifecycle.TerminalCatalog{}
 	}
-	workflow := source.FlowTerminalStages("")
+	workflow := source.FlowTerminalStages(".")
 	flows := make(map[string][]string)
 	add := func(key string, states []string) {
 		key = strings.Trim(strings.TrimSpace(key), "/")

@@ -5,15 +5,13 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type AuthoredEmitSiteSourceKind string
 
 const (
-	AuthoredEmitSiteSourceProject AuthoredEmitSiteSourceKind = "project"
-	AuthoredEmitSiteSourceFlow    AuthoredEmitSiteSourceKind = "flow"
+	AuthoredEmitSiteSourceFlow AuthoredEmitSiteSourceKind = "flow"
 )
 
 type AuthoredEmitSite struct {
@@ -26,14 +24,13 @@ type AuthoredEmitSite struct {
 	Site           string
 	SiteKey        string
 	RuleID         string
-	RuleRef        contractelementidentity.ContractElementRef
+	RuleRef        runtimeidentity.DeclarationIdentity
 	Spec           runtimecontracts.EmitSpec
 	Handler        runtimecontracts.SystemNodeEventHandler
 }
 
-func (s AuthoredEmitSite) FlowID() string     { return s.Node.FlowID() }
-func (s AuthoredEmitSite) PackageKey() string { return s.Node.PackageKey() }
-func (s AuthoredEmitSite) NodeID() string     { return s.Node.NodeID() }
+func (s AuthoredEmitSite) FlowPathIdentity() string { return s.Node.FlowPath() }
+func (s AuthoredEmitSite) NodeID() string           { return s.Node.NodeID() }
 
 func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 	if source == nil {
@@ -56,15 +53,12 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 		if err != nil {
 			continue
 		}
-		kind := AuthoredEmitSiteSourceProject
-		if node.FlowID() != "" {
-			kind = AuthoredEmitSiteSourceFlow
-		}
+		kind := AuthoredEmitSiteSourceFlow
 		flowPath := executableNodeFlowPath(source, node)
 		for _, handlerEvent := range sortedAuthoredHandlerEvents(record.Entry.EventHandlers) {
 			handler := runtimecontracts.DefaultSystemNodeHandlerSourceEvent(record.Entry.EventHandlers[handlerEvent], handlerEvent)
-			handler, _ = runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
-			builder.appendHandlerSites(kind, node.PackageKey(), flowPath, node, handlerEvent, handler)
+			handler, _ = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, handlerEvent, handler)
+			builder.appendHandlerSites(kind, node.FlowPath(), flowPath, node, handlerEvent, handler)
 		}
 	}
 	sort.SliceStable(builder.sites, func(i, j int) bool {
@@ -80,7 +74,7 @@ type authoredEmitSiteBuilder struct {
 }
 
 func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSourceKind, scopeKey, flowPath string, node runtimeidentity.ExecutableNode, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) {
-	add := func(site, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, spec runtimecontracts.EmitSpec) {
+	add := func(site, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, spec runtimecontracts.EmitSpec) {
 		if spec.Empty() {
 			return
 		}
@@ -93,7 +87,7 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 				spec = lowered
 			}
 		}
-		id := authoredEmitSiteIdentity(node.FlowID(), scopeKey, node.Key(), handlerEvent, siteKey)
+		id := authoredEmitSiteIdentity(node.FlowPath(), scopeKey, node.Key(), handlerEvent, siteKey)
 		if _, ok := b.seen[id]; ok {
 			return
 		}
@@ -118,7 +112,7 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 	}
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, contractelementidentity.ContractElementRef{}, emitSpec)
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, emitSpec)
 		}
 	}
 }

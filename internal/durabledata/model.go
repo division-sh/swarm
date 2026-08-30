@@ -39,12 +39,12 @@ const (
 var digestPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*-v1:sha256:[0-9a-f]{64}$`)
 
 type DeclarationRef struct {
-	PackageKey string `json:"package_key"`
-	EventName  string `json:"event"`
+	FlowPath  string `json:"flow_path"`
+	EventName string `json:"event"`
 }
 
-func ParseDeclarationRef(packageKey, eventName string) (DeclarationRef, error) {
-	pkg, err := runtimeidentity.ParsePackageKey(packageKey)
+func ParseDeclarationRef(flowPath, eventName string) (DeclarationRef, error) {
+	flow, err := runtimeidentity.AdmitFlowIdentity(flowPath)
 	if err != nil {
 		return DeclarationRef{}, err
 	}
@@ -52,11 +52,11 @@ func ParseDeclarationRef(packageKey, eventName string) (DeclarationRef, error) {
 	if canonicalEvent != eventName || !eventidentity.IsValidName(canonicalEvent) {
 		return DeclarationRef{}, fmt.Errorf("event name %q must be one canonical qualified event name", eventName)
 	}
-	return DeclarationRef{PackageKey: pkg.String(), EventName: canonicalEvent}, nil
+	return DeclarationRef{FlowPath: flow.String(), EventName: canonicalEvent}, nil
 }
 
 func (r DeclarationRef) Validate() error {
-	_, err := ParseDeclarationRef(r.PackageKey, r.EventName)
+	_, err := ParseDeclarationRef(r.FlowPath, r.EventName)
 	return err
 }
 
@@ -64,11 +64,11 @@ func (r DeclarationRef) Key() string {
 	if r.Validate() != nil {
 		return ""
 	}
-	return r.PackageKey + "\x00" + r.EventName
+	return r.FlowPath + "\x00" + r.EventName
 }
 
 func CompareDeclarationRef(left, right DeclarationRef) int {
-	if cmp := strings.Compare(left.PackageKey, right.PackageKey); cmp != 0 {
+	if cmp := strings.Compare(left.FlowPath, right.FlowPath); cmp != 0 {
 		return cmp
 	}
 	return strings.Compare(left.EventName, right.EventName)

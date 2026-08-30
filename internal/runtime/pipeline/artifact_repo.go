@@ -36,7 +36,7 @@ const (
 	defaultRepoMaxBytes          = 50 << 20
 )
 
-var invalidArtifactRootMounts = []string{"/workspace", "/data", "/opt/swarm/contracts"}
+var invalidArtifactRootMounts = []string{"/workspace", "/data", "/opt/swarm/source"}
 
 type artifactRepoPreparedFile struct {
 	Path        string
@@ -253,7 +253,7 @@ func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.Exe
 		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result requires admitted execution producer source")
 	}
 	sourceRoute := routingSource.Route()
-	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.Node.FlowID(), eventType, sourceRoute)
+	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.Node.FlowPath(), eventType, sourceRoute)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
 	envelope := events.EventEnvelope{
@@ -1257,7 +1257,7 @@ func (pc *PipelineCoordinator) validateArtifactRepoResultPayload(execCtx runtime
 	if eventType == "" {
 		return nil
 	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), execCtx.Request.Node.FlowID(), eventType, payload, nil, runtimeengine.EmitSurfaceAction); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), execCtx.Request.Node.FlowPath(), eventType, payload, nil, runtimeengine.EmitSurfaceAction); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "artifact_repo_result_schema_invalid", "artifact-repo", "validate_result_event", map[string]any{"event_type": eventType}, err)
 	}
 	return nil

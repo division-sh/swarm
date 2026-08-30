@@ -51,7 +51,6 @@ type localContextDescriptor struct {
 	SocketPath        string                     `json:"socket_path,omitempty"`
 	Auth              localContextDescriptorAuth `json:"auth"`
 	ProjectRoot       string                     `json:"project_root,omitempty"`
-	ContractsPath     string                     `json:"contracts_path,omitempty"`
 	StorePath         string                     `json:"store_path,omitempty"`
 	PID               int                        `json:"pid,omitempty"`
 	CreatedAt         string                     `json:"created_at"`

@@ -12,14 +12,12 @@ import (
 
 type projectPackTransaction struct {
 	pathLock   *os.File
-	lock       *os.File
 	root       *admittedArtifactRoot
 	writerRoot *os.Root
 	stateRoot  string
 }
 
 func acquireProjectPackTransaction(projectRoot string, exclusive bool) (*projectPackTransaction, error) {
-	// The path lock survives package.yaml replacement; the inode lock below also serializes canonical aliases.
 	pathLock, err := openProjectPackPathLock(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("open project pack path transaction anchor: %w", err)
@@ -56,24 +54,8 @@ func acquireProjectPackTransaction(projectRoot string, exclusive bool) (*project
 		}
 		return nil, fmt.Errorf("project pack reader and writer roots do not identify the same directory")
 	}
-	lock, err := root.openRegularFile("package.yaml")
-	if err != nil {
-		_ = writerRoot.Close()
-		_ = root.close()
-		_ = unlockProjectPackFile(pathLock)
-		_ = pathLock.Close()
-		return nil, fmt.Errorf("open project pack transaction anchor: %w", err)
-	}
-	if err := lockProjectPackFile(lock, exclusive); err != nil {
-		_ = lock.Close()
-		_ = writerRoot.Close()
-		_ = root.close()
-		_ = unlockProjectPackFile(pathLock)
-		_ = pathLock.Close()
-		return nil, fmt.Errorf("lock project pack transaction: %w", err)
-	}
 	return &projectPackTransaction{
-		pathLock: pathLock, lock: lock, root: root, writerRoot: writerRoot,
+		pathLock: pathLock, root: root, writerRoot: writerRoot,
 		stateRoot: filepath.Clean(projectRoot),
 	}, nil
 }
@@ -87,11 +69,6 @@ func (t *projectPackTransaction) close() error {
 		if err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("%s: %w", message, err)
 		}
-	}
-	if t.lock != nil {
-		record("unlock project pack transaction", unlockProjectPackFile(t.lock))
-		record("close project pack transaction lock", t.lock.Close())
-		t.lock = nil
 	}
 	if t.writerRoot != nil {
 		record("close project pack writer root", t.writerRoot.Close())

@@ -159,10 +159,9 @@ type identityInboundCredentialStore struct{}
 
 func testInboundTarget(alias, signingSecret string) InboundTarget {
 	return InboundTarget{
-		BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
+		BundleHash:          "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		ServiceID:           "10000000-0000-4000-8000-000000000001",
-		PackageKey:          "test-inbound-package",
-		FlowID:              "test-inbound-flow",
+		FlowPath:            "test-inbound-flow",
 		RunID:               "10000000-0000-4000-8000-000000000002",
 		Generation:          1,
 		PublicationSequence: 1,
@@ -251,7 +250,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "chat-flow",
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowPath: "chat-flow",
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
@@ -411,11 +410,8 @@ func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, st
 	if target.ServiceID == "" {
 		target.ServiceID = defaults.ServiceID
 	}
-	if target.PackageKey == "" {
-		target.PackageKey = defaults.PackageKey
-	}
-	if target.FlowID == "" {
-		target.FlowID = defaults.FlowID
+	if target.FlowPath == "" {
+		target.FlowPath = defaults.FlowPath
 	}
 	if target.RunID == "" {
 		target.RunID = defaults.RunID
@@ -792,7 +788,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "text")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
-		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", PackageKey: "retry-proof", FlowID: "ingress",
+		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
 		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
 		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
@@ -846,7 +842,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
-		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", PackageKey: "retry-proof", FlowID: "ingress",
+		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
 		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
 		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
@@ -2724,7 +2720,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
 			entityID := eventtest.UUID("compiled-raw-admission-entity-" + tc.name)
 			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-				BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), FlowID: "partner-flow", RunID: runID,
+				BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64), FlowPath: "partner-flow", RunID: runID,
 				FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
 				SigningSecret: "partner-secret", AdmissionPlan: plan,
 			}, nil)
@@ -2777,7 +2773,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	runID := eventtest.UUID("compiled-empty-body-run")
 	entityID := eventtest.UUID("compiled-empty-body-entity")
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), FlowID: "partner-flow", RunID: runID,
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64), FlowPath: "partner-flow", RunID: runID,
 		FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
 		SigningSecret: "partner-secret", AdmissionPlan: plan,
 	}, nil)
@@ -2809,7 +2805,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("f", 64), FlowID: "json-flow", RunID: eventtest.UUID("compiled-empty-json-run"),
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("f", 64), FlowPath: "json-flow", RunID: eventtest.UUID("compiled-empty-json-run"),
 		FlowInstance: "json-flow/standing", EntityID: eventtest.UUID("compiled-empty-json-entity"), Alias: "json", Provider: "json-events",
 		AdmissionPlan: jsonPlan,
 	}, nil)

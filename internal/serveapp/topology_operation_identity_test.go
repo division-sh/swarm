@@ -6,15 +6,14 @@ import (
 	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
 const (
-	topologyOperationBundleA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	topologyOperationBundleB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	topologyOperationBundleA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	topologyOperationBundleB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func TestAdministrativeTopologyMutationIDsSurviveRepeatedSourceCycles(t *testing.T) {
@@ -24,31 +23,6 @@ func TestAdministrativeTopologyMutationIDsSurviveRepeatedSourceCycles(t *testing
 		t.Fatalf("install initial source set: %v", err)
 	}
 
-	finalizer := processOwnedBundleDeleteFinalizer{capability: capability}
-	firstDeleteID := uuid.NewString()
-	if _, err := finalizer.ApplyBundleDeleteFinalMutation(context.Background(), runtimebundledelete.FinalMutationRequest{
-		OperationID: firstDeleteID, OperationName: runtimebundledelete.DefaultOperationName,
-		BundleHash: topologyOperationBundleA, RequestedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("first bundle delete: %v", err)
-	}
-	if err := installServeSourceSet(context.Background(), capability, initial); err != nil {
-		t.Fatalf("restore source after first deletion: %v", err)
-	}
-	secondDeleteID := uuid.NewString()
-	if _, err := finalizer.ApplyBundleDeleteFinalMutation(context.Background(), runtimebundledelete.FinalMutationRequest{
-		OperationID: secondDeleteID, OperationName: runtimebundledelete.DefaultOperationName,
-		BundleHash: topologyOperationBundleA, RequestedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("second bundle delete: %v", err)
-	}
-	if len(session.bundleDeleteRequests) != 2 || session.bundleDeleteRequests[0].OperationID != firstDeleteID || session.bundleDeleteRequests[1].OperationID != secondDeleteID {
-		t.Fatalf("bundle delete operation requests = %#v", session.bundleDeleteRequests)
-	}
-
-	if err := installServeSourceSet(context.Background(), capability, initial); err != nil {
-		t.Fatalf("restore source before destructive reset: %v", err)
-	}
 	resetter := processOwnedDestructiveResetStore{capability: capability}
 	firstResetID := uuid.NewString()
 	if _, err := resetter.ApplyDestructiveResetCleanup(context.Background(), topologyResetRequest(firstResetID)); err != nil {
@@ -86,7 +60,7 @@ func newTopologyOperationTestCapability(t *testing.T) (runtimestartupownership.P
 
 func topologyOperationPlan(t *testing.T, bundleHash string) runtimeagenttopology.SourceSetPlan {
 	t.Helper()
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash, BundleSource: "ephemeral"}}, nil)
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
 	if err != nil {
 		t.Fatalf("construct source set plan: %v", err)
 	}
@@ -97,7 +71,7 @@ func topologyResetRequest(operationID string) runtimedestructivereset.CleanupReq
 	now := time.Now().UTC()
 	return runtimedestructivereset.CleanupRequest{
 		OperationID: operationID, ActorTokenID: "operator", RequestedAt: now,
-		Result:     runtimedestructivereset.Result{OperationName: runtimedestructivereset.DefaultOperationName, IncludeBundles: true, PlannedAt: now},
+		Result:     runtimedestructivereset.Result{OperationName: runtimedestructivereset.DefaultOperationName, IncludeSourceArtifacts: true, PlannedAt: now},
 		Quiescence: runtimedestructivereset.QuiescenceResult{OperationName: runtimedestructivereset.DefaultOperationName, AppliedAt: now},
 	}
 }

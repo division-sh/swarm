@@ -2,102 +2,70 @@ package contracts
 
 import (
 	"fmt"
-	"os"
+	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 var windowsAbsoluteIntentPath = regexp.MustCompile(`^[A-Za-z]:`)
 
-func materializeAgentIntents(contractsRoot string, source ContractItemSource, entries map[string]AgentRegistryEntry) (map[string]AgentRegistryEntry, error) {
+func materializeAgentIntentsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, source ContractItemSource, entries map[string]AgentRegistryEntry) (map[string]AgentRegistryEntry, error) {
 	if len(entries) == 0 {
 		return entries, nil
 	}
-	root, err := filepath.Abs(strings.TrimSpace(contractsRoot))
-	if err != nil {
-		return nil, fmt.Errorf("resolve contracts root for agent intent: %w", err)
+	declaration := strings.TrimSpace(source.File)
+	if artifact == nil || declaration == "" {
+		return nil, fmt.Errorf("agent intent resolution requires an admitted artifact and exact agents.yaml label")
 	}
-	if strings.TrimSpace(source.File) == "" {
-		return nil, fmt.Errorf("agent intent resolution requires the exact declaring agents.yaml source")
-	}
-	sourcePath, err := filepath.Abs(source.File)
-	if err != nil {
-		return nil, fmt.Errorf("resolve agent declaration source %q: %w", source.File, err)
-	}
-	sourceRel, err := pathRelativeToRoot(root, sourcePath)
-	if err != nil {
-		return nil, fmt.Errorf("agent declaration source %q: %w", source.File, err)
+	declarationDir := path.Dir(declaration)
+	if declarationDir == "." {
+		declarationDir = ""
 	}
 	out := make(map[string]AgentRegistryEntry, len(entries))
-	keys := make([]string, 0, len(entries))
-	for key := range entries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range sortedContractKeys(entries) {
 		entry := entries[key]
 		if err := entry.Intent.ValidateSyntax(); err != nil {
-			return nil, fmt.Errorf("%s agent %q intent: %w", source.File, key, err)
+			return nil, fmt.Errorf("%s agent %q intent: %w", declaration, key, err)
 		}
-		provenance, err := runtimeagentintent.NewDeclarationProvenance(filepath.ToSlash(sourceRel), strings.TrimSpace(key))
+		provenance, err := runtimeagentintent.NewDeclarationProvenance(declaration, strings.TrimSpace(key))
 		if err != nil {
-			return nil, fmt.Errorf("%s agent %q intent provenance: %w", source.File, key, err)
+			return nil, fmt.Errorf("%s agent %q intent provenance: %w", declaration, key, err)
 		}
-		resolved, err := resolveAgentIntent(root, filepath.Dir(sourcePath), provenance, entry.Intent)
+		switch entry.Intent.Kind {
+		case runtimeagentintent.SourceInline:
+			entry.ResolvedIntent, err = runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", provenance, entry.Intent.Inline)
+		case runtimeagentintent.SourceLocal:
+			var rel string
+			rel, err = validateLocalIntentPath(entry.Intent.Local)
+			if err == nil {
+				label := path.Join(declarationDir, rel)
+				var admitted sourceartifact.Entry
+				var ok bool
+				admitted, ok = artifact.Entry(label)
+				if !ok {
+					err = fmt.Errorf("local path %q is not an admitted source member", entry.Intent.Local)
+				} else if !utf8.Valid(admitted.Bytes()) {
+					err = fmt.Errorf("local path %q must contain valid UTF-8", entry.Intent.Local)
+				} else {
+					entry.ResolvedIntent, err = runtimeagentintent.Resolve(runtimeagentintent.SourceLocal, label, provenance, string(admitted.Bytes()))
+				}
+			}
+		case runtimeagentintent.SourceImport:
+			err = fmt.Errorf("import %q is unavailable until the agent-pack source owner is gated under #1685/#1770; use local or inline intent", entry.Intent.Import)
+		default:
+			err = fmt.Errorf("intent source kind %q is unsupported", entry.Intent.Kind)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("%s agent %q intent: %w", source.File, key, err)
+			return nil, fmt.Errorf("%s agent %q intent: %w", declaration, key, err)
 		}
-		entry.ResolvedIntent = resolved
 		out[key] = entry
 	}
 	return out, nil
-}
-
-func resolveAgentIntent(root, declarationDir, provenance string, source runtimeagentintent.Source) (runtimeagentintent.Resolved, error) {
-	switch source.Kind {
-	case runtimeagentintent.SourceInline:
-		return runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", provenance, source.Inline)
-	case runtimeagentintent.SourceLocal:
-		rel, err := validateLocalIntentPath(source.Local)
-		if err != nil {
-			return runtimeagentintent.Resolved{}, err
-		}
-		path, err := filepath.Abs(filepath.Join(declarationDir, filepath.FromSlash(rel)))
-		if err != nil {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("resolve local path %q: %w", source.Local, err)
-		}
-		rootRel, err := pathRelativeToRoot(root, path)
-		if err != nil {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q: %w", source.Local, err)
-		}
-		info, err := lstatNoSymlinkPath(root, rootRel, source.Local)
-		if err != nil {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q cannot be read: %w", source.Local, err)
-		}
-		if !info.Mode().IsRegular() {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q must be a regular file", source.Local)
-		}
-		if info.Mode().Perm()&0o444 == 0 {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q is not readable", source.Local)
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q cannot be read: %w", source.Local, err)
-		}
-		if !utf8.Valid(raw) {
-			return runtimeagentintent.Resolved{}, fmt.Errorf("local path %q must contain valid UTF-8", source.Local)
-		}
-		return runtimeagentintent.Resolve(runtimeagentintent.SourceLocal, filepath.ToSlash(rootRel), provenance, string(raw))
-	case runtimeagentintent.SourceImport:
-		return runtimeagentintent.Resolved{}, fmt.Errorf("import %q is unavailable until the agent-pack source owner is gated under #1685/#1770; use local or inline intent", source.Import)
-	default:
-		return runtimeagentintent.Resolved{}, fmt.Errorf("intent source kind %q is unsupported", source.Kind)
-	}
 }
 
 func validateLocalIntentPath(raw string) (string, error) {
@@ -123,17 +91,6 @@ func validateLocalIntentPath(raw string) (string, error) {
 	return strings.Join(segments, "/"), nil
 }
 
-func pathRelativeToRoot(root, path string) (string, error) {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %s is outside contracts root %s", path, root)
-	}
-	return filepath.Clean(rel), nil
-}
-
 func validateScopedAgentIntentCoordinates(bundle *WorkflowContractBundle) []error {
 	if bundle == nil {
 		return nil
@@ -157,7 +114,7 @@ func validateScopedAgentIntentCoordinates(bundle *WorkflowContractBundle) []erro
 		} else {
 			labels[label] = key
 		}
-		ascii := asciiFoldBundleHashLabel(label)
+		ascii := asciiFoldContractLabel(label)
 		if existing, ok := folded[ascii]; ok && existing != label {
 			errs = append(errs, fmt.Errorf("case-colliding agent intent coordinates %q and %q", existing, label))
 		} else {

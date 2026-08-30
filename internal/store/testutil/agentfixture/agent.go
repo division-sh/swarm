@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const agentFixtureBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const agentFixtureBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type Store interface {
 	runtimestartupownership.Store
@@ -116,7 +116,7 @@ func validateFixtureStaticSourceSetRebind(ctx context.Context, selected Store) (
 	})
 	for _, state := range states {
 		if state.Phase == runtimemanager.AgentLifecycleTerminated ||
-			state.ProcessBinding.BundleHash != agentFixtureBundleHash || state.ProcessBinding.BundleSource != "ephemeral" {
+			state.ProcessBinding.BundleHash != agentFixtureBundleHash {
 			continue
 		}
 		identity := state.Identity.Normalize()
@@ -156,7 +156,7 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 	}
 	for _, state := range states {
 		if state.Phase == runtimemanager.AgentLifecycleTerminated ||
-			state.ProcessBinding.BundleHash != agentFixtureBundleHash || state.ProcessBinding.BundleSource != "ephemeral" ||
+			state.ProcessBinding.BundleHash != agentFixtureBundleHash ||
 			state.ProcessBinding.Equal(target) {
 			continue
 		}
@@ -178,7 +178,7 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 			targetGeneration++
 		}
 		topology, topologyErr := runtimeagenttopology.StaticAdmission(
-			plan.Revision, agentFixtureBundleHash, "ephemeral", runtimeagenttopology.LifetimeDurableManaged,
+			plan.Revision, agentFixtureBundleHash, runtimeagenttopology.LifetimeDurableManaged,
 		)
 		if topologyErr != nil {
 			return nil, topologyErr
@@ -215,7 +215,7 @@ func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagen
 
 func (s *fixtureSession) issueGrant(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.GenerationGrant, error) {
 	return s.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral", RuntimeInstanceID: s.runtimeInstanceID,
+		BundleHash: agentFixtureBundleHash, RuntimeInstanceID: s.runtimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 }
@@ -317,7 +317,7 @@ func UpsertStatic(t testing.TB, ctx context.Context, selected Store, rec runtime
 	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected); err != nil {
 		return err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash}
 	session, err := fixtureSessionFor(t, ctx, selected)
 	if err != nil {
 		return err
@@ -386,7 +386,7 @@ func UpsertStatic(t testing.TB, ctx context.Context, selected Store, rec runtime
 	if err != nil {
 		return err
 	}
-	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		return err
 	}
@@ -462,7 +462,7 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash}
 	sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
 	foundSource := false
 	for _, source := range sources {
@@ -523,7 +523,7 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	req.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	req.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -577,7 +577,7 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash}
 	plan := current
 	switch kind {
 	case runtimeagenttopology.AuthorityFlowReadinessPlan:
@@ -612,7 +612,7 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 			}
 			for _, state := range states {
 				if state.Phase != runtimemanager.AgentLifecycleTerminated &&
-					state.ProcessBinding.BundleHash == agentFixtureBundleHash && state.ProcessBinding.BundleSource == "ephemeral" {
+					state.ProcessBinding.BundleHash == agentFixtureBundleHash {
 					return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent fixture source coordinate is missing while durable fixture lifecycle cells remain")
 				}
 			}
@@ -630,7 +630,7 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 	case runtimeagenttopology.AuthorityStaticDeclarationPlan:
 		static := req.Topology.Authority.Static
 		if !exists || static == nil || static.SourceSetRevision != current.Revision ||
-			static.BundleHash != coordinate.BundleHash || static.BundleSource != coordinate.BundleSource {
+			static.BundleHash != coordinate.BundleHash {
 			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("exact static lifecycle topology does not match the current fixture source set")
 		}
 		matched := false

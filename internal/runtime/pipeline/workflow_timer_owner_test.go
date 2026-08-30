@@ -37,8 +37,54 @@ import (
 type workflowTimerOwnerTestBus interface{ Bus }
 
 func newWorkflowTimerOwnerPipelineCoordinator(bus workflowTimerOwnerTestBus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	canonicalizeWorkflowTimerModuleForTest(opts.Module)
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
 	return newDurablePipelineCoordinatorForTest(bus, db, opts)
+}
+
+func canonicalizeWorkflowTimerModuleForTest(module WorkflowModule) {
+	if module == nil {
+		return
+	}
+	bundle, ok := semanticview.Bundle(module.SemanticSource())
+	if !ok || bundle == nil {
+		return
+	}
+	for i := range bundle.Semantics.Timers {
+		timer := &bundle.Semantics.Timers[i]
+		if timer.StageOwned && strings.TrimSpace(timer.FlowID) == "" {
+			timer.FlowID = "."
+		}
+		if timer.Node.Valid() && timer.Node.FlowPath() == bundle.Semantics.Name {
+			timer.Node = mustPipelineNode(".", timer.Node.NodeID())
+		}
+	}
+	for i := range bundle.Semantics.Loops {
+		if strings.TrimSpace(bundle.Semantics.Loops[i].FlowID) == "" {
+			bundle.Semantics.Loops[i].FlowID = "."
+		}
+	}
+	if bundle.FlowTree.Root == nil {
+		root := &runtimecontracts.FlowContractView{
+			Path:   ".",
+			Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
+			Schema: runtimecontracts.FlowSchemaDocument{Name: bundle.Semantics.Name},
+			Nodes:  bundle.Nodes,
+			Events: bundle.Events,
+		}
+		bundle.FlowTree.Root = root
+	}
+	if bundle.FlowTree.ByID == nil {
+		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{}
+	}
+	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &bundle.FlowTree.Root.Schema
+	}
+	if bundle.FlowSchemas == nil {
+		bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
+	}
+	bundle.FlowSchemas["."] = bundle.FlowTree.Root.Schema
 }
 
 func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) {
@@ -124,7 +170,7 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 	}
 }
 
-func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestartOnBothStores(t *testing.T) {
+func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, order := range []struct {
 			name    string
@@ -132,18 +178,9 @@ func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestart
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(tc.name+"/"+order.name, func(t *testing.T) {
 				store, ctx := tc.open(t)
-				entityID := uuid.NewString()
-				route := workflowTimerRootRoute(ctx)
 				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-				if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
-					WorkflowName: "workflow-timer-package-identity", WorkflowVersion: "1.0.0",
-					CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					EntityType: "test_entity",
-				})); err != nil {
-					t.Fatal(err)
-				}
-				first := pipelinePackageNode(t, "packages/a", "", "shared")
-				second := pipelinePackageNode(t, "packages/b", "", "shared")
+				first := pipelineFlowPathNode(t, "a", "shared")
+				second := pipelineFlowPathNode(t, "b", "shared")
 				timers := []runtimecontracts.WorkflowTimerContract{
 					{ID: "same", Node: first, Owner: "runtime", Event: "timer.a", StartOn: "event:timer.arm", Delay: "2h"},
 					{ID: "same", Node: second, Owner: "runtime", Event: "timer.b", StartOn: "event:timer.arm", Delay: "2h"},
@@ -154,8 +191,9 @@ func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestart
 				bundle := &runtimecontracts.WorkflowContractBundle{
 					Events: map[string]runtimecontracts.EventCatalogEntry{"timer.a": {}, "timer.b": {}},
 					Semantics: runtimecontracts.WorkflowSemanticView{
-						Name: "workflow-timer-package-identity", Version: "1.0.0", InitialStage: "waiting",
-						Timers: timers,
+						Name: "workflow-timer-sibling-identity", Version: "1.0.0", InitialStage: "waiting",
+						FlowInitial: map[string]string{"a": "waiting", "b": "waiting"},
+						Timers:      timers,
 					},
 				}
 				source := semanticview.Wrap(bundle)
@@ -165,20 +203,36 @@ func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestart
 					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
 					WorkOwner: owner, TimerScheduler: scheduler,
 				})
-				if err := reconcileWorkflowTimerForTest(ctx, pc, route, entityID, "waiting", "waiting", workflowTimerCause{
-					Kind: workflowTimerCauseEvent, EventID: uuid.NewString(), EventType: "timer.arm",
-					OccurredAt: createdAt, ExecutionMode: executionmode.Live,
-				}); err != nil {
-					t.Fatalf("arm package timers: %v", err)
+				entityIDs := make(map[string]string, 2)
+				for _, flowID := range []string{"a", "b"} {
+					entityID := uuid.NewString()
+					entityIDs[flowID] = entityID
+					route := testWorkflowInstanceRoute(flowID)
+					if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
+						WorkflowName: flowID, WorkflowVersion: "1.0.0",
+						CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+						EntityType: "test_entity",
+					})); err != nil {
+						t.Fatal(err)
+					}
+					if err := reconcileWorkflowTimerForTest(ctx, pc, route, entityID, "waiting", "waiting", workflowTimerCause{
+						Kind: workflowTimerCauseEvent, EventID: uuid.NewString(), EventType: "timer.arm",
+						OccurredAt: createdAt, ExecutionMode: executionmode.Live,
+					}); err != nil {
+						t.Fatalf("arm %s timer: %v", flowID, err)
+					}
 				}
-				active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+				active := make([]WorkflowTimerActivation, 0, 2)
+				for _, flowID := range []string{"a", "b"} {
+					active = append(active, listWorkflowTimerOwnerActivations(t, store, ctx, entityIDs[flowID], true)...)
+				}
 				if len(active) != 2 {
-					t.Fatalf("active package timers = %#v, want two", active)
+					t.Fatalf("active sibling timers = %#v, want two", active)
 				}
 				byDeclaration := workflowTimerActivationsByDeclaration(active)
 				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "same"), workflowTimerNodeDeclarationKey(second, "same")} {
 					if activation, ok := byDeclaration[key]; !ok || activation.Ref.ActivationID == "" {
-						t.Fatalf("package timer %q = %#v, want exact durable activation", key, activation)
+						t.Fatalf("sibling timer %q = %#v, want exact durable activation", key, activation)
 					}
 				}
 				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -218,18 +272,18 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			runID := runtimecorrelation.RunIDFromContext(liveCtx)
 			route := workflowTimerRootRoute(liveCtx)
 			entityID := uuid.NewString()
-			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(liveCtx)
+			sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(liveCtx)
 			if !ok {
 				t.Fatal("dynamic timer test context is missing bundle source fact")
 			}
-			bundleHash, bundleSource := sourceFact.StorageValues()
+			bundleHash := sourceFact.BundleHash()
 			readiness := DynamicFlowRuntimeReadinessPlan{
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "workflow-timer-first-revision", ScopeKey: route.ScopeKey,
 					InstanceID: route.InstanceID, InstancePath: route.InstancePath,
 					EntityID: entityID, HasStoredPath: true,
 				},
-				RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+				RunID: runID, BundleHash: bundleHash,
 				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Mock,
 			}
 
@@ -350,10 +404,10 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				t.Fatalf("source B timer rows all/active = %d/%d, want 5/3: %#v", len(allRows), len(activeRows), allRows)
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
-			keepKey := workflowTimerStageDeclarationKey("", "waiting.keep")
-			changedKey := workflowTimerStageDeclarationKey("", "waiting.changed")
-			removedKey := workflowTimerStageDeclarationKey("", "waiting.removed")
-			addedKey := workflowTimerStageDeclarationKey("", "waiting.added")
+			keepKey := workflowTimerStageDeclarationKey(".", "waiting.keep")
+			changedKey := workflowTimerStageDeclarationKey(".", "waiting.changed")
+			removedKey := workflowTimerStageDeclarationKey(".", "waiting.removed")
+			addedKey := workflowTimerStageDeclarationKey(".", "waiting.added")
 			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged declaration did not preserve its exact activation")
 			}
@@ -915,7 +969,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Hour))
 			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    "workflow-timer-owner-test",
+				WorkflowName:    ".",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt:  createdAt,
 				EntityType: "test_entity",
@@ -925,7 +979,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			bundle := workflowTimerEventOnlyStateTriggerBundle()
 			bus := &recordingPipelineBus{}
 			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: handlerTestWorkflowModuleWithBundle(bundle, "workflow-timer-owner-test", "observer"), Persistence: workflowPersistenceForTest(store),
+				Module: handlerTestWorkflowModuleWithBundle(bundle, ".", "observer"), Persistence: workflowPersistenceForTest(store),
 			})
 
 			if err := reconcileWorkflowTimerForTest(ctx, pc, rootRoute, entityID, "", "waiting", workflowTimerCause{
@@ -934,7 +988,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 				t.Fatalf("activate state-entry timer: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
-			stateEntryKey := workflowTimerStageDeclarationKey("", "waiting.state_entry")
+			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.state_entry")
 			if len(active) != 1 || active[0].Ref.DeclarationKey != stateEntryKey {
 				t.Fatalf("initial active timers = %#v, want %s", active, stateEntryKey)
 			}
@@ -948,7 +1002,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 					runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
 				}, false)
 				if err != nil {
@@ -980,7 +1034,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			if persistedStateTimer.Ref != stateTimer.Ref || persistedStateTimer.Status != workflowTimerStatusActive {
 				t.Fatalf("state-entry timer after event-only handlers = %#v, want original active activation %#v", persistedStateTimer, stateTimer.Ref)
 			}
-			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, "workflow-timer-owner-test", "observer"), "waiting.event_armed")
+			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), "waiting.event_armed")
 			if got := activationByDeclaration[eventArmedKey].Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
 			}
@@ -1012,7 +1066,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now())
 			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    "workflow-timer-owner-test",
+				WorkflowName:    ".",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt:  createdAt,
 				EntityType: "test_entity",
@@ -1020,7 +1074,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerHandledOutcomeBundle(), "workflow-timer-owner-test", "observer"),
+				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerHandledOutcomeBundle(), ".", "observer"),
 				Persistence: workflowPersistenceForTest(store),
 			})
 			eventOffset := time.Duration(0)
@@ -1038,7 +1092,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 					eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), handler, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
 				}, false)
 				if err != nil {
@@ -1050,7 +1104,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			}
 			declarations := func(id string) []WorkflowTimerActivation {
 				t.Helper()
-				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, "workflow-timer-owner-test", "observer"), id)
+				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, ".", "observer"), id)
 				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 				matched := make([]WorkflowTimerActivation, 0, 1)
 				for _, activation := range all {
@@ -1115,7 +1169,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 			entityID := uuid.NewString()
 			createdAt := canonicalWorkflowTimerTime(time.Now())
 			loopActivation, err := loopruntime.New(
-				runID, entityID, "", "revision", "revision_id", uuid.NewString(), "waiting", 3, createdAt,
+				runID, entityID, ".", "revision", "revision_id", uuid.NewString(), "waiting", 3, createdAt,
 			)
 			if err != nil {
 				t.Fatalf("create loop activation: %v", err)
@@ -1127,7 +1181,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				t.Fatalf("store loop activation: %v", err)
 			}
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "workflow-timer-owner-test",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 				EntityType: "test_entity",
@@ -1137,7 +1191,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 
 			bus := &recordingPipelineBus{}
 			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerLoopEventBundle(), "workflow-timer-owner-test", "observer"),
+				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerLoopEventBundle(), ".", "observer"),
 				Persistence: workflowPersistenceForTest(store),
 			})
 			armHandler := runtimecontracts.SystemNodeEventHandler{
@@ -1150,10 +1204,10 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "",
 					payload, 0, runID, "",
-					handlerTestWorkflowEnvelope("workflow-timer-owner-test", runID, entityID), eventAt,
+					handlerTestWorkflowEnvelope(".", runID, entityID), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), handler, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(runID), entityID),
 				}, false)
 				if err != nil {
@@ -1187,7 +1241,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 			if err != nil {
 				t.Fatalf("decode repeated loop state: %v", err)
 			}
-			nextLoop, ok, err := loopruntime.Load(persistedCarrier.StateBuckets, "", "revision")
+			nextLoop, ok, err := loopruntime.Load(persistedCarrier.StateBuckets, ".", "revision")
 			if err != nil || !ok {
 				t.Fatalf("load next loop generation found=%v err=%v", ok, err)
 			}
@@ -1953,21 +2007,20 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			} else {
-				packageKey := "root"
-				flowID := "standing-workflow-timer"
-				sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+				flowPath := "standing-workflow-timer"
+				sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 				if !ok {
 					t.Fatal("standing timer test context missing bundle source fact")
 				}
-				bundleHash, bundleSource := sourceFact.StorageValues()
+				bundleHash := sourceFact.BundleHash()
 				if _, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO standing_services (
-						service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
-						operator_override, effective_state, current_bundle_hash, current_bundle_source,
+						service_id, flow_path, instance_id, entity_id, declaration_present,
+						operator_override, effective_state, current_bundle_hash,
 						revision_sequence, current_generation, current_run_id, publication_state,
 						publication_sequence, created_at, updated_at
-					) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'pending', 0, NOW(), NOW())
-				`, runtimeflowidentity.StandingServiceID(packageKey, flowID), packageKey, flowID, flowID, uuid.NewString(), bundleHash, bundleSource, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					) VALUES ($1::uuid, $2, $3, $4::uuid, TRUE, 'none', 'active', $5, 1, 1, $6::uuid, 'pending', 0, NOW(), NOW())
+				`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, flowPath, uuid.NewString(), bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			}
@@ -2403,7 +2456,7 @@ func workflowTimerRootRoute(ctx context.Context) runtimeflowidentity.Route {
 }
 
 func workflowTimerMaterializedInstance(
-	_ context.Context,
+	ctx context.Context,
 	entityID string,
 	instancePath string,
 	instance WorkflowInstance,
@@ -2412,6 +2465,9 @@ func workflowTimerMaterializedInstance(
 	instance.InstanceID = runtimeflowidentity.LogicalInstanceID(instancePath)
 	instance.StorageRef = instancePath
 	instance.EntityID = strings.TrimSpace(entityID)
+	if instancePath == runtimecorrelation.RunIDFromContext(ctx) {
+		instance.WorkflowName = "."
+	}
 	instance.Fields = cloneStringAnyMap(instance.Fields)
 	if instance.Fields == nil {
 		instance.Fields = map[string]any{}
@@ -2631,7 +2687,7 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 				StartOn: "state:waiting", Delay: "1h",
 			},
 			{
-				ID: "waiting.event_armed", Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer.event_armed",
+				ID: "waiting.event_armed", Node: mustPipelineNode(".", "observer"), Owner: "runtime", Event: "timer.event_armed",
 				StartOn: "event:timer.arm", CancelOn: "state:waiting", Delay: "1h",
 			},
 		},
@@ -2651,7 +2707,7 @@ func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"}, EntryStage: "waiting", RegionStages: []string{"waiting"},
 		}},
 		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.event_armed", Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer.event_armed",
+			ID: "waiting.event_armed", Node: mustPipelineNode(".", "observer"), Owner: "runtime", Event: "timer.event_armed",
 			StartOn: "event:timer.arm", Delay: "1h",
 		}},
 	}}
@@ -2660,7 +2716,7 @@ func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundle {
 	timer := func(id, startOn, cancelOn string) runtimecontracts.WorkflowTimerContract {
 		return runtimecontracts.WorkflowTimerContract{
-			ID: id, Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
+			ID: id, Node: mustPipelineNode(".", "observer"), Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
 		}
 	}
 	timers := []runtimecontracts.WorkflowTimerContract{

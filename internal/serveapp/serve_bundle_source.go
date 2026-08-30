@@ -4,70 +4,70 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-type serveBundleSourcePlan struct {
-	fact       runtimecorrelation.BundleSourceFact
-	projection *runtimecontracts.BundleCatalogProjection
+type serveSourceArtifactPlan struct {
+	fact     runtimecorrelation.SourceArtifactFact
+	artifact *sourceartifact.AdmittedSourceArtifact
+	catalog  durabledata.Catalog
 }
 
-func prepareServeBundleSource(ctx context.Context, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) (runtimecorrelation.BundleSourceFact, error) {
-	plan, err := planServeBundleSource(writer, bundle)
+type sourceArtifactDataWriter interface {
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+}
+
+func prepareServeSourceArtifact(ctx context.Context, writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) (runtimecorrelation.SourceArtifactFact, error) {
+	plan, err := planServeSourceArtifact(writer, bundle)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
-	return persistServeBundleSourcePlan(ctx, writer, plan)
+	return persistServeSourceArtifactPlan(ctx, writer, plan)
 }
 
-func planServeBundleSource(writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) (serveBundleSourcePlan, error) {
+func planServeSourceArtifact(writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) (serveSourceArtifactPlan, error) {
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
-		return serveBundleSourcePlan{}, fmt.Errorf("derive canonical bundle hash: %w", err)
+		return serveSourceArtifactPlan{}, fmt.Errorf("derive canonical bundle hash: %w", err)
 	}
 	if writer == nil {
-		return serveBundleSourcePlan{}, fmt.Errorf("serve requires the selected bundle ingest writer")
+		return serveSourceArtifactPlan{}, fmt.Errorf("serve requires the selected bundle ingest writer")
 	}
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if bundle == nil || bundle.SourceArtifact == nil {
+		return serveSourceArtifactPlan{}, fmt.Errorf("serve requires an admitted source artifact")
+	}
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
-		return serveBundleSourcePlan{}, fmt.Errorf("project bundle catalog row: %w", err)
+		return serveSourceArtifactPlan{}, fmt.Errorf("project durable data catalog: %w", err)
 	}
-	if projection.BundleHash != bundleHash {
-		return serveBundleSourcePlan{}, fmt.Errorf("bundle catalog projection hash %q does not match source fact %q", projection.BundleHash, bundleHash)
+	if catalog.BundleHash != bundleHash {
+		return serveSourceArtifactPlan{}, fmt.Errorf("durable data catalog hash %q does not match source fact %q", catalog.BundleHash, bundleHash)
 	}
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
-		return serveBundleSourcePlan{}, err
+		return serveSourceArtifactPlan{}, err
 	}
-	return serveBundleSourcePlan{fact: fact, projection: &projection}, nil
+	return serveSourceArtifactPlan{fact: fact, artifact: bundle.SourceArtifact, catalog: catalog}, nil
 }
 
-func persistServeBundleSourcePlan(ctx context.Context, writer bundlecatalog.ServeIngestWriter, plan serveBundleSourcePlan) (runtimecorrelation.BundleSourceFact, error) {
+func persistServeSourceArtifactPlan(ctx context.Context, writer sourceArtifactDataWriter, plan serveSourceArtifactPlan) (runtimecorrelation.SourceArtifactFact, error) {
 	if err := plan.fact.Validate(); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle source fact: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("planned source artifact fact: %w", err)
 	}
-	if plan.fact.IsEphemeral() {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("serve bundle source plan must be persisted")
+	if plan.artifact == nil {
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("source artifact plan requires an admitted source artifact")
 	}
-	if plan.projection == nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("persisted bundle source plan requires a catalog projection")
-	}
-	if plan.projection.BundleHash != plan.fact.BundleHash() {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle catalog projection hash %q does not match source fact %q", plan.projection.BundleHash, plan.fact.BundleHash())
+	if plan.artifact.BundleHash() != plan.fact.BundleHash() || plan.catalog.BundleHash != plan.fact.BundleHash() {
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("planned source artifact and durable data hashes must match source fact %q", plan.fact.BundleHash())
 	}
 	if writer == nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("persisted bundle source plan requires a bundle catalog store")
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("source artifact plan requires a source artifact store")
 	}
-	if _, err := writer.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash:  plan.projection.BundleHash,
-		ContentYAML: plan.projection.ContentYAML,
-		ParsedJSON:  plan.projection.ParsedJSON,
-		DataBlob:    plan.projection.DataBlob,
-		Metadata:    plan.projection.Metadata,
-	}, plan.projection.DataCatalog); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+	if _, err := writer.EnsureSourceArtifactWithData(ctx, plan.artifact, plan.catalog); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return plan.fact, nil
 }

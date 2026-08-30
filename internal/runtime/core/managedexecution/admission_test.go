@@ -2,7 +2,7 @@ package managedexecution
 
 import "testing"
 
-const testCanonicalBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const testCanonicalBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestAdmissionSeparatesNormalAndSelectedExecutionAuthority(t *testing.T) {
 	normal, err := New(KindNormalRuntime, "runtime-owner", 3, "", "actors", testCanonicalBundleHash, nil)

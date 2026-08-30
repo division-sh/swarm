@@ -28,10 +28,12 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bundle := runCompletionSystemNodeBundle(t)
 	source := semanticview.Wrap(bundle)
+	bundleFact := sourceArtifactFactForTestBundle(t, bundle)
+	bundleHash := bundleFact.BundleHash()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle:   source,
-		BundleSourceFact: runStartTestBundleSourceFact(),
+		ContractBundle:     source,
+		SourceArtifactFact: bundleFact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -42,7 +44,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	lifecycleExecutor := startAPIRunLifecycleExecutor(t, pg, source)
+	lifecycleExecutor := startAPIRunLifecycleExecutor(t, pg, source, bundleHash)
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
@@ -53,11 +55,11 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		DeliveryRuntime:     bus,
 		PipelineObligations: pg.PipelineObligations(),
 		RunLifecycle:        pg,
-		BundleSourceFact:    runStartTestBundleSourceFact(),
+		SourceArtifactFact:  runStartTestSourceArtifactFact(),
 	}))
 
 	runID := "11111111-1111-4111-8111-111111111111"
-	started := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))
+	started := rpcCall(t, handler, runStartBody(runID, bundleHash, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
@@ -89,7 +91,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.diagnose run.status = %#v, want completed", diagnosisRun["status"])
 	}
 
-	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
+	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
 	if terminalPublish.Error == nil {
 		t.Fatal("event.publish --run-id terminal error = nil")
 	}
@@ -105,10 +107,11 @@ func startAPIRunLifecycleExecutor(
 	t *testing.T,
 	pg *store.PostgresStore,
 	source semanticview.Source,
+	bundleHash string,
 ) *runtimerunlifecycle.Executor {
 	t.Helper()
-	scope := runtimerunlifecycle.CandidateScope{BundleHash: runStartTestBundleHash}
-	occurrence := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, runStartTestBundleHash)
+	scope := runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}
+	occurrence := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash)
 	executor, err := runtimerunlifecycle.NewExecutor(
 		pg,
 		scope,
@@ -319,15 +322,7 @@ func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowIns
 func runCompletionSystemNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: review
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: discovery
-    flow: discovery
-    mode: static
-`)
+
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 run:
   topic: string
@@ -344,7 +339,7 @@ pins:
     events:
       - flow.started
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "schema.yaml"), `
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "schema.yaml"), `
 name: discovery
 initial_state: active
 terminal_states:
@@ -357,17 +352,17 @@ pins:
     events:
       - flow.started
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "entities.yaml"), `
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "entities.yaml"), `
 discovery: {}
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "events.yaml"), `
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "events.yaml"), `
 flow.started:
   entity_id:
     type: string
   topic:
     type: string?
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "nodes.yaml"), `
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "nodes.yaml"), `
 pipeline:
   id: pipeline
   execution_type: system_node

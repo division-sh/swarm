@@ -37,6 +37,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -121,6 +122,7 @@ type startupRecoveryOrderStore interface {
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecycleCellCensus
 	storetest.AgentFixtureStore
+	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 }
 
 type startupRecoveryOrderLLM struct{ llm.NoopRuntime }
@@ -144,11 +146,11 @@ func (a startupRecoveryOrderAgent) OnEvent(_ context.Context, event events.Event
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
-	persistedSource, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	persistedSource, err := runtimecorrelation.NewSourceArtifactFact(authorActivityTestSourceArtifactFact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct persisted startup bundle source: %v", err)
 	}
-	persistedBundleHash, persistedBundleSource := persistedSource.StorageValues()
+	persistedBundleHash := persistedSource.BundleHash()
 	for _, backend := range []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
@@ -160,11 +162,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
-				seedStartupRecoveryPersistedBundle(t, ctx, db, "postgres", persistedSource.BundleHash())
+				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
 				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
+					BundleHash: persistedBundleHash,
 				})
 				return ctx, db, db, selected
 			},
@@ -174,11 +176,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
-				seedStartupRecoveryPersistedBundle(t, ctx, storetest.Database(selected), "sqlite", persistedSource.BundleHash())
+				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
 				storetest.RequireSQLiteRun(t, ctx, storetest.Database(selected), storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
-					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
+					BundleHash: persistedBundleHash,
 				})
 				return ctx, nil, storetest.Database(selected), selected
 			},
@@ -227,7 +229,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("load startup agent authority: %v", err)
 			}
 			predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-				agentSnapshot.Authority.BundleSource(), "startup-predecessor-"+backend.name, 41,
+				agentSnapshot.Authority.SourceArtifact(), "startup-predecessor-"+backend.name, 41,
 			)
 			if err != nil {
 				t.Fatalf("construct startup predecessor authority: %v", err)
@@ -255,7 +257,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: persistedSource,
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: persistedSource,
 					ProcessWorkOwner: processOwner,
 					TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 						if !hydrated.Load() {
@@ -311,11 +313,13 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 }
 
 func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t *testing.T) {
-	currentSource, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	currentArtifact := authorActivityTestSourceArtifact
+	currentSource, err := runtimecorrelation.NewSourceArtifactFact(currentArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct current startup source: %v", err)
 	}
-	foreignSource, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	foreignArtifact := startupRecoverySourceArtifact(t, "foreign-startup-recovery")
+	foreignSource, err := runtimecorrelation.NewSourceArtifactFact(foreignArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct foreign startup source: %v", err)
 	}
@@ -364,7 +368,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
 					currentCtx := startupRecoverySourceContext(currentSource, currentRunID)
-					seedStartupRecoverySourceRun(t, currentCtx, db, backend, selected, currentSource, currentRunID)
+					seedStartupRecoverySourceRun(t, currentCtx, selected, currentSource, currentArtifact, currentRunID)
 
 					var (
 						deliveryID  string
@@ -379,7 +383,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							eventSource = foreignSource
 							eventRunID = eventtest.UUID("recovery-disabled-foreign-" + backend + "-" + mode.name)
 							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
-							seedStartupRecoverySourceRun(t, eventCtx, db, backend, selected, eventSource, eventRunID)
+							seedStartupRecoverySourceRun(t, eventCtx, selected, eventSource, foreignArtifact, eventRunID)
 						}
 						deliveryCtx = eventCtx
 						event := eventtest.ExistingRunRootIngress(
@@ -452,7 +456,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 
 						Options: swarmruntime.RuntimeOptions{
 							SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
-							RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: currentSource,
+							RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: currentSource,
 							ProcessWorkOwner:                 processOwner,
 							DisablePersistentStartupRecovery: mode.disablePersistentStartupRecovery,
 							TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
@@ -505,29 +509,24 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 }
 
 func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *testing.T) {
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	source, err := runtimecorrelation.NewSourceArtifactFact(authorActivityTestSourceArtifactFact.BundleHash())
 	if err != nil {
 		t.Fatalf("construct pipeline handoff source: %v", err)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var (
-				db       *sql.DB
-				selected startupRecoveryOrderStore
-			)
+			var selected startupRecoveryOrderStore
 			if backend == "postgres" {
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				db = postgresDB
 				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-				db = storetest.Database(sqliteStore)
 				selected = sqliteStore
 			}
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
-			seedStartupRecoverySourceRun(t, ctx, db, backend, selected, source, runID)
+			seedStartupRecoverySourceRun(t, ctx, selected, source, authorActivityTestSourceArtifact, runID)
 			route := startupRecoveryNodeRoute(t, "complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),
@@ -555,7 +554,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
 				PipelineObligations: pipelineOwner,
-				BundleSourceFact:    source,
+				SourceArtifactFact:  source,
 				DeliveryAuthority:   snapshot.Authority,
 			})
 			if err != nil {
@@ -643,13 +642,13 @@ func startupRecoveryNodeRoute(t testing.TB, nodeID string) events.DeliveryRoute 
 	return events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, nodeID)),
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-			FlowID: "test-boot-success", FlowInstance: templateInstanceDeliveryRunID,
+			FlowID: ".", FlowInstance: templateInstanceDeliveryRunID,
 		}),
 	}
 }
 
-func startupRecoverySourceContext(source runtimecorrelation.BundleSourceFact, runID string) context.Context {
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), source)
+func startupRecoverySourceContext(source runtimecorrelation.SourceArtifactFact, runID string) context.Context {
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		source.BundleHash(),
@@ -660,18 +659,20 @@ func startupRecoverySourceContext(source runtimecorrelation.BundleSourceFact, ru
 func seedStartupRecoverySourceRun(
 	t *testing.T,
 	ctx context.Context,
-	db *sql.DB,
-	backend string,
 	selected startupRecoveryOrderStore,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
+	artifact *sourceartifact.AdmittedSourceArtifact,
 	runID string,
 ) {
 	t.Helper()
-	bundleHash, bundleSource := source.StorageValues()
-	seedStartupRecoveryPersistedBundle(t, ctx, db, backend, bundleHash)
+	bundleHash := source.BundleHash()
+	if artifact == nil || artifact.BundleHash() != bundleHash {
+		t.Fatalf("startup recovery artifact = %v, want exact source %s", artifact, bundleHash)
+	}
+	ensureStartupRecoverySourceArtifact(t, ctx, selected, artifact)
 	fixture := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
-		BundleHash: bundleHash, BundleSource: bundleSource,
+		BundleHash: bundleHash,
 	}
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
@@ -686,32 +687,41 @@ func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflo
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	files := make(map[string]string)
-	for _, name := range []string{"package.yaml", "schema.yaml", "events.yaml", "nodes.yaml"} {
+	for _, name := range []string{"schema.yaml", "events.yaml", "nodes.yaml"} {
 		body, err := os.ReadFile(filepath.Join(fixtureRoot, name))
 		if err != nil {
 			t.Fatalf("read startup recovery fixture %s: %v", name, err)
 		}
 		files[name] = string(body)
 	}
+	files["schema.yaml"] = `name: startup-recovery-stateless
+stages: []
+pins:
+  inputs:
+    events: [task.requested]
+`
 	files["nodes.yaml"] = strings.ReplaceAll(files["nodes.yaml"], "\n      advances_to: done", "")
 	return loadRuntimeTempBundle(t, files)
 }
 
-func seedStartupRecoveryPersistedBundle(t *testing.T, ctx context.Context, db *sql.DB, backend, bundleHash string) {
+func ensureStartupRecoverySourceArtifact(t *testing.T, ctx context.Context, selected startupRecoveryOrderStore, artifact *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
-	query := `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: startup-recovery-test', '{}'::jsonb)
-		ON CONFLICT (bundle_hash) DO NOTHING`
-	if backend == "sqlite" {
-		query = `
-			INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-			VALUES (?, 'name: startup-recovery-test', '{}')
-			ON CONFLICT (bundle_hash) DO NOTHING`
+	if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
+		t.Fatalf("persist startup recovery source artifact: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, query, bundleHash); err != nil {
-		t.Fatalf("seed persisted startup bundle: %v", err)
+}
+
+func startupRecoverySourceArtifact(t *testing.T, name string) *sourceartifact.AdmittedSourceArtifact {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatalf("admit startup recovery source artifact: %v", err)
+	}
+	return artifact
 }
 
 func (s *renewalTrackingDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {

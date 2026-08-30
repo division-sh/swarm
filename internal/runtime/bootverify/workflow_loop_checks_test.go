@@ -125,7 +125,7 @@ func TestLoopValidationRejectsIncompleteEscapeEmitPayload(t *testing.T) {
 func TestLoopValidationRejectsRecurringTimerConnectedToRegion(t *testing.T) {
 	bundle := loopValidationBundle()
 	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
-		ID: "review.poll", Stage: "review", StageOwned: true, Event: "review.poll", StartOn: "state:review", Recurring: true,
+		ID: "review.poll", Stage: "review", StageOwned: true, FlowID: ".", Event: "review.poll", StartOn: "state:review", Recurring: true,
 	}}
 	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "recurring timer review.poll is connected to the loop region") {
 		t.Fatalf("findings = %#v, want recurring timer rejection", findings)
@@ -135,7 +135,7 @@ func TestLoopValidationRejectsRecurringTimerConnectedToRegion(t *testing.T) {
 func TestLoopValidationRejectsTimerThatBypassesLoopClose(t *testing.T) {
 	bundle := loopValidationBundle()
 	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
-		ID: "review.expire", Stage: "review", StageOwned: true, Event: "platform.stage_timer_fired",
+		ID: "review.expire", Stage: "review", StageOwned: true, FlowID: ".", Event: "platform.stage_timer_fired",
 		StartOn: "state:review", AdvancesTo: "exhausted",
 	}}
 	if findings := loopValidationFindings(bundle); !loopFindingContains(findings, "timer review.expire advances_to exhausted leaves the loop region") {
@@ -181,7 +181,7 @@ func loopValidationFindings(bundle *runtimecontracts.WorkflowContractBundle) []F
 
 func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	revisionField := "revision_id"
-	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "controller")
+	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "controller")
 	emit := func(event string) runtimecontracts.EmitSpec {
 		return runtimecontracts.EmitSpec{Event: event, Fields: map[string]runtimecontracts.ExpressionValue{revisionField: runtimecontracts.RefExpression("loop.revision_id")}}
 	}
@@ -220,7 +220,7 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 			InitialStage:   "research",
 			Stages:         []runtimecontracts.WorkflowStageContract{{ID: "research"}, {ID: "drafting"}, {ID: "review"}, {ID: "exhausted"}, {ID: "approved"}},
 			TerminalStages: []string{"exhausted", "approved"},
-			Loops:          []runtimecontracts.WorkflowLoopPlan{{ID: "revision", RevisionField: revisionField, MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "exhausted"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Operations: operations}},
+			Loops:          []runtimecontracts.WorkflowLoopPlan{{FlowID: ".", ID: "revision", RevisionField: revisionField, MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "exhausted"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Operations: operations}},
 		},
 	}
 	refreshLoopValidationTopology(bundle)
@@ -228,7 +228,7 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
-	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "controller")
+	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "controller")
 	transitions := make([]runtimecontracts.HandlerTransitionSemantic, 0)
 	for eventType, handler := range bundle.Nodes["controller"].EventHandlers {
 		transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
@@ -238,10 +238,10 @@ func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 		})
 	}
 	bundle.Semantics.HandlerTransitions = transitions
-	topology := runtimecontracts.BuildWorkflowStageTopology("", bundle.Semantics.InitialStage,
+	topology := runtimecontracts.BuildWorkflowStageTopology(".", bundle.Semantics.InitialStage,
 		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.Semantics.TerminalStages,
 		transitions, bundle.Semantics.Timers, bundle.Semantics.Loops)
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": topology}
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": topology}
 	bundle.Semantics.Loops = runtimecontracts.BindWorkflowLoopRegions(bundle.Semantics.Loops, bundle.Semantics.StageTopologies)
 }
 

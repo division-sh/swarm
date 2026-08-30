@@ -1,7 +1,0 @@
-name: test-boot-dialect-guard
-version: 1.0.0
-description: >
-  Boot verification: guard is a plain string instead of an object
-  with {id, check}. Should produce a DIALECT-GUARD error.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

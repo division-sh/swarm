@@ -22,8 +22,8 @@ import (
 func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeScenarioRunnerFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeScenarioRunnerFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var calls []jsonRPCRequest
 	var publishCalls int
@@ -42,7 +42,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case eventPublishMethod:
 			publishCalls++
 			switch publishCalls {
@@ -107,8 +107,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -141,8 +140,8 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeScenarioSetupFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeScenarioSetupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var calls []jsonRPCRequest
 	var setupRunID string
@@ -155,7 +154,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -236,8 +235,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -261,8 +259,8 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeScenarioRootSetupFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeScenarioRootSetupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var calls []jsonRPCRequest
 	var setupRunID string
@@ -275,7 +273,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -296,7 +294,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			if want := runtimeflowidentity.EntityID(setupRunID); setupEntityID != want {
 				t.Fatalf("test.setup_entities root entity_id = %q, want canonical run root %q", setupEntityID, want)
 			}
-			if entity["alias"] != "widget" || entity["flow_instance"] != "" || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
+			if entity["alias"] != "widget" || entity["flow_instance"] != "." || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities root entity = %#v", entity)
 			}
 			if err := assertScenarioJSONEqual("test.setup_entities root fields", entity["fields"], map[string]any{"score": float64(5)}); err != nil {
@@ -351,8 +349,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -376,8 +373,8 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := filepath.Join(RepoRoot(), "examples", "routing", "root-ingress")
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := filepath.Join(RepoRoot(), "examples", "routing", "root-ingress")
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +385,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case eventPublishMethod:
 			if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
@@ -431,8 +428,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -512,9 +508,9 @@ func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
 	}
 }
 
-func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string, doc scenarioDocument) {
+func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, doc scenarioDocument) {
 	t.Helper()
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	for _, step := range doc.Steps {
 		if step.Action != "publish" {
 			t.Fatalf("scenario step = %#v, want publish", step)
@@ -563,7 +559,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -740,8 +736,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -783,15 +778,15 @@ func scenarioTraceRowForEvent(eventID, eventName string) map[string]any {
 func TestSwarmTestRejectsInvalidFixtureSchemaBeforePublish(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-type.yaml"), `
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "invalid-type.yaml"), `
 name: invalid type fixture
 steps:
   - publish: item.received
     payload:
       item_id: [not, text]
 `)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -799,7 +794,7 @@ steps:
 			t.Errorf("decode request: %v", err)
 		}
 		if req.Method == "runtime.identity" {
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 			return
 		}
 		called = true
@@ -809,9 +804,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		filepath.Join(contractsPath, "tests", "invalid-type.yaml"),
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Join("tests", "invalid-type.yaml"),
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -827,9 +820,8 @@ steps:
 func TestSwarmTestRejectsInvalidSetupBeforeMutation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeScenarioSetupFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	scenarioPath := filepath.Join(contractsPath, "flows", "operating", "tests", "bad-setup.yaml")
+	sourceRoot := writeScenarioSetupFixture(t)
+	scenarioPath := filepath.Join(sourceRoot, "operating", "tests", "bad-setup.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: bad setup
 setup:
@@ -843,6 +835,7 @@ steps:
     target: product
     payload: {note: approved}
 `)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -850,7 +843,7 @@ steps:
 			t.Errorf("decode request: %v", err)
 		}
 		if req.Method == "runtime.identity" {
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 			return
 		}
 		called = true
@@ -860,9 +853,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		scenarioPath,
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Join("operating", "tests", "bad-setup.yaml"),
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -919,8 +910,8 @@ expect:
 func TestSwarmTestRejectsScenariosOutsideSupportedRoots(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	outside := filepath.Join(contractsPath, "private.yaml")
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	outside := filepath.Join(sourceRoot, "private.yaml")
 	writeWorkflowValidationFixtureFile(t, outside, `
 name: private scenario
 steps:
@@ -930,36 +921,34 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		outside,
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Base(outside),
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "outside supported roots") {
-		t.Fatalf("stderr = %q, want supported-root failure", stderr.String())
+	if !strings.Contains(stderr.String(), `unclassified source file "private.yaml"`) {
+		t.Fatalf("stderr = %q, want source-admission classification failure", stderr.String())
 	}
 }
 
 func TestSwarmTestRejectsSymlinkFixtureEscapeBeforePublish(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
 	outside := filepath.Join(t.TempDir(), "outside.yaml")
 	writeWorkflowValidationFixtureFile(t, outside, `
 amount: 7
 who: outside
 `)
-	fixtureDir := filepath.Join(contractsPath, "tests", "fixtures")
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
+	fixtureDir := filepath.Join(sourceRoot, "tests", "fixtures")
 	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
 		t.Fatalf("mkdir fixture dir: %v", err)
 	}
 	if err := os.Symlink(outside, filepath.Join(fixtureDir, "outside.yaml")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "symlink-escape.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "symlink-escape.yaml"), `
 name: symlink escape
 steps:
   - publish: thing.created
@@ -973,7 +962,7 @@ steps:
 			t.Errorf("decode request: %v", err)
 		}
 		if req.Method == "runtime.identity" {
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 			return
 		}
 		called = true
@@ -983,9 +972,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		filepath.Join(contractsPath, "tests", "symlink-escape.yaml"),
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Join("tests", "symlink-escape.yaml"),
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -993,17 +980,16 @@ steps:
 	if called {
 		t.Fatal("event.publish API was called for symlink-escaped fixture")
 	}
-	if !strings.Contains(stderr.String(), "escapes contract package root") {
-		t.Fatalf("stderr = %q, want contract-root escape failure", stderr.String())
+	if !strings.Contains(stderr.String(), `source path "tests/fixtures/outside.yaml" must not be a symlink`) {
+		t.Fatalf("stderr = %q, want source-admission symlink failure", stderr.String())
 	}
 }
 
 func TestSwarmTestMailboxDecideFindsExactlyOneThenMutates(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox.yaml"), `
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "mailbox.yaml"), `
 name: mailbox scenario
 steps:
   - publish: item.received
@@ -1015,6 +1001,7 @@ steps:
       verdict: approve
       fields: {}
 `)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -1024,7 +1011,7 @@ steps:
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
@@ -1055,9 +1042,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		filepath.Join(contractsPath, "tests", "mailbox.yaml"),
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Join("tests", "mailbox.yaml"),
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -1081,8 +1066,7 @@ func TestSwarmTestHumanTaskDecideAndDeferUsePublicMailboxRPC(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			setCLIAPITestToken(t, "test-token")
-			contractsPath := writeServedEventPublishFollowUpFixture(t)
-			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+			sourceRoot := writeServedEventPublishFollowUpFixture(t)
 			step := `
   - mailbox.decide:
       match:
@@ -1102,13 +1086,14 @@ func TestSwarmTestHumanTaskDecideAndDeferUsePublicMailboxRPC(t *testing.T) {
         scope: flow
       until: "2026-05-14T12:00:00Z"`
 			}
-			writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "human-task.yaml"), `
+			writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "human-task.yaml"), `
 name: human task mailbox scenario
 steps:
   - publish: item.received
     payload: {item_id: human-review}
 `+step+`
 `)
+			bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 			var calls []jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -1118,7 +1103,7 @@ steps:
 				calls = append(calls, req)
 				switch req.Method {
 				case "runtime.identity":
-					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
@@ -1152,8 +1137,7 @@ steps:
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-				"test", filepath.Join(contractsPath, "tests", "human-task.yaml"),
-				"--contracts", contractsPath,
+				"test", sourceRoot, filepath.Join("tests", "human-task.yaml"),
 				"--timeout", "2s", "--poll-interval", "10ms",
 			}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 0 {
@@ -1180,9 +1164,8 @@ func TestSwarmTestRejectsCrossAnchorDecisionCardSelectorsBeforeLookup(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			setCLIAPITestToken(t, "test-token")
-			contractsPath := writeServedEventPublishFollowUpFixture(t)
-			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"), `
+			sourceRoot := writeServedEventPublishFollowUpFixture(t)
+			writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "invalid-card-match.yaml"), `
 name: invalid card match
 steps:
   - publish: item.received
@@ -1192,6 +1175,7 @@ steps:
         `+tc.match+`
       verdict: approve
 `)
+			bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 			var lookup bool
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -1200,7 +1184,7 @@ steps:
 				}
 				switch req.Method {
 				case "runtime.identity":
-					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
@@ -1216,8 +1200,7 @@ steps:
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-				"test", filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"),
-				"--contracts", contractsPath,
+				"test", sourceRoot, filepath.Join("tests", "invalid-card-match.yaml"),
 			}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != scenarioTestExitValidation || lookup || !strings.Contains(stderr.String(), tc.want) {
 				t.Fatalf("code=%d lookup=%v stderr=%q, want validation containing %q", code, lookup, stderr.String(), tc.want)
@@ -1229,9 +1212,8 @@ steps:
 func TestSwarmTestMailboxDecideMissingVerdictFailsBeforeMailboxLookup(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"), `
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "mailbox-reject-missing-reason.yaml"), `
 name: mailbox decide missing verdict
 steps:
   - publish: item.received
@@ -1240,6 +1222,7 @@ steps:
       match:
         decision: launch_review
 `)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -1249,7 +1232,7 @@ steps:
 		calls = append(calls, req)
 		switch req.Method {
 		case "runtime.identity":
-			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash)
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
@@ -1262,9 +1245,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test",
-		filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"),
-		"--contracts", contractsPath,
+		"test", sourceRoot, filepath.Join("tests", "mailbox-reject-missing-reason.yaml"),
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -1298,14 +1279,14 @@ func TestScenarioEventExpectationsDeduplicateRunTraceDeliveryRows(t *testing.T) 
 func TestScenarioEvaluatorSeedIsContractRelativeAndRecorded(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
-	fileA := scenarioTestFile{Path: filepath.Join(rootA, "tests", "same.yaml")}
-	fileB := scenarioTestFile{Path: filepath.Join(rootB, "tests", "same.yaml")}
+	fileA := scenarioTestFile{Path: "tests/same.yaml"}
+	fileB := scenarioTestFile{Path: "tests/same.yaml"}
 	doc := scenarioDocument{Name: "portable", Seed: "recorded-seed"}
-	seedA, err := (scenarioRunner{contractsDir: rootA}).scenarioEvaluatorSeed(fileA, doc)
+	seedA, err := (scenarioRunner{sourceRoot: rootA}).scenarioEvaluatorSeed(fileA, doc)
 	if err != nil {
 		t.Fatalf("seed A: %v", err)
 	}
-	seedB, err := (scenarioRunner{contractsDir: rootB}).scenarioEvaluatorSeed(fileB, doc)
+	seedB, err := (scenarioRunner{sourceRoot: rootB}).scenarioEvaluatorSeed(fileB, doc)
 	if err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
@@ -1489,14 +1470,14 @@ expect:
 
 func writeScenarioRunnerFixture(t *testing.T) string {
 	t.Helper()
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	if err := os.RemoveAll(filepath.Join(contractsPath, "tests")); err != nil {
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	if err := os.RemoveAll(filepath.Join(sourceRoot, "tests")); err != nil {
 		t.Fatalf("remove inherited canonical scenarios: %v", err)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "fixtures", "item-received.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "fixtures", "item-received.yaml"), `
 item_id: fixture
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "empire-routing.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "empire-routing.yaml"), `
 name: empire-style deterministic routing
 steps:
   - publish: item.received
@@ -1526,7 +1507,7 @@ expect:
     - type: default
       current_state: done
 `)
-	return contractsPath
+	return sourceRoot
 }
 
 func writeScenarioSetupFixture(t *testing.T) string {
@@ -1574,20 +1555,19 @@ func mustScenarioExpressionEvaluator(t *testing.T, vars map[string]any) *scenari
 	return evaluator
 }
 
-func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) {
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	otherHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+func TestScenarioTestSourceArtifactFactConsumesExactRuntimeIdentity(t *testing.T) {
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	otherHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	for _, tc := range []struct {
 		name    string
 		sources []map[string]any
-		want    string
 		wantErr string
 	}{
-		{name: "persisted", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "persisted"}}, want: "persisted"},
-		{name: "ephemeral", sources: []map[string]any{{"bundle_hash": otherHash, "bundle_source": "persisted"}, {"bundle_hash": bundleHash, "bundle_source": "ephemeral"}}, want: "ephemeral"},
-		{name: "missing", sources: []map[string]any{{"bundle_hash": otherHash, "bundle_source": "persisted"}}, wantErr: "does not serve bundle_hash"},
-		{name: "duplicate", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "persisted"}, {"bundle_hash": bundleHash, "bundle_source": "persisted"}}, wantErr: "duplicate source facts"},
-		{name: "invalid", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "derived"}}, wantErr: "invalid source fact"},
+		{name: "present", sources: []map[string]any{{"bundle_hash": bundleHash}}},
+		{name: "among multiple", sources: []map[string]any{{"bundle_hash": otherHash}, {"bundle_hash": bundleHash}}},
+		{name: "missing", sources: []map[string]any{{"bundle_hash": otherHash}}, wantErr: "does not serve bundle_hash"},
+		{name: "duplicate", sources: []map[string]any{{"bundle_hash": bundleHash}, {"bundle_hash": bundleHash}}, wantErr: "duplicate source facts"},
+		{name: "invalid", sources: []map[string]any{{"bundle_hash": "not-canonical"}}, wantErr: "invalid source fact"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1600,7 +1580,7 @@ func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) 
 				}
 				writeJSONRPCResult(t, w, req.ID, map[string]any{
 					"runtime_instance_id": "runtime-test", "started_at": "2026-01-01T00:00:00Z",
-					"api_version": "v1", "supported_transports": []string{"tcp"}, "bundle_sources": tc.sources,
+					"api_version": "v1", "supported_transports": []string{"tcp"}, "source_artifacts": tc.sources,
 				})
 			}))
 			defer server.Close()
@@ -1608,7 +1588,7 @@ func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) 
 			if err != nil {
 				t.Fatalf("client: %v", err)
 			}
-			fact, err := scenarioTestBundleSourceFact(context.Background(), client, bundleHash)
+			fact, err := scenarioTestSourceArtifactFact(context.Background(), client, bundleHash)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want %q", err, tc.wantErr)
@@ -1618,23 +1598,22 @@ func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) 
 			if err != nil {
 				t.Fatalf("source fact: %v", err)
 			}
-			gotHash, gotSource := fact.StorageValues()
-			if gotHash != bundleHash || gotSource != tc.want {
-				t.Fatalf("source fact = %s/%s, want %s/%s", gotHash, gotSource, bundleHash, tc.want)
+			if gotHash := fact.BundleHash(); gotHash != bundleHash {
+				t.Fatalf("source fact hash = %s, want %s", gotHash, bundleHash)
 			}
 		})
 	}
 }
 
-func writeScenarioRuntimeIdentity(t *testing.T, w http.ResponseWriter, id string, bundleHash, bundleSource string) {
+func writeScenarioRuntimeIdentity(t *testing.T, w http.ResponseWriter, id string, bundleHash string) {
 	t.Helper()
 	writeJSONRPCResult(t, w, id, map[string]any{
 		"runtime_instance_id":  "runtime-test",
 		"started_at":           "2026-01-01T00:00:00Z",
 		"api_version":          "v1",
 		"supported_transports": []string{"tcp"},
-		"bundle_sources": []map[string]any{{
-			"bundle_hash": bundleHash, "bundle_source": bundleSource,
+		"source_artifacts": []map[string]any{{
+			"bundle_hash": bundleHash,
 		}},
 	})
 }

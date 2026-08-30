@@ -505,7 +505,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		} else if found {
 			continue
 		}
-		delay := workflowTimerRenderedDelay(joinPlan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowID()))
+		delay := workflowTimerRenderedDelay(joinPlan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowPath()))
 		interval, ok := timeridentity.ParseDelayDuration(delay)
 		if !ok {
 			return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Timeout.After)

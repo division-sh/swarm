@@ -44,26 +44,26 @@ func TestAdmittedEffectiveSourceProjectionBindsBaseProvenanceAndIsStable(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, _ := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-	ephemeral, _ := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	persisted, _ := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	ephemeral, _ := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 
-	first, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: persisted})
+	first, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: persisted})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: persisted})
+	second, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: persisted})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !first.Identity().Equal(second.Identity()) {
 		t.Fatalf("same effective source produced different identities: %s != %s", first.Identity().Digest(), second.Identity().Digest())
 	}
-	other, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: ephemeral})
+	other, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: ephemeral})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Identity().Digest() == other.Identity().Digest() {
-		t.Fatal("persisted and ephemeral source provenance produced the same effective digest")
+	if first.Identity().Digest() != other.Identity().Digest() {
+		t.Fatal("the same admitted source fact produced different effective digests")
 	}
 	if !strings.HasPrefix(first.Identity().Digest(), "sha256:") {
 		t.Fatalf("digest = %q", first.Identity().Digest())
@@ -82,11 +82,11 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: fact})
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +143,8 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	}
 	admitRuntimeTestBundle(t, bundle)
 	bundleHash, _ := runtimecontracts.BundleHash(bundle)
-	fact, _ := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: fact})
+	fact, _ := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +154,6 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	}
 	const toolID = "telegram.send_message"
 	entries := []runtimecontracts.ToolSchemaEntry{projection.Source().ToolEntries()[toolID]}
-	for _, scope := range projection.Source().ProjectScopes() {
-		if entry, ok := scope.Tools[toolID]; ok {
-			entries = append(entries, entry)
-		}
-	}
 	for _, scope := range projection.Source().FlowScopes() {
 		if entry, ok := scope.Tools[toolID]; ok {
 			entries = append(entries, entry)
@@ -179,7 +174,7 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 }
 
 func TestEffectiveSourceIdentityChangesWithAuthoredProviderConnectorSchema(t *testing.T) {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("7", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +201,8 @@ func TestEffectiveSourceIdentityChangesWithAuthoredProviderConnectorSchema(t *te
 			t.Fatal(err)
 		}
 		admitted, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
-			Source:           semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"local.send": tool}}),
-			BundleSourceFact: fact,
+			Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"local.send": tool}}),
+			SourceArtifactFact: fact,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -270,7 +265,7 @@ func TestEffectiveSourceProjectionHasNoProductionCompositionBypass(t *testing.T)
 	}
 }
 
-func digestForTriggerGeneration(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, generation triggergeneration.Generation) string {
+func digestForTriggerGeneration(t *testing.T, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, generation triggergeneration.Generation) string {
 	t.Helper()
 	provenance := semanticview.ProviderTriggerEventProvenance{
 		Provider: "telegram", Event: "inbound.telegram.text_message", Kind: "normalized",
@@ -281,7 +276,7 @@ func digestForTriggerGeneration(t *testing.T, source semanticview.Source, fact r
 	return digestForEffectiveSourceValue(t, effectiveSourceCapabilityOverride{Source: source, capabilities: capabilities}, fact, nil)
 }
 
-func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, marker string) string {
+func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, marker string) string {
 	t.Helper()
 	const toolID = "telegram.send_message"
 	importSource, ok := source.SemanticCapabilities().ConnectorImportSource(toolID)
@@ -305,7 +300,7 @@ func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact
 	return digestForEffectiveSourceValue(t, effectiveSourceCapabilityOverride{Source: source, capabilities: capabilities}, fact, nil)
 }
 
-func digestForEffectiveSourceValue(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, plans []packs.SatisfactionPlan) string {
+func digestForEffectiveSourceValue(t *testing.T, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, plans []packs.SatisfactionPlan) string {
 	t.Helper()
 	value, err := effectiveSourceIdentityValue(source, fact, plans)
 	if err != nil {

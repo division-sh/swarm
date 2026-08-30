@@ -9,111 +9,66 @@ import (
 	"testing"
 )
 
-func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T) {
-	repo := t.TempDir()
-	discoveredContracts := filepath.Join(repo, "contracts")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(discoveredContracts, "package.yaml"), `name: discovered`)
-	configContracts := filepath.Join(t.TempDir(), "config-contracts")
-	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
-	envContracts := filepath.Join(t.TempDir(), "env-contracts")
-
-	t.Run("flags beat env config and discovery", func(t *testing.T) {
-		isolateCLIAPIConfigEnv(t)
-		t.Setenv("SWARM_CONTRACTS_PATH", envContracts)
-		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-			"contracts_path":     configContracts,
-			"platform_spec_path": configPlatform,
-		}))
-
-		got, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
-			ContractsPath:    "flag-contracts",
-			PlatformSpecPath: "flag-platform.yaml",
-		})
-		if err != nil {
-			t.Fatalf("resolve paths: %v", err)
-		}
-		if want := filepath.Join(repo, "flag-contracts"); got.ContractsPath != want {
-			t.Fatalf("contracts path = %q, want %q", got.ContractsPath, want)
-		}
-		if want := filepath.Join(repo, "flag-platform.yaml"); got.PlatformSpecPath != want {
-			t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
-		}
-	})
-
-	t.Run("environment beats config and discovery for contracts only", func(t *testing.T) {
-		isolateCLIAPIConfigEnv(t)
-		t.Setenv("SWARM_CONTRACTS_PATH", envContracts)
-		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-			"contracts_path":     configContracts,
-			"platform_spec_path": configPlatform,
-		}))
-
-		got, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{})
-		if err != nil {
-			t.Fatalf("resolve paths: %v", err)
-		}
-		if got.ContractsPath != envContracts {
-			t.Fatalf("contracts path = %q, want %q", got.ContractsPath, envContracts)
-		}
-		if got.PlatformSpecPath != configPlatform {
-			t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, configPlatform)
-		}
-	})
-
-	t.Run("config beats discovery and built in default", func(t *testing.T) {
-		isolateCLIAPIConfigEnv(t)
-		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-			"contracts_path":     configContracts,
-			"platform_spec_path": configPlatform,
-		}))
-
-		got, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{})
-		if err != nil {
-			t.Fatalf("resolve paths: %v", err)
-		}
-		if got.ContractsPath != configContracts {
-			t.Fatalf("contracts path = %q, want %q", got.ContractsPath, configContracts)
-		}
-		if got.PlatformSpecPath != configPlatform {
-			t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, configPlatform)
-		}
-	})
-
-	t.Run("discovers repo contracts and embedded platform spec last", func(t *testing.T) {
-		isolateCLIAPIConfigEnv(t)
-
-		got, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{})
-		if err != nil {
-			t.Fatalf("resolve paths: %v", err)
-		}
-		if got.ContractsPath != discoveredContracts {
-			t.Fatalf("contracts path = %q, want %q", got.ContractsPath, discoveredContracts)
-		}
-		want, err := EmbeddedPlatformSpecPath()
-		if err != nil {
-			t.Fatalf("embedded platform spec path: %v", err)
-		}
-		if got.PlatformSpecPath != want {
-			t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
-		}
-	})
-}
-
-func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *testing.T) {
+func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	outsideRepo := t.TempDir()
-	contractsRoot := filepath.Join(t.TempDir(), "contracts")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `name: external`)
-	chdirForTest(t, outsideRepo)
+	repo := t.TempDir()
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"platform_spec_path": configPlatform,
+	}))
 
-	got, err := ResolveCLIContractPlatformSpecPaths(outsideRepo, CLIContractPlatformSpecPathOptions{
-		ContractsPath: contractsRoot,
+	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot: sourceRoot,
 	})
 	if err != nil {
 		t.Fatalf("resolve paths: %v", err)
 	}
-	if got.ContractsPath != contractsRoot {
-		t.Fatalf("contracts path = %q, want %q", got.ContractsPath, contractsRoot)
+	if got.SourceRoot != sourceRoot {
+		t.Fatalf("source path = %q, want %q", got.SourceRoot, sourceRoot)
+	}
+	if got.PlatformSpecPath != configPlatform {
+		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, configPlatform)
+	}
+
+	got, err = ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot:       sourceRoot,
+		PlatformSpecPath: "explicit-platform.yaml",
+	})
+	if err != nil {
+		t.Fatalf("resolve explicit platform path: %v", err)
+	}
+	if want := filepath.Join(repo, "explicit-platform.yaml"); got.PlatformSpecPath != want {
+		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
+	}
+
+	t.Run("omitted source is invocation cwd", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{})
+		if err != nil {
+			t.Fatalf("resolve omitted source: %v", err)
+		}
+		if got.SourceRoot != repo {
+			t.Fatalf("omitted source root = %q, want invocation cwd %q", got.SourceRoot, repo)
+		}
+	})
+}
+
+func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	outsideRepo := t.TempDir()
+	sourceRoot := filepath.Join(t.TempDir(), "contracts")
+
+	chdirForTest(t, outsideRepo)
+
+	got, err := ResolveCLISourcePlatformSpecPaths(outsideRepo, CLISourcePlatformSpecPathOptions{
+		SourceRoot: sourceRoot,
+	})
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+	if got.SourceRoot != sourceRoot {
+		t.Fatalf("contracts path = %q, want %q", got.SourceRoot, sourceRoot)
 	}
 	want, err := EmbeddedPlatformSpecPath()
 	if err != nil {
@@ -131,9 +86,9 @@ func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t 
 	}
 }
 
-func TestResolveCLIContractPlatformSpecPathsRejectsMissingInvocationRoot(t *testing.T) {
+func TestResolveCLISourcePlatformSpecPathsRejectsMissingInvocationRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	if _, err := ResolveCLIContractPlatformSpecPaths("", CLIContractPlatformSpecPathOptions{}); err == nil || !strings.Contains(err.Error(), "CLI invocation root is required") {
+	if _, err := ResolveCLISourcePlatformSpecPaths("", CLISourcePlatformSpecPathOptions{}); err == nil || !strings.Contains(err.Error(), "CLI invocation root is required") {
 		t.Fatalf("missing invocation root error = %v", err)
 	}
 }
@@ -142,19 +97,20 @@ func TestCLIContractPathResolutionIgnoresLegacyContractsDir(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	legacyContracts := filepath.Join(t.TempDir(), "legacy-contracts")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(legacyContracts, "package.yaml"), `name: legacy`)
+
 	t.Setenv("SWARM_CONTRACTS_DIR", legacyContracts)
 
-	got, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{})
+	chdirForTest(t, t.TempDir())
+	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{SourceRoot: "."})
 	if err != nil {
 		t.Fatalf("resolve paths: %v", err)
 	}
-	if got.ContractsPath != "" {
-		t.Fatalf("contracts path = %q, want empty; SWARM_CONTRACTS_DIR must not be a CLI source", got.ContractsPath)
+	if got.SourceRoot != repo {
+		t.Fatalf("source path = %q, want invocation root %q; SWARM_CONTRACTS_DIR must not be a CLI source", got.SourceRoot, repo)
 	}
 }
 
-func TestResolveCLIContractPlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *testing.T) {
+func TestResolveCLISourcePlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(configPath, []byte("retry: true\n"), 0o600); err != nil {
@@ -162,7 +118,7 @@ func TestResolveCLIContractPlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *
 	}
 	t.Setenv("SWARM_CONFIG", configPath)
 
-	_, err := ResolveCLIContractPlatformSpecPaths(t.TempDir(), CLIContractPlatformSpecPathOptions{})
+	_, err := ResolveCLISourcePlatformSpecPaths(t.TempDir(), CLISourcePlatformSpecPathOptions{})
 	if err == nil {
 		t.Fatal("resolve paths returned nil error")
 	}
@@ -171,28 +127,19 @@ func TestResolveCLIContractPlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *
 	}
 }
 
-func TestRunVerifyCommandConsumesContractPathResolver(t *testing.T) {
+func TestRunVerifyCommandConsumesExplicitSourceRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := RepoRoot()
-	configContracts := filepath.Join(t.TempDir(), "config-contracts")
-	envContracts := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
-	legacyContracts := filepath.Join(t.TempDir(), "legacy-contracts")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(legacyContracts, "package.yaml"), `name: legacy`)
-	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"contracts_path": configContracts,
-	}))
-	t.Setenv("SWARM_CONTRACTS_PATH", envContracts)
-	t.Setenv("SWARM_CONTRACTS_DIR", legacyContracts)
+	missingSource := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
 
 	var out bytes.Buffer
-	code := runVerifyCommandWithOutput(context.Background(), repo, defaultVerifyCommandOptions(), &out, &out)
+	opts := defaultVerifyCommandOptions()
+	opts.sourceRoot = missingSource
+	code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &out)
 	if code == 0 {
 		t.Fatalf("verify unexpectedly succeeded: %s", out.String())
 	}
-	if !strings.Contains(out.String(), envContracts) {
-		t.Fatalf("verify did not use SWARM_CONTRACTS_PATH path %q:\n%s", envContracts, out.String())
-	}
-	if strings.Contains(out.String(), configContracts) || strings.Contains(out.String(), legacyContracts) {
-		t.Fatalf("verify used lower-priority or legacy path:\n%s", out.String())
+	if !strings.Contains(out.String(), missingSource) {
+		t.Fatalf("verify did not use explicit source path %q:\n%s", missingSource, out.String())
 	}
 }

@@ -26,7 +26,7 @@ type wave1WriteTarget struct {
 	HasWriteIndex bool
 }
 
-func (t wave1WriteTarget) flowID() string { return t.Node.FlowID() }
+func (t wave1WriteTarget) flowID() string { return t.Node.FlowPath() }
 func (t wave1WriteTarget) nodeID() string { return t.Node.Key() }
 
 type wave1ScopedAgentRecord struct {
@@ -199,13 +199,13 @@ func (c *checkerContext) entityReaderCoverage() []Finding {
 
 func wave1DeclaredEntityContracts(source semanticview.Source) []wave1EntityContractView {
 	contracts := make([]wave1EntityContractView, 0)
-	root := wave1EntityContractForFlow(source, "")
+	root := wave1EntityContractForFlow(source, ".")
 	if root.Defined {
 		contracts = append(contracts, root)
 	}
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
+		if flowID == "" || flowID == "." {
 			continue
 		}
 		view := wave1EntityContractForFlow(source, flowID)
@@ -424,7 +424,7 @@ func wave1ResolveEntityWriteContract(source semanticview.Source, agentSource run
 	if entityType == "" {
 		return wave1EntityContractView{}, false
 	}
-	if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+	if flowID := strings.TrimSpace(agentSource.FlowPath); flowID != "" {
 		view := wave1EntityContractForFlow(source, flowID)
 		if view.Defined {
 			if entityType == view.EntityType || entityType == flowID+"."+view.EntityType {
@@ -444,13 +444,13 @@ func wave1ResolveEntityWriteContract(source semanticview.Source, agentSource run
 }
 
 func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runtimecontracts.ContractItemSource) (wave1EntityContractView, bool) {
-	if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+	if flowID := strings.TrimSpace(agentSource.FlowPath); flowID != "" {
 		view := wave1EntityContractForFlow(source, flowID)
 		if view.Defined {
 			return view, true
 		}
 	}
-	root := wave1EntityContractForFlow(source, "")
+	root := wave1EntityContractForFlow(source, ".")
 	if root.Defined {
 		return root, true
 	}
@@ -516,7 +516,7 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 	out := map[string]map[string]struct{}{}
 	for _, record := range wave1ScopedNodeRecords(source) {
 		node, _ := record.Identity()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		nodeID := node.Key()
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)

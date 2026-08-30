@@ -3,8 +3,8 @@
 Use this when delivery must target exactly one already-existing `account` instance. The carried `account_id` is the selection key. Missing and ambiguous matches fail closed and never create an instance.
 
 ```sh
-swarm verify --contracts examples/routing/template-select-existing
-swarm serve --contracts examples/routing/template-select-existing
+swarm verify examples/routing/template-select-existing
+swarm serve examples/routing/template-select-existing
 swarm event publish producer/account.setup.requested --payload-json '{"account_id":"account-1"}'
 swarm event publish producer/account.work.requested --payload-json '{"account_id":"account-1"}'
 ```

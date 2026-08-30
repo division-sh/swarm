@@ -12,12 +12,12 @@ import (
 )
 
 func TestResolveLocalRuntimeStateUsesProjectLocalStoreWithoutAmbientData(t *testing.T) {
-	projectRoot, contractsPath := writeLocalRuntimeStateProject(t)
+	projectRoot, sourceRoot := writeLocalRuntimeStateProject(t)
 	swarmDir := CLISwarmDirResolution{Path: t.TempDir(), Source: "test"}
 
 	state, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                projectRoot,
-		ResolvedPaths:           CLIContractPlatformSpecPaths{ContractsPath: contractsPath},
+		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
 		SwarmDir:                swarmDir,
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -40,11 +40,11 @@ func TestResolveLocalRuntimeStateUsesProjectLocalStoreWithoutAmbientData(t *test
 
 func TestResolveLocalRuntimeStateBorrowedContractsNeedsNoAmbientData(t *testing.T) {
 	RepoRoot := t.TempDir()
-	_, contractsPath := writeLocalRuntimeStateProject(t)
+	_, sourceRoot := writeLocalRuntimeStateProject(t)
 
 	state, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                RepoRoot,
-		ResolvedPaths:           CLIContractPlatformSpecPaths{ContractsPath: contractsPath},
+		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
 		SwarmDir:                CLISwarmDirResolution{Path: t.TempDir(), Source: "test"},
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -55,13 +55,13 @@ func TestResolveLocalRuntimeStateBorrowedContractsNeedsNoAmbientData(t *testing.
 	if state.MountSources != (WorkspaceMountSources{}) {
 		t.Fatalf("mount sources = %#v, want no ambient data", state.MountSources)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(contractsPath), ".swarm", "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(sourceRoot), ".swarm", "data")); !os.IsNotExist(err) {
 		t.Fatalf("borrowed contracts data stat error = %v, want no .swarm/data created", err)
 	}
 }
 
 func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
-	projectRoot, contractsPath := writeLocalRuntimeStateProject(t)
+	projectRoot, sourceRoot := writeLocalRuntimeStateProject(t)
 	legacyPath := filepath.Join(projectRoot, storebackend.LegacySQLiteRelativePath)
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatalf("mkdir legacy sqlite dir: %v", err)
@@ -72,7 +72,7 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 
 	_, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                projectRoot,
-		ResolvedPaths:           CLIContractPlatformSpecPaths{ContractsPath: contractsPath},
+		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
 		SwarmDir:                CLISwarmDirResolution{Path: t.TempDir(), Source: "test"},
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -85,7 +85,7 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 
 func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	projectRoot, contractsPath := writeLocalRuntimeStateProject(t)
+	projectRoot, sourceRoot := writeLocalRuntimeStateProject(t)
 	canonicalProjectRoot, status := canonicalizeDoctorTargetPath(projectRoot)
 	if status != "resolved" {
 		t.Fatalf("canonicalize project root status = %s", status)
@@ -98,9 +98,9 @@ func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
 	apiOptions := defaultRootCommandOptions()
 	apiOptions.rootFlags = &rootCommandFlagState{swarmDir: swarmDir, swarmDirSet: true}
 	_, err := prepareLocalRunProjectClaim(context.Background(), projectRoot, runCommandOptions{
-		apiOptions:    apiOptions,
-		contractsPath: contractsPath,
-	}, CLIContractPlatformSpecPaths{ContractsPath: contractsPath})
+		apiOptions: apiOptions,
+		sourceRoot: sourceRoot,
+	}, CLISourcePlatformSpecPaths{SourceRoot: sourceRoot})
 	if err == nil || !strings.Contains(err.Error(), "local swarm run start requires exclusive project runtime") || !strings.Contains(err.Error(), "--connect") {
 		t.Fatalf("prepareLocalRunProjectClaim error = %v, want live project runtime conflict", err)
 	}
@@ -109,12 +109,8 @@ func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
 func writeLocalRuntimeStateProject(t *testing.T) (string, string) {
 	t.Helper()
 	projectRoot := t.TempDir()
-	contractsPath := filepath.Join(projectRoot, "contracts")
-	if err := os.MkdirAll(contractsPath, 0o755); err != nil {
-		t.Fatalf("mkdir contracts: %v", err)
+	if err := os.WriteFile(filepath.Join(projectRoot, "schema.yaml"), []byte("name: local-runtime-state-test\n"), 0o644); err != nil {
+		t.Fatalf("write root schema: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsPath, "package.yaml"), []byte("name: local-runtime-state-test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
-	return projectRoot, contractsPath
+	return projectRoot, projectRoot
 }

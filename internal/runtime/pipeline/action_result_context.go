@@ -77,6 +77,9 @@ func actionResultEventType(source semanticview.Source, flowID, eventType string,
 	if localEvent == "" {
 		return eventType
 	}
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
+		return localEvent
+	}
 	namespace := runtimeeventidentity.Normalize(producerRoute.FlowInstance)
 	if namespace == "" || !actionResultFlowInstanceBelongsToFlow(source, flowID, namespace) {
 		namespace = flowPath

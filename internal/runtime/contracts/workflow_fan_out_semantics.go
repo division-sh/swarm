@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
@@ -32,19 +31,20 @@ type FanOutPlanRef struct {
 }
 
 type FanOutElementRef struct {
-	PackageKey string `json:"package_key"`
-	ElementID  string `json:"element_id"`
+	FlowPath     string `json:"flow_path"`
+	Family       string `json:"family"`
+	SemanticPath string `json:"semantic_path"`
 }
 
-func FanOutElementRefFrom(ref contractelementidentity.ContractElementRef) FanOutElementRef {
+func FanOutElementRefFrom(ref runtimeidentity.DeclarationIdentity) FanOutElementRef {
 	if !ref.Valid() {
 		return FanOutElementRef{}
 	}
-	return FanOutElementRef{PackageKey: ref.PackageKey().String(), ElementID: ref.ElementID().String()}
+	return FanOutElementRef{FlowPath: ref.Flow().String(), Family: ref.Family(), SemanticPath: ref.SemanticPath()}
 }
 
-func (r FanOutElementRef) ContractElementRef() (contractelementidentity.ContractElementRef, error) {
-	return contractelementidentity.ParseContractElementRef(strings.TrimSpace(r.PackageKey), strings.TrimSpace(r.ElementID))
+func (r FanOutElementRef) DeclarationIdentity() (runtimeidentity.DeclarationIdentity, error) {
+	return runtimeidentity.AdmitDeclarationIdentity(r.FlowPath, r.Family, r.SemanticPath)
 }
 
 type FanOutCompiledPlan struct {
@@ -139,9 +139,9 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 	if err != nil {
 		return FanOutCompiledPlan{}, err
 	}
-	ref, ok := spec.ContractElementRef()
+	ref, ok := spec.DeclarationIdentity()
 	if !ok {
-		return FanOutCompiledPlan{}, fmt.Errorf("fan_out requires canonical package-qualified element_id; run `swarm mint-element-ids --contracts <path>`")
+		return FanOutCompiledPlan{}, fmt.Errorf("fan_out requires canonical declaration identity")
 	}
 	bundleHash, err := BundleHash(b)
 	if err != nil {
@@ -195,7 +195,7 @@ func (b *WorkflowContractBundle) CompileFanOutHandlerPlans(node runtimeidentity.
 	if b == nil {
 		return fmt.Errorf("fan_out plans require a loaded contract bundle")
 	}
-	qualified, err := QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (b *WorkflowContractBundle) PrepareFanOutPlans() []FanOutPlanFailure {
 			continue
 		}
 		for eventType, handler := range record.Entry.EventHandlers {
-			qualified, err := QualifySystemNodeHandlerRuleRefs(node, handler)
+			qualified, err := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 			if err != nil {
 				b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Node: node, EventType: eventType, Source: "handler", Detail: err.Error()})
 				continue
@@ -260,7 +260,7 @@ func (b *WorkflowContractBundle) storeFanOutCompiledPlan(plan FanOutCompiledPlan
 		b.fanOutPlansByElement = make(map[FanOutElementRef]FanOutCompiledPlan)
 	}
 	if prior, exists := b.fanOutPlansByElement[plan.Ref.ElementRef]; exists && prior.Site != plan.Site {
-		return fmt.Errorf("fan_out element %s/%s has multiple compiled sites", plan.Ref.ElementRef.PackageKey, plan.Ref.ElementRef.ElementID)
+		return fmt.Errorf("fan_out declaration %s/%s/%s has multiple compiled sites", plan.Ref.ElementRef.FlowPath, plan.Ref.ElementRef.Family, plan.Ref.ElementRef.SemanticPath)
 	}
 	b.fanOutPlansBySite[plan.Site] = cloneFanOutCompiledPlan(plan)
 	b.fanOutPlansByElement[plan.Ref.ElementRef] = cloneFanOutCompiledPlan(plan)
@@ -395,7 +395,7 @@ func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.Ex
 	if handler.Accumulate == nil || strings.TrimSpace(handler.Accumulate.Into) == "" {
 		return false
 	}
-	primary, err := b.ResolveFlowPrimaryEntity(node.FlowID())
+	primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
 	if err != nil {
 		return false
 	}
@@ -408,12 +408,12 @@ func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.Ex
 }
 
 func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []WorkflowDataWrite {
-	want, ok := spec.ContractElementRef()
+	want, ok := spec.DeclarationIdentity()
 	if !ok {
 		return nil
 	}
 	for _, site := range HandlerFanOutSites(handler) {
-		got, present := site.Spec.ContractElementRef()
+		got, present := site.Spec.DeclarationIdentity()
 		if present && got == want {
 			return append([]WorkflowDataWrite(nil), site.Writes...)
 		}
@@ -485,7 +485,7 @@ func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentit
 	if b == nil {
 		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from requires a loaded contract bundle")
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	field := strings.TrimSpace(path.Segments[0])
 	switch path.Root {
 	case paths.RootPayload:

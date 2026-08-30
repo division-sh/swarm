@@ -84,8 +84,7 @@ type Declaration struct {
 type StaticData struct {
 	StaticID      StaticDataID  `json:"static_id"`
 	Ref           StaticDataRef `json:"ref"`
-	PackageKey    string        `json:"package_key"`
-	OwnerFlowID   string        `json:"owner_flow_id"`
+	FlowPath      string        `json:"flow_path"`
 	RelativePath  string        `json:"relative_path"`
 	ContentDigest string        `json:"content_digest"`
 	ContentType   string        `json:"content_type"`

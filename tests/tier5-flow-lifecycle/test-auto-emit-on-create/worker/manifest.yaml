@@ -1,0 +1,4 @@
+name: worker
+version: 1.0.0
+description: Template worker proving production-owned auto emission.
+platform_version: ">=0.7.0 <0.8.0"

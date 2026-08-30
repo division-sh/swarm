@@ -24,7 +24,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
-const managedTurnFixtureBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const managedTurnFixtureBundleHash = SemanticFixtureBundleHash
 
 type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.Store
@@ -75,13 +75,13 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if fixture.Store == nil || fixture.Selected == nil {
 		t.Fatal("managed turn fixture requires selected store owners")
 	}
-	bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(SemanticFixtureBundleHash)
+	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(SemanticFixtureBundleHash)
 	if err != nil {
 		t.Fatalf("build managed turn fixture bundle source: %v", err)
 	}
 	const runtimeInstanceID = "00000000-0000-4000-8000-000000000001"
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, bundleSource)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, bundleSource)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, SemanticFixtureBundleHash))
 	identity := fixture.Identity.Normalize()
 	if err := identity.Validate(); err != nil {
@@ -238,9 +238,9 @@ func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority,
 	return surface
 }
 
-func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.BundleSourceFact) agentframe.Frame {
+func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.SourceArtifactFact) agentframe.Frame {
 	t.Helper()
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.storetest.intent", "Persist the admitted managed turn fixture.")
 	if err != nil {
 		t.Fatalf("resolve managed turn fixture intent: %v", err)
@@ -258,7 +258,7 @@ func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, s
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "storetest-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+		BundleHash: bundleHash, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete managed turn fixture frame: %v", err)

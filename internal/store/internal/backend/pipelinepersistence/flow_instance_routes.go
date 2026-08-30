@@ -737,7 +737,7 @@ func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptors(ctx context.Co
 	}
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT fi.instance_id, fi.flow_template, readiness.plan,
-		       run.bundle_hash, run.bundle_source, es.fields
+		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
 		  ON readiness.instance_id = fi.instance_id AND readiness.run_id = $1::uuid
@@ -772,7 +772,7 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Cont
 	}
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT fi.instance_id, fi.flow_template, readiness.plan,
-		       run.bundle_hash, run.bundle_source, es.fields
+		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
 		  ON readiness.instance_id = fi.instance_id AND readiness.run_id = ?
@@ -868,8 +868,8 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}
 	for rows.Next() {
 		var instancePath, templateID string
-		var planRaw, bundleHash, bundleSource, fieldsRaw sql.NullString
-		if err := rows.Scan(&instancePath, &templateID, &planRaw, &bundleHash, &bundleSource, &fieldsRaw); err != nil {
+		var planRaw, bundleHash, fieldsRaw sql.NullString
+		if err := rows.Scan(&instancePath, &templateID, &planRaw, &bundleHash, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", label, err)
 		}
 		instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
@@ -880,13 +880,13 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 		if !planRaw.Valid || strings.TrimSpace(planRaw.String) == "" {
 			return nil, fmt.Errorf("%s %s is missing exact readiness plan", label, instancePath)
 		}
-		if !bundleHash.Valid || !bundleSource.Valid {
-			return nil, fmt.Errorf("%s %s is missing exact run bundle source", label, instancePath)
+		if !bundleHash.Valid {
+			return nil, fmt.Errorf("%s %s is missing exact run source artifact", label, instancePath)
 		}
 		readiness, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(
 			runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{
 				RunID: runID, InstancePath: instancePath, Plan: []byte(planRaw.String),
-				OwningRunBundleHash: bundleHash.String, OwningRunBundleSource: bundleSource.String,
+				OwningRunBundleHash: bundleHash.String,
 			},
 		)
 		if err != nil {
@@ -899,11 +899,11 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 		if !fieldsRaw.Valid {
 			return nil, fmt.Errorf("%s %s is missing exact entity state", label, instancePath)
 		}
-		persistedSource, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash.String, bundleSource.String)
+		persistedSource, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash.String)
 		if err != nil {
 			return nil, fmt.Errorf("%s %s run bundle source: %w", label, instancePath, err)
 		}
-		planSource, err := runtimecorrelation.DecodeBundleSourceFact(plan.BundleHash, plan.BundleSource)
+		planSource, err := runtimecorrelation.DecodeSourceArtifactFact(plan.BundleHash)
 		if err != nil || planSource != persistedSource {
 			return nil, fmt.Errorf("%s %s readiness source does not match persisted run", label, instancePath)
 		}
@@ -914,7 +914,7 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 		out = append(out, runtimebus.ActiveFlowInstanceDescriptor{
 			InstanceID: plan.Identity.InstanceID, EntityID: plan.Identity.EntityID,
 			FlowInstance: instancePath, FlowTemplate: templateID,
-			BundleHash: plan.BundleHash, BundleSource: plan.BundleSource,
+			BundleHash:      plan.BundleHash,
 			WorkflowVersion: plan.WorkflowVersion, AddressFields: addressFields,
 		}.Normalized())
 	}

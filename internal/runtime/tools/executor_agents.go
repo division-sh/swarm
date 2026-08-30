@@ -75,7 +75,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 			return nil, fmt.Errorf("admit schedule control source: %w", err)
 		}
 	}
-	flowID := ""
+	flowID := "."
 	if routingSource.Kind() == events.RoutingSourceFlowOwnedControl {
 		flowID = routingSource.Route().FlowID
 	}

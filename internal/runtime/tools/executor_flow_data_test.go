@@ -134,7 +134,7 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	actor.FlowDataAccess = []string{"escape.md"}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
-	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
 		t.Fatalf("write escape.md: %v", err)
 	}
 	_, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", map[string]any{"filename": "escape.md"})
@@ -143,10 +143,10 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 
 func TestExecutorReadFlowDataSelectsActorScopeForSharedEffectiveName(t *testing.T) {
 	source, root := loadFlowDataToolSource(t)
-	if err := os.MkdirAll(filepath.Join(root, "flows", "other", "data"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "other", "data"), 0o755); err != nil {
 		t.Fatalf("mkdir other data: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "flows", "other", "data", "exclusions.yaml"), []byte("blocked: other-flow\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "other", "data", "exclusions.yaml"), []byte("blocked: other-flow\n"), 0o644); err != nil {
 		t.Fatalf("write other exclusions: %v", err)
 	}
 	actor := flowDataActor()
@@ -167,12 +167,12 @@ func TestExecutorReadFlowDataSelectsActorScopeForSharedEffectiveName(t *testing.
 	}
 }
 
-func TestPackageBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testing.T) {
+func TestFlowBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := flowDataActor()
 	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
-	if !ok || declaration.ScopeKind != "flow" || declaration.OwnerFlowID != "support" || declaration.Source.Layer != "flow" {
-		t.Fatalf("package-backed declaration = %#v ok %v", declaration, ok)
+	if !ok || declaration.ScopeKind != "flow" || declaration.OwnerFlowID != "support" || declaration.Source.FlowPath != "support" {
+		t.Fatalf("flow-backed declaration = %#v ok %v", declaration, ok)
 	}
 	staticData := flowdata.AllowedStaticData(source, actor)
 	if len(staticData) != 1 || staticData[0].RelativePath != "exclusions.yaml" {
@@ -212,7 +212,7 @@ func TestExecutorReadFlowDataDiagnosticsUseFlowDataAuthorization(t *testing.T) {
 func TestExecutorReadFlowDataCursorBindsRunActorContentAndOffset(t *testing.T) {
 	_, root := loadFlowDataToolSource(t)
 	content := strings.Repeat("<tag>&", 6_000) + strings.Repeat("é", 5_000) + strings.Repeat("z", 37)
-	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "support", "data", "exclusions.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
@@ -547,39 +547,28 @@ func loadFlowDataToolSource(t *testing.T) (semanticview.Source, string) {
 func loadFlowDataToolSourceWithAccess(t *testing.T, access []string) (semanticview.Source, string) {
 	t.Helper()
 	root := t.TempDir()
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: flow-data-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-  - id: other
-    flow: other
-    mode: static
-`)
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-test\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), "support_state:\n  support_id: string\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 factory-cto:
   id: public-factory-cto
   role: factory_cto
   intent: {inline: "Read only the flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "package.yaml"), "name: other\nversion: \"1.0.0\"\nflows: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), "name: other\nmode: static\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "entities.yaml"), "other_state:\n  other_id: string\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "agents.yaml"), `
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "data", "exclusions.yaml"), "blocked: true\n")
+
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "schema.yaml"), "name: other\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "entities.yaml"), "other_state:\n  other_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "agents.yaml"), `
 factory-cto:
   id: public-factory-cto
   role: other_factory_cto
   intent: {inline: "Read only the other flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "data", "exclusions.yaml"), "blocked: other-flow\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "other", "data", "exclusions.yaml"), "blocked: other-flow\n")
 
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -596,20 +585,12 @@ func loadResourceDataToolSource(t *testing.T) (semanticview.Source, string) {
 func loadResourceDataToolSourceWithEventName(t *testing.T, eventName string) (semanticview.Source, string) {
 	t.Helper()
 	root := t.TempDir()
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: resource-data-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: resource-data-test\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), "support_state:\n  support_id: string\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), fmt.Sprintf(`
+
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support_state:\n  support_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), fmt.Sprintf(`
 factory-cto:
   id: public-factory-cto
   role: factory_cto
@@ -617,7 +598,7 @@ factory-cto:
   data_access:
     - data: support/%s
 `, eventName))
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), fmt.Sprintf(`
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "support", "events.yaml"), fmt.Sprintf(`
 ? %q
 :
   id: text

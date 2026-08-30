@@ -166,7 +166,7 @@ func (a Activation) JoinRef() timeridentity.JoinRef {
 	return ref
 }
 
-func (a Activation) FlowID() string       { return a.JoinRef().FlowID() }
+func (a Activation) FlowPath() string     { return a.JoinRef().FlowPath() }
 func (a Activation) NodeID() string       { return a.JoinRef().NodeID() }
 func (a Activation) HandlerEvent() string { return a.JoinRef().HandlerEvent() }
 func (a Activation) Stage() string        { return a.JoinRef().Stage() }

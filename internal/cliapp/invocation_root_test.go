@@ -93,15 +93,19 @@ func TestCLIArchetypeOutputUsesInvocationRoot(t *testing.T) {
 	if err := scaffoldArchetype(root, io.Discard, "zero-agent-automation", "starter"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(root.Resolve(filepath.Join("starter", "package.yaml"))); err != nil {
-		t.Fatalf("relative scaffold output: %v", err)
+	for _, relative := range []string{"manifest.yaml", filepath.Join("automation", "schema.yaml")} {
+		if _, err := os.Stat(root.Resolve(filepath.Join("starter", relative))); err != nil {
+			t.Fatalf("relative scaffold output %s: %v", relative, err)
+		}
 	}
 	absolute := filepath.Join(t.TempDir(), "absolute-starter")
 	if err := scaffoldArchetype(root, io.Discard, "zero-agent-automation", absolute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(absolute, "package.yaml")); err != nil {
-		t.Fatalf("absolute scaffold output: %v", err)
+	for _, relative := range []string{"manifest.yaml", filepath.Join("automation", "schema.yaml")} {
+		if _, err := os.Stat(filepath.Join(absolute, relative)); err != nil {
+			t.Fatalf("absolute scaffold output %s: %v", relative, err)
+		}
 	}
 }
 

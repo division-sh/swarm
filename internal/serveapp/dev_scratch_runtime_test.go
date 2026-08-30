@@ -20,17 +20,17 @@ import (
 )
 
 func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) {
-	repo, contractsPath, opts := devScratchRuntimeFixture(t)
+	repo, sourceRoot, opts := devScratchRuntimeFixture(t)
 	process := startServeRuntimeTestProcessAtRepo(t, repo, opts)
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &identity)
-	if len(identity.BundleSources) != 1 || identity.BundleSources[0].BundleSource != "persisted" {
-		t.Fatalf("runtime identity = %#v, want one persisted source", identity)
+	if len(identity.SourceArtifacts) != 1 {
+		t.Fatalf("runtime identity = %#v, want one source artifact", identity)
 	}
-	bundleHash := identity.BundleSources[0].BundleHash
+	bundleHash := identity.SourceArtifacts[0].BundleHash
 	var started struct {
 		RunID string `json:"run_id"`
 	}
@@ -45,19 +45,19 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()
-	var catalogHash string
-	if err := db.QueryRow(`SELECT bundle_hash FROM bundles WHERE bundle_hash = ?`, bundleHash).Scan(&catalogHash); err != nil {
-		t.Fatalf("read persisted dev bundle catalog row: %v", err)
+	var artifactHash string
+	if err := db.QueryRow(`SELECT bundle_hash FROM source_artifacts WHERE bundle_hash = ?`, bundleHash).Scan(&artifactHash); err != nil {
+		t.Fatalf("read persisted dev source artifact row: %v", err)
 	}
-	var runHash, runSource string
-	if err := db.QueryRow(`SELECT bundle_hash, bundle_source FROM runs WHERE run_id = ?`, started.RunID).Scan(&runHash, &runSource); err != nil {
+	var runHash string
+	if err := db.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id = ?`, started.RunID).Scan(&runHash); err != nil {
 		t.Fatalf("read persisted dev run source: %v", err)
 	}
-	if catalogHash != bundleHash || runHash != bundleHash || runSource != "persisted" {
-		t.Fatalf("catalog/run source = %q {%q,%q}, want exact persisted %q", catalogHash, runHash, runSource, bundleHash)
+	if artifactHash != bundleHash || runHash != bundleHash {
+		t.Fatalf("artifact/run source = %q/%q, want exact %q", artifactHash, runHash, bundleHash)
 	}
-	if contractsPath != repo {
-		t.Fatalf("fixture contracts %q are not the canonical project root %q", contractsPath, repo)
+	if sourceRoot != repo {
+		t.Fatalf("fixture contracts %q are not the canonical project root %q", sourceRoot, repo)
 	}
 }
 
@@ -70,14 +70,14 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, endpoint, "runtime.identity", map[string]any{}, &identity)
-	if len(identity.BundleSources) != 1 {
+	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("runtime identity = %#v, want one source", identity)
 	}
 	var started struct {
 		RunID string `json:"run_id"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
-		"bundle_hash": identity.BundleSources[0].BundleHash,
+		"bundle_hash": identity.SourceArtifacts[0].BundleHash,
 		"event_name":  "item.received",
 		"payload":     map[string]any{"item_id": "dev-scratch-fork"},
 	}, &started)
@@ -92,7 +92,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 		RunID   string `json:"run_id"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
-		"bundle_hash":     identity.BundleSources[0].BundleHash,
+		"bundle_hash":     identity.SourceArtifacts[0].BundleHash,
 		"run_id":          started.RunID,
 		"event_name":      "item.processed",
 		"payload":         map[string]any{"item_id": "review"},
@@ -142,8 +142,8 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 }
 
 func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
-	repo, contractsPath, opts := devScratchRuntimeFixture(t)
-	promoteDevScratchFixtureToStanding(t, contractsPath)
+	repo, sourceRoot, opts := devScratchRuntimeFixture(t)
+	promoteDevScratchFixtureToStanding(t, sourceRoot)
 	durablePath := filepath.Join(repo, ".swarm", "stores", "dev.db")
 	if err := os.MkdirAll(filepath.Dir(durablePath), 0o700); err != nil {
 		t.Fatal(err)
@@ -157,23 +157,23 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	var firstIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, firstEndpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &firstIdentity)
-	firstHash := firstIdentity.BundleSources[0].BundleHash
+	firstHash := firstIdentity.SourceArtifacts[0].BundleHash
 	firstStanding := requireSingleServedStandingRun(t, firstEndpoint+"/v1/rpc", firstHash)
 	firstHistory := requireServedStandingHistory(t, firstEndpoint+"/v1/rpc", firstStanding.RunID)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first dev scratch process exit code = %d\n%s", code, first.outputString())
 	}
 
-	packagePath := filepath.Join(contractsPath, "package.yaml")
-	body, err := os.ReadFile(packagePath)
+	schemaPath := filepath.Join(sourceRoot, "schema.yaml")
+	body, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := strings.Replace(string(body), `version: "1.0.0"`, `version: "1.0.1"`, 1)
+	changed := strings.Replace(string(body), `name: derived-novel-flow`, `name: derived-novel-flow-v2`, 1)
 	if changed == string(body) {
-		t.Fatalf("fixture package version was not replaceable:\n%s", body)
+		t.Fatalf("fixture source name was not replaceable:\n%s", body)
 	}
-	if err := os.WriteFile(packagePath, []byte(changed), 0o644); err != nil {
+	if err := os.WriteFile(schemaPath, []byte(changed), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,9 +182,9 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	secondEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	var secondIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, secondEndpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &secondIdentity)
-	secondHash := secondIdentity.BundleSources[0].BundleHash
-	if secondHash == firstHash || secondIdentity.BundleSources[0].BundleSource != "persisted" {
-		t.Fatalf("second identity = %#v, want new persisted source replacing %s", secondIdentity, firstHash)
+	secondHash := secondIdentity.SourceArtifacts[0].BundleHash
+	if secondHash == firstHash {
+		t.Fatalf("second identity = %#v, want new source artifact replacing %s", secondIdentity, firstHash)
 	}
 	secondStanding := requireSingleServedStandingRun(t, secondEndpoint+"/v1/rpc", secondHash)
 	if secondStanding.RunID != firstStanding.RunID || !secondStanding.Origin.Equal(firstStanding.Origin) {
@@ -199,11 +199,11 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()
 	var predecessorRows int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM bundles WHERE bundle_hash = ?`, firstHash).Scan(&predecessorRows); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash = ?`, firstHash).Scan(&predecessorRows); err != nil {
 		t.Fatal(err)
 	}
 	if predecessorRows != 0 {
-		t.Fatalf("predecessor bundle rows = %d, want fresh epoch", predecessorRows)
+		t.Fatalf("predecessor source artifact rows = %d, want fresh epoch", predecessorRows)
 	}
 	durable, err := os.ReadFile(durablePath)
 	if err != nil || string(durable) != "normal-durable-state" {
@@ -211,35 +211,21 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	}
 }
 
-func promoteDevScratchFixtureToStanding(t *testing.T, contractsPath string) {
+func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	t.Helper()
-	packagePath := filepath.Join(contractsPath, "package.yaml")
-	body, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ordinary := "  - {id: fulfillment, flow: fulfillment, mode: static}"
-	standing := "  - id: fulfillment\n    flow: fulfillment\n    mode: singleton\n    activation: standing"
-	updated := strings.Replace(string(body), ordinary, standing, 1)
-	if updated == string(body) {
-		t.Fatalf("dev scratch fixture flow declaration was not replaceable:\n%s", body)
-	}
-	if err := os.WriteFile(packagePath, []byte(updated), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	schemaPath := filepath.Join(contractsPath, "flows", "fulfillment", "schema.yaml")
+	schemaPath := filepath.Join(sourceRoot, "fulfillment", "schema.yaml")
 	schema, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedSchema := strings.Replace(string(schema), "mode: static", "mode: singleton", 1)
+	updatedSchema := strings.Replace(string(schema), "mode: static", "mode: singleton\nactivation: standing", 1)
 	if updatedSchema == string(schema) {
 		t.Fatalf("dev scratch fixture flow schema mode was not replaceable:\n%s", schema)
 	}
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsPath, "flows", "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -312,11 +298,11 @@ func assertServedStandingHistoryReplaced(t *testing.T, predecessor, fresh served
 
 func devScratchRuntimeFixture(t *testing.T) (string, string, cliapp.ServeOptions) {
 	t.Helper()
-	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-	return contractsPath, contractsPath, devScratchRuntimeOptions(t, contractsPath)
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	return sourceRoot, sourceRoot, devScratchRuntimeOptions(t, sourceRoot)
 }
 
-func devScratchRuntimeOptions(t *testing.T, contractsPath string) cliapp.ServeOptions {
+func devScratchRuntimeOptions(t *testing.T, sourceRoot string) cliapp.ServeOptions {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
@@ -327,10 +313,10 @@ func devScratchRuntimeOptions(t *testing.T, contractsPath string) cliapp.ServeOp
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), "")
 	return cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsPath,
+		ConfigPath: configPath, SourceRoot: sourceRoot,
 		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		Dev: true, NoFeed: true, SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
+		Dev: true, NoFeed: true, SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 }

@@ -26,13 +26,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
-		selection = SelectedContractSelection(req.Source, selection.ContractsRoot)
-	}
-	if strings.TrimSpace(selection.WorkflowName) == "" {
-		selection.WorkflowName = strings.TrimSpace(req.Source.WorkflowName())
-	}
-	if strings.TrimSpace(selection.WorkflowVersion) == "" {
-		selection.WorkflowVersion = strings.TrimSpace(req.Source.WorkflowVersion())
+		selection = SelectedContractSelection(req.Source)
 	}
 	if strings.TrimSpace(req.FrontierAdmission.Owner) != runfork.RunForkContractFrontierAdmissionOwner {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires %s frontier admission; got %q", runfork.RunForkContractFrontierAdmissionOwner, req.FrontierAdmission.Owner)

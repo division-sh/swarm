@@ -21,16 +21,8 @@ type ContractFrontierRequest struct {
 	ContractSelection runfork.RunForkContractSelection
 }
 
-func SelectedContractSelection(source semanticview.Source, contractsRoot string) runfork.RunForkContractSelection {
-	selection := runfork.RunForkContractSelection{
-		Mode:          "selected_contracts",
-		ContractsRoot: strings.TrimSpace(contractsRoot),
-	}
-	if source != nil {
-		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
-		selection.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
-	}
-	return selection
+func SelectedContractSelection(source semanticview.Source) runfork.RunForkContractSelection {
+	return runfork.RunForkContractSelection{Mode: "selected_contracts"}
 }
 
 func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContractFrontierAdmission, error) {
@@ -39,15 +31,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
-		selection = SelectedContractSelection(req.Source, selection.ContractsRoot)
+		selection = SelectedContractSelection(req.Source)
 	}
-	if strings.TrimSpace(selection.WorkflowName) == "" {
-		selection.WorkflowName = strings.TrimSpace(req.Source.WorkflowName())
-	}
-	if strings.TrimSpace(selection.WorkflowVersion) == "" {
-		selection.WorkflowVersion = strings.TrimSpace(req.Source.WorkflowVersion())
-	}
-
 	routeTable, err := runtimebus.DeriveRouteTable(req.Source)
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)

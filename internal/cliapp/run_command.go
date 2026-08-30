@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -63,7 +64,7 @@ type runCommandOptions struct {
 	bundleHash       string
 	configPath       string
 	backend          string
-	contractsPath    string
+	sourceRoot       string
 	dataImports      []string
 	dataPins         []string
 	platformSpecPath string
@@ -154,13 +155,16 @@ type foregroundRunTraceRenderer struct {
 func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
-		Use:   "start",
+		Use:   "start [directory]",
 		Short: "Start a workflow run on a running runtime, or reattach to one.",
 		Example: `  swarm run start --event <event-name> --payload payload.json
   swarm run start --reattach <run-id>`,
-		Args: cobra.NoArgs,
+		Args: argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := opts
+			if len(args) == 1 {
+				runOpts.sourceRoot = args[0]
+			}
 			runOpts.changedFlags = runCommandChangedFlags(cmd)
 			if path, set, err := effectiveCommandConfigPath(cmd, runOpts.configPath, runOpts.changedFlags["config"]); err != nil {
 				return err
@@ -186,7 +190,6 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Expected server canonical bundle hash")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config for local foreground startup")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
@@ -291,7 +294,7 @@ func (o runCommandOptions) validate() error {
 			return fmt.Errorf("--bundle-hash must be non-empty")
 		}
 		if !cliBundleHashPattern.MatchString(bundleHash) {
-			return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+			return fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 	}
 	if o.changedFlags["platform-spec"] {
@@ -327,10 +330,13 @@ func (o runCommandOptions) validate() error {
 		return fmt.Errorf("--no-follow and --reattach are mutually exclusive")
 	}
 	if strings.TrimSpace(o.reattachRunID) != "" {
+		if strings.TrimSpace(o.sourceRoot) != "" {
+			return fmt.Errorf("a source directory cannot be used with --reattach")
+		}
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "pin", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "config", "backend", "data", "pin", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -338,7 +344,10 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"config", "backend", "contracts", "api-port", "mcp-port"} {
+		if strings.TrimSpace(o.sourceRoot) != "" {
+			return fmt.Errorf("a source directory requires local foreground mode and cannot be used with --connect")
+		}
+		for _, flag := range []string{"config", "backend", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -478,8 +487,8 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	if runServe == nil {
 		return nil, fmt.Errorf("serve runtime is unavailable")
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.contractsPath,
+	resolvedPaths, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.sourceRoot,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
 	})
@@ -496,7 +505,7 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	serveOpts.SwarmDirSet = swarmDirOpts.SwarmDirFlagSet
 	serveOpts.ConfigPath = opts.configPath
 	serveOpts.Backend = opts.backend
-	serveOpts.ContractsPath = resolvedPaths.ContractsPath
+	serveOpts.SourceRoot = resolvedPaths.SourceRoot
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	serveOpts.LocalRun = true
 	var startupOutput runStartupOutput
@@ -533,7 +542,7 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	return stop, nil
 }
 
-func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths CLIContractPlatformSpecPaths) (func(), error) {
+func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths CLISourcePlatformSpecPaths) (func(), error) {
 	project := resolveLocalRuntimeStateProject(repo, resolvedPaths)
 	if strings.TrimSpace(project.CanonicalProjectRoot) == "" {
 		return nil, nil
@@ -549,7 +558,6 @@ func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runComma
 	contextName := localProjectContextName(project.CanonicalProjectRoot)
 	registry := newLocalContextRegistry(swarmDir.Path)
 	cliProject := cliProjectResolution{
-		contractsPath:        project.ContractsPath,
 		projectRoot:          project.ProjectRoot,
 		canonicalProjectRoot: project.CanonicalProjectRoot,
 	}

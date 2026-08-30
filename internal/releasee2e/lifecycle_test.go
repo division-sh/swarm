@@ -34,7 +34,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		filepath.Join(repo, "internal", "releasee2e", "testdata", "claude_cli_managed_lifecycle"),
 		filepath.Join(releaseRoot, "contracts"),
 	)
-	payloadSource := filepath.Join(releaseRoot, "contracts", "payload.json")
+	payloadSource := filepath.Join(releaseRoot, "contracts", "tests", "payload.json")
 	payloadPath := filepath.Join(releaseRoot, "payload.json")
 	if err := os.Rename(payloadSource, payloadPath); err != nil {
 		t.Fatalf("move release payload: %v", err)
@@ -61,7 +61,8 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 
 	env := releaseProcessEnv(fakeBin, fakeRoot, home)
-	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify")
+	contracts := filepath.Join(releaseRoot, "contracts")
+	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -90,6 +91,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	}
 	cmd := exec.CommandContext(runCtx, binaryPath,
 		"run", "start",
+		contracts,
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "task.assigned",
@@ -109,7 +111,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		_ = os.WriteFile(emitGate, []byte("release\n"), 0o600)
 		cancelRun()
 	}()
-	if err := waitForReleasePath(runCtx, emitGate+".ready"); err != nil {
+	if err := waitForReleasePath(runCtx, emitGate+".ready", waitDone); err != nil {
 		_ = runOutput.Sync()
 		raw, _ := os.ReadFile(runOutputPath)
 		t.Fatalf("wait for committed release notice: %v\n%s\nDocker calls:\n%s", err, raw, fakeDockerLogText(t, fakeRoot))
@@ -156,8 +158,8 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 			t.Fatalf("release foreground output contains %q:\n%s", forbidden, run.output)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(releaseRoot, ".swarm", "stores", "dev.db")); err != nil {
-		t.Fatalf("default SQLite store was not created at .swarm/stores/dev.db: %v", err)
+	if _, err := os.Stat(filepath.Join(contracts, ".swarm", "stores", "dev.db")); err != nil {
+		t.Fatalf("default SQLite store was not created under the selected source root: %v", err)
 	}
 
 	records := readFakeDockerRecords(t, fakeRoot)
@@ -442,10 +444,23 @@ func assertReleasePersistentWorkspacesPreserved(t *testing.T, root string) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode fake Docker state: %v", err)
 	}
-	for _, name := range []string{"swarm-scaffold", "swarm-system", releaseE2EAgentContainer} {
-		container, ok := state.Containers[name]
-		if !ok || !container.Running {
+	seen := map[string]string{}
+	for name, container := range state.Containers {
+		kind, _, ok := releaseE2EContainerIdentity(name)
+		if !ok {
+			t.Fatalf("persistent workspace %q does not have canonical bundle-scoped identity", name)
+		}
+		if prior := seen[kind]; prior != "" {
+			t.Fatalf("persistent workspace kind %q has duplicate containers %q and %q", kind, prior, name)
+		}
+		if !container.Running {
 			t.Fatalf("persistent workspace %q state = %#v, want preserved and running", name, container)
+		}
+		seen[kind] = name
+	}
+	for _, kind := range []string{"scaffold", "system", "agent"} {
+		if seen[kind] == "" {
+			t.Fatalf("persistent workspace kind %q is missing; state=%#v", kind, state.Containers)
 		}
 	}
 }

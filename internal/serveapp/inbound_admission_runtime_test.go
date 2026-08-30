@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -53,7 +54,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
 					return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg), nil
 				}
-				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
 				}
 				t.Cleanup(func() {
@@ -63,49 +64,49 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			}
 
 			for _, tc := range []struct {
-				name          string
-				mutatePackage func(string) string
-				want          string
+				name         string
+				mutateSchema func(string) string
+				want         string
 			}{
 				{
 					name: "missing pinned pack",
-					mutatePackage: func(body string) string {
+					mutateSchema: func(body string) string {
 						return strings.Replace(body, "pack: {id: provider.telegram}", "pack: {id: provider.telegram_missing}", 1)
 					},
 					want: `verified pack for "telegram" is "provider.telegram"`,
 				},
 				{
 					name: "provider pack mismatch",
-					mutatePackage: func(body string) string {
+					mutateSchema: func(body string) string {
 						return strings.Replace(body, "pack: {id: provider.telegram}", "pack: {id: provider.slack}", 1)
 					},
 					want: `which provides "slack"`,
 				},
 				{
 					name: "missing project pack",
-					mutatePackage: func(body string) string {
-						return strings.Replace(body, `        - provider: acme_public
-          admission:
-            kind: raw
-            acknowledge: unsigned_webhook
-            authentication: {kind: none}
-            event: inbound.acme_public
-            delivery_id: {source: body_sha256}
-            payload: json`, `        - provider: acme_public
-          admission:
-            pack: {id: provider.acme_public}`, 1)
+					mutateSchema: func(body string) string {
+						return strings.Replace(body, `    - provider: acme_public
+      admission:
+        kind: raw
+        acknowledge: unsigned_webhook
+        authentication: {kind: none}
+        event: inbound.acme_public
+        delivery_id: {source: body_sha256}
+        payload: json`, `    - provider: acme_public
+      admission:
+        pack: {id: provider.acme_public}`, 1)
 					},
 					want: `pins pack "provider.acme_public", but that id is not selected`,
 				},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-					packagePath := filepath.Join(contractsRoot, "package.yaml")
-					body, err := os.ReadFile(packagePath)
+					sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
+					schemaPath := filepath.Join(sourceRoot, "matrix", "schema.yaml")
+					body, err := os.ReadFile(schemaPath)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(packagePath, []byte(tc.mutatePackage(string(body))), 0o600); err != nil {
+					if err := os.WriteFile(schemaPath, []byte(tc.mutateSchema(string(body))), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					if backend == "postgres" {
@@ -116,9 +117,9 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					}
 					configPath := writeInboundAdmissionRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "failure.sqlite"))
 					process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-						ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+						ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 						StoreMode: backend, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-						SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, Verbose: true,
+						SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 					})
 					code, exited := process.waitForExit(15 * time.Second)
 					if !exited {
@@ -139,8 +140,8 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend string) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-	importProjectTelegramTrigger(t, contractsRoot)
+	sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
+	importProjectTelegramTrigger(t, sourceRoot)
 	dataRoot := t.TempDir()
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -179,7 +180,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(postgresStore), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -190,9 +191,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	process := startServeRuntimeTestProcess(t, opts)
@@ -347,13 +348,13 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 }
 
-func importProjectTelegramTrigger(t testing.TB, contractsRoot string) {
+func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
 	t.Helper()
 	base := packfixture.EmbeddedBase(t)
-	if changed, err := packartifact.ImportEmbeddedPack(contractsRoot, "provider.telegram", base); err != nil || !changed {
+	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "provider.telegram", base); err != nil || !changed {
 		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
 	}
-	path := filepath.Join(contractsRoot, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
+	path := filepath.Join(sourceRoot, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

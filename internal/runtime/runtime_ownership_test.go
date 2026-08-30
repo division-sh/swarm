@@ -21,9 +21,9 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
 		Config: cfg, Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  testBundleSourceFact(t, runtimeTestBundleHash),
-			ProcessWorkOwner:  runtimeTestProcessWorkOwner(t),
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: testSourceArtifactFact(t, runtimeTestBundleHash),
+			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
 		},
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
 	cfg.Runtime.ExecutionPosture = "live"
-	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
 	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	}, "runtime_test")
@@ -58,8 +58,8 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  fact, ProcessWorkOwner: runtimeTestProcessWorkOwner(t),
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: fact, ProcessWorkOwner: runtimeTestProcessWorkOwner(t),
 		},
 	})
 	if err != nil {

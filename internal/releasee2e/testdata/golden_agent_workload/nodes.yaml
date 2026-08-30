@@ -27,7 +27,6 @@ scout-collector:
           - source_field: candidate_ids
             target_field: candidate_ids
       fan_out:
-        element_id: af92a627-060e-4bd4-8b15-41add01a9217
         items_from: payload.candidate_ids
         as: candidate_id
         max_items: 10
@@ -52,9 +51,7 @@ candidate-collector:
           by: payload.batch_id
         output: payload.summary
         on_complete:
-          element_id: 12369ea1-7b08-49af-a4da-9d931cb00e30
           advances_to: complete
         timeout:
-          element_id: 2866c26f-a18a-4b4f-8bf6-aa26104d448a
           after: 2m
           advances_to: failed

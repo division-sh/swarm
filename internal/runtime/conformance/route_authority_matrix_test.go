@@ -28,7 +28,6 @@ type routeAuthorityMatrixSource struct {
 	PlatformSpec               string `yaml:"platform_spec"`
 	OpenRPCArtifact            string `yaml:"openrpc_artifact"`
 	PublicSurfaceBackendMatrix string `yaml:"public_surface_backend_matrix"`
-	MultiBundleMatrix          string `yaml:"multi_bundle_matrix"`
 	CatalogTiers               string `yaml:"catalog_tiers"`
 }
 
@@ -279,14 +278,12 @@ func validateRouteAuthoritySources(root string, source routeAuthorityMatrixSourc
 		"platform_spec":                 "platform-spec.yaml",
 		"openrpc_artifact":              "openrpc.json",
 		"public_surface_backend_matrix": "internal/apiv1/testdata/public_surface_backend_matrix.yaml",
-		"multi_bundle_matrix":           "internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml",
 		"catalog_tiers":                 "internal/runtime/cataloge2e/README.md",
 	}
 	actual := map[string]string{
 		"platform_spec":                 source.PlatformSpec,
 		"openrpc_artifact":              source.OpenRPCArtifact,
 		"public_surface_backend_matrix": source.PublicSurfaceBackendMatrix,
-		"multi_bundle_matrix":           source.MultiBundleMatrix,
 		"catalog_tiers":                 source.CatalogTiers,
 	}
 	var problems []string

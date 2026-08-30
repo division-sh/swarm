@@ -10,14 +10,13 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
 )
 
-const startupBundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const startupBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const startupBundleHashA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const startupBundleHashB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestAuthorityValidateRecomputesAcquisitionBinding(t *testing.T) {
 	req := AcquireRequest{OwnerID: "owner-a", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
@@ -128,14 +127,6 @@ func (s *retainedSessionProbe) CommitSourceSet(_ context.Context, req runtimeage
 	return runtimeagenttopology.SourceSetCommitResult{Operation: req.Operation, OperationID: req.OperationID, PreviousRevision: previous, CurrentRevision: req.Plan.Revision}, nil
 }
 
-func (*retainedSessionProbe) ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	return runtimebundledelete.FinalMutationResult{}, errors.New("not implemented")
-}
-
-func (*retainedSessionProbe) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	return runtimebundledelete.Result{}, errors.New("not implemented")
-}
-
 func (*retainedSessionProbe) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	return runtimedestructivereset.CleanupResult{}, errors.New("not implemented")
 }
@@ -172,7 +163,7 @@ func testCapability(t *testing.T) (ProcessCapability, *retainedSessionProbe, run
 
 func testRetainedSession(t *testing.T) (*retainedSessionProbe, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: startupBundleHashA, BundleSource: "ephemeral"}}, nil)
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: startupBundleHashA}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +187,7 @@ func TestAcquireRequestRequiresTypedProcessIdentity(t *testing.T) {
 func TestProcessCapabilityIssuesExactRevocableGenerationGrant(t *testing.T) {
 	capability, session, plan := testCapability(t)
 	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 7, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -222,13 +213,13 @@ func TestProcessCapabilityIssuesExactRevocableGenerationGrant(t *testing.T) {
 func TestGenerationGrantProjectsExactBundleScopeForLifecycleCommit(t *testing.T) {
 	capability, session, plan := testCapability(t)
 	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
 		t.Fatalf("IssueGenerationGrant: %v", err)
 	}
-	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, startupBundleHashA, "ephemeral", runtimeagenttopology.LifetimeDurableManaged)
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, startupBundleHashA, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("StaticAdmission: %v", err)
 	}
@@ -247,32 +238,33 @@ func TestGenerationGrantProjectsExactBundleScopeForLifecycleCommit(t *testing.T)
 func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing.T) {
 	capability, session, plan := testCapability(t)
 	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
 		t.Fatalf("IssueGenerationGrant: %v", err)
 	}
 	grantToAdmit, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
 		t.Fatalf("IssueGenerationGrant for admission: %v", err)
 	}
 	if _, err := grantToAdmit.MarkProbesSettled(context.Background(), []string{"startup"}); err != nil {
-		t.Fatalf("MarkProbesSettled before source-set restore: %v", err)
+		t.Fatalf("MarkProbesSettled before source-set restoration: %v", err)
 	}
-	restoredPlan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
-		{BundleHash: startupBundleHashA, BundleSource: "ephemeral"},
-		{BundleHash: startupBundleHashB, BundleSource: "ephemeral"},
+	restored, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
+		{BundleHash: startupBundleHashA},
+		{BundleHash: startupBundleHashB},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewSourceSetPlan: %v", err)
 	}
-	if _, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: restoredPlan,
-	}); err != nil {
+	replacement, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: restored,
+	})
+	if err != nil {
 		t.Fatalf("RestoreSourceSet: %v", err)
 	}
 
@@ -296,7 +288,7 @@ func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing
 		t.Fatal("CommitAgentLifecycleTransition accepted flow readiness through a superseded grant")
 	}
 	if _, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), ExpectedRevision: restoredPlan.Revision, Plan: plan,
+		OperationID: uuid.NewString(), ExpectedRevision: replacement.CurrentRevision, Plan: plan,
 	}); err != nil {
 		t.Fatalf("RestoreSourceSet: %v", err)
 	}
@@ -320,7 +312,7 @@ func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing
 func TestRetainedSessionLossRetiresCapabilityAndAllGrantsBeforeReturn(t *testing.T) {
 	capability, session, plan := testCapability(t)
 	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -362,7 +354,7 @@ func TestProcessCapabilityReleaseIsTerminal(t *testing.T) {
 func TestProcessCapabilityReleaseDoesNotDeadlockWhenGrantPersistenceTerminalizesSession(t *testing.T) {
 	capability, session, plan := testCapability(t)
 	if _, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	}); err != nil {
 		t.Fatalf("IssueGenerationGrant: %v", err)
@@ -395,7 +387,7 @@ func TestProcessCapabilityReleaseRetirementFailureKeepsPossessionMonitorLive(t *
 		t.Fatalf("newProcessCapability: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
-		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		BundleHash: startupBundleHashA, RuntimeInstanceID: session.authority.RuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {

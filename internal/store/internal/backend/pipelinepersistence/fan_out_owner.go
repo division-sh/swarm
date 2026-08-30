@@ -26,9 +26,9 @@ import (
 )
 
 const fanOutIntentColumns = `
-	run_id, triggering_delivery_id, package_key, element_id, bundle_hash, semantic_digest,
+	run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, bundle_hash, semantic_digest,
 	source_kind, source_event_id, source_run_id, source_entity_id, source_field, source_mutation_id,
-	source_resource_package_key, source_resource_event_name, source_resource_version_id,
+	source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 	cardinality, cursor, status, next_chunk_size, last_chunk_ms, last_served_at, created_at, updated_at,
 	claim_owner, claim_generation, lease_expires_at, blocked_reason, capsule`
 
@@ -36,9 +36,9 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 	var (
-		runID, deliveryID, packageKey, elementID, bundleHash, digest                          string
+		runID, deliveryID, flowPath, family, semanticPath, bundleHash, digest                 string
 		sourceKind, sourceEventID, sourceRunID, sourceEntityID, sourceField, sourceMutationID sql.NullString
-		resourcePackage, resourceEvent, resourceVersion                                       sql.NullString
+		resourceFlowPath, resourceEvent, resourceVersion                                      sql.NullString
 		cardinality, cursor, nextChunk                                                        int
 		lastChunkMS                                                                           int64
 		status                                                                                string
@@ -48,9 +48,9 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		capsuleRaw                                                                            []byte
 	)
 	if err := row.Scan(
-		&runID, &deliveryID, &packageKey, &elementID, &bundleHash, &digest,
+		&runID, &deliveryID, &flowPath, &family, &semanticPath, &bundleHash, &digest,
 		&sourceKind, &sourceEventID, &sourceRunID, &sourceEntityID, &sourceField, &sourceMutationID,
-		&resourcePackage, &resourceEvent, &resourceVersion,
+		&resourceFlowPath, &resourceEvent, &resourceVersion,
 		&cardinality, &cursor, &status, &nextChunk, &lastChunkMS, &lastServedRaw, &createdAtRaw, &updatedAtRaw,
 		&claimOwner, &claimGeneration, &leaseRaw, &blockedReason, &capsuleRaw,
 	); err != nil {
@@ -79,7 +79,7 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 	source := fanoutobligation.SourceRef{
 		Kind: fanoutobligation.SourceKind(sourceKind.String), EventID: sourceEventID.String,
 		RunID: sourceRunID.String, EntityID: sourceEntityID.String, Field: sourceField.String, MutationID: sourceMutationID.String,
-		Declaration: durableDeclarationRef(resourcePackage.String, resourceEvent.String),
+		Declaration: durableDeclarationRef(resourceFlowPath.String, resourceEvent.String),
 		VersionID:   durableVersionID(resourceVersion.String),
 	}
 	requestSource := source
@@ -88,8 +88,8 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 	}
 	intent := fanoutobligation.Intent{
 		Request: fanoutobligation.IntentRequest{
-			Key:     fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: deliveryID, ElementRef: runtimeFanOutElementRef(packageKey, elementID)},
-			PlanRef: runtimeFanOutPlanRef(bundleHash, packageKey, elementID, digest), Source: requestSource, Cardinality: cardinality, Capsule: capsule,
+			Key:     fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: deliveryID, ElementRef: runtimeFanOutElementRef(flowPath, family, semanticPath)},
+			PlanRef: runtimeFanOutPlanRef(bundleHash, flowPath, family, semanticPath, digest), Source: requestSource, Cardinality: cardinality, Capsule: capsule,
 		},
 		Source: source, Cursor: cursor, Status: fanoutobligation.Status(status), NextChunkSize: nextChunk, LastChunkMS: lastChunkMS,
 		LastServedAt: lastServed, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
@@ -101,20 +101,20 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 	return intent, nil
 }
 
-func durableDeclarationRef(packageKey, eventName string) durabledata.DeclarationRef {
-	return durabledata.DeclarationRef{PackageKey: strings.TrimSpace(packageKey), EventName: strings.TrimSpace(eventName)}
+func durableDeclarationRef(flowPath, eventName string) durabledata.DeclarationRef {
+	return durabledata.DeclarationRef{FlowPath: strings.TrimSpace(flowPath), EventName: strings.TrimSpace(eventName)}
 }
 
 func durableVersionID(raw string) durabledata.VersionID {
 	return durabledata.VersionID(strings.TrimSpace(raw))
 }
 
-func runtimeFanOutElementRef(packageKey, elementID string) runtimecontracts.FanOutElementRef {
-	return runtimecontracts.FanOutElementRef{PackageKey: strings.TrimSpace(packageKey), ElementID: strings.TrimSpace(elementID)}
+func runtimeFanOutElementRef(flowPath, family, semanticPath string) runtimecontracts.FanOutElementRef {
+	return runtimecontracts.FanOutElementRef{FlowPath: strings.TrimSpace(flowPath), Family: strings.TrimSpace(family), SemanticPath: strings.TrimSpace(semanticPath)}
 }
 
-func runtimeFanOutPlanRef(bundleHash, packageKey, elementID, digest string) runtimecontracts.FanOutPlanRef {
-	return runtimecontracts.FanOutPlanRef{BundleHash: strings.TrimSpace(bundleHash), ElementRef: runtimeFanOutElementRef(packageKey, elementID), SemanticDigest: strings.TrimSpace(digest)}
+func runtimeFanOutPlanRef(bundleHash, flowPath, family, semanticPath, digest string) runtimecontracts.FanOutPlanRef {
+	return runtimecontracts.FanOutPlanRef{BundleHash: strings.TrimSpace(bundleHash), ElementRef: runtimeFanOutElementRef(flowPath, family, semanticPath), SemanticDigest: strings.TrimSpace(digest)}
 }
 
 func (s *PipelinePostgresOwner) ClaimFanOutIntent(ctx context.Context, request runtimepipeline.FanOutClaimRequest) (intent fanoutobligation.Intent, claim fanoutobligation.Claim, found bool, err error) {
@@ -127,7 +127,7 @@ func (s *PipelinePostgresOwner) ClaimFanOutIntent(ctx context.Context, request r
 	err = s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=$1 AND (claim_owner IS NULL OR lease_expires_at <= $2)
-			ORDER BY last_served_at ASC NULLS FIRST, created_at ASC, run_id ASC, triggering_delivery_id ASC, package_key ASC, element_id ASC
+			ORDER BY last_served_at ASC NULLS FIRST, created_at ASC, run_id ASC, triggering_delivery_id ASC, flow_path ASC, declaration_family ASC, semantic_path ASC
 			FOR UPDATE SKIP LOCKED LIMIT 1`, request.BundleHash, request.Now.UTC())
 		var scanErr error
 		intent, scanErr = scanFanOutIntent(row)
@@ -155,7 +155,7 @@ func (s *PipelineSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request run
 	err = s.backend.RunTransaction(ctx, "claim fan-out intent", func(txctx context.Context, tx *sql.Tx) error {
 		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=? AND (claim_owner IS NULL OR lease_expires_at <= ?)
-			ORDER BY CASE WHEN last_served_at IS NULL THEN 0 ELSE 1 END, last_served_at ASC, created_at ASC, run_id ASC, triggering_delivery_id ASC, package_key ASC, element_id ASC
+			ORDER BY CASE WHEN last_served_at IS NULL THEN 0 ELSE 1 END, last_served_at ASC, created_at ASC, run_id ASC, triggering_delivery_id ASC, flow_path ASC, declaration_family ASC, semantic_path ASC
 			LIMIT 1`, request.BundleHash, request.Now.UTC())
 		var scanErr error
 		intent, scanErr = scanFanOutIntent(row)
@@ -175,9 +175,9 @@ func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeli
 	lease := request.Now.Add(request.Lease).UTC()
 	nextGeneration := intent.ClaimGeneration + 1
 	result, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET claim_owner=$1,claim_generation=$2,lease_expires_at=$3,updated_at=$4
-		WHERE run_id=$5 AND triggering_delivery_id=$6 AND package_key=$7 AND element_id=$8 AND status='open' AND claim_generation=$9`,
+		WHERE run_id=$5 AND triggering_delivery_id=$6 AND flow_path=$7 AND declaration_family=$8 AND semantic_path=$9 AND status='open' AND claim_generation=$10`,
 		request.Owner, nextGeneration, lease, request.Now.UTC(), intent.Request.Key.RunID, intent.Request.Key.TriggeringDeliveryID,
-		intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID, intent.ClaimGeneration)
+		intent.Request.Key.ElementRef.FlowPath, intent.Request.Key.ElementRef.Family, intent.Request.Key.ElementRef.SemanticPath, intent.ClaimGeneration)
 	if err != nil {
 		return err
 	}
@@ -210,9 +210,9 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		return input, err
 	}
 	row := db.QueryRowContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
-		AND status='open' AND claim_owner=$5 AND claim_generation=$6 AND lease_expires_at>$7`,
-		claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.PackageKey, claim.Key.ElementRef.ElementID, claim.Owner, claim.Generation, now.UTC())
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
+		AND status='open' AND claim_owner=$6 AND claim_generation=$7 AND lease_expires_at>$8`,
+		claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, claim.Owner, claim.Generation, now.UTC())
 	intent, err := scanFanOutIntent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return input, fanoutobligation.ErrStaleClaim
@@ -265,7 +265,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		}
 		input.Items, err = collectionRangeFromJSON(raw, intent.Request.Cardinality, intent.Cursor, endOrdinal)
 	case fanoutobligation.SourceResourceVersion:
-		if err := db.QueryRowContext(ctx, `SELECT v.canonical_jsonl FROM resource_versions v JOIN resource_version_pins p ON p.version_id=v.version_id AND p.run_id=$1 AND p.package_key=$2 AND p.event_name=$3 WHERE v.version_id=$4 AND v.pruned_at IS NULL`, intent.Request.Key.RunID, intent.Source.Declaration.PackageKey, intent.Source.Declaration.EventName, intent.Source.VersionID).Scan(&raw); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT v.canonical_jsonl FROM resource_versions v JOIN resource_version_pins p ON p.version_id=v.version_id AND p.run_id=$1 AND p.flow_path=$2 AND p.event_name=$3 WHERE v.version_id=$4 AND v.pruned_at IS NULL`, intent.Request.Key.RunID, intent.Source.Declaration.FlowPath, intent.Source.Declaration.EventName, intent.Source.VersionID).Scan(&raw); err != nil {
 			return input, err
 		}
 		input.Items, err = collectionRangeFromJSONL(raw, intent.Request.Cardinality, intent.Cursor, endOrdinal)
@@ -434,9 +434,9 @@ func releaseFanOutRetryable(ctx context.Context, backend any, label string, requ
 			SET claim_owner=NULL,lease_expires_at=NULL,last_served_at=$1,updated_at=$1,
 				next_chunk_size=CASE WHEN next_chunk_size <= 1 THEN 1 ELSE (next_chunk_size + 1) / 2 END,
 				last_chunk_ms=$2
-			WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND claim_owner=$7 AND claim_generation=$8`,
+			WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND claim_owner=$8 AND claim_generation=$9`,
 			request.Now.UTC(), observedFanOutMilliseconds(request.ObservedDuration), request.Claim.Key.RunID,
-			request.Claim.Key.TriggeringDeliveryID, request.Claim.Key.ElementRef.PackageKey, request.Claim.Key.ElementRef.ElementID,
+			request.Claim.Key.TriggeringDeliveryID, request.Claim.Key.ElementRef.FlowPath, request.Claim.Key.ElementRef.Family, request.Claim.Key.ElementRef.SemanticPath,
 			request.Claim.Owner, request.Claim.Generation)
 		if err != nil {
 			return err
@@ -473,12 +473,12 @@ func blockFanOutClaim(ctx context.Context, tx *sql.Tx, postgres bool, effects *r
 		return err
 	}
 	query := `UPDATE fan_out_intents SET status='blocked',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,last_served_at=$2,updated_at=$2
-		WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='open' AND claim_owner=$7 AND claim_generation=$8`
+		WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='open' AND claim_owner=$8 AND claim_generation=$9`
 	if !postgres {
-		query = postgresPlaceholdersToSQLite(query, 8)
+		query = postgresPlaceholdersToSQLite(query, 9)
 	}
 	result, err := tx.ExecContext(ctx, query, string(failure), request.Now.UTC(), request.Claim.Key.RunID,
-		request.Claim.Key.TriggeringDeliveryID, request.Claim.Key.ElementRef.PackageKey, request.Claim.Key.ElementRef.ElementID,
+		request.Claim.Key.TriggeringDeliveryID, request.Claim.Key.ElementRef.FlowPath, request.Claim.Key.ElementRef.Family, request.Claim.Key.ElementRef.SemanticPath,
 		request.Claim.Owner, request.Claim.Generation)
 	if err != nil {
 		return err
@@ -517,7 +517,7 @@ func releaseFanOutClaim(ctx context.Context, backend any, label string, claim fa
 	}
 	operation := func(txctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC()
-		result, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET claim_owner=NULL,lease_expires_at=NULL,last_served_at=$1,updated_at=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND package_key=$4 AND element_id=$5 AND claim_owner=$6 AND claim_generation=$7`, now, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.PackageKey, claim.Key.ElementRef.ElementID, claim.Owner, claim.Generation)
+		result, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET claim_owner=NULL,lease_expires_at=NULL,last_served_at=$1,updated_at=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family=$5 AND semantic_path=$6 AND claim_owner=$7 AND claim_generation=$8`, now, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, claim.Owner, claim.Generation)
 		if err != nil {
 			return err
 		}
@@ -616,14 +616,14 @@ func commitFanOutChunk(
 			} else {
 				failure = string(outcome.Failure)
 			}
-			query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULL,NULL,$8,$9)`
+			query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULL,NULL,$9,$10)`
 			if postgres {
-				query = strings.ReplaceAll(query, "NULLIF($7,'')", "NULLIF($7,'')::uuid")
-				query = strings.ReplaceAll(query, "$8", "$8::jsonb")
+				query = strings.ReplaceAll(query, "NULLIF($8,'')", "NULLIF($8,'')::uuid")
+				query = strings.ReplaceAll(query, "$9", "$9::jsonb")
 			} else {
-				query = postgresPlaceholdersToSQLite(query, 9)
+				query = postgresPlaceholdersToSQLite(query, 10)
 			}
-			if _, err := tx.ExecContext(txctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.PackageKey, command.Claim.Key.ElementRef.ElementID, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
+			if _, err := tx.ExecContext(txctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
 				return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
 			}
 		}
@@ -632,7 +632,7 @@ func commitFanOutChunk(
 		if nextCursor == intent.Request.Cardinality {
 			status = fanoutobligation.StatusClosed
 		}
-		update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,claim_owner=CASE WHEN $2='closed' THEN NULL ELSE claim_owner END,lease_expires_at=CASE WHEN $2='closed' THEN NULL ELSE lease_expires_at END WHERE run_id=$4 AND triggering_delivery_id=$5 AND package_key=$6 AND element_id=$7 AND claim_owner=$8 AND claim_generation=$9 AND status='open'`, nextCursor, string(status), command.Now.UTC(), command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.PackageKey, command.Claim.Key.ElementRef.ElementID, command.Claim.Owner, command.Claim.Generation)
+		update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,claim_owner=CASE WHEN $2='closed' THEN NULL ELSE claim_owner END,lease_expires_at=CASE WHEN $2='closed' THEN NULL ELSE lease_expires_at END WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND claim_owner=$9 AND claim_generation=$10 AND status='open'`, nextCursor, string(status), command.Now.UTC(), command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, command.Claim.Owner, command.Claim.Generation)
 		if err != nil {
 			return err
 		}
@@ -730,10 +730,10 @@ func finishFanOutSuccessfulTurn(
 	}
 	operation := func(txctx context.Context, tx *sql.Tx) error {
 		query := `UPDATE fan_out_intents SET next_chunk_size=$1,last_chunk_ms=$2,last_served_at=$3,updated_at=$3,claim_owner=NULL,lease_expires_at=NULL
-			WHERE run_id=$4 AND triggering_delivery_id=$5 AND package_key=$6 AND element_id=$7 AND status=$8 AND claim_generation=$9
-			AND ((status='open' AND claim_owner=$10) OR (status='closed' AND claim_owner IS NULL))`
+			WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND status=$9 AND claim_generation=$10
+			AND ((status='open' AND claim_owner=$11) OR (status='closed' AND claim_owner IS NULL))`
 		result, err := tx.ExecContext(txctx, query, nextChunk, lastChunkMS, observedAt.UTC(), claim.Key.RunID,
-			claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.PackageKey, claim.Key.ElementRef.ElementID,
+			claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath,
 			string(status), claim.Generation, claim.Owner)
 		if err != nil {
 			return err
@@ -765,18 +765,18 @@ func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool
 	if db == nil {
 		return false, fmt.Errorf("fan-out chunk readback owner is required")
 	}
-	intent, err := scanFanOutIntent(db.QueryRowContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.PackageKey, command.Claim.Key.ElementRef.ElementID))
+	intent, err := scanFanOutIntent(db.QueryRowContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath))
 	if err != nil {
 		return false, fmt.Errorf("read fan-out intent after unconfirmed commit: %w", err)
 	}
 	start := command.Outcomes[0].Ordinal
 	end := start + len(command.Outcomes)
-	query := `SELECT ordinal,outcome_kind,COALESCE(event_id::text,''),COALESCE(source_event_id::text,''),COALESCE(inherited_disposition,''),failure FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4 AND ordinal>=$5 AND ordinal<$6 ORDER BY ordinal`
+	query := `SELECT ordinal,outcome_kind,COALESCE(event_id::text,''),COALESCE(source_event_id::text,''),COALESCE(inherited_disposition,''),failure FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal>=$6 AND ordinal<$7 ORDER BY ordinal`
 	if !postgres {
 		query = strings.ReplaceAll(query, "event_id::text", "event_id")
 		query = strings.ReplaceAll(query, "source_event_id::text", "source_event_id")
 	}
-	rows, err := db.QueryContext(ctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.PackageKey, command.Claim.Key.ElementRef.ElementID, start, end)
+	rows, err := db.QueryContext(ctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, start, end)
 	if err != nil {
 		return false, fmt.Errorf("read fan-out outcomes after unconfirmed commit: %w", err)
 	}
@@ -861,11 +861,11 @@ func nullableText(raw string) any {
 }
 
 func lockClaimedFanOutIntent(ctx context.Context, tx *sql.Tx, postgres bool, claim fanoutobligation.Claim, now time.Time) (fanoutobligation.Intent, error) {
-	query := `SELECT ` + fanOutIntentColumns + ` FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4 AND status='open' AND claim_owner=$5 AND claim_generation=$6 AND lease_expires_at>$7`
+	query := `SELECT ` + fanOutIntentColumns + ` FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND status='open' AND claim_owner=$6 AND claim_generation=$7 AND lease_expires_at>$8`
 	if postgres {
 		query += ` FOR UPDATE`
 	}
-	intent, err := scanFanOutIntent(tx.QueryRowContext(ctx, query, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.PackageKey, claim.Key.ElementRef.ElementID, claim.Owner, claim.Generation, now.UTC()))
+	intent, err := scanFanOutIntent(tx.QueryRowContext(ctx, query, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, claim.Owner, claim.Generation, now.UTC()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
 	}
@@ -929,11 +929,11 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects *revisionEffect
 		return err
 	}
 	for _, intent := range intents {
-		update := `UPDATE fan_out_intents SET status='canceled',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status IN ('open','blocked')`
+		update := `UPDATE fan_out_intents SET status='canceled',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status IN ('open','blocked')`
 		if !postgres {
-			update = postgresPlaceholdersToSQLite(update, 6)
+			update = postgresPlaceholdersToSQLite(update, 7)
 		}
-		if _, err := tx.ExecContext(ctx, update, reason, at.UTC(), runID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID); err != nil {
+		if _, err := tx.ExecContext(ctx, update, reason, at.UTC(), runID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.FlowPath, intent.Request.Key.ElementRef.Family, intent.Request.Key.ElementRef.SemanticPath); err != nil {
 			return err
 		}
 	}
@@ -985,7 +985,7 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	summary.BarrierArmed = barriers.Armed
 	summary.BarrierPending = barriers.ClosedPending
 	summary.BarrierTerminal = barriers.Terminal
-	blocked, err := db.QueryContext(ctx, `SELECT triggering_delivery_id,package_key,element_id,cursor,cardinality-cursor,blocked_reason FROM fan_out_intents WHERE run_id=$1 AND status='blocked' ORDER BY triggering_delivery_id,package_key,element_id`, summary.RunID)
+	blocked, err := db.QueryContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path,cursor,cardinality-cursor,blocked_reason FROM fan_out_intents WHERE run_id=$1 AND status='blocked' ORDER BY triggering_delivery_id,flow_path,declaration_family,semantic_path`, summary.RunID)
 	if err != nil {
 		return summary, err
 	}
@@ -993,7 +993,7 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	for blocked.Next() {
 		var diagnosis fanoutobligation.BlockedIntentDiagnosis
 		var raw any
-		if err := blocked.Scan(&diagnosis.TriggeringDeliveryID, &diagnosis.PackageKey, &diagnosis.ElementID, &diagnosis.Cursor, &diagnosis.Owed, &raw); err != nil {
+		if err := blocked.Scan(&diagnosis.TriggeringDeliveryID, &diagnosis.FlowPath, &diagnosis.Family, &diagnosis.SemanticPath, &diagnosis.Cursor, &diagnosis.Owed, &raw); err != nil {
 			return summary, err
 		}
 		failureRaw := []byte(fmt.Sprint(raw))
@@ -1021,10 +1021,10 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 
 func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, postgres bool, runID string, summary *fanoutobligation.RunSummary) error {
 	rows, err := db.QueryContext(ctx, `
-		SELECT triggering_delivery_id, package_key, element_id
+		SELECT triggering_delivery_id, flow_path, declaration_family, semantic_path
 		FROM fan_out_intents
 		WHERE run_id=$1
-		ORDER BY triggering_delivery_id, package_key, element_id
+		ORDER BY triggering_delivery_id, flow_path, declaration_family, semantic_path
 	`, runID)
 	if err != nil {
 		return err
@@ -1034,7 +1034,7 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 	for rows.Next() {
 		var key fanoutobligation.IntentKey
 		key.RunID = runID
-		if err := rows.Scan(&key.TriggeringDeliveryID, &key.ElementRef.PackageKey, &key.ElementRef.ElementID); err != nil {
+		if err := rows.Scan(&key.TriggeringDeliveryID, &key.ElementRef.FlowPath, &key.ElementRef.Family, &key.ElementRef.SemanticPath); err != nil {
 			return err
 		}
 		keys = append(keys, key)

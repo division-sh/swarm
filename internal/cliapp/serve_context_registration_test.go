@@ -28,7 +28,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	listener := listenLoopbackTestListener(t)
 	defer listener.Close()
 	storePath := filepath.Join(t.TempDir(), "dev.db")
-	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{
+	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{
 		Backend:    storebackend.BackendSQLite,
 		SQLitePath: storePath,
 	}, WorkspaceMountSources{}); err != nil {
@@ -36,7 +36,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	}
 
 	registry := newLocalContextRegistry(swarmDir)
-	entry, err := registry.ReadDescriptor(localProjectContextName(project.canonicalRoot))
+	entry, err := registry.ReadDescriptor(localProjectContextName(project.contracts))
 	if err != nil {
 		t.Fatalf("read descriptor: %v", err)
 	}
@@ -44,8 +44,8 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 		t.Fatalf("descriptor status = %s detail=%s", entry.Status, entry.Detail)
 	}
 	desc := entry.Descriptor
-	if desc.RuntimeInstanceID != "runtime-1" || desc.ProjectRoot != project.canonicalRoot || desc.ContractsPath != project.contracts {
-		t.Fatalf("descriptor = %#v, want runtime/project/contracts metadata", desc)
+	if desc.RuntimeInstanceID != "runtime-1" || desc.ProjectRoot != project.contracts {
+		t.Fatalf("descriptor = %#v, want runtime/project metadata", desc)
 	}
 	if desc.StorePath != storePath || desc.Auth.Mode != localContextAuthBuiltinLoopback {
 		t.Fatalf("descriptor = %#v, want store/builtin auth metadata", desc)
@@ -61,7 +61,7 @@ func TestServeDevEpochAuthorityReplacesSameProjectDescriptor(t *testing.T) {
 	swarmDir := t.TempDir()
 	server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
 	registry := newLocalContextRegistry(swarmDir)
-	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-live", server.URL, project.canonicalRoot)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.contracts), "runtime-live", server.URL, project.contracts)
 	opts := DefaultServeOptions()
 	opts.Dev = true
 	opts.SwarmDir = swarmDir
@@ -71,7 +71,7 @@ func TestServeDevEpochAuthorityReplacesSameProjectDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare registration under epoch authority: %v", err)
 	}
-	path, err := registry.descriptorPath(localProjectContextName(project.canonicalRoot))
+	path, err := registry.descriptorPath(localProjectContextName(project.contracts))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +85,8 @@ func TestServeProjectContextRegistrationReclaimsDeadProjectDescriptor(t *testing
 	project := writeCLIAPIProjectFixture(t)
 	swarmDir := t.TempDir()
 	registry := newLocalContextRegistry(swarmDir)
-	contextName := localProjectContextName(project.canonicalRoot)
-	writeCLIAPITestContext(t, registry, contextName, "runtime-dead", "http://127.0.0.1:1", project.canonicalRoot)
+	contextName := localProjectContextName(project.contracts)
+	writeCLIAPITestContext(t, registry, contextName, "runtime-dead", "http://127.0.0.1:1", project.contracts)
 	if err := registry.SetCurrent(contextName); err != nil {
 		t.Fatalf("set current context: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestServeProjectContextRegistrationTreatsExplicitNameAsDescriptorLabel(t *t
 	swarmDir := t.TempDir()
 	server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
 	registry := newLocalContextRegistry(swarmDir)
-	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-live", server.URL, project.canonicalRoot)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.contracts), "runtime-live", server.URL, project.contracts)
 	opts := DefaultServeOptions()
 	opts.Dev = true
 	opts.SwarmDir = swarmDir
@@ -137,7 +137,7 @@ func TestServeProjectContextRegistrationRejectsCrossProjectExplicitContextName(t
 	otherProject := writeCLIAPIProjectFixture(t)
 	swarmDir := t.TempDir()
 	registry := newLocalContextRegistry(swarmDir)
-	writeCLIAPITestContext(t, registry, "shared", "runtime-other", "http://127.0.0.1:1", otherProject.canonicalRoot)
+	writeCLIAPITestContext(t, registry, "shared", "runtime-other", "http://127.0.0.1:1", otherProject.contracts)
 	opts := DefaultServeOptions()
 	opts.Dev = true
 	opts.SwarmDir = swarmDir
@@ -149,7 +149,7 @@ func TestServeProjectContextRegistrationRejectsCrossProjectExplicitContextName(t
 	if err == nil {
 		t.Fatal("prepare explicit context returned nil error")
 	}
-	if !strings.Contains(err.Error(), "context shared already exists for project "+otherProject.canonicalRoot) || !strings.Contains(err.Error(), "context names are global") {
+	if !strings.Contains(err.Error(), "context shared already exists for project "+otherProject.contracts) || !strings.Contains(err.Error(), "context names are global") {
 		t.Fatalf("err = %q, want cross-project name collision", err.Error())
 	}
 }
@@ -163,7 +163,7 @@ func TestServeProjectContextRegistrationRequiresMatchingEpochGrant(t *testing.T)
 	opts.SwarmDir = t.TempDir()
 	opts.SwarmDirSet = true
 
-	paths := CLIContractPlatformSpecPaths{ContractsPath: project.contracts}
+	paths := CLISourcePlatformSpecPaths{SourceRoot: project.contracts}
 	if _, err := PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, paths, devscratch.RegistrationGrant{}); err == nil || !strings.Contains(err.Error(), "registration grant is required") {
 		t.Fatalf("zero grant error = %v, want fail-closed epoch admission", err)
 	}
@@ -204,7 +204,7 @@ func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T
 		Tokens:   []string{"secret"},
 		Source:   apiv1.AuthTokenSource("explicit-without-token-file"),
 		Explicit: true,
-	}, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
+	}, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
 	if err == nil || !strings.Contains(err.Error(), "requires token-file auth") {
 		t.Fatalf("WriteFinal err = %v, want safe-auth rejection", err)
 	}
@@ -230,13 +230,13 @@ func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing
 		Source:    apiv1.AuthTokenSource(serveAPITokenFileFlagSource),
 		Explicit:  true,
 		TokenFile: tokenFile,
-	}, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
+	}, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
 	if err != nil {
 		t.Fatalf("WriteFinal: %v", err)
 	}
 
 	registry := newLocalContextRegistry(swarmDir)
-	entry, err := registry.ReadDescriptor(localProjectContextName(project.canonicalRoot))
+	entry, err := registry.ReadDescriptor(localProjectContextName(project.contracts))
 	if err != nil {
 		t.Fatalf("read descriptor: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing
 
 func prepareServeProjectContextRegistrationForTest(t *testing.T, project cliAPITestProject, opts ServeOptions) (*ServeProjectContextRegistration, error) {
 	t.Helper()
-	coordinate, err := devscratch.Resolve(project.canonicalRoot)
+	coordinate, err := devscratch.Resolve(project.contracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func prepareServeProjectContextRegistrationForTest(t *testing.T, project cliAPIT
 	if err != nil {
 		t.Fatal(err)
 	}
-	return PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, grant)
+	return PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, grant)
 }
 
 func listenLoopbackTestListener(t *testing.T) net.Listener {

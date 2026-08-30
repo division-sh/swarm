@@ -9,8 +9,6 @@ import (
 )
 
 const (
-	PackageName = "template-select-or-create"
-
 	ProducerFlowID    = "producer"
 	ProducerOutputPin = "account.ready"
 	ProducerOutput    = "account.ready"

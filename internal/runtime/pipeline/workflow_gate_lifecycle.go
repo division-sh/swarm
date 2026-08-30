@@ -62,19 +62,14 @@ func workflowGatePlanForInstance(pc *PipelineCoordinator, instance WorkflowInsta
 	if plan, ok := pc.SemanticSource().WorkflowGateForStage(flowID, stage); ok {
 		return flowID, plan, true
 	}
-	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(pc.SemanticSource())) {
-		if plan, ok := pc.SemanticSource().WorkflowGateForStage("", stage); ok {
-			return "", plan, true
-		}
-	}
 	return "", runtimecontracts.WorkflowGatePlan{}, false
 }
 
 func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string {
-	if pc != nil && pc.bundleSourceFact.Validate() == nil {
-		return pc.bundleSourceFact.BundleHash()
+	if pc != nil && pc.sourceArtifactFact.Validate() == nil {
+		return pc.sourceArtifactFact.BundleHash()
 	}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok && fact.Validate() == nil {
+	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok && fact.Validate() == nil {
 		return fact.BundleHash()
 	}
 	return ""

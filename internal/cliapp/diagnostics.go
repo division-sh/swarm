@@ -1298,7 +1298,7 @@ func validateDiagnosticHealthCheck(result diagnosticHealthCheckResult) error {
 		return fmt.Errorf("malformed health.check result: runtime_ok is required")
 	}
 	if hash := strings.TrimSpace(result.Bundle.BundleHash); !cliBundleHashPattern.MatchString(hash) {
-		return fmt.Errorf("malformed health.check result: bundle.bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
+		return fmt.Errorf("malformed health.check result: bundle.bundle_hash must be bundle-v2:sha256:<64 lowercase hex>")
 	}
 	if result.Bundle.WorkflowName == nil {
 		return fmt.Errorf("malformed health.check result: bundle.workflow_name is required")

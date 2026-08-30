@@ -165,7 +165,7 @@ func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
+func TestPlatformSpecOwnsSourceArtifactSchemaFoundation(t *testing.T) {
 	repoRoot := repoRootForRuntimeWriterGuard(t)
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -173,30 +173,28 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
 	var runs SchemaTableDDL
-	var bundles SchemaTableDDL
+	var artifacts SchemaTableDDL
 	for _, plan := range plans {
 		if plan.TableName == "runs" {
 			runs = plan
 		}
-		if plan.TableName == "bundles" {
-			bundles = plan
+		if plan.TableName == "source_artifacts" {
+			artifacts = plan
 		}
 	}
-	if bundles.TableName == "" {
-		t.Fatal("bundles ddl plan missing")
+	if artifacts.TableName == "" {
+		t.Fatal("source_artifacts ddl plan missing")
 	}
-	bundleDDL := strings.Join(bundles.Statements, "\n")
+	artifactDDL := strings.Join(artifacts.Statements, "\n")
 	for _, want := range []string{
 		"bundle_hash      TEXT PRIMARY KEY",
-		"content_yaml     TEXT NOT NULL",
-		"parsed_json      JSONB NOT NULL",
-		"data_blob        BYTEA",
-		"metadata         JSONB NOT NULL",
-		"ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-		`CREATE INDEX IF NOT EXISTS "idx_bundles_ingested_at" ON "bundles"(ingested_at)`,
+		"source_blob      BYTEA NOT NULL",
+		"member_count     BIGINT NOT NULL",
+		"total_bytes      BIGINT NOT NULL",
+		"created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()",
 	} {
-		if !strings.Contains(bundleDDL, want) {
-			t.Fatalf("bundles ddl missing %q:\n%s", want, bundleDDL)
+		if !strings.Contains(artifactDDL, want) {
+			t.Fatalf("source_artifacts ddl missing %q:\n%s", want, artifactDDL)
 		}
 	}
 	if runs.TableName == "" {
@@ -205,9 +203,7 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	joined := strings.Join(runs.Statements, "\n")
 	for _, want := range []string{
 		"bundle_hash        TEXT NOT NULL CHECK",
-		"bundle_source      TEXT NOT NULL CHECK",
 		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_hash" ON "runs"(bundle_hash) WHERE bundle_hash IS NOT NULL`,
-		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_source_status" ON "runs"(bundle_source, status, started_at)`,
 		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_delete_planning" ON "runs"(bundle_hash, status) WHERE bundle_hash IS NOT NULL`,
 	} {
 		if !strings.Contains(joined, want) {
@@ -216,6 +212,9 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	}
 	if strings.Contains(joined, "bundle_hash TEXT REFERENCES") || strings.Contains(joined, "FOREIGN KEY (bundle_hash)") {
 		t.Fatalf("runs ddl must not create a bundle_hash foreign key:\n%s", joined)
+	}
+	if strings.Contains(joined, "bundle_source") {
+		t.Fatalf("runs ddl retained the retired source-kind axis:\n%s", joined)
 	}
 	if strings.Contains(joined, "bundle_"+"fingerprint") || strings.Contains(joined, "DEFAULT '"+"legacy'") {
 		t.Fatalf("runs ddl retained legacy bundle identity:\n%s", joined)
@@ -237,16 +236,13 @@ func TestPlatformSchemaConstrainsStandingExecutableProvenance(t *testing.T) {
 	if standing == "" {
 		t.Fatal("standing_services ddl plan missing")
 	}
-	for _, want := range []string{
-		"current_bundle_hash    TEXT NOT NULL CHECK",
-		"current_bundle_source  TEXT NOT NULL CHECK (current_bundle_source IN ('persisted', 'ephemeral'))",
-	} {
+	for _, want := range []string{"current_bundle_hash    TEXT NOT NULL CHECK"} {
 		if !strings.Contains(standing, want) {
 			t.Fatalf("standing_services ddl missing %q:\n%s", want, standing)
 		}
 	}
-	if strings.Contains(standing, "'deleted'") {
-		t.Fatalf("standing current provenance admits non-executable deleted source:\n%s", standing)
+	if strings.Contains(standing, "bundle_source") {
+		t.Fatalf("standing_services retained the retired source-kind axis:\n%s", standing)
 	}
 	for _, table := range []string{"standing_service_generations", "standing_service_journal"} {
 		ddl := byName[table]
@@ -361,7 +357,7 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 				},
 			},
 		},
-		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
 	}}
 
 	plans, err := GenerateNodeStateTableDDLs(nodes)
@@ -397,7 +393,7 @@ func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
 				},
 			},
 		},
-		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
 	}}
 
 	_, err := GenerateNodeStateTableDDLs(nodes)

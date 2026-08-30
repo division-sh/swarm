@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 
@@ -16,7 +15,7 @@ const (
 )
 
 type eventSchemaOwnershipRow struct {
-	packageKey          string
+	ownerFlowPath       string
 	producerEndpoint    string
 	producerFlowID      string
 	producerEvent       string
@@ -86,12 +85,10 @@ func eventSchemaOwnershipRowsForReceiver(bundle *WorkflowContractBundle, flowID 
 	return rows
 }
 
-func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect FlowPackageConnect) (eventSchemaOwnershipRow, bool) {
+func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect FlowConnect) (eventSchemaOwnershipRow, bool) {
 	producerEvent := connect.Event
-	if boundEvent, ok := packageEndpointBoundEvent(bundle, connect.PackageKey, connect.From, producerEvent, false); ok {
-		producerEvent = boundEvent
-	}
-	producer, producerName, producerOK := packageEndpointEventDeclaration(bundle, connect.PackageKey, connect.From, producerEvent, false)
+	producerFlowID := connectEndpointFlowID(connect.OwnerFlowPath, connect.From)
+	producer, producerName, producerOK := connectEndpointEventDeclaration(bundle, producerFlowID, producerEvent, false)
 	if !producerOK {
 		return eventSchemaOwnershipRow{}, false
 	}
@@ -99,15 +96,12 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 	if strings.TrimSpace(connect.Rename) != "" {
 		receiverEvent = connect.Rename
 	}
-	if boundEvent, ok := packageEndpointBoundInputEvent(bundle, connect.PackageKey, connect.To, receiverEvent); ok {
-		receiverEvent = boundEvent
-	}
-	receiver, receiverName, receiverOK := packageEndpointEventDeclaration(bundle, connect.PackageKey, connect.To, receiverEvent, true)
-	receiverFlowID := packageEndpointOwningFlowID(bundle, connect.PackageKey, connect.To)
+	receiverFlowID := connectEndpointFlowID(connect.OwnerFlowPath, connect.To)
+	receiver, receiverName, receiverOK := connectEndpointEventDeclaration(bundle, receiverFlowID, receiverEvent, true)
 	return eventSchemaOwnershipRow{
-		packageKey:          strings.TrimSpace(connect.PackageKey),
+		ownerFlowPath:       normalizedConnectOwnerFlowPath(connect.OwnerFlowPath),
 		producerEndpoint:    strings.TrimSpace(connect.From),
-		producerFlowID:      packageEndpointOwningFlowID(bundle, connect.PackageKey, connect.From),
+		producerFlowID:      producerFlowID,
 		producerEvent:       eventidentity.Normalize(producerEvent),
 		producerName:        producerName,
 		producer:            producer,
@@ -118,97 +112,6 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 		receiver:            receiver,
 		receiverRestatement: receiverOK,
 	}, true
-}
-
-func packageEndpointBoundInputEvent(bundle *WorkflowContractBundle, packageKey, endpoint, parentEvent string) (string, bool) {
-	return packageEndpointBoundEvent(bundle, packageKey, endpoint, parentEvent, true)
-}
-
-func packageEndpointBoundEvent(bundle *WorkflowContractBundle, packageKey, endpoint, parentEvent string, input bool) (string, bool) {
-	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
-	if packageKey == "" {
-		packageKey = "."
-	}
-	endpoint = strings.TrimSpace(endpoint)
-	parentEvent = eventidentity.Normalize(parentEvent)
-	if bundle == nil || endpoint == "" || endpoint == "." || parentEvent == "" {
-		return "", false
-	}
-	view, ok := bundle.FlowTree.ByID[endpoint]
-	if !ok || view == nil {
-		return "", false
-	}
-	declaredEvents := make(map[string]struct{})
-	if input {
-		for _, pin := range view.Schema.Pins.Inputs.EventPins {
-			declaredEvents[eventidentity.Normalize(pin.EventType())] = struct{}{}
-		}
-	} else {
-		for _, pin := range view.Schema.Pins.Outputs.EventPins {
-			declaredEvents[eventidentity.Normalize(pin.EventType())] = struct{}{}
-		}
-	}
-	if len(declaredEvents) == 0 {
-		return "", false
-	}
-
-	var bindings []map[string]string
-	for _, pkg := range bundle.PackageTree {
-		key := strings.Trim(strings.TrimSpace(pkg.Key), "/")
-		if key == "" {
-			key = "."
-		}
-		if key != packageKey {
-			continue
-		}
-		for _, flow := range pkg.Manifest.Flows {
-			if strings.TrimSpace(flow.ID) == endpoint {
-				binding := flow.Bind.Outputs
-				if input {
-					binding = flow.Bind.Inputs
-				}
-				bindings = append(bindings, binding)
-			}
-		}
-		flowPackageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
-		for _, ref := range pkg.Manifest.ChildPackages() {
-			location := strings.Trim(path.Clean(strings.ReplaceAll(ref.ResolveLocation(), "\\", "/")), "/")
-			if strings.HasSuffix(strings.ToLower(location), ".yaml") {
-				location = strings.Trim(path.Dir(location), "/")
-			}
-			childKey := location
-			if packageKey != "." {
-				childKey = strings.Trim(path.Join(packageKey, location), "/")
-			}
-			if location != "" && location != "." && childKey == flowPackageKey {
-				binding := ref.Bind.Outputs
-				if input {
-					binding = ref.Bind.Inputs
-				}
-				bindings = append(bindings, binding)
-			}
-		}
-	}
-
-	matches := make(map[string]struct{})
-	for _, binding := range bindings {
-		for localEvent, boundEvent := range binding {
-			localEvent = eventidentity.Normalize(localEvent)
-			if eventidentity.Normalize(boundEvent) != parentEvent {
-				continue
-			}
-			if _, declared := declaredEvents[localEvent]; declared {
-				matches[localEvent] = struct{}{}
-			}
-		}
-	}
-	if len(matches) != 1 {
-		return "", false
-	}
-	for localEvent := range matches {
-		return localEvent, true
-	}
-	return "", false
 }
 
 func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
@@ -230,11 +133,11 @@ func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []
 		producerLocation := eventDeclarationLocation(row.producer)
 		receiverLocation := eventDeclarationLocation(row.receiver)
 		errs = append(errs, fmt.Errorf(
-			"%w: event %s consumer %s in package %s restates producer-owned schema %s at %s with %s at %s; remove the consumer declaration so its compiled projection derives from the producer",
+			"%w: event %s consumer %s under schema owner %s restates producer-owned schema %s at %s with %s at %s; remove the consumer declaration so its compiled projection derives from the producer",
 			ErrInvalidField,
 			row.producerEvent,
 			packageEndpointLabel(row.receiverEndpoint),
-			row.packageKey,
+			row.ownerFlowPath,
 			row.producerName,
 			producerLocation,
 			row.receiverName,
@@ -259,11 +162,11 @@ func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []
 		}
 		sort.Strings(labels)
 		errs = append(errs, fmt.Errorf(
-			"%w: receiver %s event %s in package %s has multiple connected producer schema owners: %s; one effective receiver event must have exactly one producer-owned schema",
+			"%w: receiver %s event %s under schema owner %s has multiple connected producer schema owners: %s; one effective receiver event must have exactly one producer-owned schema",
 			ErrMultipleAuthoritativeOwners,
 			packageEndpointLabel(receiver.receiverEndpoint),
 			receiver.receiverEvent,
-			receiver.packageKey,
+			receiver.ownerFlowPath,
 			strings.Join(labels, ", "),
 		))
 	}
@@ -279,7 +182,7 @@ func eventSchemaReceiverOwnerKey(bundle *WorkflowContractBundle, row eventSchema
 	if receiverEvent == "" {
 		return ""
 	}
-	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.receiverFlowID), receiverEvent}, "\x00")
+	return strings.Join([]string{strings.TrimSpace(row.ownerFlowPath), strings.TrimSpace(row.receiverFlowID), receiverEvent}, "\x00")
 }
 
 func eventSchemaProducerOwnerKey(row eventSchemaOwnershipRow) string {
@@ -287,7 +190,7 @@ func eventSchemaProducerOwnerKey(row eventSchemaOwnershipRow) string {
 	if producerName == "" {
 		return ""
 	}
-	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.producerFlowID), producerName}, "\x00")
+	return strings.Join([]string{strings.TrimSpace(row.ownerFlowPath), strings.TrimSpace(row.producerFlowID), producerName}, "\x00")
 }
 
 func sameEventSchemaProducerOwner(left, right eventSchemaOwnershipRow) bool {
@@ -295,41 +198,42 @@ func sameEventSchemaProducerOwner(left, right eventSchemaOwnershipRow) bool {
 	return leftKey != "" && leftKey == eventSchemaProducerOwnerKey(right)
 }
 
-func packageEndpointOwningFlowID(bundle *WorkflowContractBundle, packageKey, endpoint string) string {
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint != "." {
-		return endpoint
+func connectEndpointEventDeclaration(bundle *WorkflowContractBundle, flowID, eventName string, input bool) (EventCatalogEntry, string, bool) {
+	flowID = strings.TrimSpace(flowID)
+	eventName = eventidentity.Normalize(eventName)
+	if bundle == nil || eventName == "" {
+		return EventCatalogEntry{}, "", false
 	}
-	if bundle == nil {
-		return ""
+	viewID := flowID
+	if viewID == "" {
+		viewID = "."
 	}
-	view, ok := bundle.projectContracts[strings.TrimSpace(packageKey)]
-	if !ok {
-		return ""
+	view, ok := bundle.FlowTree.ByID[viewID]
+	if !ok || view == nil {
+		return EventCatalogEntry{}, "", false
 	}
-	return strings.TrimSpace(view.Paths.OwningFlowID)
+	localName := packageEndpointLocalEvent(bundle, flowID, eventName, input)
+	return eventDeclarationByCandidates(view.Events, localName, eventName, eventidentity.LeafName(eventName))
 }
 
-func packageEndpointEventDeclaration(bundle *WorkflowContractBundle, packageKey, endpoint, eventName string, input bool) (EventCatalogEntry, string, bool) {
-	packageKey = strings.TrimSpace(packageKey)
-	endpoint = strings.TrimSpace(endpoint)
-	eventName = eventidentity.Normalize(eventName)
-	if bundle == nil || packageKey == "" || endpoint == "" || eventName == "" {
-		return EventCatalogEntry{}, "", false
+func normalizedConnectOwnerFlowPath(raw string) string {
+	owner := strings.Trim(strings.TrimSpace(raw), "/")
+	if owner == "" {
+		return "."
 	}
+	return owner
+}
+
+func connectEndpointFlowID(owner, endpoint string) string {
+	owner = normalizedConnectOwnerFlowPath(owner)
+	endpoint = strings.Trim(strings.TrimSpace(endpoint), "/")
 	if endpoint == "." {
-		view, ok := bundle.projectContracts[packageKey]
-		if !ok {
-			return EventCatalogEntry{}, "", false
-		}
-		return eventDeclarationByCandidates(view.Events, eventName, eventidentity.LeafName(eventName))
+		return owner
 	}
-	view, ok := bundle.FlowTree.ByID[endpoint]
-	if !ok || view == nil || strings.TrimSpace(view.Paths.PackageKey) != packageKey {
-		return EventCatalogEntry{}, "", false
+	if owner == "." {
+		return endpoint
 	}
-	localName := packageEndpointLocalEvent(bundle, endpoint, eventName, input)
-	return eventDeclarationByCandidates(view.Events, localName, eventName, eventidentity.LeafName(eventName))
+	return owner + "/" + endpoint
 }
 
 func packageEndpointLocalEvent(bundle *WorkflowContractBundle, endpoint, eventName string, input bool) string {
@@ -373,7 +277,7 @@ func eventDeclarationLocation(entry EventCatalogEntry) string {
 
 func packageEndpointLabel(endpoint string) string {
 	if strings.TrimSpace(endpoint) == "." {
-		return "package root"
+		return "owner flow"
 	}
 	return "flow " + strings.TrimSpace(endpoint)
 }
@@ -499,8 +403,8 @@ func (b *WorkflowContractBundle) resolveEffectiveExecutableNodeEventDeclaration(
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 	}
 	canonical := b.ResolveExecutableNodeEventReference(ref, eventType)
-	if strings.TrimSpace(ref.FlowID()) != "" {
-		if entry, key, types, _, ok := resolveEffectiveEventDeclarationForFlowEvent(b, ref.FlowID(), canonical); ok {
+	if strings.TrimSpace(ref.FlowPath()) != "" {
+		if entry, key, types, _, ok := resolveEffectiveEventDeclarationForFlowEvent(b, ref.FlowPath(), canonical); ok {
 			return entry, key, types, true
 		}
 	}

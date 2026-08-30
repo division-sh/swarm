@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -34,11 +33,12 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
-const runtimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const runtimeTestBundleHash = sourceartifactfixture.BundleHash
 
 type runtimeTestWorkFixture struct {
 	process *worklifetime.Process
@@ -121,14 +121,6 @@ func (s *runtimeTestRetainedSession) CommitSourceSet(_ context.Context, req runt
 	previous := s.plan.Revision
 	s.plan = req.Plan
 	return runtimeagenttopology.SourceSetCommitResult{Operation: req.Operation, OperationID: req.OperationID, PreviousRevision: previous, CurrentRevision: req.Plan.Revision}, nil
-}
-
-func (*runtimeTestRetainedSession) ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	return runtimebundledelete.FinalMutationResult{}, errors.New("runtime test retained session does not own bundle deletion")
-}
-
-func (*runtimeTestRetainedSession) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	return runtimebundledelete.Result{}, errors.New("runtime test retained session does not own bundle deletion replay")
 }
 
 func (*runtimeTestRetainedSession) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
@@ -253,14 +245,14 @@ func (s *runtimeTestRetainedSession) Release(context.Context) error {
 	return nil
 }
 
-func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
 	return newRuntimeTestProcessCapabilityWithSession(t, manager, source, fact, runtimeInstanceID, nil)
 }
 
-func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
 	t.Helper()
-	bundleHash, bundleSource := fact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := fact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	var desired []runtimeagenttopology.DesiredAgent
 	if source != nil {
 		if manager == nil {
@@ -293,7 +285,7 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 		return nil, nil, err
 	}
 	grant, err := capability.IssueGenerationGrant(context.Background(), runtimestartupownership.GrantRequest{
-		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: runtimeInstanceID,
+		BundleHash: bundleHash, RuntimeInstanceID: runtimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -333,7 +325,6 @@ func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, mana
 	admission, err := runtimeagenttopology.StaticAdmission(
 		evidence.SourceSetRevision,
 		evidence.BundleHash,
-		evidence.BundleSource,
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -496,8 +487,8 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = testBundleSourceFact(t, runtimeTestBundleHash)
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = testSourceArtifactFact(t, runtimeTestBundleHash)
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)
@@ -507,7 +498,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -577,11 +568,11 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		bundleHash,
@@ -601,8 +592,8 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	if strings.TrimSpace(deps.Options.RuntimeInstanceID) == "" {
 		deps.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if deps.Options.BundleSourceFact.Validate() != nil {
-		deps.Options.BundleSourceFact = testBundleSourceFact(t, runtimeTestBundleHash)
+	if deps.Options.SourceArtifactFact.Validate() != nil {
+		deps.Options.SourceArtifactFact = testSourceArtifactFact(t, runtimeTestBundleHash)
 	}
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
@@ -663,7 +654,7 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			if deps.Options.WorkflowModule != nil {
 				source = deps.Options.WorkflowModule.SemanticSource()
 			}
-			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.BundleSourceFact, deps.Options.RuntimeInstanceID, retainedSession)
+			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession)
 			if grantErr != nil {
 				return nil, grantErr
 			}
@@ -706,18 +697,18 @@ func admitRuntimeTestBundle(t testing.TB, bundle *runtimecontracts.WorkflowContr
 	bundle.PackAdmission = projection
 }
 
-func testBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+func testSourceArtifactFact(t testing.TB, bundleHash string) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 	if err != nil {
 		t.Fatalf("construct test bundle source fact: %v", err)
 	}
 	return fact
 }
 
-func testPersistedBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+func testPersistedSourceArtifactFact(t testing.TB, bundleHash string) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(strings.TrimSpace(bundleHash))
+	fact, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
 	if err != nil {
 		t.Fatalf("construct persisted test bundle source fact: %v", err)
 	}

@@ -23,13 +23,13 @@ import (
 func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 	repo := repoRootForTest()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
-		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
+		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
 	}
-	loaded.bundleSourceFact = mustServeTestEphemeralBundleSourceFact(loaded.bootIdentity.BundleHash)
+	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
 	cfg, err := cliapp.DefaultRuntimeConfig()
 	if err != nil {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)

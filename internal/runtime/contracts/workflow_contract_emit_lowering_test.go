@@ -148,7 +148,9 @@ payload:
 }
 
 func emitFieldLoweringTestBundle() *WorkflowContractBundle {
+	rootSchema := FlowSchemaDocument{}
 	return &WorkflowContractBundle{
+		RootSchema: &rootSchema,
 		RootEntities: EntityContractsDocument{
 			"account": {
 				Fields: map[string]EntityFieldDecl{

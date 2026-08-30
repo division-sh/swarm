@@ -96,7 +96,7 @@ func TestAuthoredSubscriptionAdmissionMatchesOnlyAuthorizedPatternProjection(t *
 	}
 }
 
-func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInvalidExact(t *testing.T) {
+func TestAuthoredSubscriptionAdmissionMatchesOwnFlowInputWithoutOpeningSiblingExact(t *testing.T) {
 	local := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerNode,
 		ConsumerID:   "listener",
@@ -104,8 +104,8 @@ func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInv
 		InputEvents:  []string{"task.ready"},
 		Authored:     "task.ready",
 	})
-	if !local.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
-		t.Fatal("admitted receiver-local exact did not match its typed input event")
+	if !local.MatchesReceiverInput("receiver/task.ready", "receiver", []string{"task.ready"}) {
+		t.Fatal("admitted receiver-local exact did not match its own-flow input event")
 	}
 	invalid := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerNode,
@@ -124,7 +124,7 @@ func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInv
 		InputEvents:  []string{"task.ready"},
 		Authored:     "*",
 	})
-	if !wildcard.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
+	if !wildcard.MatchesReceiverInput("receiver/task.ready", "receiver", []string{"task.ready"}) {
 		t.Fatal("wildcard did not match an event localized through a declared receiver input")
 	}
 	if wildcard.MatchesReceiverInput("producer/task.other", "receiver", []string{"task.ready"}) {
@@ -135,7 +135,7 @@ func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInv
 func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
@@ -164,7 +164,7 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 func TestResolveFlowNodeSubscriptionHandlerRejectsBareSubscriptionAsExecutableHandler(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {ID: "listener", SubscribesTo: []string{"task.requested"}},
@@ -189,7 +189,7 @@ func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing
 		t.Run(authored, func(t *testing.T) {
 			child := runtimecontracts.FlowContractView{
 				Path:   "child",
-				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
 					"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}},
@@ -197,7 +197,7 @@ func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing
 			}
 			sibling := runtimecontracts.FlowContractView{
 				Path:   "sibling",
-				Paths:  runtimecontracts.FlowContractPaths{ID: "sibling", Flow: "sibling"},
+				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "sibling"},
 				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 			}
 			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child, sibling}}

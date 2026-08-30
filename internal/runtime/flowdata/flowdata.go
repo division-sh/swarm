@@ -18,8 +18,7 @@ const ToolName = "read_flow_data"
 type ResolvedStaticData struct {
 	StaticID      durabledata.StaticDataID
 	StaticRef     durabledata.StaticDataRef
-	PackageKey    string
-	OwnerFlowID   string
+	FlowPath      string
 	RelativePath  string
 	ContentDigest string
 	ContentType   string
@@ -34,9 +33,8 @@ type Finding struct {
 }
 
 type agentFlowDataDeclaration struct {
-	LogicalID  string
-	FlowID     string
-	PackageKey string
+	LogicalID string
+	FlowPath  string
 }
 
 func NormalizeAccessList(values []string) []string {
@@ -105,7 +103,7 @@ func AllowedStaticData(source semanticview.Source, actor models.AgentConfig) []R
 	if !ok {
 		return nil
 	}
-	values := source.StaticDataForAgent(decl.PackageKey, decl.FlowID, decl.LogicalID)
+	values := source.StaticDataForAgent(decl.FlowPath, decl.LogicalID)
 	out := make([]ResolvedStaticData, 0, len(values))
 	for _, value := range values {
 		mountPath, err := durabledata.StaticMountPath(value.StaticID)
@@ -115,8 +113,7 @@ func AllowedStaticData(source semanticview.Source, actor models.AgentConfig) []R
 		out = append(out, ResolvedStaticData{
 			StaticID:      value.StaticID,
 			StaticRef:     value.Ref,
-			PackageKey:    value.PackageKey,
-			OwnerFlowID:   value.OwnerFlowID,
+			FlowPath:      value.FlowPath,
 			RelativePath:  value.RelativePath,
 			ContentDigest: value.ContentDigest,
 			ContentType:   value.ContentType,
@@ -133,7 +130,7 @@ func AllowedResourceData(source semanticview.Source, actor models.AgentConfig) [
 	if !ok {
 		return nil
 	}
-	return source.DurableDataForAgent(declaration.Source.PackageKey, declaration.OwnerFlowID, declaration.LocalID)
+	return source.DurableDataForAgent(declaration.OwnerFlowID, declaration.LocalID)
 }
 
 func ValidateSource(source semanticview.Source) []Finding {
@@ -158,7 +155,7 @@ func ValidateSource(source semanticview.Source) []Finding {
 			findings = append(findings, Finding{AgentLabel: scopeLabel, Message: fmt.Sprintf("agent %s references missing owning flow %s", agentID, declaration.OwnerFlowID)})
 			continue
 		}
-		compiled := source.StaticDataForAgent(declaration.Source.PackageKey, declaration.OwnerFlowID, declaration.LocalID)
+		compiled := source.StaticDataForAgent(declaration.OwnerFlowID, declaration.LocalID)
 		if len(compiled) != len(NormalizeAccessList(declaration.Entry.FlowDataAccess)) {
 			findings = append(findings, Finding{
 				AgentLabel: scopeLabel,
@@ -197,11 +194,7 @@ func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.Ag
 	if _, ok := source.FlowScopeByID(flowID); !ok {
 		return agentFlowDataDeclaration{}, false
 	}
-	return agentFlowDataDeclaration{
-		LogicalID:  strings.TrimSpace(declaration.LocalID),
-		FlowID:     flowID,
-		PackageKey: strings.TrimSpace(declaration.Source.PackageKey),
-	}, true
+	return agentFlowDataDeclaration{LogicalID: strings.TrimSpace(declaration.LocalID), FlowPath: flowID}, true
 }
 
 func FlowDataAccessFromEntry(entry runtimecontracts.AgentRegistryEntry) []string {

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -30,7 +29,6 @@ type cliAPITargetResolution struct {
 }
 
 type cliProjectResolution struct {
-	contractsPath        string
 	projectRoot          string
 	canonicalProjectRoot string
 }
@@ -52,11 +50,6 @@ func resolveCLIAPITarget(opts rootCommandOptions, cfg cliCommandConfig) (cliAPIT
 	if contextName := strings.TrimSpace(opts.contextName); contextName != "" {
 		return resolveCLIAPIExplicitContextTarget(opts, cfg, contextName)
 	}
-	if !opts.disableLocalTargeting {
-		if project, ok := resolveCLIAPIProject(opts, cfg); ok {
-			return resolveCLIAPIProjectTarget(opts, cfg, project)
-		}
-	}
 	return resolveCLIAPISelectedConfigOrDefaultTarget(opts, cfg)
 }
 
@@ -74,44 +67,6 @@ func resolveCLIAPIExplicitContextTarget(opts rootCommandOptions, cfg cliCommandC
 		return cliAPITargetResolution{}, cliAPIContextResolutionError("explicit context", entry)
 	}
 	return cliAPITargetFromDescriptor(entry, "--context")
-}
-
-func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliCommandConfig, project cliProjectResolution) (cliAPITargetResolution, error) {
-	registry, err := cliAPILocalContextRegistry(opts, cfg)
-	if err != nil {
-		return cliAPITargetResolution{}, err
-	}
-	entries, err := registry.ProjectEntries(context.Background(), project.canonicalProjectRoot, cliRuntimeIdentityCaller{httpClient: opts.httpClient})
-	if err != nil {
-		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("inspect project contexts: %v", err)}
-	}
-	okEntries := make([]localContextEntry, 0, len(entries))
-	for _, entry := range entries {
-		if entry.Status == localContextStatusOK {
-			okEntries = append(okEntries, entry)
-		}
-	}
-	switch {
-	case len(okEntries) == 1 && len(entries) == 1:
-		target, err := cliAPITargetFromDescriptor(okEntries[0], "project context")
-		if err != nil {
-			return cliAPITargetResolution{}, err
-		}
-		target.projectRoot = project.canonicalProjectRoot
-		return target, nil
-	case len(okEntries) > 1:
-		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("multiple live project contexts for %s; pass --context to choose one", project.canonicalProjectRoot)}
-	case len(entries) > 0:
-		return cliAPITargetResolution{}, cliAPIProjectContextError(project, entries)
-	case !cliAPICommandClassAllowsProjectlessFallthrough(opts.apiCommandClass):
-		commandClass := opts.apiCommandClass
-		if commandClass == "" {
-			commandClass = cliAPICommandClassMutating
-		}
-		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("no live project context for %s; refusing %s command without explicit --context or --api-server; start `swarm serve --dev` for this project or choose a target explicitly", project.canonicalProjectRoot, commandClass)}
-	default:
-		return resolveCLIAPISelectedConfigOrDefaultTarget(opts, cfg)
-	}
 }
 
 func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cliCommandConfig) (cliAPITargetResolution, error) {
@@ -148,27 +103,6 @@ func cliAPILocalContextRegistry(opts rootCommandOptions, cfg cliCommandConfig) (
 	return newLocalContextRegistry(swarmDir.Path), nil
 }
 
-func resolveCLIAPIProject(opts rootCommandOptions, cfg cliCommandConfig) (cliProjectResolution, bool) {
-	contractsPath := firstNonEmpty(
-		os.Getenv(cliContractsPathEnv),
-		cfg.Paths.ContractsPath,
-	)
-	if strings.TrimSpace(contractsPath) == "" {
-		return cliProjectResolution{}, false
-	}
-	contractsPath = ResolvePath(opts.invocationRoot.Path(), contractsPath)
-	projectRoot := inferProjectRootFromContractsPath(contractsPath)
-	canonical, _ := canonicalizeDoctorTargetPath(projectRoot)
-	if strings.TrimSpace(canonical) == "" {
-		return cliProjectResolution{}, false
-	}
-	return cliProjectResolution{
-		contractsPath:        filepath.Clean(contractsPath),
-		projectRoot:          filepath.Clean(projectRoot),
-		canonicalProjectRoot: filepath.Clean(canonical),
-	}, true
-}
-
 func cliAPITargetFromDescriptor(entry localContextEntry, source string) (cliAPITargetResolution, error) {
 	rpc, err := cliAPIRPCEndpointFromServer(entry.Descriptor.APIServer, "descriptor api_server")
 	if err != nil {
@@ -201,15 +135,6 @@ func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, 
 	return cliAPITokenResolution{token: token, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
 }
 
-func cliAPICommandClassAllowsProjectlessFallthrough(class cliAPICommandClass) bool {
-	switch class {
-	case "", cliAPICommandClassReadOnly, cliAPICommandClassTargetDiagnostic:
-		return true
-	default:
-		return false
-	}
-}
-
 func cliAPIContextResolutionError(prefix string, entry localContextEntry) error {
 	name := strings.TrimSpace(entry.Descriptor.Name)
 	if name == "" {
@@ -220,18 +145,6 @@ func cliAPIContextResolutionError(prefix string, entry localContextEntry) error 
 		detail = ": " + detail
 	}
 	return &cliAPIValidationError{message: fmt.Sprintf("%s %s is not usable (%s)%s; run `swarm context prune` or pass --context/--api-server explicitly", prefix, name, entry.Status, detail)}
-}
-
-func cliAPIProjectContextError(project cliProjectResolution, entries []localContextEntry) error {
-	parts := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		name := strings.TrimSpace(entry.Descriptor.Name)
-		if name == "" {
-			name = "<unknown>"
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s", name, entry.Status))
-	}
-	return &cliAPIValidationError{message: fmt.Sprintf("project context for %s is not usable (%s); run `swarm context prune` or pass --context/--api-server explicitly", project.canonicalProjectRoot, strings.Join(parts, ", "))}
 }
 
 func localProjectContextName(canonicalProjectRoot string) string {

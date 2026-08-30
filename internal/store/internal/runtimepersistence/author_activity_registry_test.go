@@ -164,7 +164,7 @@ func (r dynamicAuthoredEventDescriptorResolver) AuthorActivityEventCatalogRegist
 
 func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
-	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v1:sha256:"+strings.Repeat("d", 64))
+	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("d", 64))
 	registry := runtimeauthoractivity.NewEventCatalogRegistry()
 	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "static.event", Disposition: runtimeauthoractivity.StoryDifferent}})
 	if err != nil {
@@ -237,7 +237,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 }
 
 func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T) {
-	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v1:sha256:"+strings.Repeat("e", 64))
+	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("e", 64))
 	registry := runtimeauthoractivity.NewEventCatalogRegistry()
 	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "text"}})
 	if err != nil {
@@ -267,9 +267,9 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), uuid.NewString())
-	ctx = runtimecorrelation.WithBundleSourceFact(
+	ctx = runtimecorrelation.WithSourceArtifactFact(
 		ctx,
-		mustStoreTestEphemeralBundleSourceFact("bundle-v1:sha256:"+strings.Repeat("a", 64)),
+		mustStoreTestSourceArtifactFact("bundle-v2:sha256:"+strings.Repeat("a", 64)),
 	)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

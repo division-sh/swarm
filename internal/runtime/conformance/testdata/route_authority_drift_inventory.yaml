@@ -16,8 +16,8 @@ policy:
     It explicitly covers event name/type, semantic scope, entity/run/source
     event context, route/event-key derivation helpers, lowered ConnectRoutePlan
     artifacts, import-boundary pin interface adaptation versus invalid
-    pin_bind_input_alias/pin_bind_output_alias route authority, flow-owned
-    exact/pattern subscription admission versus invalid live cross-flow routes,
+    retired bind-derived route authority, flow-owned exact/pattern subscription
+    admission versus invalid live cross-flow routes,
     required internal pipeline carriers versus raw agent-kind fallbacks,
     RouteTable.Resolve role boundaries, receiver-carrier evidence,
     descriptor evidence, direct-delivery paths, removed legacy
@@ -75,16 +75,6 @@ search_dimensions:
       - internal/runtime/semantic_ownership_guard_test.go
     canonical_layer: route_plan_authority
     classified_paths_required: true
-  - id: import_boundary_pin_alias_route_authority
-    pattern: 'pin_bind_input_alias|pin_bind_output_alias|ImportBoundary(Input|Output)Alias|bind\.inputs|bind\.outputs'
-    minimum_matching_files: 7
-    required_paths:
-      - platform-spec.yaml
-      - internal/runtime/contracts/workflow_contract_yaml_wave1.go
-      - internal/runtime/semanticview/import_boundary_aliases.go
-      - internal/runtime/semanticview/import_boundary_aliases_test.go
-    canonical_layer: invalid_old_authority
-    classified_paths_required: true
   - id: live_agent_subscription_route_authority
     pattern: 'type AgentConfig struct|\bnewLLMAgent\b|\bnewGenericAgent\b|\bbuildFlowAgentConfig\b|\bbuildStaticFlowAgentConfig\b|\breconfigureAgentIdentityExactWithTopology\b|\bReplaceAgentRoute\b|\bresolveSubscribedRecipientsForPlanning\b|\bpendingEventsForAgent\b|TestEventBusSubscribe_RejectsUnadmittedQualifiedAgentRoute'
     minimum_matching_files: 21
@@ -110,16 +100,14 @@ search_dimensions:
       - internal/store/internal/backend/delivery/lifecycle.go
     canonical_layer: durable_delivery_authority
   - id: flow_owned_subscription_pattern_authority
-    pattern: 'wildcard_subscription_scope|ResolveImportBoundaryWildcardSubscription|ImportBoundaryWildcardSubscriptionMatches|\bbuildFlowAgentConfig\b|\bbuildStaticFlowAgentConfig\b|\bresolveSubscribedRecipientsForPlanning\b|\brouteMatches\b'
-    minimum_matching_files: 13
+    pattern: 'AuthoredSubscriptionAdmission|ClassifyAuthoredSubscription|routeClassifyAuthoredSubscription|AdmitFlowOwnedAgentSubscriptions'
+    minimum_matching_files: 24
     required_paths:
-      - platform-spec.yaml
-      - internal/runtime/semanticview/import_boundary_wildcards.go
+      - internal/runtime/semanticview/subscription_admission.go
+      - internal/runtime/semanticview/agent_subscription_admission.go
+      - internal/runtime/semanticview/endpoint_census.go
       - internal/runtime/bus/routing_derivation.go
-      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
       - internal/runtime/manager/flow_activation.go
-      - internal/runtime/bus/eventbus_routing.go
-      - internal/runtime/bus/delivery_planner.go
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
@@ -193,7 +181,7 @@ search_dimensions:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/pipeline/workflow_instance_activation.go
       - internal/store/internal/runtimepersistence/sqlite_runtime.go
-      - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
+      - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
     canonical_layer: event_context
   - id: event_name_type
     pattern: 'event_name|event type|EventType|EventName|\.Type|TriggerEventType'
@@ -431,8 +419,8 @@ seam_families:
       - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
-      - internal/cliapp/connect_delivery_one_codemod_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - internal/runtime/conformance/testdata/canonical_forms_registry.yaml
       - internal/runtime/conformance/template_instance_semantic_ownership_test.go
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >
@@ -581,51 +569,6 @@ seam_families:
       passthrough or receipt settlement. Duplicate same-edge declarations remain
       idempotent; distinct subscribers and distinct targets remain legal fanout
       under the existing one event x subscriber durable model.
-  - id: import_boundary_pin_interface_adaptation
-    layer: route_plan_consumers
-    classification: valid_consumer
-    paths:
-      - internal/runtime/contracts/workflow_contract_yaml_wave1.go
-      - internal/runtime/contracts/workflow_contract_yaml_test.go
-      - internal/runtime/core/pinrouting/connect_route_plan.go
-      - internal/runtime/semanticview/import_boundary_aliases.go
-      - internal/runtime/semanticview/import_boundary_aliases_test.go
-      - internal/runtime/bootverify/workflow_composition_connect_checks.go
-      - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
-      - internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go
-      - internal/runtime/conformance/testdata/canonical_forms_registry.yaml
-    search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
-    notes: >
-      Binding input/output pins remains canonical package-visible event-name
-      evidence. Under #2309, CompileConnectGraph consumes that projection while
-      resolving an explicit event-centric FlowPackageConnect. A bind cannot
-      create an inter-flow route by itself.
-  - id: import_boundary_pin_alias_route_engines
-    layer: invalid_old_authority
-    classification: invalid_old_authority_path
-    paths:
-      - platform-spec.yaml
-      - internal/runtime/semanticview/flow_input_producer.go
-      - internal/runtime/semanticview/flow_input_producer_test.go
-      - internal/runtime/semanticview/import_boundary_wildcards.go
-      - internal/runtime/pipeline/workflow_nodes.go
-      - internal/runtime/pipeline/workflow_nodes_test.go
-      - internal/runtime/bus/routing_derivation.go
-      - internal/runtime/bus/delivery_planner.go
-      - internal/runtime/bus/import_boundary_alias_routing_test.go
-    search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
-    invalid_authority:
-      - bind.inputs creating pin_bind_input_alias RouteTable or recipient authority without explicit connect
-      - bind.outputs creating pin_bind_output_alias RouteTable or recipient authority without explicit connect
-      - import bindings being reported as parent-connect producer proof without an explicit connect edge
-      - workflow-node subscription rewriting reconstructing an inter-flow edge from a bind alone
-    notes: >
-      #1786 makes FlowPackageConnect lowered to ConnectRoutePlan the sole
-      inter-flow edge owner and adds symmetric connect.to root-input syntax.
-      #2085 must delete both alias route engines together; direction is not an
-      owner boundary. Old bind-only delivery is unsupported and receives no
-      compatibility route, migration reader, or dual-write period.
-
   - id: compiled_connect_execution_claim
     layer: durable_delivery_authority
     classification: canonical_owner
@@ -713,22 +656,28 @@ seam_families:
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/accprojection/resolver.go
       - internal/runtime/accprojection/resolver_test.go
+      - internal/apiv1/operator_event_publish_test.go
+      - internal/apiv1/operator_event_replay_test.go
       - internal/runtime/semanticview/agent_subscription_admission.go
       - internal/runtime/semanticview/agent_subscription_admission_test.go
-      - internal/runtime/semanticview/bundle_source.go
+      - internal/runtime/semanticview/source_artifact.go
       - internal/runtime/semanticview/endpoint_census.go
       - internal/runtime/semanticview/endpoint_census_test.go
-      - internal/runtime/semanticview/import_boundary_wildcards.go
       - internal/runtime/semanticview/subscription_admission.go
       - internal/runtime/semanticview/subscription_admission_test.go
       - internal/runtime/bootverify/report_test.go
       - internal/runtime/bootverify/workflow_event_topology_checks.go
       - internal/runtime/bootverify/workflow_stage_timer_checks_test.go
       - internal/runtime/bootverify/workflow_timer_checks.go
+      - internal/runtime/bus/bustest/routes.go
+      - internal/runtime/bus/event_identity_dispatch_surface_test.go
       - internal/runtime/bus/eventbus_publish_test.go
-      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
+      - internal/runtime/bus/outbox_test.go
       - internal/runtime/bus/routing_derivation.go
       - internal/runtime/bus/routing_derivation_test.go
+      - internal/runtime/bus/test_routes_test.go
+      - internal/runtime/conformance/reply_resolution_conformance_test.go
+      - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - internal/runtime/engine/declarative_node.go
       - internal/runtime/engine/declarative_node_test.go
       - internal/runtime/pipeline/node_declarative.go
@@ -745,6 +694,8 @@ seam_families:
       - internal/runtime/manager/recovery_test.go
       - internal/runtime/manager/runtime.go
       - internal/runtime/bus/agent_subscription_admission_test.go
+      - internal/runtime/inbound_postgres_test.go
+      - internal/runtime/inbound_raw_settlement_store_test.go
       - internal/runtime/runforkexecution/agent_runtime_materialization_test.go
       - internal/store/internal/runtimepersistence/postgres_store_additional_test.go
       - internal/store/internal/runtimepersistence/sqlite_runtime_test.go
@@ -754,29 +705,9 @@ seam_families:
       subscriptions before they may become verification, relation, route,
       handler, lifecycle, or recovery authority. Node and timer exact values are
       local-only; agent exact values retain only the admitted same-scope form;
-      imported wildcard observation consumes the typed subtree/grant owner.
+      descendant wildcard observation consumes the typed filesystem-scope owner.
       Private agent admission state remains the only capability accepted by
       live agent route APIs; raw strings and channels are non-authoritative.
-  - id: import_boundary_wildcard_pattern_authority
-    layer: route_plan_consumers
-    classification: valid_consumer
-    paths:
-      - platform-spec.yaml
-      - internal/apispec/platform_spec_composition_routing_test.go
-      - internal/runtime/accprojection/resolver.go
-      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
-      - internal/runtime/bus/routing_derivation.go
-      - internal/runtime/pipeline/workflow_nodes.go
-      - internal/runtime/semanticview/bundle_source.go
-      - internal/runtime/semanticview/endpoint_census.go
-      - internal/runtime/semanticview/endpoint_census_test.go
-      - internal/runtime/semanticview/import_boundary_wildcards.go
-    search_dimensions: [flow_owned_subscription_pattern_authority, route_table_resolve]
-    notes: >
-      The platform-spec wildcard scope/grant resolver owns imported-package
-      pattern candidate sets and bind.observe grants. Low-level route matching
-      is only a primitive within those candidates. Same-scope and supported
-      root/non-import wildcard behavior remain canonical and must be preserved.
   - id: unadmitted_live_agent_pattern_routes
     layer: invalid_old_authority
     classification: invalid_old_authority_path
@@ -820,6 +751,7 @@ seam_families:
     layer: route_topology
     classification: valid_consumer
     paths:
+      - platform-spec.yaml
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/runforkadmission/contract_frontier.go
@@ -1145,7 +1077,6 @@ seam_families:
       - internal/store/internal/runtimepersistence/selected_contract_runtime_execution_test.go
       - internal/store/internal/runtimepersistence/delivery_lifecycle_fixture_test.go
       - internal/store/internal/runtimepersistence/postgres_smoke_test.go
-      - internal/store/internal/runtimepersistence/preservation_cleanup_test.go
       - internal/store/internal/runtimepersistence/run_completion_test.go
       - internal/store/internal/runtimepersistence/run_control_test.go
       - internal/store/internal/runtimepersistence/run_debug_read_surface_test.go
@@ -1185,25 +1116,23 @@ seam_families:
       - internal/runtime/cataloge2e/runtime_harness_test.go
       - internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go
       - internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go
-      - internal/runtime/bus/sealed_flow_package_fixture_test.go
-      - internal/runtime/conformance/sealed_flow_package_conformance_test.go
       - internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go
       - internal/runtime/conformance/empire_routing_counterparts_test.go
       - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
-      - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
-      - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
+      - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
+      - tests/tier5-flow-lifecycle/test-create-flow-instance/tests/expected.yaml
     search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority]
     notes: >
       Catalog and fixture proofs are broader behavior consumers. Required PR
       smoke must cite focused rows; full route behavior stays in named full
-      conformance/catalog tiers. The sealed package fixture and conformance
-      tests consume lowered connect route plans and typed recipient evaluation
-      as runtime proof; they do not introduce or replace route authority. #1552
+      conformance/catalog tiers. Filesystem-tree fixtures consume lowered
+      connect route plans and typed recipient evaluation as runtime proof; they
+      do not introduce or replace route authority. #1552
       adds the template-flow pilot conformance fixture as an integrated
-      package-boundary proof consumer for the existing route-authority owners.
+      flow-boundary proof consumer for the existing route-authority owners.
       #1553 adds the singleton coordinator pilot conformance fixture as a
       consumer that proves contained map/list state does not produce lowered
       connect route authority. #1924 adds the reply-resolution conformance
@@ -1223,15 +1152,15 @@ seam_families:
       The matrix proves selected route-authority rows. This inventory proves
       the repo-wide drift audit boundary and identifies guardrails that should
       prevent future narrow closure.
-  - id: bundle_source_operation_guard
+  - id: source_artifact_operation_guard
     layer: conformance_guardrails
     classification: separate_semantic_concept
     paths:
-      - internal/runtime/bus/bundle_source_mutation_roots_test.go
+      - internal/runtime/bus/source_artifact_mutation_roots_test.go
       - internal/store/internal/runtimepersistence/run_bundle_identity_repository_test.go
     search_dimensions: [live_agent_subscription_route_authority, descriptor_evidence, direct_delivery_path]
     notes: >
-      Bundle-source hostile tests invoke the existing public operations, and
+      Source-artifact hostile tests invoke the existing public operations, and
       the repository ledger names every exported EventBus operation for source
       ownership classification. Those references guard source admission and
       capability lifetime; they do not produce, infer, or replace route

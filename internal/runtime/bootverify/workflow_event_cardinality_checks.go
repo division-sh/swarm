@@ -21,7 +21,7 @@ func (c *checkerContext) singleNodePerEvent() []Finding {
 		if endpoint.Kind != semanticview.EventEndpointNodeHandler || endpoint.Pattern || !endpoint.Node.Valid() {
 			continue
 		}
-		eventKey := endpoint.Node.PackageKey() + "\x00" + endpoint.Event.EventKey()
+		eventKey := endpoint.Node.FlowPath() + "\x00" + endpoint.Event.EventKey()
 		labels[eventKey] = endpoint.Event.EventKey()
 		if owners[eventKey] == nil {
 			owners[eventKey] = map[string]struct{}{}

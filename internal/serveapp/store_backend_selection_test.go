@@ -42,7 +42,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			storeMode:   storebackend.ActiveDefaultBackend().String(),
 			wantBackend: storebackend.BackendSQLite,
 			wantSource:  storebackend.SourceRolloutDefault,
-			wantPathSrc: storebackend.SourceSwarmDirDefault,
+			wantPathSrc: storebackend.SourceProjectDefault,
 		},
 		{
 			name:        "flag postgres reaches store construction",
@@ -85,16 +85,15 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 
 			var out bytes.Buffer
 			code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
-				ConfigPath:         writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
-				StoreMode:          tt.storeMode,
-				StoreModeSet:       tt.storeFlag,
-				APIListenAddr:      defaultAPIListenAddr,
-				MCPListenAddr:      defaultMCPListenAddr,
-				ShutdownGrace:      runtime.DefaultShutdownGrace,
-				SelfCheck:          true,
-				RequireBundleMatch: true,
-				Verbose:            true,
-				Output:             &out,
+				ConfigPath:    writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
+				StoreMode:     tt.storeMode,
+				StoreModeSet:  tt.storeFlag,
+				APIListenAddr: defaultAPIListenAddr,
+				MCPListenAddr: defaultMCPListenAddr,
+				ShutdownGrace: runtime.DefaultShutdownGrace,
+				SelfCheck:     true,
+				Verbose:       true,
+				Output:        &out,
 			})
 			if code != 1 {
 				t.Fatalf("Run code = %d, want selector proof failure 1; output=%s", code, out.String())
@@ -125,16 +124,15 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
-		ConfigPath:         configPath,
-		StoreMode:          storebackend.BackendSQLite.String(),
-		StoreModeSet:       true,
-		APIListenAddr:      defaultAPIListenAddr,
-		MCPListenAddr:      defaultMCPListenAddr,
-		ShutdownGrace:      runtime.DefaultShutdownGrace,
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-		Output:             &out,
+		ConfigPath:    configPath,
+		StoreMode:     storebackend.BackendSQLite.String(),
+		StoreModeSet:  true,
+		APIListenAddr: defaultAPIListenAddr,
+		MCPListenAddr: defaultMCPListenAddr,
+		ShutdownGrace: runtime.DefaultShutdownGrace,
+		SelfCheck:     true,
+		Verbose:       true,
+		Output:        &out,
 	})
 	if code != 1 {
 		t.Fatalf("Run code = %d, want selector proof failure 1; output=%s", code, out.String())
@@ -218,9 +216,6 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.Agents == nil || apiCaps.Conversations == nil {
 		t.Fatal("sqlite apiCapabilities missing exact agent/conversation read owners")
 	}
-	if apiCaps.BundleCatalog == nil {
-		t.Fatal("sqlite apiCapabilities missing BundleCatalog pure operator-read owner")
-	}
 	if apiCaps.ConversationForks == nil {
 		t.Fatal("sqlite apiCapabilities missing ConversationForks read owner")
 	}
@@ -230,10 +225,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.RunForkAvailability == nil || apiCaps.RunFork == nil || apiCaps.RunForkSelector == nil {
 		t.Fatal("sqlite apiCapabilities missing complete run-fork capability family")
 	}
-	classifiedOut := map[string]any{
-		"BundleDelete":     apiCaps.BundleDelete,
-		"ResetCoordinator": apiCaps.ResetCoordinator,
-	}
+	classifiedOut := map[string]any{"ResetCoordinator": apiCaps.ResetCoordinator}
 	for name, capability := range classifiedOut {
 		if capability != nil {
 			t.Fatalf("sqlite optional capability %s = %T, want nil classified split/postgres-only capability", name, capability)
@@ -366,7 +358,8 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		t.Fatalf("build PostgreSQL API capabilities: %v", err)
 	}
 	for name, available := range map[string]bool{
-		"sqlite required serve ingest":       sqlite.ServeBundleIngestWriter() != nil,
+		"sqlite source artifact writer":      sqlite.SourceArtifactWriter() != nil,
+		"sqlite source artifact store":       sqlite.SourceArtifactStore() != nil,
 		"sqlite required run availability":   sqlite.RunBundleAvailability() != nil,
 		"sqlite database":                    sqliteCaps.Database != nil,
 		"sqlite runs":                        sqliteCaps.Runs != nil,
@@ -376,16 +369,13 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		"sqlite observability":               sqliteCaps.Observability != nil,
 		"sqlite run bundle context":          sqliteCaps.RunBundleContext != nil,
 		"sqlite test setup":                  sqliteCaps.TestSetup != nil,
-		"sqlite bundle catalog":              sqliteCaps.BundleCatalog != nil,
-		"sqlite bundle register":             sqliteCaps.BundleRegister != nil,
 		"sqlite conversation reads":          sqliteCaps.ConversationForks != nil,
 		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
 		"sqlite run fork":                    sqliteCaps.RunFork != nil,
 		"sqlite run fork selector":           sqliteCaps.RunForkSelector != nil,
-		"postgres bundle register":           postgresCaps.BundleRegister != nil,
-		"postgres required serve ingest":     postgres.ServeBundleIngestWriter() != nil,
+		"postgres source artifact writer":    postgres.SourceArtifactWriter() != nil,
+		"postgres source artifact store":     postgres.SourceArtifactStore() != nil,
 		"postgres required run availability": postgres.RunBundleAvailability() != nil,
-		"postgres bundle delete":             postgresCaps.BundleDelete != nil,
 		"postgres run fork":                  postgresCaps.RunFork != nil,
 		"postgres run fork selector":         postgresCaps.RunForkSelector != nil,
 		"postgres reset":                     postgresCaps.ResetCoordinator != nil,
@@ -394,10 +384,7 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 			t.Fatalf("%s capability is unavailable", name)
 		}
 	}
-	for name, available := range map[string]bool{
-		"sqlite bundle delete": sqliteCaps.BundleDelete != nil,
-		"sqlite reset":         sqliteCaps.ResetCoordinator != nil,
-	} {
+	for name, available := range map[string]bool{"sqlite reset": sqliteCaps.ResetCoordinator != nil} {
 		if available {
 			t.Fatalf("%s capability unexpectedly available", name)
 		}
@@ -448,7 +435,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		SelfCheck:              true,
 		ProcessWorkOwner:       processWorkOwner,
 		RuntimeInstanceID:      "11111111-1111-4111-8111-111111111111",
-		BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(bundleHash),
+		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
 		LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
 		ProviderTriggerCatalog: testProviderTriggerCatalog(t),
@@ -477,14 +464,10 @@ func (storeBackendSelectionNoopLLMRuntime) ProviderContract() runtimellm.Provide
 func loadStoreBackendSelectionWorkflowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: store-backend-selection
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: store-backend-selection
+mode: static
 initial_state: idle
 states:
   - idle

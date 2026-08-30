@@ -241,12 +241,6 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 			ProofTokens: []string{"executeStandaloneCompletionCandidateWithCatalog", "requireCompleteRunForkRevision"},
 		},
 		{
-			Path: "internal/store/internal/preservationpersistence/preservation_cleanup.go", Writer: "applyPreservationCleanup",
-			WriterTokens: []string{"effects := privaterunforkrevision.NewEffects()", "TerminalizeRunTx", "MarkTerminalTx", "FinalizeRunForkRevisionTx"},
-			ProofPath:    "internal/store/internal/runtimepersistence/preservation_cleanup_test.go", Proof: "TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres",
-			ProofTokens: []string{"ApplyUnavailableBundleStartupPreservationCleanup", "assertPreservationCleanupRunForkRevision"},
-		},
-		{
 			Path: "internal/store/internal/backend/pipelinepersistence/standing_service.go", Writer: "quiesceStandingRunTx",
 			WriterTokens: []string{"s.revisionEffects", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FamilyAgentSessions"},
 			ProofPath:    "internal/store/internal/runtimepersistence/standing_service_store_test.go", Proof: "TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState",
@@ -460,8 +454,6 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go", []string{"deleteSelectedContractForkState"}, []string{"agent_conversation_audits", "agent_sessions", "agent_turns", "committed_replay_scopes", "dead_letters", "entity_mutations", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "event_receipts", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes", "timers"}, "retained revision families or parent-owned complete state", "DiscardMaterializedSelectedContractExecutionFork", "retained completion-evidence branch and distinct parent-deleting branch", "locked selected fork run ID", "retained branch finalizes every affected family; parent branch deletes parent and cascade ledger", discardProof+"; "+discardParity+"; "+rollbackProof),
 
 		row("internal/store/internal/backend/runlifecycle/active_run_quiescence.go", []string{"terminateActiveRunSessionsTx", "sqliteTerminateActiveRunSessionsTx"}, []string{"agent_sessions"}, "agent_sessions", "ApplyActiveRunQuiescence/run control", "run quiescence", "locked target run IDs", "run-lifecycle owner finalizer", matrixProof),
-		row("internal/store/internal/preservationpersistence/preservation_cleanup.go", []string{"terminateUnavailableBundlePreservationSessionTx"}, []string{"agent_sessions"}, "agent_sessions", "ApplyPreservationCleanup", "retained-run cleanup", "locked active run IDs", "preservation owner finalizer", matrixProof),
-
 		row("internal/store/storetest/event.go", []string{"insertPipelineScopeFixture"}, []string{"committed_replay_scopes"}, "test fixture only", "storetest semantic event fixture", "test-only insertion", "fixture event run ID", "fixture explicitly invokes selected-store finalizer", matrixProof),
 		row("internal/store/storetest/event.go", []string{"insertPipelineDispositionFixture"}, []string{"event_receipts"}, "test fixture only", "storetest semantic event fixture", "test-only insertion", "fixture event run ID", "fixture explicitly invokes selected-store finalizer", matrixProof),
 	}

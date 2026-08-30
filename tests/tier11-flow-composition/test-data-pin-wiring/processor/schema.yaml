@@ -1,0 +1,13 @@
+name: processor
+initial_state: waiting
+terminal_states: [finished]
+states: [waiting, finished]
+pins:
+  inputs:
+    events: [process.run]
+    reads: [task_config]
+  outputs:
+    events:
+      - process.done
+    writes: [result]
+mode: static

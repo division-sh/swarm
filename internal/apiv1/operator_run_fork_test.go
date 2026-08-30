@@ -17,7 +17,7 @@ const (
 	runForkTestSourceRunID = "00000000-0000-0000-0000-000000000701"
 	runForkTestForkRunID   = "00000000-0000-0000-0000-000000000702"
 	runForkTestEventID     = "00000000-0000-0000-0000-000000000703"
-	runForkTestBundleHash  = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	runForkTestBundleHash  = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T) {
@@ -148,7 +148,7 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 	}{
 		{
 			name:         "deleted source unavailable",
-			availability: runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, runbundle.AvailabilitySourceDeleted),
+			availability: runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash),
 			params:       fmt.Sprintf(`{"source_run_id":%q,"fork_event_id":%q}`, runForkTestSourceRunID, runForkTestEventID),
 			wantCode:     BundleUnavailableCode,
 		},
@@ -162,7 +162,7 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 			name:         "different bundle hash",
 			availability: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
 			params: fmt.Sprintf(
-				`{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":"bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","confirm_source_freeze":true}`,
+				`{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":"bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","confirm_source_freeze":true}`,
 				runForkTestSourceRunID,
 				runForkTestEventID,
 			),
@@ -244,7 +244,7 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 	})
 
 	t.Run("executor source hash mismatch", func(t *testing.T) {
-		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": selected_contracts source hash mismatch: request bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
+		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": selected_contracts source hash mismatch: request bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"hash-mismatch"}}`,
@@ -272,28 +272,26 @@ func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, exe
 
 func runForkAvailable(runID, bundleHash string) runbundle.Availability {
 	return runbundle.Availability{
-		RunID:            strings.TrimSpace(runID),
-		Status:           "running",
-		BundleHash:       strings.TrimSpace(bundleHash),
-		BundleSource:     runbundle.AvailabilitySourcePersisted,
-		BundleRowPresent: true,
+		RunID:                 strings.TrimSpace(runID),
+		Status:                "running",
+		BundleHash:            strings.TrimSpace(bundleHash),
+		SourceArtifactPresent: true,
 	}
 }
 
-func runForkUnavailable(runID, bundleHash string, source runbundle.AvailabilitySource) runbundle.Availability {
+func runForkUnavailable(runID, bundleHash string) runbundle.Availability {
 	availability := runForkAvailable(runID, bundleHash)
-	availability.BundleSource = source
-	availability.BundleRowPresent = false
+	availability.SourceArtifactPresent = false
 	availability.ErrorCode = runbundle.CodeBundleUnavailable
-	availability.Cause = source.String()
+	availability.Cause = "source_artifact_unavailable"
 	return availability
 }
 
 func runForkDataIntegrity(runID, bundleHash string) runbundle.Availability {
 	availability := runForkAvailable(runID, bundleHash)
-	availability.BundleRowPresent = false
+	availability.SourceArtifactPresent = false
 	availability.ErrorCode = runbundle.CodeBundleDataIntegrityError
-	availability.Cause = "persisted_missing_bundle_row"
+	availability.Cause = "missing_source_artifact"
 	return availability
 }
 

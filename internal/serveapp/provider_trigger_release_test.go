@@ -1,19 +1,13 @@
 package serveapp
 
 import (
-	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testing.T) {
@@ -24,50 +18,28 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build release-shaped swarm binary: %v\n%s", err, output)
 	}
-	copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"), filepath.Join(releaseRoot, "contracts"))
-	platformSpecBody, err := os.ReadFile(filepath.Join(repoRootForTest(), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "platform-spec.yaml"), platformSpecBody, 0o644); err != nil {
-		t.Fatalf("write release platform spec: %v", err)
-	}
-	sqlitePath := filepath.Join(releaseRoot, "runtime.db")
-	seedReleaseProviderTriggerStore(t, platformSpecBody, sqlitePath)
-	configPath := filepath.Join(releaseRoot, "platform-config.yaml")
-	writeReleaseProviderTriggerConfig(t, configPath, sqlitePath)
-
-	runDoctor := func(executable, cwd string) (string, error) {
-		cmd := exec.Command(executable,
-			"doctor",
-			"--config", configPath,
-			"--contracts", filepath.Join(releaseRoot, "contracts"),
-			"--workspace-backend", "host",
-			"--api-listen-addr", "127.0.0.1:0",
-			"--mcp-listen-addr", "127.0.0.1:0",
-			"--json",
-		)
+	sourceRoot := filepath.Join(releaseRoot, "source")
+	copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"), sourceRoot)
+	runPackList := func(executable, cwd string) (string, error) {
+		cmd := exec.Command(executable, "packs", "list", sourceRoot, "--json")
 		cmd.Dir = cwd
 		cmd.Env = releaseProviderTriggerProcessEnv()
 		output, err := cmd.CombinedOutput()
 		return string(output), err
 	}
 
-	output, err := runDoctor(binaryPath, releaseRoot)
+	output, err := runPackList(binaryPath, releaseRoot)
 	if err != nil {
-		t.Fatalf("bare-binary doctor failed: %v\n%s", err, output)
+		t.Fatalf("bare-binary packs list failed: %v\n%s", err, output)
 	}
-	doctor := decodeReleasePackInventory(t, output)
-	if doctor.BaseMode != "embedded" || doctor.EffectiveDigest == "" {
-		t.Fatalf("release doctor pack inventory = %#v", doctor)
+	inventory := decodeReleasePackInventory(t, output)
+	if inventory.BaseMode != "embedded" || inventory.EffectiveDigest == "" {
+		t.Fatalf("release pack inventory = %#v\n%s", inventory, output)
 	}
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
-		if !strings.Contains(output, "provider_trigger_pack_"+provider) {
-			t.Fatalf("release doctor missing provider trigger %s:\n%s", provider, output)
-		}
-		entry, ok := doctor.Packs["provider."+provider]
+		entry, ok := inventory.Packs["provider."+provider]
 		if !ok || entry.Source != "embedded" || entry.ManifestHash == "" {
-			t.Fatalf("release doctor provider.%s = %#v, present=%t", provider, entry, ok)
+			t.Fatalf("release pack inventory provider.%s = %#v, present=%t", provider, entry, ok)
 		}
 	}
 
@@ -76,35 +48,27 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if err := os.Rename(binaryPath, relocatedBinary); err != nil {
 		t.Fatalf("relocate release binary: %v", err)
 	}
-	output, err = runDoctor(relocatedBinary, relocatedRoot)
+	output, err = runPackList(relocatedBinary, relocatedRoot)
 	if err != nil {
-		t.Fatalf("relocated bare-binary doctor failed: %v\n%s", err, output)
+		t.Fatalf("relocated bare-binary packs list failed: %v\n%s", err, output)
 	}
-	doctor = decodeReleasePackInventory(t, output)
-	if doctor.BaseMode != "embedded" || !strings.HasPrefix(doctor.EffectiveDigest, "sha256:") {
-		t.Fatalf("relocated release doctor pack inventory = %#v", doctor)
+	inventory = decodeReleasePackInventory(t, output)
+	if inventory.BaseMode != "embedded" || !strings.HasPrefix(inventory.EffectiveDigest, "sha256:") {
+		t.Fatalf("relocated release pack inventory = %#v", inventory)
 	}
 	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
-		entry, ok := doctor.Packs[id]
+		entry, ok := inventory.Packs[id]
 		if !ok || entry.Source != "embedded" || !strings.HasPrefix(entry.ManifestHash, "sha256:") {
-			t.Fatalf("relocated release doctor %s = %#v, present=%t", id, entry, ok)
+			t.Fatalf("relocated release pack inventory %s = %#v, present=%t", id, entry, ok)
 		}
 	}
-	for _, command := range [][]string{{"packs", "list", "--json"}, {"packs", "show", "provider.telegram", "--json"}} {
+	for _, command := range [][]string{{"packs", "show", "provider.telegram", sourceRoot, "--json"}} {
 		cmd := exec.Command(relocatedBinary, command...)
 		cmd.Dir = relocatedRoot
 		cmd.Env = releaseProviderTriggerProcessEnv()
 		body, commandErr := cmd.CombinedOutput()
 		if commandErr != nil {
 			t.Fatalf("relocated bare-binary %s failed: %v\n%s", strings.Join(command, " "), commandErr, body)
-		}
-		if command[1] == "list" {
-			inventory := decodeReleasePackInventory(t, string(body))
-			entry, ok := inventory.Packs["provider.telegram"]
-			if !ok || entry.Source != "embedded" || !strings.HasPrefix(entry.ManifestHash, "sha256:") {
-				t.Fatalf("relocated bare-binary packs list telegram = %#v, present=%t", entry, ok)
-			}
-			continue
 		}
 		var show struct {
 			Pack         releasePackInventoryEntry `json:"pack"`
@@ -162,42 +126,6 @@ func decodeReleasePackInventory(t *testing.T, body string) releasePackInventory 
 		result.Packs[entry.ID] = entry
 	}
 	return result
-}
-
-func writeReleaseProviderTriggerConfig(t *testing.T, path, sqlitePath string) {
-	t.Helper()
-	lines := []string{
-		"runtime:",
-		"  execution_posture: live",
-		"store:",
-		"  backend: sqlite",
-		"  sqlite:",
-		"    path: " + strconv.Quote(sqlitePath),
-	}
-	writeRuntimeConfigText(t, path, strings.Join(lines, "\n")+"\n")
-}
-
-func seedReleaseProviderTriggerStore(t *testing.T, platformSpecBody []byte, sqlitePath string) {
-	t.Helper()
-	var platformSpec runtimecontracts.PlatformSpecDocument
-	decodeAuthoritativeYAMLBytesForTest(t, platformSpecBody, &platformSpec)
-	plans, err := store.GeneratePlatformTableDDLs(platformSpec)
-	if err != nil {
-		t.Fatalf("generate release platform tables: %v", err)
-	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("create release SQLite store: %v", err)
-	}
-	ctx := context.Background()
-	bootstrapSQLiteSchemaForTest(t, ctx, sqliteStore, plans)
-	seedProviderTriggerSmokeRuntime(t, runtimecorrelation.WithRunID(ctx, "76000000-0000-0000-0000-000000000001"), sqliteStore,
-		"76000000-0000-0000-0000-000000000001", "76000000-0000-0000-0000-000000000002", "release-stripe", "stripe-customer", "stripe", "stripe-release-secret", "release-stripe-agent")
-	seedProviderTriggerSmokeRuntime(t, runtimecorrelation.WithRunID(ctx, "76000000-0000-0000-0000-000000000003"), sqliteStore,
-		"76000000-0000-0000-0000-000000000003", "76000000-0000-0000-0000-000000000004", "release-slack", "slack-customer", "slack", "slack-release-secret", "release-slack-agent")
-	if err := sqliteStore.Close(); err != nil {
-		t.Fatalf("close seeded release SQLite store: %v", err)
-	}
 }
 
 func releaseProviderTriggerProcessEnv() []string {

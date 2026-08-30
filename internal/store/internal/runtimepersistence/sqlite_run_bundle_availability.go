@@ -24,17 +24,3 @@ func (s *SQLiteRuntimeStore) ActiveNonStandingRunBundleAvailabilities(ctx contex
 	}
 	return s.runBundles.ListActiveNonStanding(ctx)
 }
-
-func (s *SQLiteRuntimeStore) ActiveNonStandingRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
-	availabilities, err := s.ActiveNonStandingRunBundleAvailabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var conflicts []runbundle.Availability
-	for _, availability := range availabilities {
-		if !availability.Available() {
-			conflicts = append(conflicts, availability)
-		}
-	}
-	return conflicts, nil
-}

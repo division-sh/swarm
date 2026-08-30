@@ -287,7 +287,7 @@ func LocalizeForFlow(flowPath string, inputEvents []string, eventName string) st
 		return strings.TrimPrefix(eventName, prefix)
 	}
 	for _, input := range NormalizeList(inputEvents) {
-		if eventName == input || strings.HasSuffix(eventName, "/"+input) {
+		if eventName == input {
 			return input
 		}
 	}

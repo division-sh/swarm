@@ -19,8 +19,6 @@ type testOperatorCapabilities struct {
 	ExecutionPosture          executionposture.Posture
 	Now                       func() time.Time
 	Ready                     func() bool
-	RepoRoot                  string
-	PlatformSpecPath          string
 	Database                  Pinger
 	Runs                      RunReadStore
 	Observability             ObservabilityReadStore
@@ -28,10 +26,8 @@ type testOperatorCapabilities struct {
 	AgentConversations        any
 	AgentDeliveryLifecycle    AgentDeliveryLifecycleReadStore
 	AgentUsage                AgentUsageReadStore
-	BundleCatalog             BundleCatalogReadStore
 	Data                      DurableDataStore
 	AgentFrameEffective       AgentFrameEffectiveResolver
-	BundleDelete              BundleDeleteExecutor
 	ConversationForks         ConversationForkReadStore
 	ConversationForkLifecycle ConversationForkLifecycleStore
 	ForkChatExecutor          ForkChatExecutor
@@ -89,21 +85,21 @@ func (c testOperatorCapabilities) runtimePublication() RuntimePublicationReader 
 		return c.RuntimePublication
 	}
 	reader := testRuntimePublicationReader{snapshot: runtime.RuntimeContextPublicationSnapshot{PrimaryBundle: c.Bundle}}
-	for _, source := range c.RuntimeIdentity.BundleSources {
-		fact, err := runtimecorrelation.DecodeBundleSourceFact(source.BundleHash, source.BundleSource)
+	for _, source := range c.RuntimeIdentity.SourceArtifacts {
+		fact, err := runtimecorrelation.DecodeSourceArtifactFact(source.BundleHash)
 		if err != nil {
 			reader.err = fmt.Errorf("decode test runtime publication: %w", err)
 			return reader
 		}
-		reader.snapshot.BundleSourceFacts = append(reader.snapshot.BundleSourceFacts, fact)
+		reader.snapshot.SourceArtifactFacts = append(reader.snapshot.SourceArtifactFacts, fact)
 	}
-	if len(reader.snapshot.BundleSourceFacts) == 0 && c.Bundle.BundleHash != "" {
-		fact, err := runtimecorrelation.NewPersistedBundleSourceFact(c.Bundle.BundleHash)
+	if len(reader.snapshot.SourceArtifactFacts) == 0 && c.Bundle.BundleHash != "" {
+		fact, err := runtimecorrelation.NewSourceArtifactFact(c.Bundle.BundleHash)
 		if err != nil {
 			reader.err = fmt.Errorf("construct test runtime publication: %w", err)
 			return reader
 		}
-		reader.snapshot.BundleSourceFacts = []runtimecorrelation.BundleSourceFact{fact}
+		reader.snapshot.SourceArtifactFacts = []runtimecorrelation.SourceArtifactFact{fact}
 	}
 	return reader
 }
@@ -111,11 +107,11 @@ func (c testOperatorCapabilities) runtimePublication() RuntimePublicationReader 
 func (c testOperatorCapabilities) publication() EventPublicationOptions {
 	acknowledged, _ := c.Events.(AcknowledgedEventPublisher)
 	recipientPlans, _ := c.Events.(EventRecipientPlanChecker)
-	bundleSource, _ := c.Events.(BundleSourceAdmitter)
+	bundleSource, _ := c.Events.(SourceArtifactAdmitter)
 	return EventPublicationOptions{
 		ExecutionPosture: c.posture(),
 		Now:              c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
-		RecipientPlans: recipientPlans, BundleSource: bundleSource,
+		RecipientPlans: recipientPlans, SourceArtifact: bundleSource,
 		Runs: c.Runs, Entities: c.Entities, Observability: c.Observability,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
@@ -132,11 +128,11 @@ func (c testOperatorCapabilities) posture() executionposture.Posture {
 func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 	proposedEffects, _ := c.DecisionCards.(decisioncard.ProposedEffectStore)
 	noticeAcknowledgment, _ := c.Mailbox.(MailboxNoticeAcknowledgmentStore)
-	bundleSource, _ := c.Events.(BundleSourceAdmitter)
+	bundleSource, _ := c.Events.(SourceArtifactAdmitter)
 	return DecisionCardHandlerOptions{
 		Now: c.Now, Cards: c.DecisionCards, ProposedEffects: proposedEffects,
 		Mailbox: c.Mailbox, NoticeAcknowledgment: noticeAcknowledgment,
-		Authority: c.DecisionAuthority, BundleSource: bundleSource,
+		Authority: c.DecisionAuthority, SourceArtifact: bundleSource,
 		Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts,
 	}
 }
@@ -152,7 +148,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorDecisionCardHandlers(c.decisionCards()),
 		OperatorRunStartHandlers(RunStartHandlerOptions{Publication: c.publication()}),
 		OperatorEventPublishHandlers(EventPublishHandlerOptions{Publication: c.publication()}),
-		OperatorTestSetupHandlers(TestSetupHandlerOptions{Now: c.Now, Setup: c.TestSetup, Idempotency: c.Idempotency, RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts, BundleSource: c.publication().BundleSource, Source: c.Source}),
+		OperatorTestSetupHandlers(TestSetupHandlerOptions{Now: c.Now, Setup: c.TestSetup, Idempotency: c.Idempotency, RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts, SourceArtifact: c.publication().SourceArtifact, Source: c.Source}),
 		testOperatorEventReplayHandlers(c),
 		testOperatorRunForkHandlers(c),
 		OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
@@ -162,11 +158,8 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorObservabilityHandlers(ObservabilityHandlerOptions{Observability: c.Observability}),
 		OperatorEntityHandlers(EntityHandlerOptions{Entities: c.Entities}),
 		OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: agents, Conversations: conversations, DeliveryLifecycle: c.AgentDeliveryLifecycle, Usage: c.AgentUsage}),
-		OperatorBundleCatalogHandlers(BundleCatalogHandlerOptions{Catalog: c.BundleCatalog}),
 		OperatorDataHandlers(DataHandlerOptions{Store: c.Data}),
-		OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: c.BundleCatalog, Effective: c.AgentFrameEffective}),
-		testOperatorBundleRegisterHandlers(c),
-		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency}),
+		OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Effective: c.AgentFrameEffective}),
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
 	)
@@ -179,11 +172,6 @@ func testOperatorSubscriptions(c testOperatorCapabilities, overrides ...Subscrip
 		Now:              c.Now, Ready: c.Ready, Database: c.Database, Observability: c.Observability,
 		DecisionCards: c.DecisionCards, ProposedEffects: proposedEffects, Publication: c.runtimePublication(),
 	}, overrides...)
-}
-
-func testOperatorBundleRegisterHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	register, _ := c.BundleCatalog.(BundleCatalogRegisterStore)
-	return OperatorBundleRegisterHandlers(BundleRegisterHandlerOptions{Now: c.Now, RepoRoot: c.RepoRoot, PlatformSpecPath: c.PlatformSpecPath, Register: register, Idempotency: c.Idempotency})
 }
 
 func testOperatorConversationForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {

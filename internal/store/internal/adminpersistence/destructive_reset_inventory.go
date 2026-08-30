@@ -34,7 +34,7 @@ func (s *DestructiveResetPostgresOwner) ReadResetInventory(ctx context.Context) 
 	}
 	for _, entry := range destructivereset.DefaultPlatformCleanupCatalog() {
 		switch entry.Classification {
-		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve, destructivereset.CleanupRequestScopedBundles:
+		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve, destructivereset.CleanupRequestScopedSourceArtifacts:
 			continue
 		default:
 			out.RunScopedTables = append(out.RunScopedTables, destructivereset.TableRef{

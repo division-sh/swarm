@@ -58,7 +58,10 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			route := runtimeagentidentity.RootRoute()
 			flowID := strings.TrimSpace(declaration.OwnerFlowID)
 			flowPath := ""
-			if flowID != "" {
+			switch flowID {
+			case "":
+			case ".":
+			default:
 				flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
 				if flowPath == "" {
 					failures = append(failures, fmt.Sprintf("agent %s scoped declaration owner %s has no canonical flow path", strings.TrimSpace(agentID), flowID))

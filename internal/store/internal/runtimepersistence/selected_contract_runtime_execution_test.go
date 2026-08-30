@@ -909,7 +909,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	go func() {
 		discardDone <- store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
 	}()
-	waitForPostgresQueryLock(t, ctx, db, "SELECT run_id::text, status, bundle_hash, bundle_source")
+	waitForPostgresQueryLock(t, ctx, db, "SELECT run_id::text, status, bundle_hash, origin_kind")
 
 	var status string
 	var committedRevisionRows int
@@ -1208,15 +1208,15 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		t.Fatalf("seed selected event: %v", err)
 	}
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES (?,?,?,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,contracts_root,workflow_name,workflow_version,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	}
-	selection := runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "workflow", WorkflowVersion: "v1"}
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, ExecutionSupported: false, ForkRunID: forkRun, SourceRunID: sourceRun, ForkEventID: eventID,

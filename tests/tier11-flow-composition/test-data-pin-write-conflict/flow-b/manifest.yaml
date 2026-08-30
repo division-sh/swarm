@@ -1,0 +1,4 @@
+name: flow-b
+version: 1.0.0
+description: Sibling flow B that also writes shared_field, causing conflict.
+platform_version: ">=0.7.0 <0.8.0"

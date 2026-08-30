@@ -504,7 +504,7 @@ func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegati
 func applyFanInMultipleJoinPlan(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	for _, plan := range bundle.Semantics.Joins {
-		if plan.Node.FlowID() == "portfolio" && plan.Node.NodeID() == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
+		if plan.Node.FlowPath() == "portfolio" && plan.Node.NodeID() == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
 			plan.Node = identitytest.FlowNode(t, "portfolio", "portfolio-collector-duplicate")
 			bundle.Semantics.Joins = append(bundle.Semantics.Joins, plan)
 			return

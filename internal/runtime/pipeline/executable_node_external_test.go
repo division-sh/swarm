@@ -21,11 +21,15 @@ func externalPipelineSourceNode(t testing.TB, source semanticview.Source, flowID
 	var match runtimeidentity.ExecutableNode
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || node.FlowID() != flowID || node.NodeID() != nodeID {
+		wantFlowPath := flowID
+		if wantFlowPath == "" {
+			wantFlowPath = "."
+		}
+		if err != nil || node.FlowPath() != wantFlowPath || node.NodeID() != nodeID {
 			continue
 		}
 		if !match.Empty() {
-			t.Fatalf("executable node %s/%s is package-ambiguous", flowID, nodeID)
+			t.Fatalf("executable node %s/%s is flow-path ambiguous", flowID, nodeID)
 		}
 		match = node
 	}

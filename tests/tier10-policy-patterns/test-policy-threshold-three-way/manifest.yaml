@@ -1,0 +1,4 @@
+name: test-policy-threshold-three-way
+version: 1.0.0
+description: "Policy: on_complete branches reference policy thresholds for 3-way routing — high/mid/low based on policy.high_mark and policy.low_mark.\n"
+platform_version: ">=0.7.0 <0.8.0"

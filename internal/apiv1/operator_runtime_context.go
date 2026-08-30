@@ -111,13 +111,13 @@ func runtimeBundleContextByHash(ctx context.Context, contexts *swruntime.Runtime
 	ctx = use.WorkContext()
 	contextDef := &use.Context
 	selectedRuntime := use.Runtime()
-	fact := contextDef.BundleSourceFact
+	fact := contextDef.SourceArtifactFact
 	if err := fact.Validate(); err != nil || fact.BundleHash() != bundleHash {
 		return ctx, selectedRuntimeContext{}, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 			"bundle_hash": bundleHash, "cause": "runtime_source_fact_mismatch",
 		})
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	if selectedRuntime != nil {
 		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
@@ -147,8 +147,7 @@ func runtimeBundleContextByRun(ctx context.Context, contexts *swruntime.RuntimeC
 	if availability.ErrorCode == BundleDataIntegrityErrorCode {
 		return ctx, selectedRuntimeContext{}, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(availability))
 	}
-	loadedEphemeral := lookup.Loaded() && availability.BundleSource.IsEphemeral() && strings.TrimSpace(availability.BundleHash) != ""
-	if !availability.Available() && !loadedEphemeral {
+	if !availability.Available() {
 		return ctx, selectedRuntimeContext{}, availability, NewApplicationError(BundleUnavailableCode, false, bundleAvailabilityDetails(availability))
 	}
 	if !lookup.Loaded() {
@@ -163,14 +162,14 @@ func runtimeBundleContextByRun(ctx context.Context, contexts *swruntime.RuntimeC
 	ctx = use.WorkContext()
 	contextDef := &use.Context
 	selectedRuntime := use.Runtime()
-	fact := contextDef.BundleSourceFact
-	runFact, decodeErr := runtimecorrelation.DecodeBundleSourceFact(availability.BundleHash, availability.BundleSource.String())
+	fact := contextDef.SourceArtifactFact
+	runFact, decodeErr := runtimecorrelation.DecodeSourceArtifactFact(availability.BundleHash)
 	if decodeErr != nil || !fact.Matches(runFact) {
 		return ctx, selectedRuntimeContext{}, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 			"run_id": strings.TrimSpace(runID), "bundle_hash": availability.BundleHash, "cause": "runtime_source_fact_mismatch",
 		})
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	if selectedRuntime != nil {
 		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)

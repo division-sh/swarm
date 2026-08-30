@@ -377,7 +377,7 @@ func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRe
 	importedGeneration := map[string]GenerationSurface{}
 	importSources := map[string]semanticview.ConnectorImportSource{}
 	importProvenance := map[string]semanticview.ConnectorPackProvenance{}
-	importedByProjectScope := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
+	importedByFlowScope := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, item := range imports {
 		if item.provider == "" {
 			return nil, fmt.Errorf("provider connector pack import in %s must declare provider", item.source)
@@ -418,44 +418,53 @@ func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRe
 			ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash),
 			Source:       strings.TrimSpace(firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source)),
 		}
-		if importedByProjectScope[item.projectScopeKey] == nil {
-			importedByProjectScope[item.projectScopeKey] = map[string]runtimecontracts.ToolSchemaEntry{}
+		for _, scope := range source.FlowScopes() {
+			flowPath := connectorFlowPath(scope)
+			if !flowPathWithin(item.flowPath, flowPath) {
+				continue
+			}
+			if importedByFlowScope[flowPath] == nil {
+				importedByFlowScope[flowPath] = map[string]runtimecontracts.ToolSchemaEntry{}
+			}
+			importedByFlowScope[flowPath][item.toolID] = tool
 		}
-		importedByProjectScope[item.projectScopeKey][item.toolID] = tool
 	}
 	return connectorPackSource{
-		Source:                 source,
-		importedTools:          importedTools,
-		importedGeneration:     importedGeneration,
-		importSources:          importSources,
-		importProvenance:       importProvenance,
-		importedByProjectScope: importedByProjectScope,
+		Source:              source,
+		importedTools:       importedTools,
+		importedGeneration:  importedGeneration,
+		importSources:       importSources,
+		importProvenance:    importProvenance,
+		importedByFlowScope: importedByFlowScope,
 	}, nil
 }
 
 type connectorPackImport struct {
-	provider        string
-	toolID          string
-	projectScopeKey string
-	source          string
+	provider string
+	toolID   string
+	flowPath string
+	source   string
 }
 
 func connectorPackImportsFromSource(source semanticview.Source) []connectorPackImport {
 	var out []connectorPackImport
-	for _, scope := range source.ProjectScopes() {
-		scopeKey := strings.TrimSpace(scope.Key)
-		sourceName := projectScopeSourceName(scope)
-		for _, item := range scope.Manifest.ConnectorPacks.Imports {
+	for _, scope := range source.FlowScopes() {
+		flowPath := connectorFlowPath(scope)
+		schema, ok := source.FlowSchemaByID(scope.ID)
+		if !ok {
+			continue
+		}
+		for _, item := range schema.Imports.ConnectorPacks {
 			provider := normalizeToken(item.Provider)
 			toolID := strings.TrimSpace(item.Tool)
 			if provider == "" && toolID == "" {
 				continue
 			}
 			out = append(out, connectorPackImport{
-				provider:        provider,
-				toolID:          toolID,
-				projectScopeKey: scopeKey,
-				source:          sourceName + " connector_packs.imports",
+				provider: provider,
+				toolID:   toolID,
+				flowPath: flowPath,
+				source:   "flow " + flowPath + " schema.yaml imports.connector_packs",
 			})
 		}
 	}
@@ -464,11 +473,11 @@ func connectorPackImportsFromSource(source semanticview.Source) []connectorPackI
 
 type connectorPackSource struct {
 	semanticview.Source
-	importedTools          map[string]runtimecontracts.ToolSchemaEntry
-	importedGeneration     map[string]GenerationSurface
-	importSources          map[string]semanticview.ConnectorImportSource
-	importProvenance       map[string]semanticview.ConnectorPackProvenance
-	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
+	importedTools       map[string]runtimecontracts.ToolSchemaEntry
+	importedGeneration  map[string]GenerationSurface
+	importSources       map[string]semanticview.ConnectorImportSource
+	importProvenance    map[string]semanticview.ConnectorPackProvenance
+	importedByFlowScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 
 func (s connectorPackSource) SemanticCapabilities() semanticview.Capabilities {
@@ -486,12 +495,12 @@ func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchem
 	return out
 }
 
-func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
-	scopes := s.Source.ProjectScopes()
-	out := make([]semanticview.ProjectScope, 0, len(scopes))
+func (s connectorPackSource) FlowScopes() []semanticview.FlowScope {
+	scopes := s.Source.FlowScopes()
+	out := make([]semanticview.FlowScope, 0, len(scopes))
 	for _, scope := range scopes {
 		scope.Tools = cloneToolMap(scope.Tools)
-		for toolID, tool := range s.importedByProjectScope[strings.TrimSpace(scope.Key)] {
+		for toolID, tool := range s.importedByFlowScope[connectorFlowPath(scope)] {
 			scope.Tools[toolID] = tool
 		}
 		out = append(out, scope)
@@ -567,15 +576,6 @@ func cloneConnectorEventCatalog(in map[string]runtimecontracts.EventCatalogEntry
 
 func existingToolSources(source semanticview.Source) map[string][]string {
 	out := map[string][]string{}
-	for _, scope := range source.ProjectScopes() {
-		sourceName := projectScopeSourceName(scope)
-		for toolID := range scope.Tools {
-			toolID = strings.TrimSpace(toolID)
-			if toolID != "" {
-				out[toolID] = appendIfMissing(out[toolID], sourceName)
-			}
-		}
-	}
 	for _, scope := range source.FlowScopes() {
 		sourceName := flowScopeSourceName(scope)
 		for toolID := range scope.Tools {
@@ -599,6 +599,22 @@ func existingToolSources(source semanticview.Source) map[string][]string {
 		sort.Strings(out[key])
 	}
 	return out
+}
+
+func connectorFlowPath(scope semanticview.FlowScope) string {
+	if strings.TrimSpace(scope.ID) == "." {
+		return "."
+	}
+	return strings.Trim(strings.TrimSpace(scope.Path), "/")
+}
+
+func flowPathWithin(owner, candidate string) bool {
+	owner = strings.Trim(strings.TrimSpace(owner), "/")
+	candidate = strings.Trim(strings.TrimSpace(candidate), "/")
+	if owner == "" || owner == "." {
+		return candidate == "." || candidate != ""
+	}
+	return candidate == owner || strings.HasPrefix(candidate, owner+"/")
 }
 
 func manifestToolNames(manifest ConnectorManifest) []string {
@@ -652,21 +668,10 @@ func cloneLoadedPack(in LoadedPack) LoadedPack {
 	return out
 }
 
-func projectScopeSourceName(scope semanticview.ProjectScope) string {
-	key := strings.TrimSpace(scope.Key)
-	if key == "" {
-		key = "."
-	}
-	return "package " + key
-}
-
 func flowScopeSourceName(scope semanticview.FlowScope) string {
 	id := strings.TrimSpace(scope.ID)
 	if id == "" {
 		id = strings.TrimSpace(scope.Path)
-	}
-	if id == "" {
-		id = strings.TrimSpace(scope.PackageKey)
 	}
 	if id == "" {
 		id = "unknown"

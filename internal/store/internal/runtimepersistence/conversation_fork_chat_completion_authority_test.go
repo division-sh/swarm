@@ -141,7 +141,7 @@ func TestConversationForkChatSourceBundleOwnershipParity(t *testing.T) {
 			}
 
 			wrong := forkChatCompletionAuthority(prepared, 1)
-			wrong.ForkChat.BundleHash = "bundle-v1:sha256:" + strings.Repeat("b", 64)
+			wrong.ForkChat.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 			wrongCtx := forkChatCompletionContext(fixture, wrong, "wrong-bundle")
 			if _, err := runtimeeffects.BeginCompletion(wrongCtx, "anthropic_api", []byte(prepared.RequestHash), nil); err == nil {
 				t.Fatal("forkchat authority accepted a bundle other than its durable source bundle")

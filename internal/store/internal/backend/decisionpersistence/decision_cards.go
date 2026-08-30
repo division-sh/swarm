@@ -998,9 +998,9 @@ func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimea
 	return err == nil, err
 }
 
-type decisionRunSourceOwner func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+type decisionRunSourceOwner func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 
-func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return fn(ctx, runID)
 }
 
@@ -1186,7 +1186,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 	if len(updates) == 0 {
 		return nil
 	}
-	var fact runtimecorrelation.BundleSourceFact
+	var fact runtimecorrelation.SourceArtifactFact
 	if postgres {
 		fact, err = storerunstate.RequirePostgresActiveSourceTx(mutationCtx, tx, runID)
 	} else {
@@ -1195,7 +1195,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 	if err != nil {
 		return err
 	}
-	mutationCtx = runtimecorrelation.WithBundleSourceFact(mutationCtx, fact)
+	mutationCtx = runtimecorrelation.WithSourceArtifactFact(mutationCtx, fact)
 	for _, item := range updates {
 		raw, err := json.Marshal(item.accumulator)
 		if err != nil {
@@ -1220,7 +1220,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 			if err := privatemutationlog.InsertEntityStateDiffWithStory(
 				mutationCtx,
 				tx,
-				decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+				decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
 				}),
 				story,

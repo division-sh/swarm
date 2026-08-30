@@ -1,1 +1,4 @@
-item: {}
+item:
+  item_id:
+    type: text
+    _unused_reason: external root instance identity

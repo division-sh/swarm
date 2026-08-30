@@ -150,7 +150,7 @@ func issueRelevantToHandler(source semanticview.Source, issue Issue, node runtim
 	if !issue.SourceNode.Equal(node) {
 		return false
 	}
-	if issueFlowID := strings.TrimSpace(issue.FlowID); issueFlowID != "" && issueFlowID != node.FlowID() {
+	if issueFlowID := strings.TrimSpace(issue.FlowID); issueFlowID != "" && issueFlowID != node.FlowPath() {
 		return false
 	}
 	if issueEventType := strings.TrimSpace(issue.SourceEventType); issueEventType != "" {
@@ -174,7 +174,7 @@ func issueMatchesActiveAccumulator(issue Issue, node runtimeidentity.ExecutableN
 	if strings.TrimSpace(accumulatorName) == "" {
 		return false
 	}
-	if strings.TrimSpace(issue.FlowID) != "" && strings.TrimSpace(issue.FlowID) != node.FlowID() {
+	if strings.TrimSpace(issue.FlowID) != "" && strings.TrimSpace(issue.FlowID) != node.FlowPath() {
 		return false
 	}
 	return issue.SourceNode.Equal(node) &&
@@ -233,8 +233,7 @@ func scopedIssue(binding Binding, code, location, message string) Issue {
 }
 
 type materializedFieldTarget struct {
-	FlowID      string
-	PackageKey  string
+	FlowPath    string
 	EntityType  string
 	FieldName   string
 	FieldDecl   runtimecontracts.EntityFieldDecl
@@ -243,7 +242,7 @@ type materializedFieldTarget struct {
 
 func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []materializedFieldTarget {
 	out := make([]materializedFieldTarget, 0)
-	add := func(packageKey, flowID, entityType string, contract runtimecontracts.EntityContract, types runtimecontracts.TypeCatalogDocument) {
+	add := func(flowPath, entityType string, contract runtimecontracts.EntityContract, types runtimecontracts.TypeCatalogDocument) {
 		fieldNames := make([]string, 0, len(contract.Fields))
 		for fieldName := range contract.Fields {
 			fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
@@ -255,8 +254,7 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 				continue
 			}
 			out = append(out, materializedFieldTarget{
-				FlowID:      strings.TrimSpace(flowID),
-				PackageKey:  strings.TrimSpace(packageKey),
+				FlowPath:    strings.TrimSpace(flowPath),
 				EntityType:  strings.TrimSpace(entityType),
 				FieldName:   fieldName,
 				FieldDecl:   decl,
@@ -266,39 +264,43 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 	}
 	if root := bundle.RootEntityContracts(); len(root) > 0 {
 		for entityType, contract := range root {
-			add(runtimeidentity.RootPackageKey, "", entityType, contract, bundle.RootTypeCatalog())
+			add(".", entityType, contract, bundle.RootTypeCatalog())
 		}
 	}
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
+		if flowID == "" || flowID == "." {
 			continue
 		}
 		entityType, contract, ok := bundle.FlowPrimaryEntityContract(flowID)
 		if !ok {
 			continue
 		}
-		add(scope.PackageKey, flowID, entityType, contract, bundle.ResolvedTypeCatalogForFlow(flowID))
+		flowPath := strings.TrimSpace(source.FlowPath(flowID))
+		if flowPath == "" {
+			flowPath = strings.TrimSpace(scope.Path)
+		}
+		add(flowPath, entityType, contract, bundle.ResolvedTypeCatalogForFlow(flowID))
 	}
 	return out
 }
 
 func resolveTarget(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, target materializedFieldTarget) (Binding, []Issue) {
 	binding := Binding{
-		FlowID:      target.FlowID,
+		FlowID:      target.FlowPath,
 		EntityType:  target.EntityType,
 		TargetField: target.FieldName,
 		TargetDecl:  target.FieldDecl,
 		Project:     cloneProject(target.FieldDecl.Project),
 	}
-	loc := locationFor(target.FlowID, target.EntityType, target.FieldName)
+	loc := locationFor(target.FlowPath, target.EntityType, target.FieldName)
 	issues := make([]Issue, 0)
 	sourceNodeID, accName, ok := parseMaterializeFrom(target.FieldDecl.MaterializeFrom)
 	if !ok {
 		issues = append(issues, Issue{Code: "invalid_reference", Location: loc, Message: fmt.Sprintf("materialize_from %q must have shape <node_id>.<accumulator_name>", strings.TrimSpace(target.FieldDecl.MaterializeFrom))})
 		return binding, issues
 	}
-	node, identityErr := runtimeidentity.AdmitExecutableNodeDeclaration(target.PackageKey, target.FlowID, sourceNodeID)
+	node, identityErr := runtimeidentity.AdmitExecutableNodeDeclaration(target.FlowPath, sourceNodeID)
 	if identityErr != nil {
 		issues = append(issues, Issue{Code: "invalid_source_node", Location: loc, Message: identityErr.Error()})
 		return binding, issues
@@ -311,9 +313,9 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 		issues = append(issues, scopedIssue(binding, "unknown_source_node", loc, fmt.Sprintf("materialize_from %q references unknown node %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)))
 		return binding, issues
 	}
-	sourceFlowID := node.FlowID()
-	if sourceFlowID != strings.TrimSpace(target.FlowID) {
-		issues = append(issues, scopedIssue(binding, "cross_flow_reference", loc, fmt.Sprintf("materialize_from %q references node in flow %s, but target entity %s belongs to flow %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), flowLabel(sourceFlowID), target.EntityType, flowLabel(target.FlowID))))
+	sourceFlowID := node.FlowPath()
+	if sourceFlowID != strings.TrimSpace(target.FlowPath) {
+		issues = append(issues, scopedIssue(binding, "cross_flow_reference", loc, fmt.Sprintf("materialize_from %q references node in flow %s, but target entity %s belongs to flow %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), flowLabel(sourceFlowID), target.EntityType, flowLabel(target.FlowPath))))
 	}
 
 	handlers := handlersForAccumulator(record.Entry, accName)
@@ -395,7 +397,7 @@ func handlersForAccumulator(node runtimecontracts.SystemNodeContract, accName st
 }
 
 func validateProject(source semanticview.Source, target materializedFieldTarget, binding Binding) []Issue {
-	loc := locationFor(target.FlowID, target.EntityType, target.FieldName)
+	loc := locationFor(target.FlowPath, target.EntityType, target.FieldName)
 	issues := make([]Issue, 0)
 	targetFields := sortedTypeFields(binding.TargetNamedType)
 	for _, fieldName := range targetFields {
@@ -431,8 +433,8 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 		}
 		if policyPath, ok := strings.CutPrefix(expr, "policy."); ok {
 			policyPath = strings.TrimSpace(policyPath)
-			if _, ok := semanticview.PolicyValueForFlow(source, target.FlowID, policyPath); !ok {
-				issues = append(issues, scopedIssue(binding, "project_unknown_policy_field", loc, fmt.Sprintf("project.%s references %q; policy field %s is not declared for flow %s", fieldName, expr, policyPath, flowLabel(target.FlowID))))
+			if _, ok := semanticview.PolicyValueForFlow(source, target.FlowPath, policyPath); !ok {
+				issues = append(issues, scopedIssue(binding, "project_unknown_policy_field", loc, fmt.Sprintf("project.%s references %q; policy field %s is not declared for flow %s", fieldName, expr, policyPath, flowLabel(target.FlowPath))))
 			}
 			continue
 		}

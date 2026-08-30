@@ -52,10 +52,10 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].AgentID == out[j].AgentID {
-			if out[i].Source.FlowID == out[j].Source.FlowID {
+			if out[i].Source.FlowPath == out[j].Source.FlowPath {
 				return out[i].IntentSource < out[j].IntentSource
 			}
-			return out[i].Source.FlowID < out[j].Source.FlowID
+			return out[i].Source.FlowPath < out[j].Source.FlowPath
 		}
 		return out[i].AgentID < out[j].AgentID
 	})

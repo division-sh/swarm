@@ -97,7 +97,7 @@ func workflowNodeCarrierTestEventAndRoute(t *testing.T) (events.Event, events.De
 
 func workflowNodeCarrierAuthorities(t *testing.T) map[string]runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("d", 64))
+	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("d", 64))
 	if err != nil {
 		t.Fatalf("construct delivery source: %v", err)
 	}

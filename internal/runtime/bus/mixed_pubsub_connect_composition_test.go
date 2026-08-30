@@ -187,7 +187,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted"}}))
+	}, []runtimecontracts.FlowConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted"}}))
 	owners := mixedStaticOwners("producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
@@ -323,7 +323,7 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 			nodes:  receiver("right-sink-node", "branch.final"),
 		},
 	}
-	connects := []runtimecontracts.FlowPackageConnect{
+	connects := []runtimecontracts.FlowConnect{
 		{Event: "branch.ready", From: "producer", To: "left", Rename: "branch.accepted"},
 		{Event: "branch.ready", From: "producer", To: "right", Rename: "branch.accepted"},
 		{Event: "branch.done", From: "left", To: "left-sink", Rename: "branch.final"},

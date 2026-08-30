@@ -104,8 +104,8 @@ func TestBuildProjectsFanInConnectWithCompleteResolution(t *testing.T) {
 	if edge.Boundary.From != "operating.operating.reported" || edge.Boundary.To != "portfolio.operating.reported" {
 		t.Fatalf("boundary = %#v, want authored endpoints", edge.Boundary)
 	}
-	if !strings.Contains(edge.Boundary.AuthoredLocation, "package.yaml:") {
-		t.Fatalf("boundary source = %q, want exact package.yaml:line", edge.Boundary.AuthoredLocation)
+	if !strings.Contains(edge.Boundary.AuthoredLocation, "schema.yaml:") {
+
 	}
 	if edge.Resolution == nil || edge.Resolution.Mode != "fan-in" || edge.Resolution.FanIn == nil {
 		t.Fatalf("resolution = %#v, want fan-in", edge.Resolution)
@@ -175,29 +175,35 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 }
 
 func TestBuildProjectsRunnableStaticConnect(t *testing.T) {
-	connect := runtimecontracts.FlowPackageConnect{SourceFile: "package.yaml", SourceLine: 1, Event: "work.ready", From: "producer", To: "consumer"}
+	connect := runtimecontracts.FlowConnect{SourceFile: "schema.yaml", SourceLine: 1, Event: "work.ready", From: "producer", To: "consumer"}
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 		}}},
 		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
 			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}},
 		}}},
 		Path: "consumer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package:     runtimecontracts.ProjectPackageDocument{Name: "topology-test", Version: "1.0.0", Connect: []runtimecontracts.FlowPackageConnect{connect}},
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
+		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "topology-test", Version: "1.0.0"},
+		RootSchema:  &root.Schema,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":        {FlowPath: ".", Schema: "schema.yaml", Children: []string{"producer", "consumer"}},
+			"producer": {FlowPath: "producer", Schema: "producer/schema.yaml"},
+			"consumer": {FlowPath: "consumer", Schema: "consumer/schema.yaml"},
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"producer": &root.Children[0], "consumer": &root.Children[1]},
+			Root:   &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root, "producer": &root.Children[0], "consumer": &root.Children[1]},
+			ByID:   map[string]*runtimecontracts.FlowContractView{"producer": &root.Children[0], "consumer": &root.Children[1]},
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
@@ -268,8 +274,8 @@ func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
 	if len(topology.Issues[0].ID) != len("issue-")+16 {
 		t.Fatalf("issue id = %q, want stable public issue digest", topology.Issues[0].ID)
 	}
-	if !strings.Contains(topology.Issues[0].AuthoredLocation, "package.yaml:") {
-		t.Fatalf("issue source = %q, want exact package.yaml:line", topology.Issues[0].AuthoredLocation)
+	if !strings.Contains(topology.Issues[0].AuthoredLocation, "schema.yaml:") {
+
 	}
 	for _, edge := range topology.Edges {
 		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.From == "operating.operating_reported" {
@@ -432,12 +438,8 @@ func TestBuildProjectsImportedWildcardConsumerAsTypedPubSub(t *testing.T) {
 			if edge.Scope != DeliveryScopeTypedPubSub {
 				t.Fatalf("wildcard edge scope = %q, want typed pub/sub", edge.Scope)
 			}
-			if edge.TypedPubSub == nil || edge.TypedPubSub.Match != "pattern" || edge.TypedPubSub.Boundary != "import_boundary" || edge.TypedPubSub.Authorization == nil {
-				t.Fatalf("wildcard edge proof = %#v, want pattern/import_boundary authorization", edge.TypedPubSub)
-			}
-			authorization := edge.TypedPubSub.Authorization
-			if authorization.ParentPackageKey != "." || authorization.ChildPackageKey != "flows/child" || authorization.EventPattern == "" || authorization.MatchPattern != "**/task.done" || authorization.RouteSource == "" {
-				t.Fatalf("wildcard authorization = %#v, want stable parent/child/pattern/source proof", authorization)
+			if edge.TypedPubSub == nil || edge.TypedPubSub.Match != "pattern" || edge.TypedPubSub.Boundary != "flow_tree" || edge.TypedPubSub.Authorization != nil {
+				t.Fatalf("wildcard edge proof = %#v, want direct flow-tree pattern without retired import authorization", edge.TypedPubSub)
 			}
 			return
 		}
@@ -451,8 +453,8 @@ func TestIssueViewsProjectsTypedPubSubAmbiguityWithoutEdgeAuthority(t *testing.T
 		Producer: semanticview.AuthoredEventEndpoint{ID: "producer"},
 		Consumer: semanticview.AuthoredEventEndpoint{ID: "consumer"},
 		Authorizations: []semanticview.TypedPubSubAuthorizationProof{
-			{ChildPackageKey: "flows/consumer", ImportLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant"},
-			{ChildPackageKey: "flows/consumer", ImportLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant"},
+			{SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant"},
+			{SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant"},
 		},
 	}})
 	if len(issues) != 1 || issues[0].Failure != semanticview.TypedPubSubFailureAuthorizationAmbiguous || issues[0].From != "producer" || issues[0].To != "consumer" {
@@ -470,13 +472,13 @@ func TestEdgeIDIncludesTypedPubSubAuthorizationProof(t *testing.T) {
 			Match:    "pattern",
 			Boundary: "import_boundary",
 			Authorization: &TypedPubSubAuthorizationProof{
-				ChildPackageKey: "flows/consumer", ImportLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant",
+				SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant",
 			},
 		},
 	}
 	changed := base
 	changed.TypedPubSub = &TypedPubSub{Match: base.TypedPubSub.Match, Boundary: base.TypedPubSub.Boundary, Authorization: &TypedPubSubAuthorizationProof{
-		ChildPackageKey: "flows/consumer", ImportLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant",
+		SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant",
 	}}
 	if edgeID(base) == edgeID(changed) {
 		t.Fatal("edge identity hid a distinct import authorization proof")

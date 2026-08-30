@@ -320,32 +320,19 @@ func TestOptionalDeclarationAdmissionPreservesSpecificTypedDiagnostics(t *testin
 func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	for _, scope := range []struct {
-		name          string
-		supportedRole func(string) bool
-		targetRoot    func(string) string
+		name       string
+		targetRoot func(string) string
 	}{
 		{
-			name:          "root package",
-			supportedRole: func(string) bool { return true },
-			targetRoot:    func(root string) string { return root },
+			name:       "root flow",
+			targetRoot: func(root string) string { return root },
 		},
 		{
-			name: "nested package",
-			supportedRole: func(role string) bool {
-				return role != "types" && role != "entities"
-			},
-			targetRoot: func(root string) string { return filepath.Join(root, "packages", "child") },
-		},
-		{
-			name:          "flow",
-			supportedRole: func(string) bool { return true },
-			targetRoot:    func(root string) string { return filepath.Join(root, "flows", "child") },
+			name:       "child flow",
+			targetRoot: func(root string) string { return filepath.Join(root, "child") },
 		},
 	} {
 		for _, role := range optionalDeclarationRoleTestCases() {
-			if !scope.supportedRole(role.name) {
-				continue
-			}
 			scope, role := scope, role
 			for _, document := range []struct {
 				name string
@@ -357,29 +344,20 @@ func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 				document := document
 				t.Run(scope.name+"/"+role.name+"/"+document.name, func(t *testing.T) {
 					root := t.TempDir()
-					writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: optional-declaration-scope
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/child
-flows:
-  - {id: child, flow: child, mode: static}
-`)
 					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: optional-declaration-scope\n")
-					packageRoot := filepath.Join(root, "packages", "child")
-					writeFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: child-package\nversion: \"1.0.0\"\nflows: []\n")
-					flowRoot := filepath.Join(root, "flows", "child")
-					writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
-					writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
+					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
 					targetRoot := scope.targetRoot(root)
 					target := filepath.Join(targetRoot, role.fileName)
 					writeFixtureFile(t, target, document.body)
+					wantLocation, err := filepath.Rel(root, target)
+					if err != nil {
+						t.Fatal(err)
+					}
 
 					bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 					diagnostic, ok := AsLoaderDiagnostic(err)
-					if bundle != nil || !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" || filepath.Clean(diagnostic.Location.File) != filepath.Clean(target) {
-						t.Fatalf("bundle = %#v, diagnostic = %#v, %v, want exact %s failure", bundle, diagnostic, err, target)
+					if bundle != nil || !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" || filepath.Clean(diagnostic.Location.File) != filepath.Clean(wantLocation) {
+						t.Fatalf("bundle = %#v, diagnostic = %#v, %v, want artifact-relative %s failure", bundle, diagnostic, err, wantLocation)
 					}
 				})
 			}
@@ -396,20 +374,23 @@ func TestMergeOnlyCustomDocumentsFailBeforeBundlePublicationAtEverySupportedScop
 		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "entities.yaml") }},
 		{name: "root/types", target: func(root string) string { return filepath.Join(root, "types.yaml") }},
 		{name: "root/policy", target: func(root string) string { return filepath.Join(root, "policy.yaml") }},
-		{name: "project/policy", target: func(root string) string { return filepath.Join(root, "packages", "child", "policy.yaml") }},
-		{name: "flow/entities", target: func(root string) string { return filepath.Join(root, "flows", "child", "entities.yaml") }},
-		{name: "flow/types", target: func(root string) string { return filepath.Join(root, "flows", "child", "types.yaml") }},
-		{name: "flow/policy", target: func(root string) string { return filepath.Join(root, "flows", "child", "policy.yaml") }},
+		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "entities.yaml") }},
+		{name: "child/types", target: func(root string) string { return filepath.Join(root, "child", "types.yaml") }},
+		{name: "child/policy", target: func(root string) string { return filepath.Join(root, "child", "policy.yaml") }},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			root := writeMergeProjectionBundleSkeleton(t)
 			target := test.target(root)
 			writeFixtureFile(t, target, "<<: &empty {}\n")
+			wantLocation, err := filepath.Rel(root, target)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 			diagnostic, ok := AsLoaderDiagnostic(err)
-			if bundle != nil || !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" || filepath.Clean(diagnostic.Location.File) != filepath.Clean(target) {
+			if bundle != nil || !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" || filepath.Clean(diagnostic.Location.File) != filepath.Clean(wantLocation) {
 				t.Fatalf("bundle = %#v, diagnostic = %#v, error = %v", bundle, diagnostic, err)
 			}
 		})
@@ -422,7 +403,6 @@ func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 		role := role
 		t.Run(role.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "package.yaml"), "name: merge-publication\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: merge-publication\n")
 			writeFixtureFile(t, filepath.Join(root, role.fileName), role.merged)
 
@@ -438,19 +418,8 @@ func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 func writeMergeProjectionBundleSkeleton(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: merge-projection
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/child
-flows:
-  - {id: child, flow: child, mode: static}
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: merge-projection\n")
-	writeFixtureFile(t, filepath.Join(root, "packages", "child", "package.yaml"), "name: child-package\nversion: \"1.0.0\"\nflows: []\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
 	return root
 }
 
@@ -485,33 +454,6 @@ func assertRegistryIdentity[T any](t *testing.T, registry map[string]T, want str
 	}
 	if _, ok := registry["<<"]; ok {
 		t.Fatalf("registry published merge pseudo-key: %#v", registry)
-	}
-}
-
-func TestPresentZeroPackageScopedTypesAndEntitiesRemainRetired(t *testing.T) {
-	repoRoot := contractRepoRoot(t)
-	for _, fileName := range []string{"types.yaml", "entities.yaml"} {
-		fileName := fileName
-		t.Run(fileName, func(t *testing.T) {
-			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: retired-package-contract-scope
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/child
-flows: []
-`)
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retired-package-contract-scope\n")
-			packageRoot := filepath.Join(root, "packages", "child")
-			writeFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
-			writeFixtureFile(t, filepath.Join(packageRoot, fileName), "{}\n")
-
-			_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-			if err == nil || !strings.Contains(err.Error(), "RETIRED: package-scoped "+fileName+" is not supported") {
-				t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want retired %s rejection", err, fileName)
-			}
-		})
 	}
 }
 

@@ -191,8 +191,8 @@ func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *te
 			sibling := first
 			sibling.OperationID = uuid.NewString()
 			sibling.RequestKeyHash, sibling.RequestHash = "sibling-key", "sibling-request"
-			sibling.Coordinate.BundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-			sibling.TargetSelector = "ingress:support:sibling:telegram"
+			sibling.Coordinate.BundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			sibling.TargetSelector = "ingress:support/sibling:telegram"
 			_, siblingActivation := publishChannelOnboardingTestActivation(t, selected, sibling, 1, now.Add(time.Minute))
 
 			rebind := first
@@ -338,7 +338,7 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		t.Fatalf("list activations = %#v, %v", listed, err)
 	}
 	semanticMismatch := op.Coordinate
-	semanticMismatch.BundleSource = "ephemeral"
+	semanticMismatch.BundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
 		RebindCoordinate: &semanticMismatch, Now: now.Add(9 * time.Second),
@@ -428,11 +428,11 @@ func channelOnboardingStartRequest(principalID string, now time.Time) channelonb
 		OperationID: uuid.NewString(), RequestKeyHash: "request-key", RequestHash: "semantic-input", PrincipalID: principalID,
 		Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BundleSource: "persisted",
+			BundleHash:     "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			BundleIdentity: "support-bundle", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
 			PlanGeneration: planGeneration, TargetGeneration: 3,
 		},
-		TargetSelector: "ingress:support:flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
+		TargetSelector: "ingress:support/flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,
 		Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: true,
 		CredentialReservations: []channelonboarding.CredentialReservation{{Role: "bot_token", StoreKey: "telegram_bot_token"}}, RequestedAt: now,
 	}

@@ -72,7 +72,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 			if result.Server == nil || result.Server.Bundle.BundleHash == "" {
 				t.Fatalf("version --server json = %#v, want server identity", result)
 			}
-		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nbundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" {
+		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nbundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" {
 			t.Fatalf("version --server quiet stdout = %q, want binary and bundle hash", got)
 		}
 		assertEmptyStderr(t, stderr.String())
@@ -83,12 +83,12 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", "--contracts", verifyFixture, "--config", verifyConfig, "--json"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--config", verifyConfig, "--json"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
-	if !verifyJSON.OK || strings.TrimSpace(verifyJSON.Contracts) == "" {
+	if !verifyJSON.OK || strings.TrimSpace(verifyJSON.SourceRoot) == "" {
 		t.Fatalf("verify json = %#v, want ok contracts", verifyJSON)
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
@@ -97,7 +97,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", "--contracts", verifyFixture, "--config", verifyConfig, "--quiet"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--config", verifyConfig, "--quiet"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --quiet code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -363,7 +363,7 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", "--contracts", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
+				return []string{"verify", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return RepoRoot() },
 		},
@@ -540,7 +540,7 @@ func TestCLIOutputModeCollisionFailsBeforeSideEffects(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", "--json", "--quiet"}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", ".", "--json", "--quiet"}, &stdout, &stderr)
 	if code != CLIExitValidation {
 		t.Fatalf("verify collision code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 	}

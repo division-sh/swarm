@@ -2,12 +2,10 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -87,55 +85,5 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 }
 
-func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
-	ctx := context.Background()
-	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	parsedJSON, err := json.Marshal(map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []map[string]any{
-		apiTestCatalogAgentDefinition(t, "bundle-agent", "Bundle agent intent."),
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
-		VALUES (?, ?, ?, NULL, '{"source":"sqlite-test"}', ?)
-	`, bundleHash, `agents:
-  bundle-agent:
-    role: worker
-    model: regular
-    type: managed
-	`, string(parsedJSON), time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("seed sqlite bundle catalog: %v", err)
-	}
-	if _, err := sqliteStore.ListBundleCatalog(ctx, bundlecatalog.ListOptions{}); err != nil {
-		t.Fatalf("list sqlite bundle catalog through selected-store owner: %v", err)
-	}
-
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			BundleCatalog: sqliteStore,
-		}),
-	})
-
-	for _, tc := range []struct {
-		method string
-		params string
-	}{
-		{method: "bundle.list", params: `{}`},
-		{method: "bundle.get", params: fmt.Sprintf(`{"bundle_hash":%q}`, bundleHash)},
-		{method: "bundle.agents", params: fmt.Sprintf(`{"bundle_hash":%q}`, bundleHash)},
-	} {
-		t.Run(tc.method, func(t *testing.T) {
-			resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
-			if resp.Error != nil {
-				t.Fatalf("%s sqlite error = %#v", tc.method, resp.Error)
-			}
-		})
-	}
-}
-
 var _ AgentReadStore = (*storepkg.SQLiteRuntimeStore)(nil)
 var _ ConversationReadStore = (*storepkg.SQLiteRuntimeStore)(nil)
-var _ BundleCatalogReadStore = (*storepkg.SQLiteRuntimeStore)(nil)

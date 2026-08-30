@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -55,23 +56,23 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 			seedFanOutBarrierOutcomes(t, ctx, db, fixture, []string{eventsByOrdinal[0].ID(), eventsByOrdinal[1].ID(), eventsByOrdinal[2].ID()}, true, base.Add(5*time.Second))
 
 			advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(6*time.Second))
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusArmed, nil, "")
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 0)
 
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[1], routes[1][0])
 			settleFanOutBarrierRouteDeadLetter(t, ctx, selected, eventsByOrdinal[2], routes[2][0])
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[2], routes[2][1])
 			advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(7*time.Second))
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusArmed, nil, "")
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[2], routes[2][2])
 			advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(8*time.Second))
 			want := fanoutbarrier.Summary{Total: 4, Succeeded: 1, DeadLettered: 1, NoRoute: 1, SemanticRejected: 1}
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 
 			advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(9*time.Second))
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 
 			summary, err := owner.FanOutRunSummary(ctx, fixture.runID, base.Add(10*time.Second))
@@ -117,7 +118,7 @@ func TestFanOutDeliveryBarrierCardinalityBoundariesOnBothStores(t *testing.T) {
 				}
 				advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, now)
 				want := fanoutbarrier.Summary{Total: cardinality, SemanticRejected: cardinality}
-				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 				assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 			})
 		}
@@ -138,7 +139,7 @@ func TestFanOutDeliveryBarrierFoldsOnlyExactIntentNotNestedDescendantsOnBothStor
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, runtimepipeline.FanOutClaimRequest{
 				Owner: "parent-only", BundleHash: parent.bundleHash, Now: base.Add(2 * time.Second), Lease: time.Minute,
 			})
-			if err != nil || !found || claim.Key.ElementRef.ElementID != parent.elementID {
+			if err != nil || !found || claim.Key.ElementRef.SemanticPath != parent.semanticPath {
 				t.Fatalf("claim parent intent = %#v found=%v err=%v", claim, found, err)
 			}
 			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, base.Add(3*time.Second))); err != nil {
@@ -146,7 +147,7 @@ func TestFanOutDeliveryBarrierFoldsOnlyExactIntentNotNestedDescendantsOnBothStor
 			}
 			advanceFanOutBarriersForTest(t, ctx, selected, db, parent.runID, base.Add(4*time.Second))
 			want := fanoutbarrier.Summary{Total: 1, SemanticRejected: 1}
-			assertFanOutBarrierState(t, ctx, db, parent.runID, parent.deliveryID, parent.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, parent.runID, parent.deliveryID, parent.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, child, 0, 0)
 
 			summary, err := owner.FanOutRunSummary(ctx, parent.runID, base.Add(5*time.Second))
@@ -172,8 +173,8 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 			// A separately constructed owner simulates restart after registration.
 			advanceFanOutBarriersForTest(t, ctx, restartedSelected, db, closed.runID, base.Add(2*time.Second))
 			closedSummary := fanoutbarrier.Summary{Total: 0}
-			assertFanOutBarrierState(t, ctx, db, closed.runID, closed.deliveryID, closed.elementID, fanoutbarrier.StatusClosedPending, &closedSummary, closedHandle.TaskID())
-			assertFanOutBarrierState(t, ctx, db, openSibling.runID, openSibling.deliveryID, openSibling.elementID, fanoutbarrier.StatusArmed, nil, "")
+			assertFanOutBarrierState(t, ctx, db, closed.runID, closed.deliveryID, closed.semanticPath, fanoutbarrier.StatusClosedPending, &closedSummary, closedHandle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, openSibling.runID, openSibling.deliveryID, openSibling.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 			assertFanOutBarrierTimerCount(t, ctx, db, closed.runID, 1)
 
 			_, claim, found, err := restarted.ClaimFanOutIntent(ctx, runtimepipeline.FanOutClaimRequest{
@@ -181,7 +182,7 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 			})
 			if err != nil || !found || claim.Key != (fanoutobligation.IntentKey{
 				RunID: openSibling.runID, TriggeringDeliveryID: openSibling.deliveryID,
-				ElementRef: runtimecontracts.FanOutElementRef{PackageKey: openSibling.packageKey, ElementID: openSibling.elementID},
+				ElementRef: runtimecontracts.FanOutElementRef{FlowPath: openSibling.flowPath, Family: "fan_out", SemanticPath: openSibling.semanticPath},
 			}) {
 				t.Fatalf("claim exact sibling after restart = %#v found=%v err=%v", claim, found, err)
 			}
@@ -190,7 +191,7 @@ func TestFanOutDeliveryBarrierRestartAndExactIntentIsolationOnBothStores(t *test
 			}
 			advanceFanOutBarriersForTest(t, ctx, restartedSelected, db, closed.runID, base.Add(5*time.Second))
 			siblingSummary := fanoutbarrier.Summary{Total: 1, SemanticRejected: 1}
-			assertFanOutBarrierState(t, ctx, db, openSibling.runID, openSibling.deliveryID, openSibling.elementID, fanoutbarrier.StatusClosedPending, &siblingSummary, mustFanOutBarrierTaskID(t, ctx, db, openSibling))
+			assertFanOutBarrierState(t, ctx, db, openSibling.runID, openSibling.deliveryID, openSibling.semanticPath, fanoutbarrier.StatusClosedPending, &siblingSummary, mustFanOutBarrierTaskID(t, ctx, db, openSibling))
 			assertFanOutBarrierTimerCount(t, ctx, db, closed.runID, 2)
 		})
 	}
@@ -247,15 +248,15 @@ func TestFanOutDeliveryBarrierCorruptFactsFailBeforeCloseOnBothStores(t *testing
 
 				switch corruption {
 				case "missing_ordinal":
-					if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=1,status='closed' WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+					if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=1,status='closed' WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 						t.Fatal(err)
 					}
 				case "contradictory_handle":
-					if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET timer_handle=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND package_key=$4 AND element_id=$5`, `{}`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+					if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET timer_handle=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`, `{}`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 						t.Fatal(err)
 					}
 				case "contradictory_plan":
-					if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET semantic_digest=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND package_key=$4 AND element_id=$5`, "sha256:"+strings.Repeat("f", 64), fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+					if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET semantic_digest=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`, "sha256:"+strings.Repeat("f", 64), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -263,7 +264,7 @@ func TestFanOutDeliveryBarrierCorruptFactsFailBeforeCloseOnBothStores(t *testing
 				if err := advanceFanOutBarriersAttempt(ctx, selected, fixture.runID, base.Add(time.Second)); err == nil {
 					t.Fatalf("%s corruption advanced barrier", corruption)
 				}
-				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusArmed, nil, "")
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 				assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 0)
 			})
 		}
@@ -283,7 +284,7 @@ func TestFanOutDeliveryBarrierCancellationSuppressesOutcomeOnBothStores(t *testi
 				t.Fatal(err)
 			}
 			want := fanoutbarrier.Summary{Total: 3, Canceled: 3}
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusSuppressedRunTerminal, &want, "")
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusSuppressedRunTerminal, &want, "")
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 0)
 			summary, err := owner.FanOutRunSummary(ctx, fixture.runID, base.Add(2*time.Second))
 			if err != nil {
@@ -315,7 +316,7 @@ func TestFanOutDeliveryBarrierGenerationSupersessionOnBothStores(t *testing.T) {
 				if closeFirst {
 					advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(time.Second))
 					want := fanoutbarrier.Summary{Total: 0}
-					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 					activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 					assertFanOutBarrierScheduleLifecycle(t, ctx, db, activationID, "active", "", false)
 				}
@@ -327,12 +328,12 @@ func TestFanOutDeliveryBarrierGenerationSupersessionOnBothStores(t *testing.T) {
 
 				if closeFirst {
 					want := fanoutbarrier.Summary{Total: 0}
-					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusSuppressedGenerationSuperseded, &want, handle.TaskID())
+					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusSuppressedGenerationSuperseded, &want, handle.TaskID())
 					activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 					assertFanOutBarrierScheduleLifecycle(t, ctx, db, activationID, "cancelled", "fan_out_generation_superseded", false)
 					assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 				} else {
-					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusSuppressedGenerationSuperseded, nil, "")
+					assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusSuppressedGenerationSuperseded, nil, "")
 					assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 0)
 				}
 			})
@@ -392,7 +393,7 @@ func TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores(
 				if completionWins {
 					wantStatus = fanoutbarrier.StatusFired
 				}
-				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, wantStatus, &summary, handle.TaskID())
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, wantStatus, &summary, handle.TaskID())
 				assertFanOutBarrierScheduleLifecycle(t, ctx, db, activationID, "fired", "", true)
 				runSummary, err := owner.FanOutRunSummary(ctx, fixture.runID, base.Add(5*time.Second))
 				if err != nil {
@@ -443,7 +444,7 @@ func TestFanOutDeliveryBarrierConcurrentGenerationSupersessionCancelsExactlyOnce
 				}
 			}
 			want := fanoutbarrier.Summary{Total: 0}
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusSuppressedGenerationSuperseded, &want, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusSuppressedGenerationSuperseded, &want, handle.TaskID())
 			assertFanOutBarrierScheduleLifecycle(t, ctx, db, activationID, "cancelled", "fan_out_generation_superseded", false)
 		})
 	}
@@ -480,7 +481,7 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 			}
 
 			want := fanoutbarrier.Summary{Total: 0}
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 		})
 	}
@@ -548,7 +549,7 @@ func TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores(t *testing
 					t.Fatal(err)
 				}
 			}
-			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusFired, &summary, handle.TaskID())
+			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusFired, &summary, handle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)
 		})
 	}
@@ -585,7 +586,7 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 				}
 				advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(4*time.Second))
 				want := fanoutbarrier.Summary{Total: 0}
-				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.elementID, fanoutbarrier.StatusOutcomeDeadLettered, &want, handle.TaskID())
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusOutcomeDeadLettered, &want, handle.TaskID())
 			})
 		}
 	}
@@ -629,7 +630,7 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 							sourceScheduleActivationID = mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 						}
 						if tc.status != fanoutbarrier.StatusClosedPending {
-							if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6`, string(tc.status), at.Add(2*time.Second), fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+							if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, string(tc.status), at.Add(2*time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -640,7 +641,7 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 						value := fanoutbarrier.Summary{Total: 1, Canceled: 1}
 						summary = &value
 					case fanoutbarrier.StatusSuppressedGenerationSuperseded:
-						if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6`, string(tc.status), at.Add(time.Second), fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+						if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, string(tc.status), at.Add(time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -650,11 +651,11 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 						forkPointID, events.EventType("fork.barrier."+tc.name), "operator", "", []byte(`{}`), 0,
 						fixture.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(uuid.NewString()), at.Add(3*time.Second),
 					)
-					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, fixture.bundleHash, postgres)
+					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
 					if err := insertCanonicalEventRecordFixture(ctx, owner, forkPoint); err != nil {
 						t.Fatal(err)
 					}
-					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, fixture.bundleHash, postgres)
+					captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
 					materialized, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointID})
 					if err != nil {
 						t.Fatalf("materialize %s barrier fork: %v", tc.name, err)
@@ -663,7 +664,7 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 					if err != nil || repeated.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("repeat %s barrier fork = %#v err=%v, want %s", tc.name, repeated, err, materialized.ForkRunID)
 					}
-					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.elementID, tc.status, summary, expectedForkBarrierSchedule(tc.status, handle.TaskID()))
+					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.semanticPath, tc.status, summary, expectedForkBarrierSchedule(tc.status, handle.TaskID()))
 					assertForkBarrierScheduleState(t, ctx, db, materialized.ForkRunID, tc.status)
 					if tc.status == fanoutbarrier.StatusClosedPending {
 						childFixture := fixture
@@ -707,7 +708,7 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 	digest := "sha256:" + strings.Repeat("2", 64)
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(
 		mustPersistenceRootNode("fan-out-source"), "items.ready", "all-items-delivered",
-		fixture.packageKey, fixture.elementID, fixture.bundleHash, digest,
+		mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -733,18 +734,27 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 	defer tx.Rollback()
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO fan_out_obligation_barriers (
-			run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,
-			target_package_key,target_flow_id,target_node_id,handler_event,join_id,
+			run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,
+			target_flow_path,target_node_id,handler_event,join_id,
 			route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,
 			execution_mode,timer_handle,status,created_at,updated_at
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'root','root','root',$12,$13,$14,$15,'armed',$16,$16)
-	`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, fixture.bundleHash, digest,
-		ref.PackageKey(), ref.FlowID(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
+	`, fixture.runID, fixture.deliveryID, fixture.flowPath, "fan_out", fixture.semanticPath, fixture.bundleHash, digest,
+		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
 		string(routingRaw), string(executionmode.Live), string(handleRaw), at)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	return handle
+}
+
+func mustFanOutBarrierDeclaration(t testing.TB, fixture fanOutOwnerFixture) runtimeidentity.DeclarationIdentity {
+	t.Helper()
+	declaration, err := runtimeidentity.AdmitDeclarationIdentity(fixture.flowPath, "fan_out", fixture.semanticPath)
+	if err != nil {
+		t.Fatalf("fan-out barrier declaration: %v", err)
+	}
+	return declaration
 }
 
 func seedFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB, runID, entityID string, activation loopruntime.Activation, at time.Time) {
@@ -805,17 +815,17 @@ func seedFanOutBarrierOutcomes(t *testing.T, ctx context.Context, db *sql.DB, fi
 	}
 	defer tx.Rollback()
 	for ordinal, eventID := range eventIDs {
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,created_at) VALUES ($1,$2,$3,$4,$5,'committed',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, ordinal, eventID, at)
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,created_at) VALUES ($1,$2,$3,'fan_out',$4,$5,'committed',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, ordinal, eventID, at)
 	}
 	if appendRejection {
 		failure := `{"class":"invalid_input","code":"fixture_rejection","owner":"test","operation":"fan_out","message":"fixture rejection"}`
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, len(eventIDs), failure, at)
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,'fan_out',$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, len(eventIDs), failure, at)
 	}
 	cursor := len(eventIDs)
 	if appendRejection {
 		cursor++
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE fan_out_intents SET cursor=$1,status='closed',updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6`, cursor, at, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE fan_out_intents SET cursor=$1,status='closed',updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, cursor, at, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -879,11 +889,11 @@ func advanceFanOutBarriersAttempt(ctx context.Context, selected storeTestDurable
 	}
 }
 
-func assertFanOutBarrierState(t *testing.T, ctx context.Context, db *sql.DB, runID, triggeringDeliveryID, elementID string, wantStatus fanoutbarrier.Status, wantSummary *fanoutbarrier.Summary, wantSchedule string) {
+func assertFanOutBarrierState(t *testing.T, ctx context.Context, db *sql.DB, runID, triggeringDeliveryID, semanticPath string, wantStatus fanoutbarrier.Status, wantSummary *fanoutbarrier.Summary, wantSchedule string) {
 	t.Helper()
 	var status, schedule string
 	var summaryRaw any
-	if err := db.QueryRowContext(ctx, `SELECT status,COALESCE(summary,'null'),COALESCE(schedule_key,'') FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key='root' AND element_id=$3`, runID, triggeringDeliveryID, elementID).Scan(&status, &summaryRaw, &schedule); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT status,COALESCE(summary,'null'),COALESCE(schedule_key,'') FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path='.' AND declaration_family='fan_out' AND semantic_path=$3`, runID, triggeringDeliveryID, semanticPath).Scan(&status, &summaryRaw, &schedule); err != nil {
 		t.Fatal(err)
 	}
 	if fanoutbarrier.Status(status) != wantStatus || schedule != wantSchedule {
@@ -919,7 +929,7 @@ func assertFanOutBarrierTimerCount(t *testing.T, ctx context.Context, db *sql.DB
 func mustFanOutBarrierTaskID(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture) string {
 	t.Helper()
 	var taskID string
-	if err := db.QueryRowContext(ctx, `SELECT schedule_key FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID).Scan(&taskID); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT schedule_key FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&taskID); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(taskID) == "" {
@@ -931,7 +941,7 @@ func mustFanOutBarrierTaskID(t *testing.T, ctx context.Context, db *sql.DB, fixt
 func mustFanOutBarrierScheduleActivationID(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture) string {
 	t.Helper()
 	var activationID string
-	if err := db.QueryRowContext(ctx, `SELECT schedule_activation_id FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID).Scan(&activationID); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT schedule_activation_id FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&activationID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := uuid.Parse(activationID); err != nil {
@@ -979,11 +989,8 @@ func commitFanOutBarrierCompletionForTest(t *testing.T, ctx context.Context, sel
 	}
 }
 
-func captureFanOutBarrierForkRevision(t *testing.T, ctx context.Context, db *sql.DB, runID, bundleHash string, postgres bool) {
+func captureFanOutBarrierForkRevision(t *testing.T, ctx context.Context, db *sql.DB, runID string, postgres bool) {
 	t.Helper()
-	if _, err := db.ExecContext(ctx, `INSERT INTO bundles (bundle_hash,content_yaml,parsed_json,metadata) VALUES ($1,'api_version: swarm.test.bundle.v1','{}','{"source":"fan-out-barrier-test"}') ON CONFLICT (bundle_hash) DO NOTHING`, bundleHash); err != nil {
-		t.Fatalf("admit fan-out barrier fork bundle: %v", err)
-	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)

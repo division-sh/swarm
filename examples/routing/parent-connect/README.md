@@ -3,8 +3,8 @@
 Use this for static inter-flow delivery. The producer output pin and consumer input pin describe the interface; the parent package owns the edge.
 
 ```sh
-swarm verify --contracts examples/routing/parent-connect
-swarm serve --contracts examples/routing/parent-connect
+swarm verify examples/routing/parent-connect
+swarm serve examples/routing/parent-connect
 swarm event publish producer/work.requested --payload-json '{"work_id":"work-1"}'
 ```
 

@@ -80,7 +80,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 
 func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-	source, err := gateruntime.New("source-run", "launch/review", "entity-1", "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:"+strings.Repeat("a", 64), testGateRoutes(t), "event-1", now)
+	source, err := gateruntime.New("source-run", "launch/review", "entity-1", "launch", "awaiting_review", "launch_review", "bundle-v2:sha256:"+strings.Repeat("a", 64), testGateRoutes(t), "event-1", now)
 	if err != nil {
 		t.Fatal(err)
 	}

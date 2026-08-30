@@ -65,7 +65,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), BundleSource: "persisted", BundleIdentity: "support@1.0.0#bundle",
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), BundleIdentity: "support@1.0.0#bundle",
 		PackInventoryGeneration: "inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 1, PlanGeneration: planGeneration, TargetGeneration: 1,
 	}
@@ -73,7 +73,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		Operation: channelonboarding.Operation{OperationID: operationID, Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity, Coordinate: coordinate},
 		Candidate: channelonboarding.Candidate{
 			Provider: "telegram", Interface: identity, Coordinate: coordinate,
-			Target: channelonboarding.CandidateTarget{Selector: "ingress:support:telegram:telegram", ServiceID: uuid.NewString(), PackageKey: "support", FlowID: "telegram", Alias: "telegram", Provider: "telegram", Generation: 1, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
+			Target: channelonboarding.CandidateTarget{Selector: "ingress:support/telegram:telegram", ServiceID: uuid.NewString(), FlowPath: "support/telegram", Alias: "telegram", Provider: "telegram", Generation: 1, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
 		},
 	}}
 	handlers := ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: lifecycle, Channels: channels})
@@ -90,7 +90,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		t.Fatalf("unauthorized onboarding status = %d, want 401", unauthorized.Code)
 	}
 
-	start := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"start","method":"channel.onboarding_start","params":{"verb":"connect","provider":"telegram","bundle":"bundle-v1:sha256:`+strings.Repeat("b", 64)+`","interface":"`+identity.Selector+`","target":"ingress:support:telegram:telegram","provider_credential":"private-token","save_proof":false,"idempotency_key":"journey"}}`)
+	start := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"start","method":"channel.onboarding_start","params":{"verb":"connect","provider":"telegram","bundle":"bundle-v2:sha256:`+strings.Repeat("b", 64)+`","interface":"`+identity.Selector+`","target":"ingress:support:telegram","provider_credential":"private-token","save_proof":false,"idempotency_key":"journey"}}`)
 	if start.Error != nil {
 		t.Fatalf("channel.onboarding_start error = %#v", start.Error)
 	}

@@ -325,7 +325,7 @@ func runDataPruneCommand(ctx context.Context, out, errOut io.Writer, opts dataPr
 func selectedDataBundleIdentity(ctx context.Context, client *cliAPIClient, raw string) (string, error) {
 	if value := strings.TrimSpace(raw); value != "" {
 		if !cliBundleHashPattern.MatchString(value) {
-			return "", fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+			return "", fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 		return value, nil
 	}
@@ -470,10 +470,10 @@ func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliA
 }
 
 func dataDeclarationLabel(declaration durabledata.DeclarationSummary) string {
-	if declaration.Declaration.PackageKey == "." {
+	if declaration.Declaration.FlowPath == "." {
 		return "./" + declaration.LocalName
 	}
-	return strings.TrimSuffix(declaration.Declaration.PackageKey, "/") + "/" + declaration.LocalName
+	return strings.TrimSuffix(declaration.Declaration.FlowPath, "/") + "/" + declaration.LocalName
 }
 
 func parseCLIExpectedHead(raw string) (durabledata.ExpectedHead, error) {

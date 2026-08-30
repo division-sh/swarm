@@ -1,0 +1,4 @@
+name: test-guard-escalate
+version: 1.0.0
+description: Guard fails with on_fail escalate — escalation event emitted, state unchanged.
+platform_version: ">=0.7.0 <0.8.0"

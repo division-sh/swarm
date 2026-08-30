@@ -606,11 +606,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	}
 	selectionTargets := make([]events.RouteIdentity, 0, len(targets))
 	for _, target := range targets {
-		selectionTarget := target.Normalized()
-		if plan.ReceiverEndpoint().IsRoot() {
-			selectionTarget = events.RouteIdentity{EntityID: selectionTarget.EntityID}
-		}
-		selectionTargets = append(selectionTargets, selectionTarget)
+		selectionTargets = append(selectionTargets, target.Normalized())
 	}
 	evaluation := r.evaluateSelectedReceiverCarriers(ctx, plan, selectionTargets)
 	ledger, err := evaluation.Ledger()
@@ -626,14 +622,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	subscribers := make([]Subscriber, 0, len(targets))
 	for _, target := range targets {
 		target = target.Normalized()
-		selectionTarget := target
-		if plan.ReceiverEndpoint().IsRoot() {
-			// Root receiver registration is pin-owned and has no instance path.
-			// Keep exact execution identity on the delivery route while matching
-			// the registered root carrier through its entity-bearing pin target.
-			selectionTarget = events.RouteIdentity{EntityID: target.EntityID}
-		}
-		matchedSubscribers, err := r.resolveSelectedReceiverCarriers(ctx, plan, selectionTarget)
+		matchedSubscribers, err := r.resolveSelectedReceiverCarriers(ctx, plan, target)
 		if err != nil {
 			return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 		}

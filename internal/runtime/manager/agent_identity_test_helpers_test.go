@@ -14,17 +14,17 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-const managerTestTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const managerTestTopologyBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatalf("construct manager test topology plan: %v", err)
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("construct manager test topology admission: %v", err)
@@ -53,7 +53,7 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	if err != nil {
 		return PersistedAgent{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan(
 		[]runtimeagenttopology.SourceCoordinate{coordinate},
 		[]runtimeagenttopology.DesiredAgent{{Identity: identity, Source: coordinate, ConfigRevision: revision}},
@@ -62,7 +62,7 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 		return PersistedAgent{}, err
 	}
 	rec.Topology, err = runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	return rec, err
 }
@@ -82,7 +82,7 @@ func installManagerTestStaticTopology(
 	configs ...runtimeactors.AgentConfig,
 ) ([]PersistedAgent, runtimeagenttopology.Admission, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	records := make([]PersistedAgent, 0, len(configs))
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(configs))
 	for _, authored := range configs {
@@ -112,7 +112,7 @@ func installManagerTestStaticTopology(
 	if err != nil {
 		t.Fatalf("construct manager test complete source set: %v", err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct manager test static admission: %v", err)
 	}

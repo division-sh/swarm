@@ -25,9 +25,9 @@ func NewGenericTestWorkflowModule() WorkflowModule {
 func (m *genericTestModule) init() {
 	m.once.Do(func() {
 		repoRoot := WorkflowRepoRoot()
-		contractsDir := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
+		sourceRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
 		platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsDir, platformSpec)
+		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, sourceRoot, platformSpec)
 		if m.loadErr != nil {
 			return
 		}

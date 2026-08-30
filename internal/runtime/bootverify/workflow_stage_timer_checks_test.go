@@ -80,6 +80,9 @@ func stageTimerValidationFindings(timer runtimecontracts.WorkflowTimerContract) 
 }
 
 func stageTimerValidationBundle(timer runtimecontracts.WorkflowTimerContract) *runtimecontracts.WorkflowContractBundle {
+	if !timer.Node.Valid() {
+		timer.FlowID = "."
+	}
 	return &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{

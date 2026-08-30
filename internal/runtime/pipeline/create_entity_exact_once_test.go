@@ -276,12 +276,9 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 		owner = newPipelineTestDeliveryOwner(t, store.testDB(), store.isSQLite())
 		store.deliveryStore = owner
 	}
-	flowID := node.FlowID()
-	if flowID == "" {
-		flowID = pc.SemanticSource().WorkflowName()
-	}
+	flowID := node.FlowPath()
 	flowInstance := actionResultFlowPath(pc.SemanticSource(), flowID)
-	if flowID == strings.TrimSpace(pc.SemanticSource().WorkflowName()) && strings.TrimSpace(evt.RunID()) != "" {
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(pc.SemanticSource())) && strings.TrimSpace(evt.RunID()) != "" {
 		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
 	}
 	if concrete := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); actionResultFlowInstanceBelongsToFlow(pc.SemanticSource(), flowID, concrete) {

@@ -71,23 +71,23 @@ func TestDefaultPlatformCleanupCatalogMatchesPlatformSpecPolicy(t *testing.T) {
 	}
 }
 
-func TestCleanupCatalogPolicyMapsRequestScopedBundles(t *testing.T) {
-	includeCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: true})
-	includeEntry, ok := includeCatalog["bundles"]
+func TestCleanupCatalogPolicyMapsRequestScopedSourceArtifacts(t *testing.T) {
+	includeCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: true})
+	includeEntry, ok := includeCatalog["source_artifacts"]
 	if !ok {
-		t.Fatal("include_bundles=true catalog missing bundles")
+		t.Fatal("include_source_artifacts=true catalog missing source_artifacts")
 	}
 	if includeEntry.Classification != CleanupDeleteAll || includeEntry.DeleteOrderGroup == 0 || includeEntry.PreservationProof != "" {
-		t.Fatalf("include_bundles=true bundles entry = %#v, want delete_all without preservation proof", includeEntry)
+		t.Fatalf("include_source_artifacts=true source artifacts entry = %#v, want delete_all without preservation proof", includeEntry)
 	}
 
-	preserveCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: false})
-	preserveEntry, ok := preserveCatalog["bundles"]
+	preserveCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: false})
+	preserveEntry, ok := preserveCatalog["source_artifacts"]
 	if !ok {
-		t.Fatal("include_bundles=false catalog missing bundles")
+		t.Fatal("include_source_artifacts=false catalog missing source_artifacts")
 	}
 	if preserveEntry.Classification != CleanupPreserve || preserveEntry.DeleteOrderGroup != 0 || preserveEntry.PreservationProof == "" {
-		t.Fatalf("include_bundles=false bundles entry = %#v, want preserve with proof", preserveEntry)
+		t.Fatalf("include_source_artifacts=false source artifacts entry = %#v, want preserve with proof", preserveEntry)
 	}
 }
 

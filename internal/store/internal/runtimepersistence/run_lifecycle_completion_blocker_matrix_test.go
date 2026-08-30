@@ -20,7 +20,7 @@ func TestRunLifecycleCompletionBlockerMatrixParity(t *testing.T) {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			seedCompletionBlockerAgent(t, fixture, ctx)
 			testCompletionSessionBlockers(t, fixture, ctx)
 			testCompletionGateBlockers(t, fixture, ctx)

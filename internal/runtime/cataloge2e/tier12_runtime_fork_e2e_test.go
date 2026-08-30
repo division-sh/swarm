@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,11 +43,11 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	fixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-selected-contract-fork-execution").Root
 
 	var expected catalogExpectedDocument
-	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
+	loadYAML(t, catalogExpectedPath(fixtureRoot), &expected)
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
-	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), "", "test-agent")
+	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), ".", "test-agent")
 	if !ok {
 		t.Fatal("resolve test-agent declaration owner")
 	}
@@ -72,7 +71,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceBefore := selectedContractSourceRunCounts(t, h.db, sourceRunID)
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
-	loader, selection, selectedSource := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
+	loader, selection, selectedSource := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot, h.pg)
 	selectedBundle, ok := semanticview.Bundle(selectedSource.Source)
 	if !ok {
 		t.Fatal("selected-contract source has no loader-owned bundle")
@@ -186,16 +185,19 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 	return owner
 }
 
-func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {
+func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string, selected *store.PostgresStore) (runtimerunforkexecution.SelectedContractSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
-	loader := runtimerunforkexecution.ContractBundleSourceLoader{
+	bundle := loadFixtureBundle(t, fixtureRoot)
+	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
+	loader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot:         repoRoot,
 		PlatformSpecPath: platformSpecPathFromCatalogE2E(t),
+		Store:            selected,
 	}
-	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
-		Mode:          "selected_contracts",
-		ContractsRoot: fixtureRoot,
-	})
+	selection := runfork.RunForkContractSelection{
+		Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundle.SourceArtifact.BundleHash(),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
@@ -206,7 +208,7 @@ func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, rep
 			}
 		})
 	}
-	return loader, runforkadmission.SelectedContractSelection(loaded.Source, fixtureRoot), loaded
+	return loader, selection, loaded
 }
 
 func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *runtimeHarness, loaded runtimerunforkexecution.LoadedSelectedContractSource) {
@@ -214,8 +216,8 @@ func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *
 	if h == nil || h.processTopology == nil || h.rt == nil || h.rt.Manager == nil {
 		t.Fatal("catalog selected source topology requires a live process capability")
 	}
-	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := loaded.SourceArtifactFact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-contract source topology: %v", err)
@@ -568,7 +570,7 @@ func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string
 func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot string) {
 	t.Helper()
 	var expected catalogExpectedDocument
-	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
+	loadYAML(t, catalogExpectedPath(fixtureRoot), &expected)
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)

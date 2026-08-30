@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"gopkg.in/yaml.v3"
 )
@@ -204,7 +205,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsMalformedPolicyValidationSet(t *testing.T) {
 	pinCandidate := true
 	flow := &FlowContractView{
-		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Paths: FlowContractPaths{FlowPath: "deploy"},
 		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
 			"deploy_manifest": {
 				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
@@ -237,7 +238,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMalformedPolicyVali
 
 func TestValidateWorkflowContractBundleLoadConstraintsRequiresPolicyValidationPinCandidate(t *testing.T) {
 	flow := &FlowContractView{
-		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Paths: FlowContractPaths{FlowPath: "deploy"},
 		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
 			"deploy_manifest": {
 				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
@@ -278,7 +279,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 		},
 	}
 	flow := &FlowContractView{
-		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Paths: FlowContractPaths{FlowPath: "deploy"},
 		Nodes: map[string]SystemNodeContract{
 			"deploy_node": {
 				ID: "deploy_node",
@@ -439,12 +440,6 @@ worker:
 
 func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes string) {
 	t.Helper()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: field-reconciliation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-reconciliation\n"+schemaExtra)
 	if strings.TrimSpace(nodes) != "" {
 		writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
@@ -684,20 +679,6 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 			},
 			wantError: "but the agent does not declare it",
 		},
-		{
-			name: "project criteria is not a flow-local owner",
-			mutate: func(bundle *WorkflowContractBundle) {
-				bundle.projectContracts = map[string]ProjectContractView{
-					"root": {
-						Paths: ProjectPackagePaths{Key: "root"},
-						Policy: PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
-							"root_criteria": criteriaValidationTestSet(),
-						}},
-					},
-				}
-			},
-			wantError: "criteria must be declared in flow policy.yaml",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -749,7 +730,7 @@ cites:
 func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
 	t.Helper()
 	flow := FlowContractView{
-		Paths: FlowContractPaths{ID: "validation", Flow: "validation"},
+		Paths: FlowContractPaths{FlowPath: "validation"},
 		Policy: PolicyDocument{
 			Values: map[string]PolicyValue{
 				"max_features": {Value: 5},
@@ -776,12 +757,12 @@ func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
 			},
 		},
 	}
-	root := &FlowContractView{Children: []FlowContractView{flow}}
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Children: []FlowContractView{flow}}
 	flowPtr := &root.Children[0]
 	agent := AgentRegistryEntry{
 		Model:          "regular",
 		Role:           "cto",
-		ResolvedIntent: resolvedInlineIntentForTest(t, "flows/validation/agents.yaml#agents.cto-agent.intent", "Validate the specification."),
+		ResolvedIntent: resolvedInlineIntentForTest(t, "validation/agents.yaml#agents.cto-agent.intent", "Validate the specification."),
 		EmitEvents:     []string{"cto.spec_vetoed"},
 		Criteria:       []string{"feasibility_exclusions"},
 	}
@@ -794,18 +775,19 @@ func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
 			ByID: map[string]*FlowContractView{
 				"validation": flowPtr,
 			},
+			ByPath: map[string]*FlowContractView{".": root, "validation": flowPtr},
 		},
 		scopedAgents: map[string]AgentRegistryEntry{
 			"validation::cto-agent": agent,
 		},
 		scopedAgentSources: map[string]ContractItemSource{
-			"validation::cto-agent": {FlowID: "validation", Layer: "flow", File: "flows/validation/agents.yaml"},
+			"validation::cto-agent": {FlowPath: "validation", Family: "agents", File: "validation/agents.yaml"},
 		},
 		scopedEvents: map[string]EventCatalogEntry{
 			"validation::cto.spec_vetoed": flow.Events["cto.spec_vetoed"],
 		},
 		scopedEventSources: map[string]ContractItemSource{
-			"validation::cto.spec_vetoed": {FlowID: "validation", Layer: "flow", File: "flows/validation/events.yaml"},
+			"validation::cto.spec_vetoed": {FlowPath: "validation", Family: "events", File: "validation/events.yaml"},
 		},
 	}
 }
@@ -901,15 +883,6 @@ func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string,
 func setLoadedWorkflowNode(t testing.TB, bundle *WorkflowContractBundle, nodeID string, node SystemNodeContract) {
 	t.Helper()
 	var updated bool
-	for key, view := range bundle.projectContracts {
-		if _, ok := view.Nodes[nodeID]; !ok {
-			continue
-		}
-		view.Nodes[nodeID] = node
-		bundle.projectContracts[key] = view
-		updated = true
-		break
-	}
 	var walk func(*FlowContractView)
 	walk = func(view *FlowContractView) {
 		if view == nil || updated {
@@ -928,8 +901,9 @@ func setLoadedWorkflowNode(t testing.TB, bundle *WorkflowContractBundle, nodeID 
 		walk(bundle.FlowTree.Root)
 	}
 	if !updated {
-		for key, entry := range bundle.scopedNodes {
-			if strings.TrimSpace(entry.ID) != nodeID && !strings.HasSuffix(key, "::"+nodeID) {
+		for key := range bundle.scopedNodes {
+			identity, err := runtimeidentity.ParseDeclarationIdentityKey(key)
+			if err != nil || identity.SemanticPath() != nodeID {
 				continue
 			}
 			bundle.scopedNodes[key] = node
@@ -979,8 +953,8 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	alpha := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "alpha-intake")
-	beta := identitytest.ExecutableNode(t, "flows/flow-b", "flow-b", "beta-intake")
+	alpha := identitytest.ExecutableNode(t, "flow-a", "alpha-intake")
+	beta := identitytest.ExecutableNode(t, "flow-b", "beta-intake")
 	if got := bundle.ResolveExecutableNodeEventPattern(alpha, "work.begin"); got != "flow-a/work.begin" {
 		t.Fatalf("alpha exact event projection = %q", got)
 	}
@@ -992,19 +966,8 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: wildcard-owner-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: flow-a
-    flow: flow-a
-  - id: flow-b
-    flow: flow-b
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "package.yaml"), "name: flow-a\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `
 name: flow-a
 initial_state: active
 terminal_states: [done]
@@ -1013,11 +976,11 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "events.yaml"), `
 task.done:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "nodes.yaml"), `
 flow-a-wildcard:
   id: flow-a-wildcard
   execution_type: system_node
@@ -1026,8 +989,7 @@ flow-a-wildcard:
     task.*:
       advances_to: done
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "package.yaml"), "name: flow-b\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "schema.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `
 name: flow-b
 initial_state: active
 terminal_states: [done]
@@ -1036,11 +998,11 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "events.yaml"), `
 task.done:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "nodes.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "nodes.yaml"), `
 flow-b-wildcard:
   id: flow-b-wildcard
   execution_type: system_node
@@ -1055,8 +1017,8 @@ flow-b-wildcard:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	flowA := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "flow-a-wildcard")
-	flowB := identitytest.ExecutableNode(t, "flows/flow-b", "flow-b", "flow-b-wildcard")
+	flowA := identitytest.ExecutableNode(t, "flow-a", "flow-a-wildcard")
+	flowB := identitytest.ExecutableNode(t, "flow-b", "flow-b-wildcard")
 	if got := bundle.ResolveExecutableNodeEventPattern(flowA, "task.*"); got != "flow-a/task.*" {
 		t.Fatalf("flow-a exact wildcard projection = %q", got)
 	}

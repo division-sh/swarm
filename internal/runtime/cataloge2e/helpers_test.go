@@ -31,6 +31,10 @@ func platformSpecPathFromCatalogE2E(t testing.TB) string {
 	return runtimecontracts.DefaultPlatformSpecFile(repoRootFromCatalogE2E(t))
 }
 
+func catalogExpectedPath(fixtureRoot string) string {
+	return filepath.Join(fixtureRoot, "tests", "expected.yaml")
+}
+
 func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle, err := loadFixtureBundleMaybe(fixtureRoot)

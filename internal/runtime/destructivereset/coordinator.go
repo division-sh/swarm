@@ -60,11 +60,11 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		return ExecutionResult{}, err
 	}
 	result := Result{
-		OperationName:  DefaultOperationName,
-		DryRun:         req.DryRun,
-		IncludeBundles: req.IncludeBundles,
-		PlannedAt:      req.RequestedAt,
-		Plan:           plan,
+		OperationName:          DefaultOperationName,
+		DryRun:                 req.DryRun,
+		IncludeSourceArtifacts: req.IncludeSourceArtifacts,
+		PlannedAt:              req.RequestedAt,
+		Plan:                   plan,
 	}
 	if !req.DryRun && c.RuntimeContexts != nil {
 		if err := c.RuntimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {

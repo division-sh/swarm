@@ -65,12 +65,13 @@ func (s *captureScheduleScheduler) Admit(_ context.Context, command runtimegener
 
 func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	scheduler := &captureScheduleScheduler{}
-	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "")
+	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ".")
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 	actor := models.AgentConfig{
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ID:            "root-agent",
 		Identity:      toolTestRootAgentIdentity(t, "root-agent"),
+		FlowID:        ".",
 		EntityID:      "entity-root",
 	}
 
@@ -97,15 +98,15 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 
 func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	const (
-		flowID       = "telegram-chat"
 		flowPath     = "telegram-ingress/telegram-chat"
+		flowID       = flowPath
 		instancePath = flowPath + "/chat-1"
 		agentID      = "scheduler-agent"
 	)
 	flow := runtimecontracts.FlowContractView{
 		Path: flowPath,
 		Paths: runtimecontracts.FlowContractPaths{
-			ID: flowID, Flow: flowID, PackageKey: "bot", AgentsFile: "/contracts/bot/flows/telegram-chat/agents.yaml",
+			FlowPath: flowPath, AgentsFile: "/contracts/telegram-ingress/telegram-chat/agents.yaml",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -158,6 +159,7 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:       "root-agent",
 		Identity: toolTestRootAgentIdentity(t, "root-agent"),
+		FlowID:   ".",
 		EntityID: "entity-root",
 	}
 	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), runtimeeffects.ExecutionModeLive)
@@ -165,7 +167,7 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		t.Helper()
 		scheduler := &captureScheduleScheduler{}
 		return NewExecutorWithOptions(nil, ExecutorOptions{
-			WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ""),
+			WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "."),
 			GenericSchedules: scheduler,
 		}), scheduler
 	}
@@ -244,12 +246,13 @@ func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scheduler := &captureScheduleScheduler{}
-			source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "")
+			source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ".")
 			exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 			actor := models.AgentConfig{
 				ExecutionMode: runtimeeffects.ExecutionModeLive,
 				ID:            "root-agent",
 				Identity:      toolTestRootAgentIdentity(t, "root-agent"),
+				FlowID:        ".",
 				EntityID:      "entity-root",
 			}
 			ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
@@ -282,12 +285,13 @@ func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 	scheduler := &captureScheduleScheduler{}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ""),
+		WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "."),
 		GenericSchedules: scheduler,
 	})
 	actor := models.AgentConfig{
 		ID:          "root-agent",
 		Identity:    toolTestRootAgentIdentity(t, "root-agent"),
+		FlowID:      ".",
 		EntityID:    "00000000-0000-4000-8000-000000002164",
 		Permissions: []string{"schedule"},
 	}

@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,18 +16,21 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(testSetupValidationBundle(t))
+	bundle := testSetupValidationBundle(t)
+	source := semanticview.Wrap(bundle)
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	handler := testSetupHandler(t, pg, source)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 
-	resp := rpcCall(t, handler, testSetupBody(runID, entityID, "waiting", "seeded", true, "idem-setup"))
+	resp := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup"))
 	if resp.Error != nil {
 		t.Fatalf("test.setup_entities error = %#v", resp.Error)
 	}
@@ -42,37 +46,37 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" || entityResult["current_state"] != "waiting" {
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
-	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 
-	replay := rpcCall(t, handler, testSetupBody(runID, entityID, "waiting", "seeded", true, "idem-setup"))
+	replay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup"))
 	if replay.Error != nil {
 		t.Fatalf("test.setup_entities replay error = %#v", replay.Error)
 	}
-	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
 
-	conflict := rpcCall(t, handler, testSetupBody(runID, entityID, "ready", "changed", false, "idem-setup"))
+	conflict := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "ready", "changed", false, "idem-setup"))
 	if conflict.Error == nil {
 		t.Fatal("test.setup_entities idempotency conflict error = nil")
 	}
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("test.setup_entities conflict data = %#v", data)
 	}
-	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
 
 	if _, err := db.Exec(`DELETE FROM api_idempotency`); err != nil {
 		t.Fatalf("delete setup api idempotency rows: %v", err)
 	}
-	expiredReplay := rpcCall(t, handler, testSetupBody(runID, entityID, "waiting", "seeded", true, "idem-setup-after-expiry"))
+	expiredReplay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup-after-expiry"))
 	if expiredReplay.Error != nil {
 		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
 	}
-	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
 	}
@@ -192,10 +196,11 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			handler := testSetupHandler(t, pg, semanticview.Wrap(testSetupValidationBundle(t)))
+			bundle := testSetupValidationBundle(t)
+			handler := testSetupHandler(t, pg, semanticview.Wrap(bundle))
 			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)
 			tc.edit(entity)
-			resp := rpcCall(t, handler, testSetupBodyWithEntity(uuid.NewString(), "idem-invalid-"+tc.name, entity))
+			resp := rpcCall(t, handler, testSetupBodyWithEntity(bundle.SourceArtifact.BundleHash(), uuid.NewString(), "idem-invalid-"+tc.name, entity))
 			if resp.Error == nil {
 				t.Fatal("test.setup_entities invalid setup error = nil")
 			}
@@ -219,21 +224,29 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 
 func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview.Source) *Handler {
 	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("test setup source has no admitted source artifact")
+	}
+	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
 	handlers := testOperatorHandlers(testOperatorCapabilities{
-		Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-		Ready:            func() bool { return true },
-		Database:         fakePinger{},
-		Runs:             pg,
-		Entities:         pg,
-		TestSetup:        pg,
-		Idempotency:      pg,
-		Events:           failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
+		Now:         func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
+		Ready:       func() bool { return true },
+		Database:    fakePinger{},
+		Runs:        pg,
+		Entities:    pg,
+		TestSetup:   pg,
+		Idempotency: pg,
+		Events: bundleScopedFailingEventPublisher{
+			failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
+			fact:                     fact,
+		},
 		Source:           source,
 		RunBundleContext: pg,
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
-			BundleHash:      runStartTestBundleHash,
+			BundleHash:      fact.BundleHash(),
 		},
 	})
 	if handlers[testSetupEntitiesMethod] == nil {
@@ -245,17 +258,17 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 	})
 }
 
-func testSetupBody(runID, entityID, currentState, note string, reviewReady bool, idempotencyKey string) string {
-	return testSetupBodyWithEntity(runID, idempotencyKey, validTestSetupEntity(entityID, currentState, note, reviewReady))
+func testSetupBody(bundleHash, runID, entityID, currentState, note string, reviewReady bool, idempotencyKey string) string {
+	return testSetupBodyWithEntity(bundleHash, runID, idempotencyKey, validTestSetupEntity(entityID, currentState, note, reviewReady))
 }
 
-func testSetupBodyWithEntity(runID, idempotencyKey string, entity map[string]any) string {
+func testSetupBodyWithEntity(bundleHash, runID, idempotencyKey string, entity map[string]any) string {
 	body := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      "setup",
 		"method":  testSetupEntitiesMethod,
 		"params": map[string]any{
-			"bundle_hash":     runStartTestBundleHash,
+			"bundle_hash":     bundleHash,
 			"run_id":          runID,
 			"idempotency_key": idempotencyKey,
 			"entities":        []any{entity},
@@ -284,21 +297,21 @@ func validTestSetupEntity(entityID, currentState, note string, reviewReady bool)
 	}
 }
 
-func assertTestSetupPersistence(t *testing.T, db *sql.DB, runID, entityID, currentState, note string, reviewReady bool) {
+func assertTestSetupPersistence(t *testing.T, db *sql.DB, expectedBundleHash, runID, entityID, currentState, note string, reviewReady bool) {
 	t.Helper()
-	var runStatus, originKind, bundleHash, bundleSource string
+	var runStatus, originKind, bundleHash string
 	if err := db.QueryRow(`
-		SELECT status, origin_kind, bundle_hash, bundle_source
+		SELECT status, origin_kind, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &originKind, &bundleHash, &bundleSource); err != nil {
+	`, runID).Scan(&runStatus, &originKind, &bundleHash); err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
 	if runStatus != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) {
 		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", runStatus, originKind)
 	}
-	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
-		t.Fatalf("setup run row bundle identity = hash:%q source:%q", bundleHash, bundleSource)
+	if bundleHash != expectedBundleHash {
+		t.Fatalf("setup run row source artifact hash = %q, want %q", bundleHash, expectedBundleHash)
 	}
 
 	var flowInstance, entityType, gotState, gotNote, gateJSON string

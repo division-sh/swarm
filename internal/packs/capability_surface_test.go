@@ -23,7 +23,7 @@ func TestNormalizeSubjectsRejectsGlobalTriggerReadiness(t *testing.T) {
 }
 
 func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	base := Subject{
 		ID: "ingress:" + bundleHash + ":chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
 		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",
@@ -225,7 +225,7 @@ func TestCloneSubjectsDoesNotExposeNestedCapabilityState(t *testing.T) {
 }
 
 func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("d", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("d", 64)
 	subject := Subject{
 		ID: "ingress:" + bundleHash + ":chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
 		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",

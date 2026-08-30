@@ -12,6 +12,10 @@ import (
 	"testing"
 )
 
+func validBundleHash(hexDigit string) string {
+	return "bundle-v2:sha256:" + strings.Repeat(hexDigit, 64)
+}
+
 func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	sourceRunID := "11111111-1111-1111-1111-111111111111"
@@ -114,7 +118,7 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank source", args: []string{"run", "fork", " "}, wantStderr: "source run id is required"},
 		{name: "invalid source", args: []string{"run", "fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
 		{name: "opaque non uuid source", args: []string{"run", "fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},
-		{name: "invalid bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "invalid bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v2:sha256:<64 lowercase hex>"},
 		{name: "blank bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
 		{name: "invalid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
 		{name: "opaque non uuid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},

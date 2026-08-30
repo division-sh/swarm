@@ -188,7 +188,7 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 	}
 	if bundleHash != "" {
 		if !cliBundleHashPattern.MatchString(bundleHash) {
-			return "", nil, fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+			return "", nil, fmt.Errorf("--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 		params["bundle_hash"] = bundleHash
 	}

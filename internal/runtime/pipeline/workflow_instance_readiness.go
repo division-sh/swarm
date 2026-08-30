@@ -83,7 +83,6 @@ type DynamicFlowRuntimeReadinessPlan struct {
 	Identity        runtimeflowidentity.Instance         `json:"identity"`
 	RunID           string                               `json:"run_id"`
 	BundleHash      string                               `json:"bundle_hash"`
-	BundleSource    string                               `json:"bundle_source"`
 	WorkflowVersion string                               `json:"workflow_version"`
 	ExecutionMode   executionmode.Mode                   `json:"execution_mode"`
 	Agents          []DynamicFlowRuntimeAgentExpectation `json:"agents"`
@@ -93,7 +92,7 @@ type DynamicFlowRuntimeReadinessPlan struct {
 type DynamicFlowRuntimeReadiness struct {
 	InstancePath           string
 	Plan                   DynamicFlowRuntimeReadinessPlan
-	OwningRunSource        runtimecorrelation.BundleSourceFact
+	OwningRunSource        runtimecorrelation.SourceArtifactFact
 	RunStatus              string
 	InstanceStatus         string
 	InstanceTerminatedAt   time.Time
@@ -160,8 +159,8 @@ func IsDynamicFlowRuntimeReadinessObservationConflict(err error) bool {
 type DynamicFlowRuntimeReadinessPersistence interface {
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
-	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error)
-	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error)
+	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error)
+	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error)
 	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) error
 }
 
@@ -170,7 +169,6 @@ type DynamicFlowRuntimeReadinessPersistenceRecord struct {
 	InstancePath              string
 	Plan                      []byte
 	OwningRunBundleHash       string
-	OwningRunBundleSource     string
 	RunStatus                 string
 	InstanceStatus            string
 	InstanceTerminatedAt      time.Time
@@ -195,10 +193,7 @@ func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntim
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, err
 	}
-	item.OwningRunSource, err = runtimecorrelation.DecodeBundleSourceFact(
-		record.OwningRunBundleHash,
-		record.OwningRunBundleSource,
-	)
+	item.OwningRunSource, err = runtimecorrelation.DecodeSourceArtifactFact(record.OwningRunBundleHash)
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s owning run source: %w", record.InstancePath, err)
 	}
@@ -290,11 +285,11 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	p.Version = dynamicFlowRuntimeReadinessVersion
 	p.RunID = strings.TrimSpace(p.RunID)
 	p.WorkflowVersion = strings.TrimSpace(p.WorkflowVersion)
-	sourceFact, err := runtimecorrelation.DecodeBundleSourceFact(p.BundleHash, p.BundleSource)
+	sourceFact, err := runtimecorrelation.DecodeSourceArtifactFact(p.BundleHash)
 	if err != nil {
 		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness bundle source: %w", err)
 	}
-	p.BundleHash, p.BundleSource = sourceFact.StorageValues()
+	p.BundleHash = sourceFact.BundleHash()
 	p.Identity.TemplateID = strings.TrimSpace(p.Identity.TemplateID)
 	p.Identity.ScopeKey = strings.Trim(strings.TrimSpace(p.Identity.ScopeKey), "/")
 	p.Identity.InstanceID = strings.Trim(strings.TrimSpace(p.Identity.InstanceID), "/")

@@ -185,14 +185,14 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) LoadDynamicFlowRunti
 	return p.store.legacyLoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error) {
 	items, err := p.store.legacyQueryAllDynamicFlowRuntimeReadiness(ctx)
 	projection := DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range items {
 		if !item.OwningRunSource.Matches(source) {
 			continue
 		}
-		planSource, sourceErr := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		planSource, sourceErr := runtimecorrelation.DecodeSourceArtifactFact(item.Plan.BundleHash)
 		if sourceErr != nil {
 			return projection, sourceErr
 		}
@@ -209,7 +209,7 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRu
 	return projection, err
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error) {
 	items, err := p.store.legacyQueryAllDynamicFlowRuntimeReadiness(ctx)
 	if err != nil {
 		return nil, err
@@ -497,9 +497,17 @@ func testEntityContractsForType(entityType string) runtimecontracts.EntityContra
 }
 
 func testRootEntityContractSource(workflowName, entityType string) semanticview.Source {
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: strings.TrimSpace(workflowName), Mode: runtimecontracts.FlowModeStatic},
+	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: strings.TrimSpace(workflowName)},
 		RootEntities: testEntityContractsForType(entityType),
+		RootSchema:   &root.Schema,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+		},
 	})
 }
 
@@ -518,7 +526,6 @@ func admitSyntheticEntityContractsForTest(
 		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
 	}
 	sort.Strings(flowIDs)
-	var packageFlows strings.Builder
 	files := map[string]string{
 		"schema.yaml": "name: synthetic-contract\n",
 	}
@@ -527,11 +534,9 @@ func admitSyntheticEntityContractsForTest(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		fmt.Fprintf(&packageFlows, "  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID)
-		files["flows/"+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID)
-		files["flows/"+flowID+"/entities.yaml"] = fmt.Sprintf("%s: {}\n", entityType)
+		files[""+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID)
+		files[""+flowID+"/entities.yaml"] = fmt.Sprintf("%s: {}\n", entityType)
 	}
-	files["package.yaml"] = fmt.Sprintf("name: synthetic-contract\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String())
 	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {
 		files["entities.yaml"] = fmt.Sprintf("%s: {}\n", rootEntityType)
 	}

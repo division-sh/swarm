@@ -17,7 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-const coordinatorTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const coordinatorTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func coordinatorTestAgentRoute(t testing.TB, agentID string) events.DeliveryRoute {
 	t.Helper()
@@ -931,7 +931,7 @@ func coordinatorTestAuthorityAndOwner(
 	t *testing.T,
 ) (runtimedelivery.ExecutionAuthority, *worklifetime.RuntimeOccurrence, func()) {
 	t.Helper()
-	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(coordinatorTestBundleHash)
+	source, err := runtimecorrelation.NewSourceArtifactFact(coordinatorTestBundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}

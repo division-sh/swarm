@@ -30,7 +30,6 @@ const (
 type StaticDeclarationPlan struct {
 	SourceSetRevision string `json:"source_set_revision"`
 	BundleHash        string `json:"bundle_hash"`
-	BundleSource      string `json:"bundle_source"`
 }
 
 type FlowReadinessPlan struct {
@@ -75,14 +74,13 @@ func (a Admission) Equal(other Admission) bool {
 	}
 }
 
-func StaticAdmission(sourceSetRevision, bundleHash, bundleSource string, lifetime ExecutionLifetime) (Admission, error) {
+func StaticAdmission(sourceSetRevision, bundleHash string, lifetime ExecutionLifetime) (Admission, error) {
 	admission := Admission{
 		Authority: Authority{
 			Kind: AuthorityStaticDeclarationPlan,
 			Static: &StaticDeclarationPlan{
 				SourceSetRevision: strings.TrimSpace(sourceSetRevision),
 				BundleHash:        strings.TrimSpace(bundleHash),
-				BundleSource:      strings.TrimSpace(bundleSource),
 			},
 		},
 		Lifetime: lifetime,
@@ -156,7 +154,7 @@ func (a Authority) Validate() error {
 		if strings.TrimSpace(a.Static.SourceSetRevision) == "" {
 			return errors.New("static declaration topology authority requires source_set_revision")
 		}
-		if err := validateSourceCoordinate(a.Static.BundleHash, a.Static.BundleSource); err != nil {
+		if err := validateSourceCoordinate(a.Static.BundleHash); err != nil {
 			return err
 		}
 	case AuthorityFlowReadinessPlan:
@@ -188,24 +186,22 @@ func (a Authority) Validate() error {
 }
 
 type SourceCoordinate struct {
-	BundleHash   string `json:"bundle_hash"`
-	BundleSource string `json:"bundle_source"`
+	BundleHash string `json:"bundle_hash"`
 }
 
 func (c SourceCoordinate) Normalize() SourceCoordinate {
 	c.BundleHash = strings.TrimSpace(c.BundleHash)
-	c.BundleSource = strings.TrimSpace(c.BundleSource)
 	return c
 }
 
 func (c SourceCoordinate) Validate() error {
 	c = c.Normalize()
-	return validateSourceCoordinate(c.BundleHash, c.BundleSource)
+	return validateSourceCoordinate(c.BundleHash)
 }
 
 func (c SourceCoordinate) Key() string {
 	c = c.Normalize()
-	return c.BundleHash + "\x00" + c.BundleSource
+	return c.BundleHash
 }
 
 type DesiredAgent struct {
@@ -334,14 +330,9 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 	return nil
 }
 
-func validateSourceCoordinate(bundleHash, bundleSource string) error {
+func validateSourceCoordinate(bundleHash string) error {
 	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(bundleHash)); err != nil {
 		return fmt.Errorf("agent topology bundle_hash is invalid: %w", err)
 	}
-	switch strings.TrimSpace(bundleSource) {
-	case "persisted", "ephemeral":
-		return nil
-	default:
-		return fmt.Errorf("agent topology bundle_source %q is invalid", bundleSource)
-	}
+	return nil
 }

@@ -114,7 +114,7 @@ func loadPostgresRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle snapshot requires query authority and run_id")
 	}
 	query := `
-		SELECT run_id::text, status, bundle_hash, bundle_source, origin_kind,
+		SELECT run_id::text, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, ''),
@@ -142,7 +142,7 @@ func loadPostgresRunLifecycleSnapshot(
 		endedAt       sql.NullTime
 	)
 	err := q.QueryRowContext(ctx, query, runID).Scan(
-		&snapshot.RunID, &state, &snapshot.BundleHash, &snapshot.BundleSource,
+		&snapshot.RunID, &state, &snapshot.BundleHash,
 		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
@@ -209,7 +209,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		endedAt       any
 	)
 	err := q.QueryRowContext(ctx, `
-		SELECT run_id, status, bundle_hash, bundle_source, origin_kind,
+		SELECT run_id, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, ''),
@@ -219,7 +219,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		FROM runs
 		WHERE run_id = ?
 	`, runID).Scan(
-		&snapshot.RunID, &state, &snapshot.BundleHash, &snapshot.BundleSource,
+		&snapshot.RunID, &state, &snapshot.BundleHash,
 		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)

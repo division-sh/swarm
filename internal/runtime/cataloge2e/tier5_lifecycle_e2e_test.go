@@ -1,7 +1,6 @@
 package cataloge2e
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -27,7 +26,7 @@ func TestTier5LifecycleCanonicalRoutingOwnership(t *testing.T) {
 func TestCatalogTemplateNoBootInstance_RealRuntimeBoot(t *testing.T) {
 	fixture := catalogRuntimeFixture(t, "catalog.runtime.flow_lifecycle", "test-template-no-boot-instance")
 	var expected catalogExpectedDocument
-	loadYAML(t, filepath.Join(fixture.Root, "expected.yaml"), &expected)
+	loadYAML(t, catalogExpectedPath(fixture.Root), &expected)
 	h := newRuntimeHarness(t, fixture.Root, false)
 	assertCatalogRuntimeOutcome(t, h, expected)
 }

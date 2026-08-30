@@ -8,8 +8,8 @@ import (
 
 func TestEventCatalogRegistryIsScopedConflictSafeAndReferenceCounted(t *testing.T) {
 	registry := NewEventCatalogRegistry()
-	first := BundleScope("runtime-a", "bundle-v1:sha256:"+strings.Repeat("a", 64))
-	second := BundleScope("runtime-b", "bundle-v1:sha256:"+strings.Repeat("b", 64))
+	first := BundleScope("runtime-a", "bundle-v2:sha256:"+strings.Repeat("a", 64))
+	second := BundleScope("runtime-b", "bundle-v2:sha256:"+strings.Repeat("b", 64))
 	descriptors := []EventDescriptor{{EventType: "message.sent", Disposition: StoryAuthored, AuthorSummaryField: "text"}}
 
 	leaseA, err := registry.Register(first, descriptors)
@@ -56,7 +56,7 @@ func TestEventCatalogRegistryIsScopedConflictSafeAndReferenceCounted(t *testing.
 }
 
 func TestResolvedEventDescriptorFactRequiresExactMatchingScopeAndName(t *testing.T) {
-	scope := BundleScope("runtime-a", "bundle-v1:sha256:"+strings.Repeat("a", 64))
+	scope := BundleScope("runtime-a", "bundle-v2:sha256:"+strings.Repeat("a", 64))
 	descriptor := EventDescriptor{EventType: "flow/instance/message.sent", Disposition: StoryAuthored, AuthorSummaryField: "text"}
 	ctx, err := WithResolvedEventDescriptor(context.Background(), scope, descriptor)
 	if err != nil {

@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 )
 
 const cliIdentifierCandidateLimit = 5
-
-var cliBundleDigestPrefixPattern = regexp.MustCompile(`^[a-fA-F0-9]{1,64}$`)
 
 type cliIdentifierCandidate struct {
 	ID           string
@@ -45,14 +42,6 @@ func resolveCLIIdentifier(ctx context.Context, client *cliAPIClient, request cli
 	value := strings.TrimSpace(request.Value)
 	if value == "" {
 		return "", &cliAPIValidationError{message: fmt.Sprintf("ERROR: %s is required.", cliIdentifierSelectorName(request.Selector))}
-	}
-	if policy.NormalizationMode == cliIdentifierNormalizeBundleDigest {
-		if exact, err := validateBundleHashArg("bundle hash", value); err == nil {
-			return exact, nil
-		}
-		if err := validateBundleIdentifierPrefix(value); err != nil {
-			return "", err
-		}
 	}
 	if client == nil {
 		return "", fmt.Errorf("identifier resolver requires an API client")
@@ -100,29 +89,6 @@ func cliIdentifierHasApplicationCode(err error, codes ...string) bool {
 	return false
 }
 
-func validateBundleIdentifierPrefix(value string) error {
-	value = strings.TrimSpace(value)
-	lower := strings.ToLower(value)
-	switch {
-	case strings.HasPrefix(lower, "bundle-v1:sha256:"):
-		value = value[len("bundle-v1:sha256:"):]
-	case strings.HasPrefix(lower, "sha256:"):
-		value = value[len("sha256:"):]
-	}
-	if !cliBundleDigestPrefixPattern.MatchString(value) {
-		return &cliAPIValidationError{message: "ERROR: bundle hash must be a canonical bundle hash or a hexadecimal digest prefix.\n  List bundle hashes with `swarm bundle list`."}
-	}
-	return nil
-}
-
-func validateBundleIdentifierInput(value string) error {
-	value = strings.TrimSpace(value)
-	if _, err := validateBundleHashArg("bundle hash", value); err == nil {
-		return nil
-	}
-	return validateBundleIdentifierPrefix(value)
-}
-
 func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy cliIdentifierFamilyPolicy, scope map[string]string) ([]cliIdentifierCandidate, error) {
 	runID := ""
 	sessionID := ""
@@ -156,8 +122,6 @@ func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy c
 			out = append(out, cliIdentifierCandidate{ID: agent.AgentID, Status: agent.Status, StatusFamily: cliHumanCodeAgentStatus})
 		}
 		return out, nil
-	case cliIdentifierSourceBundleList:
-		return listAllBundleIdentifierCandidates(ctx, client)
 	case cliIdentifierSourceEntityList:
 		return listAllEntityIdentifierCandidates(ctx, client, runID)
 	case cliIdentifierSourceTurnList:
@@ -182,23 +146,6 @@ func listAllTurnIdentifierCandidates(ctx context.Context, client *cliAPIClient, 
 		}
 		return candidates, result.NextCursor, nil
 	}, "conversation.list_turns")
-}
-
-func listAllBundleIdentifierCandidates(ctx context.Context, client *cliAPIClient) ([]cliIdentifierCandidate, error) {
-	return listAllCLIIdentifierCandidatePages(map[string]any{"limit": 500}, func(params map[string]any) ([]cliIdentifierCandidate, string, error) {
-		var result bundleListResult
-		if err := client.call(ctx, bundleListMethod, params, &result); err != nil {
-			return nil, "", err
-		}
-		if err := validateBundleListResult(result); err != nil {
-			return nil, "", err
-		}
-		candidates := make([]cliIdentifierCandidate, 0, len(result.Bundles))
-		for _, bundle := range result.Bundles {
-			candidates = append(candidates, cliIdentifierCandidate{ID: bundle.BundleHash, CreatedAt: bundle.IngestedAt})
-		}
-		return candidates, result.NextCursor, nil
-	}, "bundle.list")
 }
 
 func listAllEntityIdentifierCandidates(ctx context.Context, client *cliAPIClient, runID string) ([]cliIdentifierCandidate, error) {
@@ -258,7 +205,7 @@ func matchCLIIdentifierCandidates(policy cliIdentifierFamilyPolicy, value string
 			return candidate.ID, nil, nil
 		}
 		if policy.NormalizationMode == cliIdentifierNormalizeBundleDigest {
-			digest := strings.TrimPrefix(candidateValue, "bundle-v1:sha256:")
+			digest := strings.TrimPrefix(candidateValue, "bundle-v2:sha256:")
 			if strings.HasPrefix(candidateValue, normalized) || strings.HasPrefix(digest, normalized) {
 				matches = append(matches, candidate)
 			}
@@ -337,7 +284,7 @@ func cliIdentifierDiscoveryCommand(family cliIdentifierFamily) string {
 	case cliIdentifierFamilyAgent:
 		return "`swarm agent list`"
 	case cliIdentifierFamilyBundle:
-		return "`swarm bundle list`"
+		return "the exact source artifact hash"
 	case cliIdentifierFamilyEntity:
 		return "`swarm entity list --run-id <full-run-id>`"
 	case cliIdentifierFamilyTurn:

@@ -6,7 +6,6 @@ census_head: 25ad370da
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
-    - package.yaml
     - schema.yaml
     - types.yaml
     - entities.yaml
@@ -28,7 +27,7 @@ scope:
     - provider-trigger manifest YAML
     - scenario/test YAML
   note: >-
-    Provider-trigger import declarations in package.yaml are included. The provider-trigger
+    Provider-trigger import declarations in schema.yaml imports are included. The provider-trigger
     manifest grammar itself is the explicitly ruled second-wave census.
 
 classification_tests:
@@ -42,14 +41,13 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 101
-  custom_unmarshal_reachable: 100
+  custom_unmarshal_total: 97
+  custom_unmarshal_reachable: 96
   custom_unmarshal_excluded: 1
   custom_unmarshal_breakdown:
-    contracts: 86
+    contracts: 82
     flowmodel_policy: 11
     agentintent: 1
-    contract_element_identity: 1
     channel_pack: 1
     deployment_config_excluded: 1
   yaml_node_functions_in_contracts: 215
@@ -84,70 +82,10 @@ rows:
     presence: {missing: admitted_as_zero, present_zero: reject, present_nonzero: typed_admission}
     corpus: {present_zero_before: 514, present_zero_after: 0}
 
-  - id: package.metadata
+  - id: schema.connect
     ruled: mechanical-ratified
-    paths: "package.name, package.version, package.platform_version, package.author, package.description, package.keywords, package.license, package.repository, package.extra"
-    owner: ProjectPackageDocument.UnmarshalYAML
-    information:
-      fact: [name, version, platform_version, license, repository]
-      annotation: [author, description, keywords, extra]
-    spelling: {canonical: mapping_fields, distinct_overrides: [], retired_duplicates: []}
-    presence: {missing: field_specific_default_or_verify, null: currently_partly_zero_collapsed, empty: currently_partly_zero_collapsed}
-
-  - id: package.child_collection
-    ruled: mechanical-ratified
-    paths: "package.packages, package.children, package.subpackages"
-    owners: [ProjectPackageDocument.UnmarshalYAML, ProjectPackageDocument.ChildPackages]
-    information: {fact: [child membership and order]}
-    spelling:
-      canonical_candidate: packages
-      retired_duplicates: [children, subpackages]
-    corpus: {packages: 0, children: 0, subpackages: 0}
-
-  - id: package.child_reference
-    ruled: mechanical-ratified
-    paths: "package.packages[].id, package.packages[].path, package.packages[].package, package.packages[].dir, package.packages[].bind"
-    owners: [ProjectPackageDocument.UnmarshalYAML, ProjectPackageRef.ResolveLocation]
-    information:
-      fact: [id]
-      choice: [path, bind]
-    spelling:
-      canonical_candidate: path
-      retired_duplicates: [package, dir]
-      distinct_overrides: [path_different_from_id]
-    corpus: {rows: 0}
-
-  - id: package.flow_reference
-    ruled: mechanical-ratified
-    paths: "package.flows[].id, package.flows[].flow, package.flows[].namespace, package.flows[].mode, package.flows[].activation, package.flows[].ingress, package.flows[].bind"
-    owner: ProjectFlowRef.UnmarshalYAML
-    information:
-      fact: [id]
-      derived_projection: [flow_when_equal_to_id]
-      choice: [flow_override, namespace, mode, activation, ingress, bind]
-    spelling:
-      canonical_candidate: omit_flow_when_flow_equals_id
-      retired_duplicates: [explicit_flow_equal_to_id]
-      distinct_overrides: [flow_path_different_from_id]
-    corpus: {rows: 22, default_would_suffice: 20, override_required: 2, mode_explicit: 22}
-
-  - id: package.requires_bind_observe
-    ruled: mechanical-ratified
-    paths: "package.requires.inputs, package.requires.outputs, package.requires.policy, package.requires.credentials, package.requires.platform_version, package.flows[].bind.inputs, package.flows[].bind.outputs, package.flows[].bind.policy, package.flows[].bind.credentials, package.flows[].bind.observe, package.packages[].bind"
-    owners: [FlowPackageRequires.UnmarshalYAML, FlowPackageBind.UnmarshalYAML]
-    information:
-      boundary_snapshot: [requires.inputs, requires.outputs, requires.policy, requires.credentials, requires.platform_version]
-      choice: [bind.inputs, bind.outputs, bind.policy, bind.credentials, bind.observe]
-    spelling:
-      canonical_candidate: requires.policy_mapping
-      retired_duplicates: [requires.policy_sequence_when_every_mapping_value_is_empty]
-      distinct_overrides: [requires.policy_mapping_with_default_or_type_or_required_or_description]
-    corpus: {requires_policy_sequence: 0, requires_policy_mapping: 0}
-
-  - id: package.connect
-    ruled: mechanical-ratified
-    paths: "package.connect[].event, package.connect[].from, package.connect[].to, package.connect[].rename"
-    owners: [FlowPackageConnect.UnmarshalYAML, CompileConnectGraph]
+    paths: "schema.connect[].event, schema.connect[].from, schema.connect[].to, schema.connect[].rename"
+    owners: [FlowConnect.UnmarshalYAML, CompileConnectGraph]
     information:
       fact: [event_and_endpoint_ownership]
       choice: [rename_override]
@@ -157,19 +95,19 @@ rows:
       distinct_overrides: [rename]
     corpus: {legacy_from_to_rows: 0, event_centric_rows: 34, adapters: 0}
 
-  - id: package.pack_imports
+  - id: schema.imports
     ruled: mechanical-ratified
-    paths: "package.connector_packs.imports[].provider, package.connector_packs.imports[].tool, package.provider_trigger_events.imports[].provider, package.provider_trigger_events.imports[].event"
-    owners: [ConnectorPackImports.UnmarshalYAML, ConnectorPackImport.UnmarshalYAML, ProviderTriggerEventImports.UnmarshalYAML, ProviderTriggerEventImport.UnmarshalYAML]
+    paths: "schema.imports.connector_packs[].provider, schema.imports.connector_packs[].tool, schema.imports.provider_trigger_events[].provider, schema.imports.provider_trigger_events[].event"
+    owners: [FlowSchemaImports.UnmarshalYAML, ConnectorPackImports.UnmarshalYAML, ConnectorPackImport.UnmarshalYAML, ProviderTriggerEventImports.UnmarshalYAML, ProviderTriggerEventImport.UnmarshalYAML]
     information: {choice: [selected provider/tool and provider/event capability imports]}
     spelling:
       canonical_candidate: normalized_underscore_token
       retired_duplicates: [hyphenated_token, space_separated_token]
     corpus: {connector_imports: 2, trigger_event_imports: 1, alternate_token_spellings: 0}
 
-  - id: package.ingress_handoff
+  - id: schema.ingress
     ruled: mechanical-ratified
-    paths: "package.flows[].ingress.*, package.handoffs[].event, package.handoffs[].creates_flow, package.handoffs[].namespace"
+    paths: "schema.ingress.*"
     owners: [ProjectFlowIngress.UnmarshalYAML, ProjectFlowIngressProvider.UnmarshalYAML, ProjectFlowIngressAdmission.UnmarshalYAML, ProjectFlowIngressAdmissionPack.UnmarshalYAML, ProjectFlowIngressAuthentication.UnmarshalYAML, ProjectFlowIngressDeliveryID.UnmarshalYAML]
     information:
       fact: [ingress alias/provider/pack/event/delivery extraction and handoff event/flow]
@@ -702,15 +640,6 @@ rows:
     spelling: {canonical: authoritative_spec_shape, distinct_overrides: [], retired_duplicates: []}
     note: "Included because the loader consumes it; it is governing law, not project-authored duplication."
 
-  - id: future.contract_element_id
-    ruled: mechanical-ratified
-    paths: "handler.rules[].element_id and the closed future #1976 adoption registry"
-    owner: "#1976 mint/codemod"
-    information: {fact: [tool-authored stable identity minted once and persisted visibly]}
-    spelling: {canonical: explicit_minted_element_id, distinct_overrides: [], retired_duplicates: [load_time_derivation_or_backfill]}
-    corpus: {current_rows: 0}
-    note: "Answer to the ruling probe: once minted, an element ID is a fact, not a projection."
-
   - id: unreachable_retired_decoders
     ruled: mechanical-ratified
     paths: "package.entity_schema, events.<event>.payload_object, EventEmission, scalar_guard"
@@ -742,12 +671,9 @@ f2_priority_rows:
 
 decoder_coverage:
   workflow_contract_yaml_wave1.go:
-    package.metadata: [ProjectPackageDocument]
-    package.flow_reference: [ProjectFlowRef]
-    package.ingress_handoff: [ProjectFlowIngress, ProjectFlowIngressProvider, ProjectFlowIngressAdmission, ProjectFlowIngressAdmissionPack, ProjectFlowIngressAuthentication, ProjectFlowIngressDeliveryID]
-    package.requires_bind_observe: [FlowPackageRequires, FlowPackageBind]
-    package.pack_imports: [ConnectorPackImports, ConnectorPackImport, ProviderTriggerEventImports, ProviderTriggerEventImport]
-    package.connect: [FlowPackageConnect]
+    schema.ingress: [ProjectFlowIngress, ProjectFlowIngressProvider, ProjectFlowIngressAdmission, ProjectFlowIngressAdmissionPack, ProjectFlowIngressAuthentication, ProjectFlowIngressDeliveryID]
+    schema.imports: [ConnectorPackImports, ConnectorPackImport, ProviderTriggerEventImports, ProviderTriggerEventImport]
+    schema.connect: [FlowConnect]
     type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
@@ -780,6 +706,7 @@ decoder_coverage:
     handler.expression: [ExpressionValue]
   workflow_contract_yaml.go:
     flow.identity_mode: [FlowSchemaDocument]
+    schema.imports: [FlowSchemaImports]
     node.identity_defaults_projections: [SystemNodeContract]
   workflow_contract_stages.go:
     flow.lifecycle: [FlowStageDeclarations, FlowStageDeclaration]
@@ -801,8 +728,6 @@ decoder_coverage:
     policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
   agentintent/model.go:
     agent.behavior: [Source]
-  core/contractelementidentity/identity.go:
-    handler.rules_shape: [ContractElementID]
   internal/packs/channel.go:
     pack.channel: [ChannelMapping]
 
@@ -811,7 +736,7 @@ decoder_exclusions:
     deployment.swarm_yaml: [WorkspaceConfig]
 
 registry_result:
-  completeness: "all 101 remaining production custom unmarshallers classified as 100 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; W2 retires the two carry decoders and W3 retires the two event decoders behind typed admission"
+  completeness: "all 97 remaining production custom unmarshallers classified as 96 source-reachable row owners and 1 deployment swarm.yaml exclusion; package/project and authored element-id decoders are retired"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
@@ -823,22 +748,18 @@ wave_3:
   migrated_decoders:
     - workflow_contract_yaml_handlers.go:EventCatalogEntry
     - workflow_contract_yaml_schema.go:EventFieldSpec
-  remaining_reachable_decoders: 99
+  remaining_reachable_decoders: 95
 
 wave_2:
   issue: 2352
   status: closed
-  rows: [flow.pin_event_entry, flow.input_pin_resolution, flow.output_pin_route_projection, package.connect]
+  rows: [flow.pin_event_entry, flow.input_pin_resolution, flow.output_pin_route_projection, schema.connect]
   retired_surfaces: [pin.name, input.carries, carry.type, carry.optional, carry.convert, output.key, output.carries, qualified_or_wildcard_flow_pin_event, connect.adapter]
   canonical_owners: [CompiledFlowInputPin, CompiledFlowOutputPin, CompiledFlowEntityPermissions, CompiledEventSchema, ConnectRoutePlan]
 
 wave_1:
-  issue: 2309
-  rows: [package.child_collection, package.child_reference, package.connect]
-  checked_in_package_corpus:
-    examples: {files: 8, rows: 16}
-    tests_and_testdata: {files: 14, rows: 19}
-    total: {files: 22, rows: 35}
+  issue: 2320
+  rows: [schema.connect, schema.imports, schema.ingress]
   go_connect_corpus:
     total_files: 16
     canonicalrouting_occurrences: 34

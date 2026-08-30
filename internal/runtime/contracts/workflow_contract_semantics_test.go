@@ -120,10 +120,10 @@ func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) 
 			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
 		},
 		scopedNodes: map[string]SystemNodeContract{
-			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
+			contractScopeKey(ContractItemSource{FlowPath: ".", Family: "nodes"}, "join-node"): {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
 		},
 		scopedNodeSources: map[string]ContractItemSource{
-			"join-node": {Layer: "project"},
+			contractScopeKey(ContractItemSource{FlowPath: ".", Family: "nodes"}, "join-node"): {FlowPath: ".", Family: "nodes", File: "nodes.yaml"},
 		},
 	}
 
@@ -256,7 +256,7 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 		if got, want := transition.From, []string{"awaiting_review"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("timer transition From = %#v, want %#v", got, want)
 		}
-		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.InternalOwner != "runtime" || transition.FlowID != "" {
+		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.InternalOwner != "runtime" || transition.FlowID != "." {
 			t.Fatalf("timer transition = %#v, want runtime timed edge to expired", transition)
 		}
 	}
@@ -267,7 +267,7 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 
 func TestWorkflowSemanticsScopesStageTimerIDsByFlow(t *testing.T) {
 	review := FlowContractView{
-		Paths: FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: FlowContractPaths{FlowPath: "review"},
 		Path:  "review",
 		Schema: FlowSchemaDocument{
 			StageDeclarations: FlowStageDeclarations{
@@ -287,7 +287,7 @@ func TestWorkflowSemanticsScopesStageTimerIDsByFlow(t *testing.T) {
 		},
 	}
 	approval := FlowContractView{
-		Paths: FlowContractPaths{ID: "approval", Flow: "approval"},
+		Paths: FlowContractPaths{FlowPath: "approval"},
 		Path:  "approval",
 		Schema: FlowSchemaDocument{
 			StageDeclarations: FlowStageDeclarations{

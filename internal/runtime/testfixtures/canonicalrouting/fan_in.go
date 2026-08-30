@@ -34,9 +34,8 @@ const (
 
 func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativeMutation) {
 	t.Helper()
-	packageFile := filepath.Join(root, "package.yaml")
-	receiverSchema := filepath.Join(root, "flows", "portfolio", "default", "schema.yaml")
-	receiverNodes := filepath.Join(root, "flows", "portfolio", "default", "nodes.yaml")
+	receiverSchema := filepath.Join(root, "portfolio", "schema.yaml")
+	receiverNodes := filepath.Join(root, "portfolio", "nodes.yaml")
 	switch mutation {
 	case FanInMissingDedup:
 		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "")
@@ -55,7 +54,6 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInEventIDDedup:
 		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "          dedup_by: [event.id]\n")
 	case FanInNonSingletonReceiver:
-		applyClosedReplacement(t, packageFile, "    mode: singleton\n", "    mode: static\n")
 		applyClosedReplacement(t, receiverSchema, "mode: singleton\n", "mode: static\n")
 	case FanInMissingReceiverHandler:
 		applyClosedReplacement(t, receiverNodes, "  subscribes_to: [operating.reported]\n", "  subscribes_to: []\n")
@@ -72,7 +70,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		applyClosedReplacement(t, receiverNodes, "          from: entity.period_id\n", "          from: entity.period_id\n          by: payload.period_id\n")
 	case FanInMissingJoinRow:
 		applyClosedReplacement(t, receiverNodes,
-			"    operating.reported:\n      join:\n        stage: awaiting\n        members:\n          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n        output: payload.revenue\n        on_complete:\n          element_id: 445e8fbd-e8f7-4b4b-81f0-08ebec2e1b70\n          advances_to: complete\n        timeout:\n          element_id: cc68292e-a6af-47bc-8785-472465db0d81\n          after: 5m\n          advances_to: failed\n",
+			"    operating.reported:\n      join:\n        stage: awaiting\n        members:\n          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n        output: payload.revenue\n        on_complete:\n          advances_to: complete\n        timeout:\n          after: 5m\n          advances_to: failed\n",
 			"    operating.reported:\n      advances_to: awaiting\n")
 	case FanInMultipleJoinRows:
 		t.Fatal("FanInMultipleJoinRows is a post-load semantic mutation")
@@ -91,7 +89,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInHandlerOnComplete:
 		applyClosedReplacement(t, receiverNodes,
 			"      accumulate:\n        into: operating_reports\n        from: payload\n",
-			"      accumulate:\n        into: operating_reports\n        from: payload\n      on_complete:\n        - element_id: 00000000-0000-4000-8000-000000000012\n          advances_to: active\n")
+			"      accumulate:\n        into: operating_reports\n        from: payload\n      on_complete:\n        - advances_to: active\n")
 	default:
 		t.Fatalf("unsupported fan-in negative mutation %d", mutation)
 	}
@@ -100,7 +98,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 func CopyFanInWithInertFrom(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, FanInStream)
-	applyClosedReplacement(t, filepath.Join(root, "flows", "portfolio", "default", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "portfolio", "schema.yaml"),
 		"          mode: fan-in", "          mode: fan-in\n          from: payload.ignored")
 	return root
 }

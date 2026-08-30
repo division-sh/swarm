@@ -292,8 +292,8 @@ func TestWorkspaceBackendCensusesScopedLiveAgentsHiddenByAmbiguousAliases(t *tes
 	}
 	joined := strings.Join(labels, "\n")
 	for _, want := range []string{
-		"project packages/project-a agent shared-worker",
-		"project packages/project-b agent shared-worker",
+		"flow packages/project-a agent shared-worker",
+		"flow packages/project-b agent shared-worker",
 		"flow flow-a agent shared-worker",
 		"flow flow-b agent shared-worker",
 	} {
@@ -317,21 +317,7 @@ func TestLocalPreflightAgentCensusIncludesOnlyAmbiguousScopedDeclarations(t *tes
 func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-workspace-backend
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-flows:
-  - id: flow-a
-    flow: flow-a
-    mode: static
-  - id: flow-b
-    flow: flow-b
-    mode: static
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-backend\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	rootAgents := ""
@@ -345,11 +331,11 @@ flows:
 
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise project-scoped workspace backend selection.\n")
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
-		dir := filepath.Join(root, "flows", flowID)
+		dir := filepath.Join(root, flowID)
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
 	}
@@ -415,7 +401,7 @@ func workspaceBackendTestSource(agents map[string]runtimecontracts.AgentRegistry
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
-	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, nil, "", semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
+	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend: %v", err)
 	}

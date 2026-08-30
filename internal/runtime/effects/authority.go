@@ -121,14 +121,12 @@ func validateManagedAgentFramePrelaunch(ctx context.Context, frame agentframe.Fr
 	if !ok {
 		return fmt.Errorf("managed execution frame requires execution admission")
 	}
-	bundleSource, ok := correlation.BundleSourceFactFromContext(ctx)
+	bundleSource, ok := correlation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("managed execution frame requires authoritative bundle source")
 	}
-	bundleHash, source := bundleSource.StorageValues()
-	if admission.BundleHash != bundleHash ||
-		frame.Session.Bundle.Hash != bundleHash ||
-		frame.Session.Bundle.Source != source {
+	bundleHash := bundleSource.BundleHash()
+	if admission.BundleHash != bundleHash || frame.Session.SourceArtifact.Hash != bundleHash {
 		return fmt.Errorf("managed execution frame does not match admitted bundle source")
 	}
 	causalEvent, ok := correlation.InboundEventFromContext(ctx)
@@ -176,7 +174,6 @@ type ServeRegistrationAuthority struct {
 	OnboardingOperationID        string
 	OnboardingRevision           int64
 	BundleHash                   string
-	BundleSource                 string
 	BundleIdentity               string
 	PackInventoryGeneration      string
 	RuntimeInstanceID            string
@@ -194,7 +191,6 @@ type ChannelConfirmationAuthority struct {
 	BindingRevision              int64
 	PrincipalID                  string
 	BundleHash                   string
-	BundleSource                 string
 	BundleIdentity               string
 	PackInventoryGeneration      string
 	RuntimeInstanceID            string
@@ -265,12 +261,12 @@ func (a Authority) Valid() bool {
 		}
 		if strings.TrimSpace(registration.OnboardingOperationID) == "" {
 			return registration.OnboardingRevision == 0 && registration.BundleHash == "" &&
-				registration.BundleSource == "" && registration.BundleIdentity == "" && registration.PackInventoryGeneration == "" &&
+				registration.BundleIdentity == "" && registration.PackInventoryGeneration == "" &&
 				registration.RuntimeInstanceID == "" && registration.ContextPublicationGeneration == 0 &&
 				!registration.PlanGeneration.Valid() && registration.TargetGeneration == 0
 		}
 		return validUUIDs(registration.OnboardingOperationID) && registration.OnboardingRevision > 0 &&
-			nonEmpty(registration.BundleHash, registration.BundleSource, registration.BundleIdentity,
+			nonEmpty(registration.BundleHash, registration.BundleIdentity,
 				registration.PackInventoryGeneration, registration.RuntimeInstanceID) &&
 			registration.ContextPublicationGeneration > 0 && registration.PlanGeneration.Valid() && registration.TargetGeneration > 0
 	case AuthorityChannelConfirmation:
@@ -279,7 +275,7 @@ func (a Authority) Valid() bool {
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
 			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
-			nonEmpty(confirmation.BundleHash, confirmation.BundleSource, confirmation.BundleIdentity,
+			nonEmpty(confirmation.BundleHash, confirmation.BundleIdentity,
 				confirmation.PackInventoryGeneration) && confirmation.PlanGeneration.Valid() && confirmation.TargetGeneration > 0
 	default:
 		return false
@@ -360,7 +356,6 @@ func (a Authority) Evidence() map[string]any {
 			evidence["onboarding_operation_id"] = a.ServeRegistration.OnboardingOperationID
 			evidence["onboarding_revision"] = a.ServeRegistration.OnboardingRevision
 			evidence["bundle_hash"] = a.ServeRegistration.BundleHash
-			evidence["bundle_source"] = a.ServeRegistration.BundleSource
 			evidence["bundle_identity"] = a.ServeRegistration.BundleIdentity
 			evidence["pack_inventory_generation"] = a.ServeRegistration.PackInventoryGeneration
 			evidence["runtime_instance_id"] = a.ServeRegistration.RuntimeInstanceID
@@ -378,7 +373,6 @@ func (a Authority) Evidence() map[string]any {
 		evidence["binding_revision"] = confirmation.BindingRevision
 		evidence["principal_id"] = confirmation.PrincipalID
 		evidence["bundle_hash"] = confirmation.BundleHash
-		evidence["bundle_source"] = confirmation.BundleSource
 		evidence["bundle_identity"] = confirmation.BundleIdentity
 		evidence["pack_inventory_generation"] = confirmation.PackInventoryGeneration
 		evidence["runtime_instance_id"] = confirmation.RuntimeInstanceID

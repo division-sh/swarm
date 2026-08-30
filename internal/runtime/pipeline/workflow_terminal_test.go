@@ -46,8 +46,8 @@ func TestWorkflowDefinition_AllowsExplicitTerminalExit(t *testing.T) {
 
 func TestLoadWorkflowDefinitionUsesFlowScopedTerminalOwnership(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "demo", Version: "1.0.0"},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Name: "demo",
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{
 				Declared: true,
 				Entries: []runtimecontracts.FlowStageDeclaration{

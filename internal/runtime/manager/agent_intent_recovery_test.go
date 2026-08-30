@@ -82,7 +82,7 @@ func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 	intent, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"flows/review/agents.yaml#agents.worker.intent",
+		"review/agents.yaml#agents.worker.intent",
 		"Perform only the declared review work.",
 	)
 	if err != nil {
@@ -93,7 +93,7 @@ func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 
 func managerRecoverySource(intent runtimeagentintent.Resolved, criteria []string) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
 				ID:             "worker",

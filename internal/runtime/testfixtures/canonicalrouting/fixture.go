@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	swarmassets "github.com/division-sh/swarm"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -122,8 +123,8 @@ func Prove(t testing.TB, ids ...ArtifactID) {
 	}
 	for _, id := range ids {
 		root := checkedArtifactRoot(t, id)
-		if _, err := os.Stat(filepath.Join(root, "package.yaml")); err != nil {
-			t.Fatalf("routing artifact %q: %v", id, err)
+		if _, err := sourceartifact.AdmitDirectory(root); err != nil {
+			t.Fatalf("admit routing artifact %q: %v", id, err)
 		}
 	}
 }
@@ -306,8 +307,8 @@ func duplicateFlowForNegativeMutation(t testing.TB, root, sourceFlowID, targetFl
 	}
 	copyTree(
 		t,
-		filepath.Join(root, "flows", sourceFlowID),
-		filepath.Join(root, "flows", targetFlowID),
+		filepath.Join(root, sourceFlowID),
+		filepath.Join(root, targetFlowID),
 	)
 }
 
@@ -327,10 +328,7 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	default:
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - id: account\n    flow: account\n    mode: template\n",
-		"  - id: account\n    flow: account\n    mode: template\n  - id: legacy_static\n    flow: legacy_static\n    mode: static\n")
-	writeClosedNegativeFile(t, root, "flows/legacy_static/schema.yaml", `name: legacy_static
+	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
 mode: static
 initial_state: active
 states: [active, archived]
@@ -340,11 +338,11 @@ pins:
     events:
       - legacy.seen
 `)
-	writeClosedNegativeFile(t, root, "flows/legacy_static/events.yaml", `legacy.seen:
+	writeClosedNegativeFile(t, root, "legacy_static/events.yaml", `legacy.seen:
   legacy_id: text
   amount: number
 `)
-	writeClosedNegativeFile(t, root, "flows/legacy_static/entities.yaml", `legacy_record:
+	writeClosedNegativeFile(t, root, "legacy_static/entities.yaml", `legacy_record:
   legacy_id:
     type: text
     indexed: true
@@ -352,7 +350,7 @@ pins:
     type: number
     initial: 0
 `)
-	writeClosedNegativeFile(t, root, "flows/legacy_static/nodes.yaml", `legacy-writer:
+	writeClosedNegativeFile(t, root, "legacy_static/nodes.yaml", `legacy-writer:
   id: legacy-writer
   execution_type: system_node
   subscribes_to: [legacy.seen]
@@ -575,7 +573,7 @@ func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string) bool {
 				"on_missing", "on_conflict", "select_entity", "select_or_create_entity", "create_flow_instance",
 				"subscriptions", "subscriptions_bootstrap", "subscribes_to", "produces", "emit_events",
 				"event_handlers", "emit", "fan_out", "auto_emit_on_create", "replies_to", "carries",
-				"broadcast", "flows", "bind", "requires":
+				"broadcast", "bind", "requires":
 				return true
 			}
 			if yamlNodeContainsAuthoredRoutingAt(value, key) {

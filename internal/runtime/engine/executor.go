@@ -1834,11 +1834,11 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 
 func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {
 	entityID = strings.TrimSpace(entityID)
-	if ref.FlowID() == "" {
+	if ref.FlowPath() == "." {
 		return events.NewRootRoutingSource(entityID)
 	}
 	return events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID:       ref.FlowID(),
+		FlowID:       ref.FlowPath(),
 		FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
 		EntityID:     entityID,
 	})
@@ -2998,7 +2998,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			if contextErr != nil {
 				return nil, -1, contextErr
 			}
-			ref, qualified := rule.ContractElementRef()
+			ref, qualified := rule.DeclarationIdentity()
 			if !qualified {
 				return nil, -1, fmt.Errorf("handler rule %q evaluation failed without canonical element identity: %w", strings.TrimSpace(rule.ID), err)
 			}
@@ -3031,7 +3031,7 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if rule == nil {
 		return nil
 	}
-	ref, qualified := rule.ContractElementRef()
+	ref, qualified := rule.DeclarationIdentity()
 	if !qualified {
 		if rule.Authored() {
 			return fmt.Errorf("selected authored handler rule %q lacks its admitted contract element reference", strings.TrimSpace(rule.ID))
@@ -3550,10 +3550,6 @@ func (e *Executor) killStateTarget(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	terminals := e.deps.Source.FlowTerminalStages(flowID)
 	states := e.deps.Source.FlowStates(flowID)
-	if flowID != "" && len(terminals) == 0 && len(states) == 0 {
-		terminals = e.deps.Source.FlowTerminalStages("")
-		states = e.deps.Source.FlowStates("")
-	}
 	for _, stage := range terminals {
 		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
 			return strings.TrimSpace(stage)

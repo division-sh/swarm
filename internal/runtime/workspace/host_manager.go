@@ -11,18 +11,19 @@ import (
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type HostConfig struct {
-	WorkspaceRoot       string
-	SharedDataSource    string
-	DataMountPoint      string
-	ContractsSource     string
-	ContractsMountPoint string
-	BundleHash          string
-	BundleScope         string
+	WorkspaceRoot    string
+	SharedDataSource string
+	DataMountPoint   string
+	SourceProjection *sourceartifact.RuntimeProjection
+	SourceMountPoint string
+	BundleHash       string
+	BundleScope      string
 }
 
 type HostManager struct {
@@ -33,11 +34,10 @@ type HostManager struct {
 
 func DefaultHostConfig() HostConfig {
 	return HostConfig{
-		WorkspaceRoot:       defaultHostWorkspaceRoot(),
-		SharedDataSource:    "",
-		DataMountPoint:      "/data",
-		ContractsSource:     "",
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    defaultHostWorkspaceRoot(),
+		SharedDataSource: "",
+		DataMountPoint:   "/data",
+		SourceMountPoint: "/opt/swarm/source",
 	}
 }
 
@@ -72,6 +72,38 @@ func (m *HostManager) SetDataProjectionProvider(provider runtimedataaccess.Provi
 	if m != nil {
 		m.data = provider
 	}
+}
+
+func (m *HostManager) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (Lifecycle, error) {
+	if m == nil {
+		return nil, fmt.Errorf("host workspace manager is required")
+	}
+	if source == nil {
+		return nil, fmt.Errorf("workspace semantic source is required")
+	}
+	if projection == nil {
+		return nil, fmt.Errorf("workspace validation failed: runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return nil, err
+	}
+	cfg := m.cfg
+	cfg.SourceProjection = projection
+	cfg.BundleHash = ""
+	cfg.BundleScope = ""
+	clone := NewHostManager()
+	clone.SetConfig(cfg)
+	clone.SetSemanticSource(source)
+	clone.SetDataProjectionProvider(m.data)
+	clone.SetBundleScope(projection.BundleHash())
+	return clone, nil
+}
+
+func (m *HostManager) SourceProjectionBundleHash() string {
+	if m == nil || m.cfg.SourceProjection == nil {
+		return ""
+	}
+	return m.cfg.SourceProjection.BundleHash()
 }
 
 func (m *HostManager) SetBundleScope(bundleHash string) {
@@ -239,13 +271,14 @@ func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionM
 	if dataMount == "" {
 		dataMount = LogicalDataMount
 	}
-	contractsMount := strings.TrimSpace(m.cfg.ContractsMountPoint)
-	if contractsMount == "" {
-		contractsMount = LogicalContractsMount
+	sourceMount := strings.TrimSpace(m.cfg.SourceMountPoint)
+	if sourceMount == "" {
+		sourceMount = LogicalSourceMount
 	}
+	sourceProjectionPath, _ := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, HostPath: strings.TrimSpace(workdir), Access: MountAccessReadWrite},
-		{LogicalPath: contractsMount, HostPath: strings.TrimSpace(m.cfg.ContractsSource), Access: MountAccessReadOnly},
+		{LogicalPath: sourceMount, HostPath: sourceProjectionPath, Access: MountAccessReadOnly},
 	}
 	if strings.TrimSpace(dataRoot) != "" {
 		out = append(out, ExecutionMount{LogicalPath: dataMount, HostPath: strings.TrimSpace(dataRoot), Access: MountAccessReadOnly})
@@ -297,12 +330,9 @@ func (m *HostManager) validateSharedMounts() error {
 	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
 		return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
 	}
-	contractsSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source")
+	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(filepath.Join(contractsSource, "package.yaml")); err != nil {
-		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", contractsSource)
 	}
 	root, err := m.hostRoot()
 	if err != nil {
@@ -311,7 +341,7 @@ func (m *HostManager) validateSharedMounts() error {
 	for _, source := range []struct {
 		name string
 		path string
-	}{{name: "/opt/swarm/contracts source", path: contractsSource}} {
+	}{{name: "/opt/swarm/source projection", path: sourceProjectionPath}} {
 		if pathsOverlap(root, source.path) {
 			return fmt.Errorf("workspace validation failed: host workspace root %s must not overlap %s %s", root, source.name, source.path)
 		}

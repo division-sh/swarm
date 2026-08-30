@@ -29,7 +29,7 @@ var admittedArchetypes = map[string]admittedArchetype{
 		Files: archetypeFiles, SourceRoot: "archetypes/zero-agent-automation", WorkingDir: ".",
 	},
 	"webhook-responder": {
-		Files: swarmassets.EmbeddedTelegramAgentExample(), SourceRoot: ".", WorkingDir: "./bot",
+		Files: swarmassets.EmbeddedTelegramAgentExample(), SourceRoot: ".", WorkingDir: ".",
 	},
 }
 
@@ -104,8 +104,8 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	if source.WorkingDir != "." {
 		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
 	}
-	fmt.Fprintln(out, "  swarm verify --config ./swarm.yaml --contracts .")
-	fmt.Fprintln(out, "  swarm serve --config ./swarm.yaml --contracts .")
-	fmt.Fprintln(out, "  swarm test --config ./swarm.yaml --contracts . ./tests/smoke.yaml")
+	fmt.Fprintln(out, "  swarm verify --config ./swarm.yaml .")
+	fmt.Fprintln(out, "  swarm serve --config ./swarm.yaml .")
+	fmt.Fprintln(out, "  swarm test --config ./swarm.yaml . tests/smoke.yaml")
 	return nil
 }

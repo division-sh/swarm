@@ -18,17 +18,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 78 {
-		t.Fatalf("method count = %d, want 78", report.MethodCount)
+	if report.MethodCount != 73 {
+		t.Fatalf("method count = %d, want 73", report.MethodCount)
 	}
-	if report.SchemaCount != 246 {
-		t.Fatalf("schema count = %d, want 246", report.SchemaCount)
+	if report.SchemaCount != 236 {
+		t.Fatalf("schema count = %d, want 236", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 72 {
-		t.Fatalf("error code count = %d, want 72", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 68 {
+		t.Fatalf("error code count = %d, want 68", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 35 {
-		t.Fatalf("mutating method count = %d, want 35", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 33 {
+		t.Fatalf("mutating method count = %d, want 33", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 5 {
 		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
@@ -127,14 +127,14 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 78 {
-		t.Fatalf("generated OpenRPC methods = %d, want 78", len(doc.Methods))
+	if len(doc.Methods) != 73 {
+		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 246 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 246", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 236 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 236", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 72 {
-		t.Fatalf("generated OpenRPC errors = %d, want 72", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 68 {
+		t.Fatalf("generated OpenRPC errors = %d, want 68", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -170,13 +170,13 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 		t.Fatal("generated OpenRPC missing agent.delivery_lifecycle")
 	}
 	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
-		if _, ok := methods[methodName]; !ok {
-			t.Fatalf("generated OpenRPC missing %s", methodName)
+		if _, ok := methods[methodName]; ok {
+			t.Fatalf("generated OpenRPC retains retired %s", methodName)
 		}
 	}
 	for _, schemaName := range []string{"BundleSummary", "BundleListResult", "BundleDetail", "BundleAgentDefinition", "BundleAgentsResult", "BundleRegistrationEnvelopeV1", "BundleRegistrationFile", "BundleRegisterDataBlobV1", "BundleRegistrationResult", "BundleDeleteResult"} {
-		if _, ok := doc.Components.Schemas[schemaName]; !ok {
-			t.Fatalf("generated OpenRPC missing %s", schemaName)
+		if _, ok := doc.Components.Schemas[schemaName]; ok {
+			t.Fatalf("generated OpenRPC retains retired %s", schemaName)
 		}
 	}
 	if _, ok := methods["run.fork"]; !ok {
@@ -322,7 +322,7 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 			params[param.Name] = param
 		}
 		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_hash",
-			"bundle-v1:sha256:<64 lowercase hex>",
+			"bundle-v2:sha256:<64 lowercase hex>",
 			"UNSUPPORTED_BUNDLE_HASH",
 		)
 		if _, ok := params["bundle_ref"]; ok {
@@ -345,285 +345,35 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 	)
 }
 
-func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkMethods(t *testing.T) {
+func TestFilesystemSourceAuthorityPublishesOnlyAdmittedArtifactRuntimeMethods(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
+	source := mustMappingValue(t, root, "filesystem_source_model")
+	assertScalarValue(t, mustMappingValue(t, source, "status"), "implemented")
+	assertScalarValue(t, mustMappingValue(t, source, "canonical_owner"), "internal/sourceartifact.AdmittedSourceArtifact")
+	assertScalarValue(t, mustYAMLPath(t, source, "flow_tree", "root_path"), ".")
+	assertScalarContains(t, mustYAMLPath(t, source, "flow_tree", "schema_owner"), "schema.yaml")
+	assertScalarContains(t, mustYAMLPath(t, source, "flow_tree", "schema_owner"), "There is no connect.yaml")
+	assertScalarValue(t, mustYAMLPath(t, source, "bundle_v2", "format"), "bundle-v2:sha256:<64 lowercase hex>")
+	assertScalarContains(t, mustYAMLPath(t, source, "bundle_v2", "preimage_and_blob"), "only canonical selected-store source blob")
+	stores := mustYAMLPath(t, source, "durable_lifecycle", "stores")
+	if !sequenceContainsScalar(stores, "sqlite") || !sequenceContainsScalar(stores, "postgres") {
+		t.Fatal("source artifact lifecycle must cover both selected stores")
+	}
+	assertScalarContains(t, mustYAMLPath(t, source, "durable_lifecycle", "reconstruction"), "never require or inspect the original filesystem")
+
 	multi := mustMappingValue(t, root, "multi_bundle_persistence")
-	assertScalarValue(t, mustMappingValue(t, multi, "status"), "promoted_source_authority_with_partial_runtime_behavior")
+	assertScalarValue(t, mustMappingValue(t, multi, "status"), "source_artifact_authority")
+	assertScalarValue(t, mustMappingValue(t, multi, "canonical_owner"), "platform-spec.yaml#filesystem_source_model")
+	assertScalarValue(t, mustYAMLPath(t, multi, "generated_artifact_policy", "current_openrpc_status"), "run_fork_only")
 
-	sourceEvidence := mustMappingValue(t, multi, "source_evidence")
-	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
-	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "boot_pinned_runtime_context_manager"), "#1175")
-
-	generatedPolicy := mustMappingValue(t, multi, "generated_artifact_policy")
-	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_run_fork_and_delete_methods_published")
-	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.list")
-	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "run.fork")
-	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.register")
-	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "now published")
-
-	identity := mustMappingValue(t, multi, "bundle_identity")
-	assertScalarValue(t, mustMappingValue(t, identity, "canonical_name"), "bundle_hash")
-	assertScalarContains(t, mustMappingValue(t, identity, "hash_rule_owner"), "platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1")
-	canonicalization := mustMappingValue(t, identity, "canonicalization_v1")
-	assertScalarValue(t, mustMappingValue(t, canonicalization, "status"), "promoted_merge_bearing_authority")
-	assertScalarValue(t, mustMappingValue(t, canonicalization, "implementation_owner"), "internal/runtime/contracts.BundleHash")
-	assertScalarContains(t, mustMappingValue(t, canonicalization, "runtime_behavior_boundary"), "Serve ingest")
-	preimage := mustMappingValue(t, canonicalization, "preimage_stream")
-	assertScalarContains(t, mustMappingValue(t, preimage, "entry_encoding"), "uint64 big-endian")
-	labels := mustMappingValue(t, canonicalization, "labels")
-	assertScalarContains(t, mustMappingValue(t, labels, "bundle_label_rule"), "bundle/<relative path from contracts root>")
-	entries := mustMappingValue(t, canonicalization, "canonical_entries")
-	if !sequenceContainsScalar(mustMappingValue(t, entries, "root_optional_yaml"), "schema.yaml") {
-		t.Fatal("canonicalization_v1 must include root schema.yaml as an optional YAML input")
-	}
-	contentPolicies := mustMappingValue(t, canonicalization, "content_policies")
-	yamlPolicy := mustMappingValue(t, contentPolicies, "yaml")
-	assertScalarContains(t, mustMappingValue(t, yamlPolicy, "tags"), "quoted explicit non-string scalar tags fail closed")
-	assertScalarContains(t, mustMappingValue(t, yamlPolicy, "json_emission"), "including `+` on positive exponents")
-	assertScalarContains(t, mustMappingValue(t, mustMappingValue(t, contentPolicies, "prompt_text"), "canonicalization"), "normalize CRLF and CR to LF")
-	namingPolicy := mustMappingValue(t, identity, "naming_policy")
-	assertScalarValue(t, mustMappingValue(t, namingPolicy, "bundle_hash"), "sole_public_runtime_and_persisted_name")
-	assertScalarValue(t, mustMappingValue(t, namingPolicy, "retired_transition_names"), "absent_from_supported_surfaces")
-
-	persistence := mustMappingValue(t, multi, "persistence_model")
-	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "#1013 promotes the bundles table")
-	serveIngest := mustMappingValue(t, persistence, "serve_ingest_projection")
-	assertScalarValue(t, mustMappingValue(t, serveIngest, "status"), "implemented_for_selected_postgres_and_sqlite_serve_contracts")
-	assertScalarValue(t, mustMappingValue(t, serveIngest, "projection_owner"), "internal/runtime/contracts.BuildBundleCatalogProjection")
-	assertScalarValue(t, mustMappingValue(t, serveIngest, "selected_projection_owner"), "internal/bundlecatalog.ServeIngestWriter projected by internal/store/selected.Owner")
-	storeOwners := mustMappingValue(t, serveIngest, "store_owners")
-	assertScalarValue(t, mustMappingValue(t, storeOwners, "postgres"), "private PostgreSQL bundle-catalog UpsertBundleCatalog owner")
-	assertScalarValue(t, mustMappingValue(t, storeOwners, "sqlite"), "private SQLite bundle-catalog UpsertBundleCatalog owner")
-	assertScalarValue(t, mustMappingValue(t, serveIngest, "source_fact_owner"), "internal/serveapp.prepareServeBundleSource")
-	assertScalarContains(t, mustMappingValue(t, serveIngest, "content_yaml"), "canonical content bytes as base64")
-	assertScalarContains(t, mustMappingValue(t, serveIngest, "data_blob"), "raw bytes as base64")
-	assertScalarContains(t, mustMappingValue(t, serveIngest, "parsed_json"), "Runtime-owned fields")
-	assertScalarContains(t, mustMappingValue(t, serveIngest, "idempotency"), "fails closed before runtime construction")
-	serveIngestApplications := mustMappingValue(t, serveIngest, "applies_to")
-	assertScalarContains(t, mustMappingValue(t, serveIngestApplications, "project_local_dev_scratch"), "bundle_source=persisted")
-	serveDBLoaded := mustMappingValue(t, persistence, "serve_db_loaded_runtime_source")
-	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "status"), "implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts")
-	assertScalarContains(t, mustMappingValue(t, serveDBLoaded, "cli_flag"), "[--bundle-hash")
-	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "runtime_context_manager_owner"), "internal/runtime.RuntimeContextManager")
-	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "bundle_context_owner"), "internal/runtime.BundleContext")
-	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
-	if mappingValue(platformTables, "bundles") == nil {
-		t.Fatal("bundles table must be live in platform_tables after the DB migration child lands")
-	}
-	runsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "runs"), "ddl")
-	assertScalarContains(t, runsDDL, "bundle_hash")
-	assertScalarContains(t, runsDDL, "bundle_source")
-	if strings.Contains(scalarValue(runsDDL), "bundle_fingerprint") {
-		t.Fatal("runs DDL still publishes retired bundle_fingerprint")
-	}
-
-	cliSurface := mustMappingValue(t, multi, "cli_surface")
-	runFork := mustMappingValue(t, cliSurface, "run_fork")
-	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]"
-	assertScalarValue(t, mustMappingValue(t, runFork, "command"), runForkCommand)
-	if strings.Contains(runForkCommand, "--bundle ") {
-		t.Fatal("run fork command promoted legacy --bundle spelling")
-	}
-	if strings.Contains(runForkCommand, "swarm control run fork") {
-		t.Fatal("run fork command promoted control-run fork spelling")
-	}
-
-	apiSurface := mustMappingValue(t, multi, "api_surface")
-	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "bundle_read_catalog_register_run_fork_and_delete_generated_openrpc")
-
-	bundleDelete := mustMappingValue(t, multi, "bundle_delete")
-	phaseFive := mustMappingValue(t, bundleDelete, "phase_5_atomicity")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "tracker"), "#1009")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "implemented_for_force_and_non_force_delete_runtime")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "canonical_runtime_owner"), "internal/store.PostgresStore.ApplyBundleDeleteFinalMutation")
-	appliesTo := mustMappingValue(t, phaseFive, "applies_to")
-	if !sequenceContainsScalar(appliesTo, "#1018 non-force bundle.delete final bundle availability mutation") {
-		t.Fatal("phase_5_atomicity must bind non-force bundle.delete")
-	}
-	if !sequenceContainsScalar(appliesTo, "#1019 bundle.delete --force final bundle availability mutation after preservation cleanup succeeds") {
-		t.Fatal("phase_5_atomicity must bind force bundle.delete")
-	}
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "one database transaction")
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "serializes run creation")
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "before deleting the matching bundles")
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "shared store transaction owner")
-	order := mustMappingValue(t, phaseFive, "transaction_order")
-	if len(order.Content) != 3 {
-		t.Fatalf("phase_5_atomicity transaction_order has %d items, want 3", len(order.Content))
-	}
-	if got := scalarValue(order.Content[0]); got != "lock_runs_table_against_new_persisted_bundle_rows" {
-		t.Fatalf("phase_5_atomicity transaction_order[0] = %q, want run-creation lock first", got)
-	}
-	if got := scalarValue(order.Content[1]); got != "update_eligible_runs_bundle_source_to_deleted" {
-		t.Fatalf("phase_5_atomicity transaction_order[1] = %q, want update second", got)
-	}
-	if got := scalarValue(order.Content[2]); got != "delete_matching_bundles_row" {
-		t.Fatalf("phase_5_atomicity transaction_order[2] = %q, want delete last", got)
-	}
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "read runs.bundle_source before consulting bundles")
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_UNAVAILABLE")
-	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_DATA_INTEGRITY_ERROR")
-	postDeleteAdmission := mustMappingValue(t, phaseFive, "post_delete_new_work_admission")
-	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "status"), "implemented_for_force_and_non_force_delete_runtime")
-	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "canonical_owner"), "internal/store/runlifecycle.EnsureActive")
-	admissionConsumers := mustMappingValue(t, postDeleteAdmission, "consumed_by")
-	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc event.publish") {
-		t.Fatal("post_delete_new_work_admission must bind event.publish")
-	}
-	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc run.start") {
-		t.Fatal("post_delete_new_work_admission must bind run.start")
-	}
-	if !sequenceContainsScalar(admissionConsumers, "internal/runtime.RuntimeLogger runtime-log run-row persistence") {
-		t.Fatal("post_delete_new_work_admission must bind runtime-log persistence")
-	}
-	if !sequenceContainsScalar(admissionConsumers, "internal/runtime/mutationlog mutation-log run-row persistence") {
-		t.Fatal("post_delete_new_work_admission must bind mutation-log persistence")
-	}
-	assertScalarContains(t, mustMappingValue(t, postDeleteAdmission, "rule"), "event.publish, run.start, runtime-log, and mutation-log attempts fail closed")
-	runtimeDeactivation := mustMappingValue(t, phaseFive, "runtime_context_deactivation")
-	assertScalarValue(t, mustMappingValue(t, runtimeDeactivation, "status"), "implemented_with_recoverable_precommit_quiescence_and_terminal_commit_evidence")
-	assertScalarContains(t, mustMappingValue(t, runtimeDeactivation, "canonical_owner"), "bundleDeleteRuntimeQuiescer")
-	runtimeDeactivationRule := mustMappingValue(t, runtimeDeactivation, "rule")
-	assertScalarContains(t, runtimeDeactivationRule, "typed recoverable ownership token")
-	assertScalarContains(t, runtimeDeactivationRule, "failure before durable final-mutation commit MUST restore")
-	assertScalarContains(t, runtimeDeactivationRule, "committed final mutation is terminal evidence")
-	assertScalarContains(t, runtimeDeactivationRule, "exact stored plan, cleanup, container, count, and final-mutation facts without synthesis")
-	assertScalarContains(t, runtimeDeactivationRule, "acquires the same serialized process-lifecycle operation")
-	assertScalarContains(t, runtimeDeactivationRule, "attaches the surviving primary runtime")
-	assertScalarContains(t, runtimeDeactivationRule, "even when no survivor refresh remains")
-	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
-	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
-		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")
-	}
-	if !sequenceContainsScalar(invalid, "leaving a quiesced loaded context unavailable after a pre-commit delete failure") {
-		t.Fatal("phase_5_atomicity must reject unavailable pre-commit failure contexts")
-	}
-
-	apiRunFork := mustMappingValue(t, apiSurface, "run_fork")
-	assertScalarValue(t, mustMappingValue(t, apiRunFork, "method"), "run.fork")
-	apiRunForkParams := mustMappingValue(t, apiRunFork, "params")
-	bundleHashParam := mustMappingValue(t, apiRunForkParams, "bundle_hash")
-	assertScalarValue(t, mustMappingValue(t, bundleHashParam, "cli_flag"), "--bundle-hash <bundle_hash>")
-
-	splits := mustMappingValue(t, multi, "explicit_splits")
-	for split, tracker := range map[string]string{
-		"schema_foundation":                   "#1013",
-		"reader_migration":                    "#1014",
-		"bundle_ingest_and_run_stamping":      "#1015",
-		"startup_recovery_unavailable_bundle": "#1016",
-		"bundle_api_catalog":                  "#1017",
-		"bundle_delete_non_force":             "#1018",
-		"bundle_delete_force":                 "#1019",
-		"serve_db_loaded_bundle":              "#1020",
-		"bundle_safe_list_read_scoping":       "#1021",
-		"create_new_work_bundle_hash":         "#1022",
-		"cross_bundle_fork":                   "#976",
-		"db_loaded_same_bundle_source":        "#1024",
-		"run_fork_cli_consumer":               "#1023",
-		"multi_bundle_cli_inventory":          "#1023",
-	} {
-		assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, splits, split), "tracker"), tracker)
-	}
-
-	cli := mustMappingValue(t, root, "cli_specification")
-	commandCatalog := mustMappingValue(t, cli, "command_catalog")
-	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
-	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents|build|register|delete")
-	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_inventory_build_prepared_envelope_directory_register_and_delete")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "swarm bundle build materialization")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "local directory swarm bundle register --contracts")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Destructive swarm bundle delete is implemented")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Archive packaging remains split")
-	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
-	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
-	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
-	retired := mustMappingValue(t, cli, "retired_namespaces")
-	// CLI v2.2 (#1654/#1677) supersedes the #1012 "fork is not retired"
-	// decision: the top-level spelling is retired fail-closed while the public
-	// command moved to `swarm run fork`. The retirement lives in the v2.2
-	// spellings block, not as a bespoke namespace key.
-	if mappingValue(retired, "fork") != nil {
-		t.Fatal("fork retirement must live in topology_v2_2_retired_spellings, not a bespoke namespace key")
-	}
-	v22Spellings := mustMappingValue(t, mustMappingValue(t, retired, "topology_v2_2_retired_spellings"), "spellings")
-	if mappingValue(v22Spellings, "fork") == nil {
-		t.Fatal("top-level swarm fork must be retired in topology_v2_2_retired_spellings")
-	}
-	legacyHarness := mustMappingValue(t, retired, "fork_legacy_harness_forms")
-	assertScalarContains(t, mustMappingValue(t, legacyHarness, "command"), "--contracts")
-
-	parentTail := mustMappingValue(t, cli, "parent_tail")
-	retiredOrFailClosed := mustMappingValue(t, parentTail, "retired_or_fail_closed")
-	forkRetirementLedgered := false
-	for _, item := range retiredOrFailClosed.Content {
-		if scalarValue(item) == "swarm fork" {
-			t.Fatal("fork retirement ledger entry must carry the v2.2 disposition annotation, not the bare spelling")
-		}
-		if strings.HasPrefix(scalarValue(item), "swarm fork (v2.2") {
-			forkRetirementLedgered = true
+	methods := mustYAMLPath(t, root, "api_specification", "method_catalog")
+	for _, retired := range []string{"bundle.register", "bundle.delete", "bundle.list", "bundle.get", "bundle.agents"} {
+		if hasMappingKey(methods, retired) {
+			t.Fatalf("retired bundle catalog method %q remains published", retired)
 		}
 	}
-	if !forkRetirementLedgered {
-		t.Fatal("parent_tail.retired_or_fail_closed must ledger the v2.2 swarm fork retirement")
-	}
-	remaining := mustMappingValue(t, parentTail, "remaining_should_have_not_implemented")
-	if sequenceContainsScalar(remaining, runForkCommand) {
-		t.Fatalf("remaining_should_have_not_implemented still includes implemented %q", runForkCommand)
-	}
-	if sequenceContainsScalar(remaining, "swarm bundle list|show|agents|register|delete") {
-		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle inventory commands")
-	}
-	if !sequenceContainsScalar(remaining, "swarm bundle register --archive <archive-file>") {
-		t.Fatal("remaining_should_have_not_implemented missing archive register split")
-	}
-	if sequenceContainsScalar(remaining, "swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]") {
-		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle delete")
-	}
-
-	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
-	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_run_fork_and_delete_method_catalog")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.register is also published")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "prepared-envelope swarm")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "local contracts-directory packaging is implemented")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "archive packaging remains split")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.delete is promoted")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "omitted or false force performs non-force deletion")
-
-	for _, relPath := range []string{
-		filepath.Join("internal", "cliapp", "fork.go"),
-	} {
-		raw, err := os.ReadFile(filepath.Join(repoRoot(t), relPath))
-		if err != nil {
-			t.Fatalf("read %s: %v", relPath, err)
-		}
-		content := string(raw)
-		if strings.Contains(content, "swarm control run fork") {
-			t.Fatalf("%s still promotes stale swarm control run fork authority", relPath)
-		}
-		if strings.Contains(content, "retired by the Cobra command tree") {
-			t.Fatalf("%s still carries stale retired-by-Cobra swarm fork authority", relPath)
-		}
-		if !strings.Contains(content, runForkCommand) {
-			t.Fatalf("%s missing promoted run fork command shape", relPath)
-		}
-	}
-
-	api := loadRepoAPISpec(t)
-	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
-		if _, ok := api.MethodCatalog[methodName]; !ok {
-			t.Fatalf("%s must be in live method_catalog after bundle catalog implementation lands", methodName)
-		}
-	}
-	if _, ok := api.MethodCatalog["run.fork"]; !ok {
-		t.Fatal("run.fork missing from live method_catalog after API/runtime handler promotion")
-	}
-	generated, err := GenerateOpenRPC(api)
-	if err != nil {
-		t.Fatalf("GenerateOpenRPC() error = %v", err)
-	}
-	var doc OpenRPCDocument
-	if err := json.Unmarshal(generated, &doc); err != nil {
-		t.Fatalf("unmarshal generated openrpc: %v", err)
+	if !hasMappingKey(methods, "run.fork") {
+		t.Fatal("run.fork must remain published")
 	}
 }
 
@@ -1229,7 +979,7 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	assertScalarValue(t, mappingValue(multiBundleIdentity, "status"), "concrete_route_identity_with_cross_bundle_slug_constraint")
 	assertScalarContains(t, mappingValue(multiBundleIdentity, "rule"), "concrete_live_identity")
 	sourceEvidence := mustMappingValue(t, multiBundle, "source_evidence")
-	assertScalarValue(t, mappingValue(sourceEvidence, "agent_identity_source_authority"), "#977")
+	assertScalarValue(t, mappingValue(sourceEvidence, "agent_identity_source_authority"), "#2133")
 
 	api := mustMappingValue(t, root, "api_specification")
 	apiIdentity := mustMappingValue(t, api, "agent_identity_boundary")

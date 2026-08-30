@@ -19,13 +19,9 @@ func WritePublicTemplateInputRoute(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"package.yaml": `name: review
+		"manifest.yaml": `name: review
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: template
 `,
 		"schema.yaml": `name: review
 pins:
@@ -44,7 +40,7 @@ pins:
   event_handlers:
     bootstrap.requested: {}
 `,
-		"flows/operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `name: operating
 mode: template
 instance: operating_id
 pins:
@@ -56,15 +52,15 @@ pins:
           mode: create
           from: event.id
 `,
-		"flows/operating/entities.yaml": `operating:
+		"operating/entities.yaml": `operating:
   operating_id:
     type: uuid
     immutable: true
 `,
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/events.yaml": `opco.product_initialization_requested:
   topic: text?
 `,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+		"operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
@@ -85,17 +81,12 @@ pins:
 func CopyRootOutputConnect(t testing.TB, emit RootConnectEmit) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root-output-connect
+	if err := os.RemoveAll(filepath.Join(root, "producer")); err != nil {
+		t.Fatalf("remove inherited producer flow: %v", err)
+	}
+	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-output-connect
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - event: root.ready
-    from: .
-    to: consumer
 `)
 	rootInput := ""
 	rootNodes := ""
@@ -107,7 +98,7 @@ connect:
 		}
 		rootNodes = "root-node:\n  id: root-node\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events: [root.ready]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
 	if rootNodes != "" {
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
@@ -133,7 +124,7 @@ pins:
 func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	applyClosedReplacement(t, root+"/package.yaml", "    to: consumer\n", "    to: missing\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    to: consumer\n", "    to: missing\n")
 	return root
 }
 
@@ -142,13 +133,14 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 func CopyRootOutputSingletonConnect(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root-output-singleton-connect
+	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-output-singleton-connect
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: singleton
+`)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: root-output-singleton-connect
+pins:
+  outputs:
+    events: [root.ready]
 connect:
   - event: root.ready
     from: .
@@ -173,10 +165,9 @@ pins:
 func CopyRootOutputSingletonArc(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputSingletonConnect(t)
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "  - id: consumer\n    flow: consumer\n", "  - id: receiver\n    flow: receiver\n")
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "    to: consumer\n", "    to: receiver\n")
-	consumerDir := filepath.Join(root, "flows", "consumer")
-	receiverDir := filepath.Join(root, "flows", "receiver")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    to: consumer\n", "    to: receiver\n")
+	consumerDir := filepath.Join(root, "consumer")
+	receiverDir := filepath.Join(root, "receiver")
 	if err := os.Rename(consumerDir, receiverDir); err != nil {
 		t.Fatalf("rename singleton receiver fixture: %v", err)
 	}
@@ -192,22 +183,18 @@ func CopyRootOutputSingletonArc(t testing.TB) string {
 func CopySingletonOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "package.yaml", `name: singleton-output-root-connect
+	writeClosedVariantFile(t, root, "manifest.yaml", `name: singleton-output-root-connect
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scout
-    flow: scout
-    mode: singleton
-connect:
-  - event: scout.completed
-    from: scout
-    to: .
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: singleton-output-root-connect
 pins:
   inputs:
     events: [scout.completed]
+connect:
+  - event: scout.completed
+    from: scout
+    to: .
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   id: root-collector
@@ -232,20 +219,9 @@ pins:
 func CopyRootSingletonBoomerang(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root-singleton-boomerang
+	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-singleton-boomerang
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: boomerang
-    flow: boomerang
-    mode: singleton
-connect:
-  - event: work.ping
-    from: .
-    to: boomerang
-  - event: work.pong
-    from: boomerang
-    to: .
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
 pins:
@@ -253,6 +229,13 @@ pins:
     events: [work.pong]
   outputs:
     events: [work.ping]
+connect:
+  - event: work.ping
+    from: .
+    to: boomerang
+  - event: work.pong
+    from: boomerang
+    to: .
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:

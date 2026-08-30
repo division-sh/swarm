@@ -81,7 +81,7 @@ var deliveryPlannerHandlerFixtures = map[string]deliveryPlannerHandlerFixture{
 	"project-observer":       {flowID: "root", event: "child.start"},
 	"flow-a-node":            {flowID: "flow-a", path: "flow-a", event: "task.ready"},
 	"repo-scaffold-node":     {flowID: "repo-scaffold", path: "repo-scaffold", event: "webhook.received"},
-	"grandchild-worker":      {flowID: "grandchild", path: "child/grandchild", event: "micro.started"},
+	"grandchild-worker":      {flowID: "child/grandchild", path: "child/grandchild", event: "micro.started"},
 }
 
 func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver, policy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
@@ -121,10 +121,12 @@ func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver
 }
 
 func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
-	root := runtimecontracts.FlowContractView{}
+	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema, Path: "."}
 	byID := map[string]*runtimecontracts.FlowContractView{}
+	byPath := map[string]*runtimecontracts.FlowContractView{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "root", Version: "1.0.0"},
+		RootSchema: &rootSchema,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "root", Version: "1.0.0", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{},
 		},
@@ -150,7 +152,7 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 		flow := flows[fixture.flowID]
 		if flow == nil {
 			flow = &runtimecontracts.FlowContractView{
-				Path: fixture.path, Paths: runtimecontracts.FlowContractPaths{ID: fixture.flowID, Flow: fixture.flowID},
+				Path: fixture.path, Paths: runtimecontracts.FlowContractPaths{FlowPath: fixture.path},
 				Schema: runtimecontracts.FlowSchemaDocument{Mode: "static"},
 				Nodes:  map[string]runtimecontracts.SystemNodeContract{}, Events: map[string]runtimecontracts.EventCatalogEntry{},
 			}
@@ -163,12 +165,21 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 		root.Children = append(root.Children, *flow)
 	}
 	for index := range root.Children {
-		flowID := strings.TrimSpace(root.Children[index].Paths.ID)
-		byID[flowID] = &root.Children[index]
+		flow := &root.Children[index]
+		for flowID, candidate := range flows {
+			if candidate == nil || strings.TrimSpace(candidate.Path) != strings.TrimSpace(flow.Path) {
+				continue
+			}
+			byID[flowID] = flow
+			break
+		}
+		byPath[flow.Paths.FlowPath] = flow
 	}
 	root.Nodes = bundle.Nodes
 	root.Events = bundle.Events
-	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: byID}
+	byID["."] = &root
+	byPath["."] = &root
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: byID, ByPath: byPath}
 	return semanticview.Wrap(bundle)
 }
 
@@ -556,7 +567,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker"))}}
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker")), Path: "."}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
@@ -619,11 +630,11 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 
 func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscriber(t *testing.T) {
 	rootRunID := uuid.NewString()
-	rootTarget := events.RouteIdentity{FlowID: "root", FlowInstance: rootRunID, EntityID: "ent-1"}
+	rootTarget := events.RouteIdentity{FlowID: ".", FlowInstance: rootRunID, EntityID: "ent-1"}
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "parent-listener"))}}
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "parent-listener")), Path: "."}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -1075,7 +1086,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-node")), MatchPattern: "opco.spinup_requested"}}
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-node")), Path: ".", MatchPattern: "opco.spinup_requested"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1106,7 +1117,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	if !route.Recipient.IsNode() || route.Recipient.LocalID() != "portfolio-node" {
 		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
 	}
-	if route.Target.Route() != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}) {
+	if route.Target.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: "ent-root"}) {
 		t.Fatalf("delivery target = %#v, want exact selected root owner", route.Target)
 	}
 	if !plan.TargetFailure.Empty() {
@@ -1119,7 +1130,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), MatchPattern: "timer.check"}}
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: ".", MatchPattern: "timer.check"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return nil
@@ -1164,7 +1175,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	if !route.Recipient.IsNode() || route.Recipient.LocalID() != "test-node" {
 		t.Fatalf("delivery route = %#v, want node/test-node", route)
 	}
-	if route.Target.Route() != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}) {
+	if route.Target.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: "ent-root"}) {
 		t.Fatalf("delivery target = %#v, want exact selected root owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
@@ -1240,7 +1251,7 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{
-					Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: "root",
+					Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "test-node")), Path: ".",
 					MatchPattern: "timer.check", routeSource: subscriberRouteSourceSubscription,
 				}}
 			},
@@ -1257,53 +1268,21 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 
 	plan, err := planner.Plan(context.Background(), eventtest.ExistingRunRootIngressWithRoutingSource(
 		"", "timer.check", "", "", nil, 0, runID,
-		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "root"),
-		eventtest.StaticFlowRoutingSource("root", "root", eventtest.UUID("root-static-source")), time.Time{},
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, runID),
+		eventtest.RootRoutingSource(eventtest.UUID("root-static-source")), time.Time{},
 	))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	want := events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}
+	want := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: "ent-root"}
 	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.LocalID() != "test-node" || routes[0].Target.Route() != want {
 		t.Fatalf("delivery routes = %#v, want exact selected-run root owner %#v", routes, want)
 	}
 	if len(plan.DeliveryIntents) != 1 {
 		t.Fatalf("delivery intents = %#v, want one exact concrete-node intent", plan.DeliveryIntents)
 	}
-	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerConcreteNodeRoute {
-		t.Fatalf("delivery intent producer = %s, want concrete_node_route", routeIntentProducerCode(got))
-	}
-}
-
-func TestDeliveryPlanner_ImportBoundaryWildcardUsesSubscriberScopeInsteadOfNestedSourceScope(t *testing.T) {
-	const (
-		rootPath  = "repo-scaffold"
-		childPath = "repo-scaffold/child-1"
-	)
-	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
-		uuid.NewString(), "repo-scaffold/repo_commit_succeeded", "artifact-repo", "", nil, 0, uuid.NewString(),
-		events.EnvelopeForFlowInstance(events.EventEnvelope{}, childPath),
-		eventtest.StaticFlowRoutingSource(rootPath, childPath, eventtest.UUID("nested-artifact-source")), time.Now().UTC(),
-	)
-	subscriber := Subscriber{
-		Recipient:    events.MustNodeDeliveryRecipient(testRootNode(t, "repo-callback")),
-		Path:         rootPath,
-		MatchPattern: "repo-scaffold/*",
-		routeSource:  subscriberRouteSourceImportBoundaryWildcardGrant,
-	}
-
-	if intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(nil, evt, []Subscriber{subscriber}); len(intents) != 0 {
-		t.Fatalf("same-instance intents = %#v, want import-boundary wildcard excluded", intents)
-	}
-	intents := routedImportBoundaryNoTargetNodeDeliveryIntents(evt, []Subscriber{subscriber})
-	if len(intents) != 1 {
-		t.Fatalf("import-boundary intents = %#v, want one exact subscriber-scope intent", intents)
-	}
-	if got := intents[0].TargetBlueprint.FlowInstance; got != rootPath {
-		t.Fatalf("target flow instance = %q, want subscriber scope %q instead of source scope %q", got, rootPath, childPath)
-	}
-	if got := intents[0].Producer; got != routeIntentProducerScopedNodeRoute {
-		t.Fatalf("intent producer = %q, want scoped node route", got)
+	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerRootNodeRoute {
+		t.Fatalf("delivery intent producer = %s, want root_node_route", routeIntentProducerCode(got))
 	}
 }
 
@@ -1338,10 +1317,10 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 		t.Run(tt.name, func(t *testing.T) {
 			flow := runtimecontracts.FlowContractView{
 				Path:   "validation",
-				Paths:  runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 				Schema: runtimecontracts.FlowSchemaDocument{Mode: tt.mode},
 			}
-			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+			root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 					Root: &root,
@@ -1377,7 +1356,7 @@ func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *t
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{
-					{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "project-observer")), MatchPattern: "child/child.start",
+					{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "project-observer")), Path: ".", MatchPattern: "child/child.start",
 						routeSource: subscriberRouteSourceSubscription,
 					},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child", "child-intake")), Path: "child",
@@ -1542,7 +1521,7 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testin
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "grandchild", "grandchild-worker")), Path: "child/grandchild",
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child/grandchild", "grandchild-worker")), Path: "child/grandchild",
 					MatchPattern: "child/grandchild/micro.start",
 					routeSource:  subscriberRouteSourceSubscription,
 				}}
@@ -1574,7 +1553,7 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testin
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), "child/inst-1"),
 		time.Time{},
 	))
-	wantNode := testFlowNode(t, "grandchild", "grandchild-worker")
+	wantNode := testFlowNode(t, "child/grandchild", "grandchild-worker")
 	if err == nil || !strings.Contains(err.Error(), `routed node "`+wantNode.Key()+`"`) {
 		t.Fatalf("Plan error = %v, want descendant route rejection", err)
 	}
@@ -1705,6 +1684,7 @@ func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.
 	childNode := testFlowNode(t, "child-flow", "child-handler")
 	root := Subscriber{
 		Recipient:      events.MustNodeDeliveryRecipient(rootNode),
+		Path:           ".",
 		MatchPattern:   "step.begin",
 		routeSource:    subscriberRouteSourceSubscription,
 		handlerNode:    rootNode,
@@ -1720,7 +1700,7 @@ func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.
 		LocalizedEvent: "step.begin",
 	}
 	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(deliveryPlannerHandlerSource(false), event, []Subscriber{child, root})
-	if len(intents) != 1 || intents[0].Recipient.LocalID() != "root-handler" || intents[0].TargetBlueprint.FlowID != "root" {
+	if len(intents) != 1 || intents[0].Recipient.LocalID() != "root-handler" || intents[0].TargetBlueprint.FlowID != "." {
 		t.Fatalf("root intents = %#v, want only exact authored-root handler", intents)
 	}
 }

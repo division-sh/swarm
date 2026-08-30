@@ -30,27 +30,11 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 	}
 	owner := semanticScope.Declaration.Source
 	route = route.Normalized()
-	if strings.TrimSpace(owner.Layer) == "project" && strings.TrimSpace(owner.FlowID) != "" {
-		scope, ok := semanticScope.OwningFlow()
-		if !ok {
-			return events.RoutingSource{}, fmt.Errorf("project node %q routing source references missing owning flow %q", node.Key(), owner.FlowID)
-		}
-		return admitFlowExecutionRoutingSource(source, "node", node.Key(), owner, route, scope)
+	scope, ok := semanticScope.OwningFlow()
+	if !ok {
+		return events.RoutingSource{}, fmt.Errorf("flow node %q routing source references missing flow %q", node.Key(), node.FlowPath())
 	}
-	if strings.TrimSpace(owner.Layer) == "project" && route.EntityID == "" {
-		if route.FlowID != strings.TrimSpace(source.WorkflowName()) || route.FlowInstance == "" {
-			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", node.Key())
-		}
-		return events.NewStaticFlowRoutingSource(route)
-	}
-	if owner.Layer == "flow" {
-		scope, ok := semanticScope.OwningFlow()
-		if !ok {
-			return events.RoutingSource{}, fmt.Errorf("flow node %q routing source references missing flow %q", node.Key(), node.FlowID())
-		}
-		return admitFlowExecutionRoutingSource(source, "node", node.Key(), owner, route, scope)
-	}
-	return admitDeclaredExecutionRoutingSource(source, "node", node.Key(), owner, route)
+	return admitFlowExecutionRoutingSource(source, "node", node.Key(), owner, route, scope)
 }
 
 // AdmitAgentExecutionRoutingSource admits the exact source fact from the
@@ -73,10 +57,10 @@ func AdmitAgentExecutionRoutingSource(source semanticview.Source, actor models.A
 		route.FlowInstance = instancePath
 	}
 	if ownerFlowID != "" {
-		if sourceFlowID := strings.TrimSpace(owner.FlowID); sourceFlowID != "" && sourceFlowID != ownerFlowID {
+		if sourceFlowID := strings.TrimSpace(owner.FlowPath); sourceFlowID != "" && sourceFlowID != ownerFlowID {
 			return events.RoutingSource{}, fmt.Errorf("agent %q declaration source flow %q conflicts with canonical owning flow %q", identity.AgentID(), sourceFlowID, ownerFlowID)
 		}
-		owner.FlowID = ownerFlowID
+		owner.FlowPath = ownerFlowID
 		flow, ok := scope.OwningFlow()
 		if !ok {
 			return events.RoutingSource{}, fmt.Errorf("agent %q routing source references missing owning flow %q", identity.AgentID(), ownerFlowID)
@@ -91,44 +75,36 @@ func AdmitAgentExecutionRoutingSource(source semanticview.Source, actor models.A
 func AdmitFlowExecutionRoutingSource(source semanticview.Source, flowID string, route events.RouteIdentity) (events.RoutingSource, error) {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
-		return admitDeclaredExecutionRoutingSource(source, "flow", "root", runtimecontracts.ContractItemSource{Layer: "project"}, route)
+		flowID = "."
 	}
-	return admitDeclaredExecutionRoutingSource(source, "flow", flowID, runtimecontracts.ContractItemSource{Layer: "flow", FlowID: flowID}, route)
+	return admitDeclaredExecutionRoutingSource(source, "flow", flowID, runtimecontracts.ContractItemSource{FlowPath: flowID, Family: "flow"}, route)
 }
 
 func admitDeclaredExecutionRoutingSource(source semanticview.Source, ownerType, ownerID string, owner runtimecontracts.ContractItemSource, route events.RouteIdentity) (events.RoutingSource, error) {
 	route = route.Normalized()
-	owner.Layer = strings.TrimSpace(owner.Layer)
-	owner.FlowID = strings.TrimSpace(owner.FlowID)
-	switch owner.Layer {
-	case "project":
-		if route.EntityID == "" {
-			return events.RoutingSource{}, fmt.Errorf("project %s %q routing source requires entity_id", ownerType, ownerID)
-		}
-		return events.NewRootRoutingSource(route.EntityID)
-	case "flow":
-		scope, ok := exactRoutingFlowScope(source, owner.PackageKey, owner.FlowID)
-		if !ok {
-			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source references missing flow %q", ownerType, ownerID, owner.FlowID)
-		}
-		return admitFlowExecutionRoutingSource(source, ownerType, ownerID, owner, route, scope)
-	default:
-		return events.RoutingSource{}, fmt.Errorf("%s %q routing source has unsupported declaration layer %q", ownerType, ownerID, owner.Layer)
+	owner.FlowPath = strings.TrimSpace(owner.FlowPath)
+	scope, ok := exactRoutingFlowScope(source, owner.FlowPath)
+	if !ok {
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source references missing flow %q", ownerType, ownerID, owner.FlowPath)
 	}
+	return admitFlowExecutionRoutingSource(source, ownerType, ownerID, owner, route, scope)
 }
 
 func admitFlowExecutionRoutingSource(source semanticview.Source, ownerType, ownerID string, owner runtimecontracts.ContractItemSource, route events.RouteIdentity, scope semanticview.FlowScope) (events.RoutingSource, error) {
-	owner.FlowID = strings.TrimSpace(owner.FlowID)
-	if owner.FlowID == "" {
-		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source requires declared flow_id", ownerType, ownerID)
+	owner.FlowPath = strings.TrimSpace(owner.FlowPath)
+	if owner.FlowPath == "" {
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source requires declared flow_path", ownerType, ownerID)
 	}
-	if route.FlowID != "" && route.FlowID != owner.FlowID {
-		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source flow_id %q conflicts with declared flow %q", ownerType, ownerID, route.FlowID, owner.FlowID)
+	if owner.FlowPath == "." {
+		return admitSelectedRootExecutionRoutingSource(ownerType, ownerID, route)
 	}
-	route.FlowID = owner.FlowID
+	if route.FlowID != "" && route.FlowID != owner.FlowPath {
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source flow_id %q conflicts with declared flow %q", ownerType, ownerID, route.FlowID, owner.FlowPath)
+	}
+	route.FlowID = owner.FlowPath
 	flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
 	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(owner.FlowID)), "/")
+		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(owner.FlowPath)), "/")
 	}
 	switch strings.TrimSpace(scope.Mode) {
 	case runtimecontracts.FlowModeTemplate:
@@ -157,17 +133,26 @@ func admitFlowExecutionRoutingSource(source semanticview.Source, ownerType, owne
 	}
 }
 
-func exactRoutingFlowScope(source semanticview.Source, packageKey, flowID string) (semanticview.FlowScope, bool) {
-	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
-	if packageKey == "" {
-		return semanticview.FlowScopeByID(source, flowID)
+func admitSelectedRootExecutionRoutingSource(ownerType, ownerID string, route events.RouteIdentity) (events.RoutingSource, error) {
+	route = route.Normalized()
+	if route.FlowID != "" && route.FlowID != "." {
+		return events.RoutingSource{}, fmt.Errorf("root %s %q routing source flow_id %q conflicts with selected root %q", ownerType, ownerID, route.FlowID, ".")
+	}
+	if route.EntityID != "" {
+		return events.NewRootRoutingSource(route.EntityID)
+	}
+	if route.FlowID != "." || route.FlowInstance == "" {
+		return events.RoutingSource{}, fmt.Errorf("root %s %q entityless routing source requires the exact selected-run flow route", ownerType, ownerID)
+	}
+	return events.NewStaticFlowRoutingSource(route)
+}
+
+func exactRoutingFlowScope(source semanticview.Source, flowID string) (semanticview.FlowScope, bool) {
+	if scope, ok := semanticview.FlowScopeByID(source, flowID); ok {
+		return scope, true
 	}
 	for _, scope := range source.FlowScopes() {
-		candidate := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
-		if candidate == "" {
-			candidate = runtimeidentity.RootPackageKey
-		}
-		if candidate == packageKey && strings.TrimSpace(scope.ID) == strings.TrimSpace(flowID) {
+		if strings.Trim(strings.TrimSpace(scope.Path), "/") == strings.Trim(strings.TrimSpace(flowID), "/") {
 			return scope, true
 		}
 	}

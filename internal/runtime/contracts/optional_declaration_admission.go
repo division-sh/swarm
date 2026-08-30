@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -46,6 +47,98 @@ type optionalDeclarationAdmission struct {
 	role     optionalDeclarationRole
 	source   yamlsource.Snapshot
 	document yamlsource.Document
+}
+
+func admitOptionalDeclarationSource(artifact *sourceartifact.AdmittedSourceArtifact, label string, role optionalDeclarationRole) (optionalDeclarationAdmission, bool, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return optionalDeclarationAdmission{}, false, nil
+	}
+	document, ok := artifact.YAML(label)
+	if !ok {
+		return optionalDeclarationAdmission{}, false, fmt.Errorf("admitted source artifact is missing %s", label)
+	}
+	if err := validateOptionalDeclarationDocument(document, role); err != nil {
+		return optionalDeclarationAdmission{}, false, wrapLoaderDiagnosticFile(err, label)
+	}
+	if document.Presence() == yamlsource.PresenceNull {
+		return optionalDeclarationAdmission{}, false, wrapLoaderDiagnosticFile(NewOptionalDeclarationFileEmptyDiagnostic(role.fileName()), label)
+	}
+	return optionalDeclarationAdmission{path: label, role: role, document: document}, true, nil
+}
+
+func loadOptionalAgentDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]AgentRegistryEntry, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationAgents)
+	if err != nil || !present {
+		return map[string]AgentRegistryEntry{}, err
+	}
+	entries := map[string]AgentRegistryEntry{}
+	if err := artifact.DecodeYAML(label, &entries); err != nil {
+		return nil, wrapLoaderDiagnosticFile(err, label)
+	}
+	return entries, admission.RequireLive(len(entries))
+}
+
+func loadOptionalEntityDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (EntityContractsDocument, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationEntities)
+	if err != nil || !present {
+		return EntityContractsDocument{}, err
+	}
+	entries, err := projectEntityContractsDocument(admission.document.Root())
+	if err != nil {
+		return nil, wrapLoaderDiagnosticFile(err, label)
+	}
+	return entries, admission.RequireLive(len(entries))
+}
+
+func loadOptionalNodeDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]SystemNodeContract, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationNodes)
+	if err != nil || !present {
+		return map[string]SystemNodeContract{}, err
+	}
+	entries := map[string]SystemNodeContract{}
+	if err := artifact.DecodeYAML(label, &entries); err != nil {
+		return nil, wrapLoaderDiagnosticFile(err, label)
+	}
+	return entries, admission.RequireLive(len(entries))
+}
+
+func loadOptionalPolicyDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (PolicyDocument, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationPolicy)
+	if err != nil || !present {
+		return PolicyDocument{Values: map[string]PolicyValue{}}, err
+	}
+	document, err := flowmodel.ProjectPolicyDocument(admission.document.Root())
+	if err != nil {
+		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, label)
+	}
+	count := len(document.Values) + len(document.Criteria) + len(document.Validation) + len(document.Modules)
+	return document, admission.RequireLive(count)
+}
+
+func loadOptionalToolDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]ToolSchemaEntry, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationTools)
+	if err != nil || !present {
+		return map[string]ToolSchemaEntry{}, err
+	}
+	entries := map[string]ToolSchemaEntry{}
+	if err := artifact.DecodeYAML(label, &entries); err != nil {
+		return nil, wrapLoaderDiagnosticFile(err, label)
+	}
+	return entries, admission.RequireLive(len(entries))
+}
+
+func loadOptionalTypeDeclarationsFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (TypeCatalogDocument, error) {
+	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationTypes)
+	if err != nil || !present {
+		return TypeCatalogDocument{}, err
+	}
+	document, err := projectTypeCatalogDocument(admission.document.Root())
+	if err != nil {
+		return TypeCatalogDocument{}, wrapLoaderDiagnosticFile(err, label)
+	}
+	count := len(document.Scalars) + len(document.Enums) + len(document.Types)
+	return document, admission.RequireLive(count)
 }
 
 func admitOptionalDeclarationFile(path string, role optionalDeclarationRole) (optionalDeclarationAdmission, bool, error) {

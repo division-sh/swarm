@@ -10,7 +10,7 @@ import (
 
 func TestResolvedIntentIdentityBindsExactCanonicalFacts(t *testing.T) {
 	content := "  preserve exact intent bytes  \n"
-	resolved, err := Resolve(SourceInline, "inline", "flows/review/agents.yaml#agents.reviewer.intent", content)
+	resolved, err := Resolve(SourceInline, "inline", "review/agents.yaml#agents.reviewer.intent", content)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestResolvedIntentIdentityBindsExactCanonicalFacts(t *testing.T) {
 }
 
 func TestResolvedIntentRejectsTamperedArtifact(t *testing.T) {
-	resolved, err := Resolve(SourceLocal, "flows/review/intent/reviewer.md", "flows/review/agents.yaml#agents.reviewer.intent", "Review the request.\n")
+	resolved, err := Resolve(SourceLocal, "review/intent/reviewer.md", "review/agents.yaml#agents.reviewer.intent", "Review the request.\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestResolvedIntentRejectsTamperedArtifact(t *testing.T) {
 }
 
 func TestResolvedIntentRejectsImpossibleCanonicalFactsAtConstruction(t *testing.T) {
-	nonNFC := "flows/caf" + string([]rune{'e', '\u0301'}) + "/intent.md"
+	nonNFC := "caf" + string([]rune{'e', '\u0301'}) + "/intent.md"
 	if norm.NFC.IsNormalString(nonNFC) {
 		t.Fatal("test coordinate unexpectedly NFC-normalized")
 	}
@@ -77,10 +77,10 @@ func TestResolvedIntentRejectsImpossibleCanonicalFactsAtConstruction(t *testing.
 		{name: "local_absolute", kind: SourceLocal, coordinate: "/outside.md", provenance: "agents.yaml#agents.worker.intent"},
 		{name: "local_windows_absolute", kind: SourceLocal, coordinate: `C:\outside.md`, provenance: "agents.yaml#agents.worker.intent"},
 		{name: "local_backslash", kind: SourceLocal, coordinate: `flows\worker.md`, provenance: "agents.yaml#agents.worker.intent"},
-		{name: "local_nul", kind: SourceLocal, coordinate: "flows/worker\x00.md", provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_nul", kind: SourceLocal, coordinate: "worker\x00.md", provenance: "agents.yaml#agents.worker.intent"},
 		{name: "local_non_nfc", kind: SourceLocal, coordinate: nonNFC, provenance: "agents.yaml#agents.worker.intent"},
 		{name: "arbitrary_provenance", kind: SourceInline, coordinate: "inline", provenance: "operator-input"},
-		{name: "wrong_declaration_file", kind: SourceInline, coordinate: "inline", provenance: "flows/review/config.yaml#agents.worker.intent"},
+		{name: "wrong_declaration_file", kind: SourceInline, coordinate: "inline", provenance: "review/config.yaml#agents.worker.intent"},
 		{name: "provenance_traversal", kind: SourceInline, coordinate: "inline", provenance: "../agents.yaml#agents.worker.intent"},
 		{name: "provenance_backslash", kind: SourceInline, coordinate: "inline", provenance: `flows\review\agents.yaml#agents.worker.intent`},
 	}

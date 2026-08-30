@@ -29,7 +29,7 @@ func (c *checkerContext) nodeStateSchemaTypedCounterpart() []Finding {
 			continue
 		}
 		nodeID := node.Key()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		types := nodeStateResolvedTypes(c.source, flowID)
 		counterparts := nodeStateTypedCounterparts(c.source, flowID)
 		for _, field := range record.Entry.StateSchema.Fields {
@@ -104,7 +104,7 @@ func nodeStateResolvedTypes(source semanticview.Source, flowID string) runtimeco
 		return runtimecontracts.TypeCatalogDocument{}
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return bundle.RootTypeCatalog()
 	}
 	return bundle.ResolvedTypeCatalogForFlow(flowID)
@@ -141,7 +141,7 @@ func nodeStateTypedCounterparts(source semanticview.Source, flowID string) []nod
 	if flowID = strings.TrimSpace(flowID); flowID != "" {
 		addEntity(wave1EntityContractForFlow(source, flowID))
 	}
-	addEntity(wave1EntityContractForFlow(source, ""))
+	addEntity(wave1EntityContractForFlow(source, "."))
 
 	for eventType, entry := range source.ResolvedEventCatalog() {
 		eventType = strings.TrimSpace(eventType)

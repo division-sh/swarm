@@ -713,7 +713,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode: "live",
-		BundleHash:    authorActivityTestBundleSourceFact.BundleHash(), CreatedAt: now,
+		BundleHash:    authorActivityTestSourceArtifactFact.BundleHash(), CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)

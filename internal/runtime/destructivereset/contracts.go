@@ -79,6 +79,6 @@ func DefaultPreservedResources() PreservedResources {
 		OperatorManagedBoundary: "operator-managed containers are outside Swarm ownership and are not enumerable by this planner",
 		SchemaMigrations:        true,
 		AuthTokens:              true,
-		BundleContracts:         true,
+		SourceArtifacts:         true,
 	}
 }

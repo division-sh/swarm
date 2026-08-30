@@ -50,7 +50,7 @@ func TestEffectiveSpecForHandlerRejectsRedeclaration(t *testing.T) {
 func accumulatorFanInSource(t testing.TB, inputPins []runtimecontracts.FlowInputEventPin) semanticview.Source {
 	t.Helper()
 	worker := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker", PackageKey: "flows/worker"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputPins}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker-node": {ID: "worker-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items"}}}},

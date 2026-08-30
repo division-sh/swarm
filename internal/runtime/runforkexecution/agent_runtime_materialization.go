@@ -142,6 +142,10 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if len(agents) == 0 {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, nil
 	}
+	options, err = bindSelectedContractWorkspaceProjection(loaded, options)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
+	}
 	records, err := selectedContractStaticAgentRecords(loaded.Source)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
@@ -156,8 +160,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if !exists {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration provenance requires an installed source-set plan")
 	}
-	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}.Normalize()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}.Normalize()
 	if err := coordinate.Validate(); err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract declaration source coordinate: %w", err)
 	}
@@ -171,7 +174,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if !sourceCurrent {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration source is not current in the process source-set plan")
 	}
-	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeEphemeral)
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeEphemeral)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract declaration topology: %w", err)
 	}
@@ -214,6 +217,24 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	}
 	proof.MaterializationSupported = true
 	return selectedContractAgentRuntimePlan{Proof: proof, Records: selected, Options: options}, nil
+}
+
+func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource, options SelectedContractAgentRuntimeOptions) (SelectedContractAgentRuntimeOptions, error) {
+	if options.Workspace == nil {
+		return options, nil
+	}
+	if loaded.RuntimeProjection == nil {
+		if err := workspace.RequireSourceProjectionBinding(options.Workspace, loaded.SourceArtifactFact.BundleHash()); err != nil {
+			return options, fmt.Errorf("prove selected-contract workspace source projection: %w", err)
+		}
+		return options, nil
+	}
+	rebound, err := workspace.RebindSourceProjection(options.Workspace, loaded.RuntimeProjection, loaded.Source)
+	if err != nil {
+		return options, fmt.Errorf("bind selected-contract workspace source projection: %w", err)
+	}
+	options.Workspace = rebound
+	return options, nil
 }
 
 func selectedContractStaticAgentRecords(source semanticview.Source) ([]runtimemanager.PersistedAgent, error) {
@@ -267,14 +288,14 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
-			ExecutionPosture:  req.AgentRuntime.Options.ExecutionPosture,
-			BaseContext:       context.WithoutCancel(ctx),
-			BundleSourceFact:  req.LoadedSource.BundleSourceFact,
-			SemanticSource:    req.LoadedSource.Source,
-			WorkflowInstances: pipeline,
-			DeliveryStore:     ports.busDurable.DeliveryLifecycle,
-			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
-			ReceiverExecution: req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
+			ExecutionPosture:   req.AgentRuntime.Options.ExecutionPosture,
+			BaseContext:        context.WithoutCancel(ctx),
+			SourceArtifactFact: req.LoadedSource.SourceArtifactFact,
+			SemanticSource:     req.LoadedSource.Source,
+			WorkflowInstances:  pipeline,
+			DeliveryStore:      ports.busDurable.DeliveryLifecycle,
+			WorkOwner:          req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
+			ReceiverExecution:  req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
 		}, bus, ports, pipeline)
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
@@ -401,7 +422,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.SemanticSource == nil {
 		managerOptions.SemanticSource = source
 	}
-	managerOptions.BundleSourceFact = req.LoadedSource.BundleSourceFact
+	managerOptions.SourceArtifactFact = req.LoadedSource.SourceArtifactFact
 	managerOptions.WorkflowInstances = pipeline
 	managerOptions = selectedContractManagerOptions(managerOptions, bus, ports, pipeline)
 	if managerOptions.Sessions == nil {

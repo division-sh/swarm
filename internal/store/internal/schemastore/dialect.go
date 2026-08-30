@@ -456,19 +456,19 @@ func sqliteRenderPredicate(raw string) (string, error) {
 	// Render longer bundle-hash column names before the generic bundle_hash
 	// spelling so a suffix match cannot leave an invalid identifier prefix.
 	predicate = strings.ReplaceAll(predicate,
-		"lifecycle_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		"lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("lifecycle_bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
-		"current_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		"current_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("current_bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
-		"authority_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		"authority_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("authority_bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
-		"bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		"bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
@@ -509,7 +509,7 @@ func sqliteRenderPredicate(raw string) (string, error) {
 }
 
 func sqliteBundleHashPredicate(column string) string {
-	return fmt.Sprintf("(length(%s) = 81 AND substr(%s, 1, 17) = 'bundle-v1:sha256:' AND substr(%s, 18) GLOB '%s')",
+	return fmt.Sprintf("(length(%s) = 81 AND substr(%s, 1, 17) = 'bundle-v2:sha256:' AND substr(%s, 18) GLOB '%s')",
 		column, column, column, strings.Repeat("[0-9a-f]", 64))
 }
 

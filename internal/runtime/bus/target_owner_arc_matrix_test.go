@@ -85,17 +85,10 @@ func TestEventBusNestedCrossFlowTargetOwnershipMatrix(t *testing.T) {
 }
 
 func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("template selection source does not expose its semantic bundle")
-	}
-	producer, ok := bundle.FlowViewByID("producer")
-	if !ok {
-		t.Fatal("template selection source is missing producer flow")
-	}
-	producer.Path = "left/child/producer"
-	source = semanticview.Wrap(bundle)
+	root := canonicalrouting.CopyNestedProducerTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{
+		Mode: canonicalrouting.SelectResolutionSelect,
+	})
+	source := loadConnectRoutePlanCanonicalSource(t, root)
 	selectedEntityID := eventtest.UUID("nested-template-selected-owner")
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -119,7 +112,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	}
 	runID := uuid.NewString()
 	sourceRoute := events.RouteIdentity{
-		FlowID: "producer", FlowInstance: "left/child/producer", EntityID: eventtest.UUID("nested-template-source-owner"),
+		FlowID: "left/child/producer", FlowInstance: "left/child/producer", EntityID: eventtest.UUID("nested-template-source-owner"),
 	}.Normalized()
 	routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
 	if err != nil {
@@ -192,7 +185,7 @@ func TestNestedChildToRootReceiverUsesSelectedOwner(t *testing.T) {
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), routingSource, time.Now().UTC(),
 	)
 	want := events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootEntityID,
+		FlowID: ".", FlowInstance: runID, EntityID: rootEntityID,
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	plan, err := eventBus.CheckPublishRecipientPlan(ctx, event)
@@ -241,7 +234,7 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 	}
 	event := targetOwnerArcEvent(t, test, eventID, eventType, runID, envelope, routingSource)
 	wantRoute := events.RouteIdentity{
-		FlowID: "receiver", FlowInstance: test.receiverPath,
+		FlowID: test.receiverPath, FlowInstance: test.receiverPath,
 		EntityID: runtimeflowidentity.EntityID(test.receiverPath),
 	}.Normalized()
 	var wantOwner events.DeliveryTargetOwnership
@@ -350,8 +343,9 @@ func assertTargetOwnerArcRoute(t *testing.T, route events.DeliveryRoute, want ev
 		t.Fatal("delivery route is missing its exact connect execution claim")
 	}
 	node, eventType, ok := route.ConnectClaim.NodeHandlerOwner()
-	if !ok || node.FlowID() != "receiver" || node.NodeID() != "arc-receiver" || strings.TrimSpace(string(eventType)) == "" {
-		t.Fatalf("connect claim handler owner = %s/%q/%t, want receiver/arc-receiver/exact event", node.Key(), eventType, ok)
+	wantFlowID := want.Route().FlowID
+	if !ok || node.FlowPath() != wantFlowID || node.NodeID() != "arc-receiver" || strings.TrimSpace(string(eventType)) == "" {
+		t.Fatalf("connect claim handler owner = %s/%q/%t, want %s/arc-receiver/exact event", node.Key(), eventType, ok, wantFlowID)
 	}
 }
 
@@ -385,7 +379,7 @@ func targetOwnerArcFixture(
 	t.Helper()
 	const localEvent = "work.ready"
 	receiver := connectRoutePlanTestFlow{
-		id: "receiver", path: test.receiverPath, mode: test.receiverMode,
+		id: test.receiverPath, path: test.receiverPath, mode: test.receiverMode,
 		inputs: []runtimecontracts.FlowInputEventPin{{Event: localEvent}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"arc-receiver": {
@@ -425,18 +419,18 @@ func targetOwnerArcFixture(
 			sourceMode = runtimecontracts.FlowModeTemplate
 		}
 		producer := connectRoutePlanTestFlow{
-			id: "producer", path: test.sourcePath, mode: sourceMode,
+			id: test.sourcePath, path: test.sourcePath, mode: sourceMode,
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: localEvent}},
 		}
-		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowPackageConnect{{
-			Event: localEvent, From: "producer", To: "receiver",
+		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowConnect{{
+			Event: localEvent, From: producer.id, To: receiver.id,
 		}})
 		bundle.Semantics.Name = "root-workflow"
 		instancePath := test.sourcePath
 		if test.sourceKind == targetOwnerArcTemplate {
 			instancePath += "/instance-1"
 		}
-		sourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: instancePath, EntityID: sourceEntityID}.Normalized()
+		sourceRoute = events.RouteIdentity{FlowID: producer.id, FlowInstance: instancePath, EntityID: sourceEntityID}.Normalized()
 		eventType = events.EventType(instancePath + "/" + localEvent)
 		if test.sourceKind == targetOwnerArcTemplate {
 			routingSource, err = events.NewConcreteTemplateInstanceRoutingSource(sourceRoute)
@@ -522,7 +516,7 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 
 	runID := uuid.NewString()
 	rootRoute := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
+		FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
 	}.Normalized()
 	childRoute := events.RouteIdentity{
 		FlowID: "boomerang", FlowInstance: "boomerang", EntityID: eventtest.UUID("boomerang-child-owner"),
@@ -631,16 +625,16 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	materializing := receiver("materializing", runtimecontracts.FlowModeSingleton, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
 	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
 	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
-	connect := func(id string) runtimecontracts.FlowPackageConnect {
-		return runtimecontracts.FlowPackageConnect{Event: eventName, From: "producer", To: id}
+	connect := func(id string) runtimecontracts.FlowConnect {
+		return runtimecontracts.FlowConnect{Event: eventName, From: "producer", To: "fanout/" + id}
 	}
 	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("mixed-owner-source")}.Normalized()
-	existingRoute := events.RouteIdentity{FlowID: "existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
+	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
 	poisonedStore := newTargetRouteMemoryStore()
 	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
 	poisonedBundle := connectRoutePlanTestBundle(
 		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless, poison},
-		[]runtimecontracts.FlowPackageConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")},
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")},
 	)
 	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{ContractBundle: semanticview.Wrap(poisonedBundle)})
 	if err != nil {
@@ -668,7 +662,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
 	legalBundle := connectRoutePlanTestBundle(
 		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless},
-		[]runtimecontracts.FlowPackageConnect{connect("existing"), connect("materializing"), connect("entityless")},
+		[]runtimecontracts.FlowConnect{connect("existing"), connect("materializing"), connect("entityless")},
 	)
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{
@@ -687,10 +681,10 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	wantOwners := map[string]events.DeliveryTargetOwnership{
 		"existing-node": events.MustExistingEntityTarget(existingRoute),
 		"materializing-node": events.MustMaterializingEntityTarget(events.RouteIdentity{
-			FlowID: "materializing", FlowInstance: "fanout/materializing", EntityID: runtimeflowidentity.EntityID("fanout/materializing"),
+			FlowID: "fanout/materializing", FlowInstance: "fanout/materializing", EntityID: runtimeflowidentity.EntityID("fanout/materializing"),
 		}),
 		"entityless-node": events.MustEntitylessReceiverTarget(events.RouteIdentity{
-			FlowID: "entityless", FlowInstance: "fanout/entityless",
+			FlowID: "fanout/entityless", FlowInstance: "fanout/entityless",
 		}),
 	}
 	for _, route := range plan.DeliveryRoutes {
@@ -734,7 +728,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
 	rootRoute := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("root-source-entity"),
+		FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
 	leftRoute := events.RouteIdentity{
 		FlowID: "branch", FlowInstance: "branch/left", EntityID: eventtest.UUID("diamond-left-parent"),
@@ -836,12 +830,12 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			}
 			if strings.Contains(route.Recipient.LocalID(), "static-result") {
 				staticSeen = true
-				if route.Target.Code() != "existing_entity" || route.Target.Route().EntityID != parent.route.EntityID || route.Target.Route().FlowInstance != "branch/static-result" {
+				if route.Target.Code() != "existing_entity" || route.Target.Route().EntityID != parent.route.EntityID || route.Target.Route().FlowInstance != "branch/worker/result-static" {
 					t.Fatalf("%s nested static target = %s %#v, want parent-shared existing owner %#v", parent.name, route.Target.Code(), route.Target.Route(), parent.route)
 				}
 			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true
-				wantPath := "branch/singleton-result"
+				wantPath := "branch/worker/result"
 				if route.Target.Code() != "materializing_entity" || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
 					t.Fatalf("%s nested singleton target = %s %#v, want materializing %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
 				}

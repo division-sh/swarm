@@ -1,0 +1,15 @@
+states:
+  - idle
+  - done
+initial_state: idle
+terminal_states:
+  - done
+pins:
+  inputs:
+    events:
+      - validate.start
+  outputs:
+    events:
+      - validation.done
+name: child
+mode: static

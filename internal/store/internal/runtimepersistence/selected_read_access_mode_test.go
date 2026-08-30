@@ -25,8 +25,9 @@ func TestSQLiteStandaloneSelectedReadsBypassMutationAdmission(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	db := store.backend.ConstructionHandle()
 	ctx := testAuthorActivityContext()
+	requireDefaultSourceArtifactForTest(t, ctx, store)
 	runID := uuid.NewString()
-	source := mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
+	source := mustStoreTestSourceArtifactFact(authorActivityTestBundleHash)
 	createSelectedReadProofRun(t, ctx, store, runID, source)
 
 	capability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("selected-read-proof"))
@@ -98,7 +99,7 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			source := mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
+			source := mustStoreTestSourceArtifactFact(authorActivityTestBundleHash)
 			var store selectedReaderAsWriterStore
 			var db *sql.DB
 			postgres := backend == "postgres"
@@ -106,11 +107,13 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 				_, db, _ = testutil.StartPostgres(t)
 				selected := admitTestPostgresStore(t, db)
 				store = selected
+				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			} else {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				store = selected
 				db = selected.backend.ConstructionHandle()
+				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				createSelectedReadProofRun(t, ctx, selected, runID, source)
 			}
 			authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "reader-side-effect-proof", 1)
@@ -160,8 +163,8 @@ type selectedReaderAsWriterStore interface {
 	RequirePresentRun(context.Context, string) error
 	RequireActiveRun(context.Context, string) error
 	RequirePublicationRunActive(context.Context, string) error
-	RequirePresentRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
-	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	RequirePresentRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 	ScanDeliveryContinuations(context.Context, runtimedelivery.ExecutionAuthority, runtimedelivery.ContinuationCursor, int) (runtimedelivery.ContinuationPage, error)
 	ObserveDeliveryContinuation(context.Context, runtimedelivery.ExecutionAuthority, string) (runtimedelivery.ContinuationObservation, error)
 }
@@ -203,7 +206,7 @@ func selectedSQLiteReadProofs(
 
 func createSelectedReadProofRun(t *testing.T, ctx context.Context, store interface {
 	CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
-}, runID string, source runtimecorrelation.BundleSourceFact) {
+}, runID string, source runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
 	if _, err := store.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: source,

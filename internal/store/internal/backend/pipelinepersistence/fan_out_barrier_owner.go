@@ -39,8 +39,8 @@ func foldFanOutIntentTerminalDispositions(
 	err := db.QueryRowContext(ctx, `
 		SELECT cardinality, cursor, status
 		FROM fan_out_intents
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
-	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID).Scan(&cardinality, &cursor, &rawStatus)
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
+	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&cardinality, &cursor, &rawStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s is missing", key.String())
 	}
@@ -63,9 +63,9 @@ func foldFanOutIntentTerminalDispositions(
 	rows, err := db.QueryContext(ctx, `
 		SELECT ordinal, outcome_kind, event_id, source_event_id, inherited_disposition
 		FROM fan_out_outcomes
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
 		ORDER BY ordinal
-	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID)
+	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
 	if err != nil {
 		return fanoutbarrier.Fold{}, err
 	}
@@ -182,15 +182,15 @@ func loadFanOutBarriersByStatus(
 		return nil, fmt.Errorf("fan-out barrier load requires valid status")
 	}
 	query := `
-		SELECT triggering_delivery_id, package_key, element_id,
-		       bundle_hash, semantic_digest, target_package_key, target_flow_id,
+		SELECT triggering_delivery_id, flow_path, declaration_family, semantic_path,
+		       bundle_hash, semantic_digest, target_flow_path,
 		       target_node_id, handler_event, join_id,
 		       route_scope_key, route_instance_id, route_instance_path,
 		       entity_id, routing_source, execution_mode, timer_handle,
 		       summary, schedule_key, schedule_activation_id, created_at, updated_at
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND status=$2
-		ORDER BY triggering_delivery_id, package_key, element_id`
+		ORDER BY triggering_delivery_id, flow_path, declaration_family, semantic_path`
 	if postgres {
 		query += " FOR UPDATE"
 	}
@@ -203,8 +203,7 @@ func loadFanOutBarriersByStatus(
 		barrier            fanoutbarrier.Barrier
 		bundleHash         string
 		digest             string
-		targetPkg          string
-		targetFlow         string
+		targetFlowPath     string
 		targetNode         string
 		handlerEvent       string
 		joinID             string
@@ -223,9 +222,10 @@ func loadFanOutBarriersByStatus(
 		var routingRaw, handleRaw, summaryRaw, createdAtRaw, updatedAtRaw any
 		if err := rows.Scan(
 			&item.barrier.Registration.IntentKey.TriggeringDeliveryID,
-			&item.barrier.Registration.IntentKey.ElementRef.PackageKey,
-			&item.barrier.Registration.IntentKey.ElementRef.ElementID,
-			&item.bundleHash, &item.digest, &item.targetPkg, &item.targetFlow,
+			&item.barrier.Registration.IntentKey.ElementRef.FlowPath,
+			&item.barrier.Registration.IntentKey.ElementRef.Family,
+			&item.barrier.Registration.IntentKey.ElementRef.SemanticPath,
+			&item.bundleHash, &item.digest, &item.targetFlowPath,
 			&item.targetNode, &item.handlerEvent, &item.joinID,
 			&item.barrier.Registration.Route.ScopeKey, &item.barrier.Registration.Route.InstanceID, &item.barrier.Registration.Route.InstancePath,
 			&item.barrier.Registration.EntityID, &routingRaw, &item.execution, &handleRaw,
@@ -284,8 +284,10 @@ func loadFanOutBarriersByStatus(
 		}
 		ref, _ := item.barrier.Registration.Handle.JoinRef()
 		fanOut, _ := ref.FanOutDelivery()
-		if fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
-			ref.PackageKey() != strings.TrimSpace(item.targetPkg) || ref.FlowID() != strings.TrimSpace(item.targetFlow) ||
+		intentDeclaration, identityErr := item.barrier.Registration.IntentKey.ElementRef.DeclarationIdentity()
+		if identityErr != nil || !fanOut.DeclarationIdentity().Equal(intentDeclaration) ||
+			fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
+			ref.FlowPath() != strings.TrimSpace(item.targetFlowPath) ||
 			ref.NodeID() != strings.TrimSpace(item.targetNode) || ref.HandlerEvent() != strings.TrimSpace(item.handlerEvent) ||
 			ref.JoinID() != strings.TrimSpace(item.joinID) {
 			return nil, fmt.Errorf("fan-out barrier persisted identity contradicts its typed handle")
@@ -425,15 +427,15 @@ func advanceFanOutDeliveryBarriersTx(
 		query := `
 			UPDATE fan_out_obligation_barriers
 			SET status=$1, summary=$2, schedule_key=$3, schedule_activation_id=$4, updated_at=$5
-			WHERE run_id=$6 AND triggering_delivery_id=$7 AND package_key=$8 AND element_id=$9 AND status='armed'`
+			WHERE run_id=$6 AND triggering_delivery_id=$7 AND flow_path=$8 AND declaration_family=$9 AND semantic_path=$10 AND status='armed'`
 		if postgres {
 			query = strings.ReplaceAll(query, "$2", "$2::jsonb")
 		} else {
-			query = postgresPlaceholdersToSQLite(query, 9)
+			query = postgresPlaceholdersToSQLite(query, 10)
 		}
 		result, err := tx.ExecContext(ctx, query, string(status), string(summaryRaw), scheduleKey, scheduleActivationID, selectedNow.UTC(),
 			registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
-			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
+			registration.IntentKey.ElementRef.FlowPath, registration.IntentKey.ElementRef.Family, registration.IntentKey.ElementRef.SemanticPath)
 		if err != nil {
 			return nil, err
 		}
@@ -465,13 +467,13 @@ func suppressSupersededArmedFanOutBarrierTx(
 	query := `
 		UPDATE fan_out_obligation_barriers
 		SET status=$1, updated_at=$2
-		WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='armed'`
+		WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='armed'`
 	if !postgres {
-		query = postgresPlaceholdersToSQLite(query, 6)
+		query = postgresPlaceholdersToSQLite(query, 7)
 	}
 	result, err := tx.ExecContext(ctx, query, string(fanoutbarrier.StatusSuppressedGenerationSuperseded), at.UTC(),
 		registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
-		registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
+		registration.IntentKey.ElementRef.FlowPath, registration.IntentKey.ElementRef.Family, registration.IntentKey.ElementRef.SemanticPath)
 	if err != nil {
 		return err
 	}
@@ -510,13 +512,13 @@ func suppressSupersededPendingFanOutBarriersTx(
 		update := `
 			UPDATE fan_out_obligation_barriers
 			SET status=$1, updated_at=$2
-			WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='closed_pending' AND schedule_key=$7 AND schedule_activation_id=$8`
+			WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='closed_pending' AND schedule_key=$8 AND schedule_activation_id=$9`
 		if !postgres {
-			update = postgresPlaceholdersToSQLite(update, 8)
+			update = postgresPlaceholdersToSQLite(update, 9)
 		}
 		result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusSuppressedGenerationSuperseded), at.UTC(),
 			registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
-			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID,
+			registration.IntentKey.ElementRef.FlowPath, registration.IntentKey.ElementRef.Family, registration.IntentKey.ElementRef.SemanticPath,
 			barrier.ScheduleKey, barrier.ScheduleActivationID)
 		if err != nil {
 			return err
@@ -596,10 +598,10 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	selectedNow time.Time,
 ) error {
 	query := `
-		SELECT triggering_delivery_id, package_key, element_id, schedule_key, schedule_activation_id
+		SELECT triggering_delivery_id, flow_path, declaration_family, semantic_path, schedule_key, schedule_activation_id
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND status='closed_pending'
-		ORDER BY triggering_delivery_id, package_key, element_id`
+		ORDER BY triggering_delivery_id, flow_path, declaration_family, semantic_path`
 	if postgres {
 		query += " FOR UPDATE"
 	}
@@ -609,15 +611,16 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	}
 	type pending struct {
 		triggeringDeliveryID string
-		packageKey           string
-		elementID            string
+		flowPath             string
+		declarationFamily    string
+		semanticPath         string
 		scheduleKey          string
 		scheduleActivationID string
 	}
 	pendingRows := make([]pending, 0)
 	for rows.Next() {
 		var item pending
-		if err := rows.Scan(&item.triggeringDeliveryID, &item.packageKey, &item.elementID, &item.scheduleKey, &item.scheduleActivationID); err != nil {
+		if err := rows.Scan(&item.triggeringDeliveryID, &item.flowPath, &item.declarationFamily, &item.semanticPath, &item.scheduleKey, &item.scheduleActivationID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -680,12 +683,12 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		update := `
 			UPDATE fan_out_obligation_barriers
 			SET status=$1, updated_at=$2
-			WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='closed_pending' AND schedule_key=$7`
+			WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='closed_pending' AND schedule_key=$8`
 		if !postgres {
-			update = postgresPlaceholdersToSQLite(update, 7)
+			update = postgresPlaceholdersToSQLite(update, 8)
 		}
 		result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusOutcomeDeadLettered), selectedNow.UTC(), runID,
-			item.triggeringDeliveryID, item.packageKey, item.elementID, item.scheduleKey)
+			item.triggeringDeliveryID, item.flowPath, item.declarationFamily, item.semanticPath, item.scheduleKey)
 		if err != nil {
 			return err
 		}
@@ -709,10 +712,10 @@ func suppressRunTerminalFanOutBarriersTx(
 	at time.Time,
 ) error {
 	query := `
-		SELECT triggering_delivery_id, package_key, element_id, status, summary
+		SELECT triggering_delivery_id, flow_path, declaration_family, semantic_path, status, summary
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND status IN ('armed','closed_pending')
-		ORDER BY triggering_delivery_id, package_key, element_id`
+		ORDER BY triggering_delivery_id, flow_path, declaration_family, semantic_path`
 	if postgres {
 		query += " FOR UPDATE"
 	}
@@ -730,7 +733,7 @@ func suppressRunTerminalFanOutBarriersTx(
 		var item candidate
 		item.key.RunID = runID
 		var status string
-		if err := rows.Scan(&item.key.TriggeringDeliveryID, &item.key.ElementRef.PackageKey, &item.key.ElementRef.ElementID, &status, &item.summaryRaw); err != nil {
+		if err := rows.Scan(&item.key.TriggeringDeliveryID, &item.key.ElementRef.FlowPath, &item.key.ElementRef.Family, &item.key.ElementRef.SemanticPath, &status, &item.summaryRaw); err != nil {
 			rows.Close()
 			return err
 		}
@@ -773,14 +776,14 @@ func suppressRunTerminalFanOutBarriersTx(
 		update := `
 			UPDATE fan_out_obligation_barriers
 			SET status=$1, summary=$2, updated_at=$3
-			WHERE run_id=$4 AND triggering_delivery_id=$5 AND package_key=$6 AND element_id=$7 AND status=$8`
+			WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND status=$9`
 		if postgres {
 			update = strings.ReplaceAll(update, "$2", "$2::jsonb")
 		} else {
-			update = postgresPlaceholdersToSQLite(update, 8)
+			update = postgresPlaceholdersToSQLite(update, 9)
 		}
 		result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusSuppressedRunTerminal), string(summaryRaw), at.UTC(),
-			candidate.key.RunID, candidate.key.TriggeringDeliveryID, candidate.key.ElementRef.PackageKey, candidate.key.ElementRef.ElementID, string(candidate.status))
+			candidate.key.RunID, candidate.key.TriggeringDeliveryID, candidate.key.ElementRef.FlowPath, candidate.key.ElementRef.Family, candidate.key.ElementRef.SemanticPath, string(candidate.status))
 		if err != nil {
 			return err
 		}
@@ -871,9 +874,13 @@ func materializeRunForkFanOutBarrierTx(
 		return fmt.Errorf("fork fan-out barrier materialization requires run, time, and revision owner")
 	}
 	sourceJoin, _ := source.Registration.Handle.JoinRef()
+	fanOutDeclaration, identityErr := selectedRef.ElementRef.DeclarationIdentity()
+	if identityErr != nil {
+		return fmt.Errorf("selected fan-out declaration: %w", identityErr)
+	}
 	selectedJoin, err := timeridentity.NewFanOutDeliveryJoinRef(
 		sourceJoin.Node(), sourceJoin.HandlerEvent(), sourceJoin.JoinID(),
-		selectedRef.ElementRef.PackageKey, selectedRef.ElementRef.ElementID,
+		fanOutDeclaration,
 		selectedRef.BundleHash, selectedRef.SemanticDigest,
 	)
 	if err != nil {
@@ -929,15 +936,15 @@ func materializeRunForkFanOutBarrierTx(
 	query := `
 		UPDATE fan_out_obligation_barriers
 		SET status=$1, summary=$2, schedule_key=$3, schedule_activation_id=$4, updated_at=$5
-		WHERE run_id=$6 AND triggering_delivery_id=$7 AND package_key=$8 AND element_id=$9 AND status='armed'`
+		WHERE run_id=$6 AND triggering_delivery_id=$7 AND flow_path=$8 AND declaration_family=$9 AND semantic_path=$10 AND status='armed'`
 	if postgres {
 		query = strings.ReplaceAll(query, "$2", "$2::jsonb")
 	} else {
-		query = postgresPlaceholdersToSQLite(query, 9)
+		query = postgresPlaceholdersToSQLite(query, 10)
 	}
 	result, err := tx.ExecContext(ctx, query, string(source.Status), summaryRaw, scheduleKey, scheduleActivationID, at.UTC(),
 		registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
-		registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
+		registration.IntentKey.ElementRef.FlowPath, registration.IntentKey.ElementRef.Family, registration.IntentKey.ElementRef.SemanticPath)
 	if err != nil {
 		return err
 	}
@@ -971,8 +978,8 @@ func commitFanOutBarrierRegistrationTx(
 	}
 	query := `
 		INSERT INTO fan_out_obligation_barriers (
-			run_id, triggering_delivery_id, package_key, element_id,
-			bundle_hash, semantic_digest, target_package_key, target_flow_id,
+			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
+			bundle_hash, semantic_digest, target_flow_path,
 			target_node_id, handler_event, join_id,
 			route_scope_key, route_instance_id, route_instance_path,
 			entity_id, routing_source, execution_mode, timer_handle, status, created_at, updated_at
@@ -988,12 +995,12 @@ func commitFanOutBarrierRegistrationTx(
 	_, err = tx.ExecContext(ctx, query,
 		registration.IntentKey.RunID,
 		registration.IntentKey.TriggeringDeliveryID,
-		registration.IntentKey.ElementRef.PackageKey,
-		registration.IntentKey.ElementRef.ElementID,
+		registration.IntentKey.ElementRef.FlowPath,
+		registration.IntentKey.ElementRef.Family,
+		registration.IntentKey.ElementRef.SemanticPath,
 		registration.PlanRef.BundleHash,
 		registration.PlanRef.SemanticDigest,
-		ref.Node().PackageKey(),
-		ref.Node().FlowID(),
+		ref.Node().FlowPath(),
 		ref.Node().NodeID(),
 		ref.HandlerEvent(),
 		ref.JoinID(),
@@ -1032,7 +1039,7 @@ func commitFanOutBarrierCompletionTx(
 	query := `
 		SELECT status, summary, schedule_key, schedule_activation_id
 		FROM fan_out_obligation_barriers
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
 	if postgres {
 		query += " FOR UPDATE"
 	}
@@ -1040,7 +1047,7 @@ func commitFanOutBarrierCompletionTx(
 	var summaryRaw any
 	var scheduleKey sql.NullString
 	var scheduleActivationID sql.NullString
-	err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID).Scan(&status, &summaryRaw, &scheduleKey, &scheduleActivationID)
+	err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&status, &summaryRaw, &scheduleKey, &scheduleActivationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("fan-out barrier completion owner is missing")
 	}
@@ -1064,11 +1071,11 @@ func commitFanOutBarrierCompletionTx(
 	update := `
 		UPDATE fan_out_obligation_barriers
 		SET status=$1, updated_at=$2
-		WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='closed_pending' AND schedule_key=$7`
+		WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='closed_pending' AND schedule_key=$8`
 	if !postgres {
-		update = postgresPlaceholdersToSQLite(update, 7)
+		update = postgresPlaceholdersToSQLite(update, 8)
 	}
-	result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusFired), updatedAt.UTC(), key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID, completion.Handle.TaskID())
+	result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusFired), updatedAt.UTC(), key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, completion.Handle.TaskID())
 	if err != nil {
 		return err
 	}

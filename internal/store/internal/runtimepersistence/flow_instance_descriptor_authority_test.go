@@ -12,15 +12,19 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -32,9 +36,10 @@ type flowInstanceDescriptorAuthorityStore interface {
 }
 
 type dynamicFlowSourceProjectionStore interface {
+	sourceartifactfixture.Writer
 	runtimerunlifecycle.OperationOwner
-	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
-	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
+	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
+	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 }
@@ -56,18 +61,15 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, db, sqlite := tc.open(t)
-			sourceA := mustExternalStoreTestBundleSourceFact()
-			hashA, kindA := sourceA.StorageValues()
-			hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-			sourceB, err := runtimecorrelation.NewEphemeralBundleSourceFact(hashB)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, kindB := sourceB.StorageValues()
+			sourceA := mustExternalStoreTestSourceArtifactFact()
+			hashA := sourceA.BundleHash()
+			sourceBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  source_b: {}\n"))
+			sourceB := sourceartifactfixture.FactFor(sourceBArtifact)
+			hashB := sourceB.BundleHash()
 			runA, runB := uuid.NewString(), uuid.NewString()
 			ctx := testAuthorActivityContext()
-			fixtureA := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA, BundleSource: kindA}
-			fixtureB := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, BundleHash: hashB, BundleSource: kindB}
+			fixtureA := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA}
+			fixtureB := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact}
 			if sqlite {
 				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureA)
 				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureB)
@@ -75,8 +77,8 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureA)
 				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureB)
 			}
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA, kindA)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB, kindB)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB)
 			seedStaticFlowInstanceRouteWithoutReadiness(t, db, sqlite, runA, "standing/a")
 			query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at = ? WHERE run_id = ? AND instance_id = ?`
 			args := []any{time.Now().UTC(), runA, "account/a"}
@@ -131,39 +133,35 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
-			current := mustExternalStoreTestBundleSourceFact()
-			currentHash, currentKind := current.StorageValues()
-			predecessor, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("c", 64))
-			if err != nil {
-				t.Fatal(err)
-			}
-			predecessorHash, predecessorKind := predecessor.StorageValues()
-			foreign, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("d", 64))
-			if err != nil {
-				t.Fatal(err)
-			}
-			foreignHash, foreignKind := foreign.StorageValues()
+			current := mustExternalStoreTestSourceArtifactFact()
+			currentHash := current.BundleHash()
+			predecessorArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  predecessor: {}\n"))
+			predecessor := sourceartifactfixture.FactFor(predecessorArtifact)
+			predecessorHash := predecessor.BundleHash()
+			foreignArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
+			foreign := sourceartifactfixture.FactFor(foreignArtifact)
+			foreignHash := foreign.BundleHash()
 			ctx := testAuthorActivityContext()
 			type seeded struct {
-				runID, path, planHash, planKind string
-				complete                        bool
+				runID, path, planHash string
+				complete              bool
 			}
 			rows := []seeded{
-				{uuid.NewString(), "account/current-complete", currentHash, currentKind, true},
-				{uuid.NewString(), "account/current-pending", currentHash, currentKind, false},
-				{uuid.NewString(), "account/transition-complete", predecessorHash, predecessorKind, true},
-				{uuid.NewString(), "account/transition-pending", predecessorHash, predecessorKind, false},
+				{uuid.NewString(), "account/current-complete", currentHash, true},
+				{uuid.NewString(), "account/current-pending", currentHash, false},
+				{uuid.NewString(), "account/transition-complete", predecessorHash, true},
+				{uuid.NewString(), "account/transition-pending", predecessorHash, false},
 			}
 			for _, row := range rows {
-				requireReadinessRun(t, ctx, db, sqlite, row.runID, currentHash, currentKind)
-				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, row.runID, uuid.NewString(), row.path, row.planHash, row.planKind)
+				requireReadinessRun(t, ctx, db, sqlite, row.runID, currentHash)
+				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, row.runID, uuid.NewString(), row.path, row.planHash)
 				if row.complete {
 					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "topology_ready_at", time.Now().UTC())
 				}
 			}
 			foreignRun := uuid.NewString()
-			requireReadinessRun(t, ctx, db, sqlite, foreignRun, foreignHash, foreignKind)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash, foreignKind)
+			requireReadinessRun(t, ctx, db, sqlite, foreignRun, foreignHash, foreignArtifact)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
 			setReadinessPlanRaw(t, db, sqlite, foreignRun, "account/foreign-malformed", `{}`)
 
 			projection, err := selected.InspectDynamicFlowRuntimeReadinessForSource(ctx, current)
@@ -217,19 +215,17 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
-			source := mustExternalStoreTestBundleSourceFact()
-			bundleHash, bundleSource := source.StorageValues()
-			otherSource, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
-			if err != nil {
-				t.Fatal(err)
-			}
+			source := mustExternalStoreTestSourceArtifactFact()
+			bundleHash := source.BundleHash()
+			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  other: {}\n"))
+			otherSource := sourceartifactfixture.FactFor(otherArtifact)
 			for _, race := range []string{"plan", "source", "topology", "creation", "run_status", "instance_status", "terminated_at"} {
 				t.Run(race, func(t *testing.T) {
 					runID := uuid.NewString()
 					path := "account/guard-" + race + "-" + uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-					requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash, bundleSource)
-					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash, bundleSource)
+					requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash)
+					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load observation: found=%v err=%v", found, err)
@@ -247,10 +243,9 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 						}
 						setReadinessPlanRaw(t, db, sqlite, runID, path, string(raw))
 					case "source":
-						otherHash, otherKind := otherSource.StorageValues()
-						setReadinessRunSource(t, selected, callCtx, runID, otherSource)
-						desired.BundleHash, desired.BundleSource = otherHash, otherKind
-						callCtx = runtimecorrelation.WithBundleSourceFact(callCtx, otherSource)
+						setReadinessRunSource(t, selected, callCtx, runID, otherSource, otherArtifact)
+						desired.BundleHash = otherSource.BundleHash()
+						callCtx = runtimecorrelation.WithSourceArtifactFact(callCtx, otherSource)
 					case "topology":
 						setReadinessCoordinate(t, db, sqlite, runID, path, "topology_ready_at", time.Now().UTC())
 					case "creation":
@@ -296,17 +291,17 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
-			source := mustExternalStoreTestBundleSourceFact()
-			bundleHash, bundleSource := source.StorageValues()
+			source := mustExternalStoreTestSourceArtifactFact()
+			bundleHash := source.BundleHash()
 			seedBatch := func(t *testing.T, label string) (context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation) {
 				t.Helper()
 				runID := uuid.NewString()
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-				requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash, bundleSource)
+				requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash)
 				requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, 2)
 				for index := range 2 {
 					path := fmt.Sprintf("account/%s-%d-%s", label, index, uuid.NewString())
-					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash, bundleSource)
+					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load batch observation %s: found=%v err=%v", path, found, err)
@@ -442,32 +437,32 @@ func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t
 			selected, db, sqlite := backend.setup(t)
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB := uuid.NewString(), uuid.NewString()
-			source := mustExternalStoreTestBundleSourceFact()
-			bundleHash, bundleSource := source.StorageValues()
+			source := mustExternalStoreTestSourceArtifactFact()
+			bundleHash := source.BundleHash()
 			ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(), runA)
 			ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(), runB)
 			if sqlite {
 				runlifecyclefixture.RequireSQLite(t, ctxA, db, runlifecyclefixture.Fixture{
 					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
-					BundleHash: bundleHash, BundleSource: bundleSource,
+					BundleHash: bundleHash,
 				})
 				runlifecyclefixture.RequireSQLite(t, ctxB, db, runlifecyclefixture.Fixture{
 					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
-					BundleHash: bundleHash, BundleSource: bundleSource,
+					BundleHash: bundleHash,
 				})
 			} else {
 				runlifecyclefixture.RequirePostgres(t, ctxA, db, runlifecyclefixture.Fixture{
 					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
-					BundleHash: bundleHash, BundleSource: bundleSource,
+					BundleHash: bundleHash,
 				})
 				runlifecyclefixture.RequirePostgres(t, ctxB, db, runlifecyclefixture.Fixture{
 					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
-					BundleHash: bundleHash, BundleSource: bundleSource,
+					BundleHash: bundleHash,
 				})
 			}
 
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash, bundleSource)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash, bundleSource)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash)
 
 			for _, check := range []struct {
 				ctx  context.Context
@@ -492,11 +487,11 @@ func seedExactFlowInstanceDescriptorOwner(
 	t *testing.T,
 	db *sql.DB,
 	sqlite bool,
-	runID, entityID, instancePath, bundleHash, bundleSource string,
+	runID, entityID, instancePath, bundleHash string,
 ) {
 	t.Helper()
 	readiness := exactFlowInstanceDescriptorReadinessJSON(
-		t, runID, bundleHash, bundleSource, "account", instancePath, entityID,
+		t, runID, bundleHash, "1.0.0", "account", instancePath, entityID,
 	)
 	if sqlite {
 		if _, err := db.Exec(`
@@ -539,13 +534,15 @@ func seedExactFlowInstanceDescriptorOwner(
 	}
 }
 
-func requireReadinessRun(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, bundleHash, bundleSource string) {
+func requireReadinessRun(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, bundleHash string, artifacts ...*sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
 	fixture := runlifecyclefixture.Fixture{
-		Origin:       runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID:        runID,
-		BundleHash:   bundleHash,
-		BundleSource: bundleSource,
+		Origin:     runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:      runID,
+		BundleHash: bundleHash,
+	}
+	if len(artifacts) > 0 {
+		fixture.Artifact = artifacts[0]
 	}
 	if sqlite {
 		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
@@ -565,8 +562,12 @@ func setReadinessPlanRaw(t *testing.T, db *sql.DB, sqlite bool, runID, instanceP
 	}
 }
 
-func setReadinessRunSource(t *testing.T, owner runtimerunlifecycle.OperationOwner, ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) {
+func setReadinessRunSource(t *testing.T, owner interface {
+	runtimerunlifecycle.OperationOwner
+	sourceartifactfixture.Writer
+}, ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
+	sourceartifactfixture.RequireArtifact(t, ctx, owner, artifact)
 	if _, err := owner.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: runID, Source: source}); err != nil {
 		t.Fatalf("set readiness run source for %s: %v", runID, err)
 	}
@@ -667,11 +668,21 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					selected, db, sqlite := backend.setup(t)
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-					source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-					planBundleHash, bundleSource := mustExternalStoreTestBundleSourceFact().StorageValues()
+					bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
+					source := semanticview.Wrap(bundle)
+					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
+					scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+					if !ok {
+						t.Fatal("test author-activity scope is unavailable")
+					}
+					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, bundle.SourceArtifact.BundleHash()))
+					storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
+					planBundleHash := bundle.SourceArtifact.BundleHash()
 					bundleHash := planBundleHash
 					if tc.foreignBundle {
-						bundleHash = "bundle-v1:sha256:" + strings.Repeat("f", 64)
+						foreign := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
+						sourceartifactfixture.RequireArtifact(t, ctx, selected, foreign)
+						bundleHash = foreign.BundleHash()
 					}
 					wrongRunID := uuid.NewString()
 					seedFlowInstanceDescriptorAuthorityCase(
@@ -682,8 +693,8 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						runID,
 						wrongRunID,
 						bundleHash,
-						bundleSource,
 						planBundleHash,
+						source.WorkflowVersion(),
 						tc.readiness,
 						tc.readinessOnWrongRun,
 					)
@@ -728,7 +739,10 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						t.Fatalf("read prior exact route set: %v", err)
 					}
 
-					eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+					eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
+						ContractBundle:     source,
+						SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+					})
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
@@ -817,8 +831,8 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	runID string,
 	wrongRunID string,
 	bundleHash string,
-	bundleSource string,
 	planBundleHash string,
+	workflowVersion string,
 	readiness string,
 	readinessOnWrongRun bool,
 ) {
@@ -828,17 +842,17 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	const config = `{"workflow_version":"1.0.0"}`
 	entityID := uuid.NewString()
 	stagedEntityID := uuid.NewString()
-	stagedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, bundleSource, notifyallchildren.ChildFlowID, stagedInstancePath, stagedEntityID)
+	stagedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, workflowVersion, notifyallchildren.ChildFlowID, stagedInstancePath, stagedEntityID)
 	if readiness == "exact" {
-		readiness = exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, bundleSource, notifyallchildren.ChildFlowID, instancePath, entityID)
+		readiness = exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, workflowVersion, notifyallchildren.ChildFlowID, instancePath, entityID)
 	}
 	if sqlite {
 		now := time.Now().UTC()
 		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource,
+			RunID: runID, StartedAt: now, BundleHash: bundleHash,
 		})
 		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource,
+			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash,
 		})
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -878,10 +892,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	}
 
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+		RunID: runID, BundleHash: bundleHash,
 	})
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: wrongRunID, BundleHash: bundleHash, BundleSource: bundleSource,
+		RunID: wrongRunID, BundleHash: bundleHash,
 	})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -923,7 +937,7 @@ func exactFlowInstanceDescriptorReadinessJSON(
 	t *testing.T,
 	runID string,
 	bundleHash string,
-	bundleSource string,
+	workflowVersion string,
 	templateID string,
 	instancePath string,
 	entityID string,
@@ -935,7 +949,7 @@ func exactFlowInstanceDescriptorReadinessJSON(
 			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
 			EntityID: entityID, HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: "live",
+		RunID: runID, BundleHash: bundleHash, WorkflowVersion: workflowVersion, ExecutionMode: "live",
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize exact descriptor readiness: %v", err)

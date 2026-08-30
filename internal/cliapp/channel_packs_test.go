@@ -99,7 +99,7 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 				"hitl": {
 					Pack: "provider.telegram.hitl_channel", Destination: "-100123",
 					Credentials: map[string]string{"telegram_bot_token": "telegram_hitl_bot"},
-					Register:    "ingress:support:telegram:telegram",
+					Register:    "ingress:support:telegram",
 				},
 			},
 		},
@@ -122,7 +122,7 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks: %v", err)
 	}
-	if len(loaded.Bindings) != 1 || loaded.Bindings[0].RegistrationTarget() != "ingress:support:telegram:telegram" {
+	if len(loaded.Bindings) != 1 || loaded.Bindings[0].RegistrationTarget() != "ingress:support:telegram" {
 		t.Fatalf("registration binding = %#v", loaded.Bindings)
 	}
 	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram_bot_token"]; got != "telegram_hitl_bot" {
@@ -135,7 +135,7 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	}{
 		{name: "missing explicit credentials", mutate: func(binding *config.ChannelBindingConfig) { binding.Credentials = nil }},
 		{name: "malformed target", mutate: func(binding *config.ChannelBindingConfig) { binding.Register = "support:telegram" }},
-		{name: "provider mismatch", mutate: func(binding *config.ChannelBindingConfig) { binding.Register = "ingress:support:telegram:slack" }},
+		{name: "provider mismatch", mutate: func(binding *config.ChannelBindingConfig) { binding.Register = "ingress:support:slack" }},
 		{name: "unknown credential role", mutate: func(binding *config.ChannelBindingConfig) { binding.Credentials["unused"] = "value" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -74,7 +74,7 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 							role, model, memory_enabled, memory_source,
 							lifecycle_process_authority_id, lifecycle_process_owner_id,
 							lifecycle_process_boot_id, lifecycle_generation_grant_id,
-							lifecycle_bundle_hash, lifecycle_bundle_source,
+							lifecycle_bundle_hash,
 							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 							topology_authority_kind, topology_admission, execution_lifetime
 						)
@@ -82,7 +82,7 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 							'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default',
 							'00000000-0000-4000-8000-000000000001'::uuid, 'schema-negative-test',
 							'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
-							'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+							'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 							'00000000-0000-4000-8000-000000000004'::uuid, 1,
 							'static_declaration_plan', $1::jsonb, 'durable_managed')
 				`, testAgentTopologyJSON(t))
@@ -99,7 +99,7 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 							role, model, memory_enabled, memory_source,
 							lifecycle_process_authority_id, lifecycle_process_owner_id,
 							lifecycle_process_boot_id, lifecycle_generation_grant_id,
-							lifecycle_bundle_hash, lifecycle_bundle_source,
+							lifecycle_bundle_hash,
 							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 							topology_authority_kind, topology_admission, execution_lifetime
 						)
@@ -107,7 +107,7 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 							'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default',
 							'00000000-0000-4000-8000-000000000001', 'schema-negative-test',
 							'00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003',
-							'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+							'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 							'00000000-0000-4000-8000-000000000004', 1,
 							'static_declaration_plan', ?, 'durable_managed')
 				`, testAgentTopologyJSON(t))
@@ -178,7 +178,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					runtime_descriptor, status,
 					lifecycle_process_authority_id, lifecycle_process_owner_id,
 					lifecycle_process_boot_id, lifecycle_generation_grant_id,
-					lifecycle_bundle_hash, lifecycle_bundle_source,
+					lifecycle_bundle_hash,
 					lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 					topology_authority_kind, topology_admission, execution_lifetime
 				) VALUES (
@@ -188,7 +188,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					$8::jsonb, 'active',
 					'00000000-0000-4000-8000-000000000001'::uuid, 'runtime-descriptor-test',
 					'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
-					'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+					'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 					'00000000-0000-4000-8000-000000000004'::uuid, 1,
 					'static_declaration_plan', $9::jsonb, 'durable_managed'
 				)

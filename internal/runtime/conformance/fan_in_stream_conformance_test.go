@@ -492,7 +492,7 @@ func fanInStreamRoutesContain(routes []events.DeliveryRoute, target events.Route
 
 func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteIdentity) (events.RouteIdentity, bool) {
 	target = target.Normalized()
-	receiver, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	receiver, err := runtimeidentity.AdmitExecutableNodeDeclaration(templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
 	if err != nil {
 		return events.RouteIdentity{}, false
 	}

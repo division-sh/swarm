@@ -43,17 +43,15 @@ func (e *StandingServiceError) Unwrap() error {
 
 type StandingServiceCandidate struct {
 	ServiceID  string
-	PackageKey string
-	FlowID     string
+	FlowPath   string
 	InstanceID string
 	EntityID   string
-	Source     runtimecorrelation.BundleSourceFact
+	Source     runtimecorrelation.SourceArtifactFact
 }
 
 func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
 	c.ServiceID = strings.TrimSpace(c.ServiceID)
-	c.PackageKey = strings.TrimSpace(c.PackageKey)
-	c.FlowID = strings.TrimSpace(c.FlowID)
+	c.FlowPath = strings.TrimSpace(c.FlowPath)
 	c.InstanceID = strings.TrimSpace(c.InstanceID)
 	c.EntityID = strings.TrimSpace(c.EntityID)
 	return c
@@ -62,7 +60,7 @@ func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
 func (c StandingServiceCandidate) Validate() error {
 	c = c.Normalized()
 	for field, value := range map[string]string{
-		"service_id": c.ServiceID, "package_key": c.PackageKey, "flow_id": c.FlowID,
+		"service_id": c.ServiceID, "flow_path": c.FlowPath,
 		"instance_id": c.InstanceID, "entity_id": c.EntityID,
 	} {
 		if value == "" {
@@ -74,9 +72,9 @@ func (c StandingServiceCandidate) Validate() error {
 			return fmt.Errorf("standing service %s must be a UUID: %w", field, err)
 		}
 	}
-	wantServiceID := runtimeflowidentity.StandingServiceID(c.PackageKey, c.FlowID)
+	wantServiceID := runtimeflowidentity.StandingServiceID(c.FlowPath)
 	if c.ServiceID != wantServiceID {
-		return fmt.Errorf("standing service_id %s does not match package_key/flow_id owner %s", c.ServiceID, wantServiceID)
+		return fmt.Errorf("standing service_id %s does not match flow_path owner %s", c.ServiceID, wantServiceID)
 	}
 	if err := c.Source.Validate(); err != nil {
 		return fmt.Errorf("standing service bundle source: %w", err)
@@ -86,8 +84,7 @@ func (c StandingServiceCandidate) Validate() error {
 
 type StandingServiceReconciliation struct {
 	ServiceID                    string
-	PackageKey                   string
-	FlowID                       string
+	FlowPath                     string
 	InstanceID                   string
 	EntityID                     string
 	RunID                        string
@@ -96,7 +93,6 @@ type StandingServiceReconciliation struct {
 	Transition                   string
 	EffectiveState               string
 	BundleHash                   string
-	BundleSource                 string
 	Reason                       string
 	RestartDisposition           StandingRestartDisposition
 	DeliveryContinuationRequired bool

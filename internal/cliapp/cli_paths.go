@@ -2,49 +2,44 @@ package cliapp
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
 
-const cliContractsPathEnv = "SWARM_CONTRACTS_PATH"
-
-type CLIContractPlatformSpecPathOptions struct {
-	ContractsPath    string
+type CLISourcePlatformSpecPathOptions struct {
+	SourceRoot       string
 	PlatformSpecPath string
 	ConfigPath       string
 }
 
-type CLIContractPlatformSpecPaths struct {
-	ContractsPath    string
+type CLISourcePlatformSpecPaths struct {
+	SourceRoot       string
 	PlatformSpecPath string
 }
 
-func ResolveCLIContractPlatformSpecPaths(invocationRootPath string, opts CLIContractPlatformSpecPathOptions) (CLIContractPlatformSpecPaths, error) {
+func ResolveCLISourcePlatformSpecPaths(invocationRootPath string, opts CLISourcePlatformSpecPathOptions) (CLISourcePlatformSpecPaths, error) {
 	var err error
 	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
-		return CLIContractPlatformSpecPaths{}, err
+		return CLISourcePlatformSpecPaths{}, err
 	}
 	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: invocationRootPath, ExplicitPath: opts.ConfigPath})
 	if err != nil {
-		return CLIContractPlatformSpecPaths{}, err
+		return CLISourcePlatformSpecPaths{}, err
 	}
-	return resolveCLIContractPlatformSpecPathsFromConfig(invocationRootPath, opts, cfg)
+	return resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath, opts, cfg)
 }
 
-func resolveCLIContractPlatformSpecPathsFromConfig(invocationRootPath string, opts CLIContractPlatformSpecPathOptions, cfg cliCommandConfig) (CLIContractPlatformSpecPaths, error) {
+func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts CLISourcePlatformSpecPathOptions, cfg cliCommandConfig) (CLISourcePlatformSpecPaths, error) {
 	var err error
 	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
-		return CLIContractPlatformSpecPaths{}, err
+		return CLISourcePlatformSpecPaths{}, err
 	}
-	contractsPath := firstNonEmpty(
-		opts.ContractsPath,
-		os.Getenv(cliContractsPathEnv),
-		cfg.Paths.ContractsPath,
-		discoverInvocationRootContractsPath(invocationRootPath),
-	)
+	sourceRoot, err := ResolveSourceRoot(invocationRootPath, opts.SourceRoot)
+	if err != nil {
+		return CLISourcePlatformSpecPaths{}, err
+	}
 	configPlatformSpecPath := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
 	platformSpecPath := firstNonEmpty(
 		opts.PlatformSpecPath,
@@ -53,29 +48,27 @@ func resolveCLIContractPlatformSpecPathsFromConfig(invocationRootPath string, op
 	if platformSpecPath == "" {
 		embedded, err := EmbeddedPlatformSpecPath()
 		if err != nil {
-			return CLIContractPlatformSpecPaths{}, fmt.Errorf("resolve embedded platform spec: %w", err)
+			return CLISourcePlatformSpecPaths{}, fmt.Errorf("resolve embedded platform spec: %w", err)
 		}
 		platformSpecPath = embedded
 	}
-	return CLIContractPlatformSpecPaths{
-		ContractsPath:    ResolvePath(invocationRootPath, contractsPath),
+	return CLISourcePlatformSpecPaths{
+		SourceRoot:       sourceRoot,
 		PlatformSpecPath: ResolvePath(invocationRootPath, platformSpecPath),
 	}, nil
 }
 
-func discoverInvocationRootContractsPath(invocationRootPath string) string {
-	invocationRootPath = strings.TrimSpace(invocationRootPath)
-	if invocationRootPath == "" {
-		return ""
+func ResolveSourceRoot(invocationRootPath, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = invocationRootPath
 	}
-	candidate := filepath.Join(invocationRootPath, "contracts")
-	if regularFileExists(filepath.Join(candidate, "package.yaml")) {
-		return candidate
+	if !filepath.IsAbs(raw) {
+		raw = filepath.Join(invocationRootPath, raw)
 	}
-	return ""
-}
-
-func regularFileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	root, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("resolve source directory %q: %w", raw, err)
+	}
+	return filepath.Clean(root), nil
 }

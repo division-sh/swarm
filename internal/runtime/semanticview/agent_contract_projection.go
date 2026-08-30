@@ -44,14 +44,6 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 			projection.scopedTools = scope.Tools
 			return projection, true
 		}
-	case "project":
-		for _, scope := range source.ProjectScopes() {
-			if strings.TrimSpace(scope.Key) != strings.TrimSpace(declaration.ScopeID) {
-				continue
-			}
-			projection.scopedTools = scope.Tools
-			return projection, true
-		}
 	default:
 		return AgentContractProjection{}, false
 	}

@@ -266,52 +266,6 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 	})
 }
 
-func TestExecutorHTTPToolUsesImportedManagedCredentialBinding(t *testing.T) {
-	ctx := unmanagedToolTestContext()
-	var sawAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-	}))
-	defer server.Close()
-
-	source := loadManagedCredentialImportSource(t, server.URL, "        provider_oauth: tenant_oauth\n", false)
-	store := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
-		Key:         "tenant_oauth",
-		GrantType:   runtimemanagedcredentials.GrantClientCredentials,
-		AccessToken: "tenant-token",
-		Scopes:      []string{"repo.read"},
-		Status:      runtimemanagedcredentials.StatusConnected,
-	})
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
-	if _, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{}); err != nil {
-		t.Fatalf("Execute(send_provider): %v", err)
-	}
-	if sawAuth != "Bearer tenant-token" {
-		t.Fatalf("Authorization = %q, want bound tenant token", sawAuth)
-	}
-}
-
-func TestExecutorHTTPToolRejectsAmbientManagedCredentialFallback(t *testing.T) {
-	ctx := unmanagedToolTestContext()
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("HTTP server should not be called when managed credential binding is missing")
-	}))
-	defer server.Close()
-
-	source := loadManagedCredentialImportSource(t, server.URL, "", false)
-	store := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
-		Key:         "provider_oauth",
-		GrantType:   runtimemanagedcredentials.GrantClientCredentials,
-		AccessToken: "ambient-token",
-		Status:      runtimemanagedcredentials.StatusConnected,
-	})
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
-	_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
-	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
-}
-
 func requireToolFailure(t *testing.T, err error, class runtimefailures.Class, detailCode string) runtimefailures.Envelope {
 	t.Helper()
 	if err == nil {
@@ -417,61 +371,4 @@ func managedCredentialSource(serverURL, key string, scopes []string) semanticvie
 			})),
 		},
 	})
-}
-
-func loadManagedCredentialImportSource(t *testing.T, serverURL, credentialBind string, omitRequires bool) semanticview.Source {
-	t.Helper()
-	repoRoot := toolsRepoRootForTest(t)
-	root := t.TempDir()
-	bindCredentials := ""
-	if strings.TrimSpace(credentialBind) != "" {
-		bindCredentials = "      credentials:\n" + credentialBind
-	}
-	writeToolFixtureFile(t, root+"/package.yaml", `
-name: managed-credential-import
-version: "1.0.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-    bind:
-`+bindCredentials)
-	writeToolFixtureFile(t, root+"/schema.yaml", "name: managed-credential-import\n")
-	requires := "  credentials: [provider_oauth]\n"
-	if omitRequires {
-		requires = ""
-	}
-	writeToolFixtureFile(t, root+"/flows/worker/package.yaml", `
-name: worker-package
-version: "1.0.0"
-requires:
-`+requires)
-	writeToolFixtureFile(t, root+"/flows/worker/schema.yaml", "name: worker\nmode: static\n")
-	writeToolFixtureFile(t, root+"/flows/worker/agents.yaml", `
-worker-agent:
-  id: worker-agent
-  role: worker
-  intent: {inline: "Invoke the declared provider using its managed credential."}
-  model: regular
-  tools: [send_provider]
-`)
-	writeToolFixtureFile(t, root+"/flows/worker/tools.yaml", `
-send_provider:
-  handler_type: http
-  managed_credential:
-    key: provider_oauth
-    scopes: [repo.read]
-  input_schema:
-    type: object
-  http:
-    method: GET
-    url: `+serverURL+`
-  response_mapping:
-    ok: '{{response.body.ok}}'
-`)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
 }

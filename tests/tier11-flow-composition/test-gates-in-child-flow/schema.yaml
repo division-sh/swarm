@@ -9,3 +9,7 @@ pins:
     events:
       - validate.requested
       - validation.done
+connect:
+  - event: validation.done
+    from: child
+    to: .

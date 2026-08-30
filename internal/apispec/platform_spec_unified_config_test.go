@@ -220,8 +220,13 @@ func TestPlatformSpecUnifiedConfigSupersedesOldConfigCommitments(t *testing.T) {
 	assertContainsScalar(t, mustMappingValue(t, cliConfig, "unified_config_supersession"), "configuration_source_authority.unified_swarm_config")
 	assertContainsScalar(t, mustMappingValue(t, cliConfig, "unified_config_supersession"), "global `--config`")
 
-	pathConfig := mustMappingValue(t, mustMappingValue(t, foundations, "contract_platform_spec_path_resolution"), "cli_config_file")
-	assertContainsScalar(t, mustMappingValue(t, pathConfig, "unified_config_supersession"), "`paths` section")
+	pathConfig := mustMappingValue(t, foundations, "source_platform_spec_path_resolution")
+	assertContainsScalar(t, mustMappingValue(t, pathConfig, "scope"), "authored source root is owned by filesystem_source_model.local_root_selection")
+	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "No environment or CLI flag source")
+
+	sourceRoot := mustYAMLPath(t, root, "filesystem_source_model", "local_root_selection")
+	assertContainsScalar(t, mustMappingValue(t, sourceRoot, "rule"), "Omission and `.` select exactly the captured invocation directory")
+	assertContainsScalar(t, mustMappingValue(t, sourceRoot, "rule"), "There is no ancestor")
 
 	envAuthority := mustMappingValue(t, mustMappingValue(t, root, "environment_source_authority"), "repo_wide_swarm_env_accepted_set")
 	typedDelegation := mustMappingValue(t, envAuthority, "typed_delegation")

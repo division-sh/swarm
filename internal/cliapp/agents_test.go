@@ -35,14 +35,14 @@ func TestAgentsListUsesV1RPCWithFilters(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "list", "--flow", "flows/research", "--role", "researcher"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "list", "--flow", "research", "--role", "researcher"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if captured.JSONRPC != "2.0" || captured.Method != "agent.list" {
 		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/agent.list", captured.JSONRPC, captured.Method)
 	}
-	wantParams := map[string]any{"flow": "flows/research", "role": "researcher"}
+	wantParams := map[string]any{"flow": "research", "role": "researcher"}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"sort"
 	"sync"
@@ -24,10 +25,12 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
-const authorActivityTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 type storeTestWorkFixture struct {
 	process *worklifetime.Process
@@ -87,6 +90,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type storeTestDurableEventBusStore interface {
+	sourceartifactfixture.Writer
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -116,8 +120,10 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = sourceartifactfixture.Require(t, context.Background(), store)
+	} else if opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
+		sourceartifactfixture.Require(t, context.Background(), store)
 	}
 	if opts.RuntimeInstanceID == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
@@ -130,7 +136,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -164,6 +170,15 @@ func testAuthorActivityContext() context.Context {
 	return testAuthorActivityContextForBundle(authorActivityTestBundleHash)
 }
 
+func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, selected any) {
+	t.Helper()
+	writer, ok := selected.(sourceartifactfixture.Writer)
+	if !ok {
+		t.Fatalf("default source artifact fixture requires source writer, got %T", selected)
+	}
+	sourceartifactfixture.Require(t, ctx, writer)
+}
+
 func testAuthorActivityRuntimeContext() context.Context {
 	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(
 		authorActivityTestRuntimeInstanceID,
@@ -171,9 +186,9 @@ func testAuthorActivityRuntimeContext() context.Context {
 }
 
 func testAuthorActivityContextForBundle(bundleHash string) context.Context {
-	ctx := runtimecorrelation.WithBundleSourceFact(
+	ctx := runtimecorrelation.WithSourceArtifactFact(
 		context.Background(),
-		mustStoreTestEphemeralBundleSourceFact(bundleHash),
+		mustStoreTestSourceArtifactFact(bundleHash),
 	)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
@@ -182,34 +197,57 @@ func testAuthorActivityContextForBundle(bundleHash string) context.Context {
 	))
 }
 
-func testAuthorActivityBundleSourceContext() context.Context {
+func testAuthorActivitySourceArtifactContext() context.Context {
 	return testAuthorActivityContext()
 }
 
-func mustStoreTestPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+func mustStoreTestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
 	return fact
 }
 
-func mustStoreTestEphemeralBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-	if err != nil {
-		panic(err)
-	}
-	return fact
+func storeTestSourceArtifact(label string) *sourceartifact.AdmittedSourceArtifact {
+	return sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# "+label+"\n"))
 }
 
-func seedStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {
+func requireStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {
 	t.Helper()
-	if _, err := db.ExecContext(testAuthorActivityContextForBundle(bundleHash), `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: test', '{}')
+	persisted := sourceartifact.Persisted{BundleHash: bundleHash, CreatedAt: time.Now().UTC()}
+	err := db.QueryRowContext(testAuthorActivityContextForBundle(bundleHash), `
+		SELECT source_blob, member_count, total_bytes
+		FROM source_artifacts
+		WHERE bundle_hash = $1
+	`, bundleHash).Scan(&persisted.SourceBlob, &persisted.MemberCount, &persisted.TotalBytes)
+	if err == nil {
+		if err := persisted.Validate(); err != nil {
+			t.Fatalf("validate persisted source artifact %s: %v", bundleHash, err)
+		}
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("read persisted source artifact %s: %v", bundleHash, err)
+	}
+	if bundleHash != sourceartifactfixture.BundleHash {
+		t.Fatalf("persisted source fixture %s requires an exact admitted artifact", bundleHash)
+	}
+	seedStoreTestPersistedArtifact(t, db, sourceartifactfixture.Artifact())
+}
+
+func seedStoreTestPersistedArtifact(t *testing.T, db *sql.DB, artifact *sourceartifact.AdmittedSourceArtifact) {
+	t.Helper()
+	persisted, err := sourceartifact.PersistedFromArtifact(artifact, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("project persisted source artifact fixture: %v", err)
+	}
+	if _, err := db.ExecContext(testAuthorActivityContextForBundle(persisted.BundleHash), `
+		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (bundle_hash) DO NOTHING
-	`, bundleHash); err != nil {
-		t.Fatalf("seed persisted bundle %s: %v", bundleHash, err)
+	`, persisted.BundleHash, persisted.SourceBlob, persisted.MemberCount, persisted.TotalBytes); err != nil {
+		t.Fatalf("seed persisted source artifact %s: %v", persisted.BundleHash, err)
 	}
 }
 
@@ -239,7 +277,7 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		"first.event", "second.event", "phrase.completed", "review.requested", "review/inst-1/task.ready", "scan.completed", "scan.dev", "scan.followup", "scan.requested", "scoring.requested", "scoring/scoring.requested",
 		"subscription.visible", "support_reply.rejected", "support_reply.revision_requested", "system.directive", "system.parent", "system.started", "task.completed",
 		"custom.stop", "quiescence.active_delivery", "quiescence.missing_pipeline_receipt", "quiescence.ready",
-		"scan.finished", "scan.progressed", "scan.replayed", "selected.test", "standing.unsettled", "standing.work",
+		"run_fork.root_gate_approved", "scan.finished", "scan.progressed", "scan.replayed", "selected.test", "standing.unsettled", "standing.work",
 		"task.canonical_entity", "task.dead", "task.dead_letter", "task.delivered", "task.failed", "task.failed.new", "task.failed.old", "task.in_progress", "task.other", "task.other_agent", "task.payload_only", "task.pending",
 		"trace.event_only", "trace.failed", "trace.late_delivered", "trace.second_delivered", "trace.task_audit", "trace.tie",
 		"test.delivery_receipt", "test.delivery_requested", "test.direct_dead_letter", "test.event", "test.receipts.typed_identity", "test.started", "test.terminal_admission", "test.terminal_delivery",

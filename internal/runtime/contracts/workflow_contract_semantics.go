@@ -10,13 +10,22 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
 	}
-	name := strings.TrimSpace(bundle.Package.Name)
-	version := strings.TrimSpace(bundle.Package.Version)
+	name := "."
+	version := ""
+	if bundle.SourceArtifact != nil {
+		version = bundle.SourceArtifact.BundleHash()
+	}
 	entitySchema := legacyWorkflowEntitySchema(bundle)
-	compositionConnects := make([]FlowPackageConnect, 0)
-	for _, pkg := range bundle.PackageTree {
-		for _, connect := range pkg.Manifest.Connect {
-			compositionConnects = append(compositionConnects, connect.WithPackageSource(pkg.Key, pkg.Paths.PackageFile))
+	compositionConnects := make([]FlowConnect, 0)
+	for _, source := range sortedFlowSources(bundle.FlowSources) {
+		var schema FlowSchemaDocument
+		if source.FlowPath == "." && bundle.RootSchema != nil {
+			schema = *bundle.RootSchema
+		} else {
+			schema = bundle.FlowSchemas[source.FlowPath]
+		}
+		for _, connect := range schema.Connect {
+			compositionConnects = append(compositionConnects, connect.WithOwnerSource(source.FlowPath, source.Schema))
 		}
 	}
 	semantics := WorkflowSemanticView{
@@ -24,8 +33,8 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		Version:                version,
 		InitialStage:           rootSchemaInitialStage(bundle.RootSchema),
 		EntitySchema:           entitySchema,
-		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
-		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
+		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.FlowSchemas),
+		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.FlowSchemas),
 		Transitions:            deriveStageTimerTransitions(bundle),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
@@ -65,19 +74,23 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
 	if bundle.RootSchema != nil {
 		var err error
-		semantics.flowInputEventPins[""], err = compileFlowInputPins(bundle, "", "", bundle.Paths.RootSchemaFile, bundle.RootSchema.Pins.Inputs.EventPins)
+		rootSchemaFile := ""
+		if root, ok := bundle.FlowSources["."]; ok {
+			rootSchemaFile = root.Schema
+		}
+		semantics.flowInputEventPins["."], err = compileFlowInputPins(bundle, ".", ".", rootSchemaFile, bundle.RootSchema.Pins.Inputs.EventPins)
 		if err != nil {
 			return fmt.Errorf("compile root input pins: %w", err)
 		}
-		semantics.flowOutputEventPins[""], err = compileFlowOutputPins(bundle, "", "", bundle.Paths.RootSchemaFile, bundle.RootSchema.Pins.Outputs.EventPins)
+		semantics.flowOutputEventPins["."], err = compileFlowOutputPins(bundle, ".", ".", rootSchemaFile, bundle.RootSchema.Pins.Outputs.EventPins)
 		if err != nil {
 			return fmt.Errorf("compile root output pins: %w", err)
 		}
-		semantics.flowReads[""], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Inputs.Reads)
+		semantics.flowReads["."], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Inputs.Reads)
 		if err != nil {
 			return fmt.Errorf("compile root input entity permissions: %w", err)
 		}
-		semantics.flowWrites[""], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Outputs.Writes)
+		semantics.flowWrites["."], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Outputs.Writes)
 		if err != nil {
 			return fmt.Errorf("compile root output entity permissions: %w", err)
 		}
@@ -100,13 +113,10 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		semantics.FlowInitial[flowID] = schema.LoweredInitialState()
 		semantics.FlowStates[flowID] = schema.LoweredStates()
 		semantics.FlowTerminal[flowID] = schema.LoweredTerminalStates()
-		assignedNamespace := strings.TrimSpace(flowAssignedNamespace(bundle.Paths.Flows, flowID))
-		if assignedNamespace == "" {
-			assignedNamespace = strings.TrimSpace(schema.NamespacePrefix)
-		}
+		assignedNamespace := strings.TrimSpace(bundle.FlowPath(flowID))
 		semantics.FlowNamespace[flowID] = assignedNamespace
-		semantics.FlowPrefix[flowID] = strings.TrimSpace(schema.NamespacePrefix)
-		semantics.FlowRules[flowID] = strings.TrimSpace(schema.NamespaceRule)
+		semantics.FlowPrefix[flowID] = assignedNamespace
+		semantics.FlowRules[flowID] = "path-derived"
 		flowPath := bundle.FlowPath(flowID)
 		schemaFile := ""
 		if view, ok := bundle.FlowViewByID(flowID); ok && view != nil {
@@ -138,9 +148,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	}
 	for _, record := range bundle.ScopedNodeRecords() {
 		node, _ := record.Identity()
-		flowID := strings.TrimSpace(record.Source.FlowID)
+		flowID := strings.TrimSpace(record.Source.FlowPath)
 		for eventType, handler := range record.Entry.EventHandlers {
-			handler, _ = QualifySystemNodeHandlerRuleRefs(node, handler)
+			handler, _ = QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 			eventType = strings.TrimSpace(eventType)
 			handler = DefaultSystemNodeHandlerSourceEvent(handler, eventType)
 			if handler.Join == nil {
@@ -161,9 +171,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				})
 				if err != nil {
 					return fmt.Errorf("compile fan-out delivery join %s: %w", handler.Join.EffectiveID(), err)
-				}
-				if fanOutPlan.Ref.ElementRef.ElementID != handler.Join.Members.FromFanOut.String() {
-					return fmt.Errorf("fan-out delivery join %s does not reference its paired fan_out", handler.Join.EffectiveID())
 				}
 				joinPlan.FanOut = WorkflowFanOutDeliveryJoinPlan{FanOut: fanOutPlan.Ref}
 			} else {
@@ -192,7 +199,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		}
 		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
 		for eventType, handler := range node.EventHandlers {
-			handler, _ = QualifySystemNodeHandlerRuleRefs(nodeRef, handler)
+			handler, _ = QualifySystemNodeHandlerRuleRefsForEvent(nodeRef, eventType, handler)
 			rawEventType := strings.TrimSpace(eventType)
 			if rawEventType == "" {
 				continue
@@ -268,7 +275,7 @@ func deriveWorkflowGatePlans(bundle *WorkflowContractBundle) []WorkflowGatePlan 
 	}
 	out := make([]WorkflowGatePlan, 0)
 	if bundle.RootSchema != nil {
-		out = append(out, bundle.RootSchema.StageDeclarations.GatePlans("")...)
+		out = append(out, bundle.RootSchema.StageDeclarations.GatePlans(".")...)
 	}
 	flowIDs := make([]string, 0, len(bundle.FlowSchemas))
 	for flowID := range bundle.FlowSchemas {
@@ -299,7 +306,7 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 		}
 	}
 	if bundle.RootSchema != nil {
-		add("", bundle.RootSchema.LoopDeclarations)
+		add(".", bundle.RootSchema.LoopDeclarations)
 	}
 	for flowID, schema := range bundle.FlowSchemas {
 		add(flowID, schema.LoopDeclarations)
@@ -313,7 +320,7 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 			continue
 		}
 		for idx := range plans {
-			if plans[idx].ID != loopID || plans[idx].FlowID != transition.Node.FlowID() {
+			if plans[idx].ID != loopID || plans[idx].FlowID != transition.Node.FlowPath() {
 				continue
 			}
 			operation := WorkflowLoopOperationPlan{
@@ -346,8 +353,8 @@ func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]Wo
 		timers := make([]WorkflowTimerContract, 0)
 		for _, timer := range semantics.Timers {
 			owner := strings.TrimSpace(timer.FlowID)
-			if flowID == "" {
-				if owner != "" && owner != strings.TrimSpace(semantics.Name) {
+			if flowID == "." {
+				if owner != "" && owner != "." {
 					continue
 				}
 			} else if owner != flowID {
@@ -357,7 +364,7 @@ func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]Wo
 		}
 		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops, semantics.Gates)
 	}
-	build("", semantics.InitialStage, rootStages, semantics.TerminalStages)
+	build(".", semantics.InitialStage, rootStages, semantics.TerminalStages)
 	for flowID, stages := range semantics.FlowStates {
 		build(flowID, semantics.FlowInitial[flowID], stages, semantics.FlowTerminal[flowID])
 	}
@@ -379,9 +386,6 @@ func joinOutputField(path string) string {
 func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {
 	if bundle == nil {
 		return EntitySchema{}
-	}
-	if !bundle.Package.EntitySchema.Empty() {
-		return bundle.Package.EntitySchema
 	}
 	if len(bundle.RootEntities) > 0 {
 		if entityType, entity, ok := bundle.RootPrimaryEntityContract(); ok {
@@ -655,10 +659,10 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 	}
 	schemas := make([]stageSchema, 0, len(bundle.FlowViews())+1)
 	if bundle.RootSchema != nil {
-		schemas = append(schemas, stageSchema{Schema: *bundle.RootSchema})
+		schemas = append(schemas, stageSchema{FlowID: ".", Schema: *bundle.RootSchema})
 	}
 	for _, flow := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(flow.Paths.ID)
+		flowID := strings.TrimSpace(flow.Paths.FlowPath)
 		if flowID == "" {
 			continue
 		}
@@ -700,7 +704,7 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 func stageWorkflowTimerSemanticID(flowID, rowID string) string {
 	rowID = strings.TrimSpace(rowID)
 	flowID = strings.TrimSpace(flowID)
-	if rowID == "" || flowID == "" {
+	if rowID == "" || flowID == "" || flowID == "." {
 		return rowID
 	}
 	return flowID + "." + rowID
@@ -937,11 +941,11 @@ func rootSchemaInitialStage(root *FlowSchemaDocument) string {
 	return root.LoweredInitialState()
 }
 
-func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
+func deriveWorkflowStages(root *FlowSchemaDocument, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
 	out := make([]WorkflowStageContract, 0)
 	seen := make(map[string]struct{})
 	if root != nil {
-		for _, stage := range root.LoweredWorkflowStages("") {
+		for _, stage := range root.LoweredWorkflowStages(".") {
 			key := strings.TrimSpace(stage.ID)
 			if _, exists := seen[key]; exists {
 				continue
@@ -950,12 +954,13 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 			out = append(out, stage)
 		}
 	}
-	for _, flow := range paths {
-		flowID := strings.TrimSpace(flow.ID)
-		schema, ok := schemas[flowID]
-		if !ok {
-			continue
-		}
+	flowIDs := make([]string, 0, len(schemas))
+	for flowID := range schemas {
+		flowIDs = append(flowIDs, flowID)
+	}
+	sort.Strings(flowIDs)
+	for _, flowID := range flowIDs {
+		schema := schemas[flowID]
 		for _, stage := range schema.LoweredWorkflowStages(flowID) {
 			key := strings.TrimSpace(stage.ID)
 			if _, exists := seen[key]; exists {
@@ -968,7 +973,7 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 	return out
 }
 
-func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {
+func deriveWorkflowTerminalStages(root *FlowSchemaDocument, schemas map[string]FlowSchemaDocument) []string {
 	out := make([]string, 0)
 	seen := make(map[string]struct{})
 	if root != nil {
@@ -984,12 +989,13 @@ func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContract
 			out = append(out, state)
 		}
 	}
-	for _, flow := range paths {
-		flowID := strings.TrimSpace(flow.ID)
-		schema, ok := schemas[flowID]
-		if !ok {
-			continue
-		}
+	flowIDs := make([]string, 0, len(schemas))
+	for flowID := range schemas {
+		flowIDs = append(flowIDs, flowID)
+	}
+	sort.Strings(flowIDs)
+	for _, flowID := range flowIDs {
+		schema := schemas[flowID]
 		for _, state := range schema.LoweredTerminalStates() {
 			state = strings.TrimSpace(state)
 			if state == "" {
@@ -1003,16 +1009,4 @@ func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContract
 		}
 	}
 	return out
-}
-func flowAssignedNamespace(paths []FlowContractPaths, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return ""
-	}
-	for _, flow := range paths {
-		if strings.TrimSpace(flow.ID) == flowID {
-			return strings.TrimSpace(flow.Namespace)
-		}
-	}
-	return ""
 }

@@ -1,5 +1,0 @@
-name: flow-a
-version: 1.0.0
-description: Sibling flow A that emits internal events.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

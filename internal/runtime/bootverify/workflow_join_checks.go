@@ -23,7 +23,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 	seenIDs := map[string]string{}
 	for _, record := range wave1ScopedNodeRecords(c.source) {
 		nodeID := strings.TrimSpace(record.LogicalID)
-		flowID := strings.TrimSpace(record.Source.FlowID)
+		flowID := strings.TrimSpace(record.Source.FlowPath)
 		nodeRef, nodeErr := record.Identity()
 		declarationLocation := nodeID
 		if nodeErr == nil {
@@ -53,15 +53,15 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			case runtimecontracts.WorkflowJoinModeArrival:
 				ref, refErr = timeridentity.NewJoinRef(nodeRef, eventType, handler.Join.Stage, handler.Join.EffectiveID(), "")
 			case runtimecontracts.WorkflowJoinModeFanOutDelivery:
-				ref, refErr = timeridentity.NewFanOutDeliveryJoinRef(
-					nodeRef,
-					eventType,
-					handler.Join.EffectiveID(),
-					compiledPlan.FanOut.FanOut.ElementRef.PackageKey,
-					compiledPlan.FanOut.FanOut.ElementRef.ElementID,
-					compiledPlan.FanOut.FanOut.BundleHash,
-					compiledPlan.FanOut.FanOut.SemanticDigest,
-				)
+				fanOutDeclaration, identityErr := compiledPlan.FanOut.FanOut.ElementRef.DeclarationIdentity()
+				if identityErr != nil {
+					refErr = identityErr
+				} else {
+					ref, refErr = timeridentity.NewFanOutDeliveryJoinRef(
+						nodeRef, eventType, handler.Join.EffectiveID(), fanOutDeclaration,
+						compiledPlan.FanOut.FanOut.BundleHash, compiledPlan.FanOut.FanOut.SemanticDigest,
+					)
+				}
 			default:
 				refErr = fmt.Errorf("join has invalid compiled mode")
 			}

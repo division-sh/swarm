@@ -137,10 +137,7 @@ func seedSelectedRouteRecoveryEvent(t testing.TB, ctx context.Context, db *sql.D
 
 func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t *testing.T) {
 	selection := runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		ContractsRoot:   "/tmp/contracts",
-		WorkflowName:    "workflow",
-		WorkflowVersion: "v1",
+		Mode: "selected_contracts",
 	}
 	_, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         uuid.NewString(),
@@ -229,12 +226,10 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	targetHash := "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	selection = runfork.RunForkContractSelection{
-		Mode:            runfork.RunForkContractSelectionModeBundleHash,
-		BundleHash:      targetHash,
-		WorkflowName:    selection.WorkflowName,
-		WorkflowVersion: selection.WorkflowVersion,
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
+		BundleHash: targetHash,
 	}
 	topology.ContractSelection = selection
 	planning.ContractSelection = selection
@@ -251,8 +246,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
 	}
 	if record.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
-		record.ContractSelection.BundleHash != targetHash ||
-		record.ContractSelection.ContractsRoot != "" {
+		record.ContractSelection.BundleHash != targetHash {
 		t.Fatalf("record selection = %#v", record.ContractSelection)
 	}
 	loaded, ok, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
@@ -264,7 +258,6 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	}
 	if loaded.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		loaded.ContractSelection.BundleHash != targetHash ||
-		loaded.ContractSelection.ContractsRoot != "" ||
 		!strings.Contains(string(loaded.RouteTopology), targetHash) ||
 		!strings.Contains(string(loaded.RecipientPlanning), targetHash) {
 		t.Fatalf("loaded bundle_hash route recovery = %#v", loaded)
@@ -338,12 +331,10 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	requireRunningRunForTest(t, ctx, pg, forkRunID, time.Now().UTC())
 	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	targetHash := "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	targetHash := "bundle-v2:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	selection = runfork.RunForkContractSelection{
-		Mode:            runfork.RunForkContractSelectionModeBundleHash,
-		BundleHash:      targetHash,
-		WorkflowName:    selection.WorkflowName,
-		WorkflowVersion: selection.WorkflowVersion,
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
+		BundleHash: targetHash,
 	}
 	topology.ContractSelection = selection
 	planning.ContractSelection = selection
@@ -465,8 +456,7 @@ func prepareSelectedRouteRecoveryStartup(
 ) {
 	t.Helper()
 	coordinate := runtimeagenttopology.SourceCoordinate{
-		BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		BundleSource: "ephemeral",
+		BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
@@ -475,7 +465,6 @@ func prepareSelectedRouteRecoveryStartup(
 	admission, err := runtimeagenttopology.StaticAdmission(
 		plan.Revision,
 		coordinate.BundleHash,
-		coordinate.BundleSource,
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
@@ -491,10 +480,7 @@ func prepareSelectedRouteRecoveryStartup(
 
 func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractSelection, runfork.RunForkSelectedContractRouteTopology, runfork.RunForkSelectedContractRecipientPlanning) {
 	selection := runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		ContractsRoot:   "/tmp/contracts",
-		WorkflowName:    "workflow",
-		WorkflowVersion: "v1",
+		Mode: "selected_contracts",
 	}
 	topology := runfork.RunForkSelectedContractRouteTopology{
 		Owner:                         runfork.RunForkSelectedContractRouteTopologyOwner,
@@ -547,7 +533,7 @@ type selectedRouteRecoveryPostgresBus struct {
 	logs  []runtimepipeline.RuntimeLogEntry
 }
 
-func (*selectedRouteRecoveryPostgresBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*selectedRouteRecoveryPostgresBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return ctx, nil
 }
 func (*selectedRouteRecoveryPostgresBus) Publish(context.Context, events.Event) error { return nil }

@@ -87,7 +87,7 @@ func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *
 func TestResolveStandingTargetDeclarationsRejectsImplicitActivation(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.PackageTree[0].Manifest.Flows[0].Activation = ""
+	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Activation = "" })
 	if _, err := ResolveStandingTargetDeclarations(source, registry); err == nil || !strings.Contains(err.Error(), "ingress requires activation: standing") {
 		t.Fatalf("implicit activation error = %v", err)
 	}
@@ -96,7 +96,7 @@ func TestResolveStandingTargetDeclarationsRejectsImplicitActivation(t *testing.T
 func TestResolveStandingTargetDeclarationsRejectsUnreachableIngressAlias(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
-	bundle.PackageTree[0].Manifest.Flows[0].Ingress.Alias = "chat/support"
+	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress.Alias = "chat/support" })
 	_, err := ResolveStandingTargetDeclarations(source, registry)
 	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
 		t.Fatalf("multi-segment alias error = %v", err)
@@ -106,10 +106,12 @@ func TestResolveStandingTargetDeclarationsRejectsUnreachableIngressAlias(t *test
 func TestStandingIngressAdmissionOmissionIsPackRequired(t *testing.T) {
 	source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
 	bundle, _ := semanticview.Bundle(source)
-	binding := &bundle.PackageTree[0].Manifest.Flows[0].Ingress.Providers[0]
-	binding.Provider = "partner"
-	binding.SigningSecret = ""
-	binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{}
+	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
+		binding := &schema.Ingress.Providers[0]
+		binding.Provider = "partner"
+		binding.SigningSecret = ""
+		binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{}
+	})
 	emptyCatalog, err := providertriggers.NewCatalogSnapshot()
 	if err != nil {
 		t.Fatal(err)
@@ -132,14 +134,16 @@ func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmissi
 		t.Run(tc.name, func(t *testing.T) {
 			source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
 			bundle, _ := semanticview.Bundle(source)
-			binding := &bundle.PackageTree[0].Manifest.Flows[0].Ingress.Providers[0]
-			binding.Provider = "partner"
-			binding.SigningSecret = ""
-			binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{
-				Kind: "raw", Acknowledge: tc.acknowledge, Event: "inbound.partner", Payload: "json",
-				Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "none"},
-				DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "json_path", JSONPath: "$.id"},
-			}
+			mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
+				binding := &schema.Ingress.Providers[0]
+				binding.Provider = "partner"
+				binding.SigningSecret = ""
+				binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{
+					Kind: "raw", Acknowledge: tc.acknowledge, Event: "inbound.partner", Payload: "json",
+					Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "none"},
+					DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "json_path", JSONPath: "$.id"},
+				}
+			})
 			emptyCatalog, err := providertriggers.NewCatalogSnapshot()
 			if err != nil {
 				t.Fatal(err)
@@ -162,7 +166,7 @@ func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmissi
 			if found != tc.wantWarning {
 				t.Fatalf("unsigned warning found=%t, want %t: %#v", found, tc.wantWarning, warnings)
 			}
-			bundleHash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+			bundleHash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
 			subject, err := declarations[0].Ingress[0].AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{BundleHash: bundleHash, Alias: declarations[0].Alias})
 			if err != nil {
 				t.Fatal(err)
@@ -176,7 +180,7 @@ func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmissi
 
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -187,12 +191,12 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		t.Fatal(err)
 	}
 	contextDef := BundleContext{
-		BundleSourceFact: testBundleSourceFact(t, hash),
-		Source:           source,
-		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
-		WorkOwner:        workOwner,
+		SourceArtifactFact: testSourceArtifactFact(t, hash),
+		Source:             source,
+		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
+		WorkOwner:          workOwner,
 		StandingTargets: []StandingTarget{{
-			BundleHash: hash, ServiceID: "service-chat", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+			BundleHash: hash, ServiceID: "service-chat", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
 			RunID: "run", Generation: 1, FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
 			AdmissionPlan: plan,
 		}},
@@ -212,7 +216,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 
 func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneration(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	hash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -223,12 +227,12 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: "service-1", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: "service-1", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
 	contextDef := BundleContext{
-		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
+		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
@@ -268,7 +272,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 
 func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupTarget(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+	hash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -279,7 +283,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: "service-suspended", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: "service-suspended", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
@@ -291,7 +295,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
 	contextDef := BundleContext{
-		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
+		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	if err := manager.Register(contextDef); err != nil {
@@ -322,7 +326,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 		t.Fatal(err)
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), FlowID: "coordinator",
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowPath: "coordinator",
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a",
 		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
@@ -359,7 +363,7 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 		t.Fatal(err)
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), FlowID: "coordinator",
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), FlowPath: "coordinator",
 		RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b",
 		EntityID: "42000000-0000-0000-0000-000000000002", Alias: "issues", Provider: "github",
 		SigningSecret: "github-secret",
@@ -384,22 +388,14 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		alias = "chat"
 	}
 	root := singletoncoordinatorpilot.Write(t, singletoncoordinatorpilot.Options{})
-	packagePath := filepath.Join(root, "package.yaml")
-	packageBytes, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatalf("read package: %v", err)
-	}
-	standingYAML := fmt.Sprintf("    mode: singleton\n    activation: standing\n    ingress:\n      alias: %s\n      providers:\n        - provider: %s\n          signing_secret: webhook_signing.%s", alias, provider, provider)
-	packageText := strings.Replace(string(packageBytes), "    mode: singleton", standingYAML, 1)
-	if err := os.WriteFile(packagePath, []byte(packageText), 0o600); err != nil {
-		t.Fatalf("write package: %v", err)
-	}
-	schemaPath := filepath.Join(root, "flows", "coordinator", "schema.yaml")
+	standingYAML := fmt.Sprintf("mode: singleton\nactivation: standing\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
+	schemaPath := filepath.Join(root, "coordinator", "schema.yaml")
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	schemaText := strings.Replace(string(schemaBytes), "event: lead.observed", "event: "+inputEvent, 1)
+	schemaText := strings.Replace(string(schemaBytes), "mode: singleton", strings.TrimSpace(standingYAML), 1)
+	schemaText = strings.Replace(schemaText, "event: lead.observed", "event: "+inputEvent, 1)
 	if err := os.WriteFile(schemaPath, []byte(schemaText), 0o600); err != nil {
 		t.Fatalf("write schema: %v", err)
 	}
@@ -418,4 +414,19 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		t.Fatalf("load admitted pack projection: %v", err)
 	}
 	return semanticview.Wrap(bundle), projection.ProviderTriggers
+}
+
+func mutateStandingCoordinatorSchema(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, mutate func(*runtimecontracts.FlowSchemaDocument)) {
+	t.Helper()
+	schema, ok := bundle.FlowSchemas["coordinator"]
+	if !ok {
+		t.Fatal("fixture coordinator schema missing")
+	}
+	mutate(&schema)
+	bundle.FlowSchemas["coordinator"] = schema
+	view, ok := bundle.FlowViewByID("coordinator")
+	if !ok {
+		t.Fatal("fixture coordinator flow missing")
+	}
+	view.Schema = schema
 }

@@ -12,14 +12,14 @@ import (
 func CopyParentConnectRequiredAgent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "schema.yaml"), "pins:\n", `required_agents:
+	applyClosedReplacement(t, filepath.Join(root, "producer", "schema.yaml"), "pins:\n", `required_agents:
   - role: analyzer
     subscribes_to: [work.requested]
     emits: [producer/work.ready]
     description: Analyzes work before delivery
 pins:
 `)
-	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `analyzer:
+	writeClosedVariantFile(t, root, "producer/agents.yaml", `analyzer:
   id: analyzer
   intent: {inline: "Analyze work before delivery."}
   model: regular
@@ -34,8 +34,8 @@ pins:
 func CopyParentConnectEventMetadataAuthority(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	producerSchema := filepath.Join(root, "flows", "producer", "schema.yaml")
-	consumerSchema := filepath.Join(root, "flows", "consumer", "schema.yaml")
+	producerSchema := filepath.Join(root, "producer", "schema.yaml")
+	consumerSchema := filepath.Join(root, "consumer", "schema.yaml")
 	applyClosedReplacement(t, producerSchema, "pins:\n", "auto_emit_on_create:\n  event: flow.started\npins:\n")
 	applyClosedReplacement(t, producerSchema,
 		"      - work.ready\n",
@@ -90,12 +90,12 @@ func CopyParentConnectEventMetadataInvalidity(t testing.TB, invalidity ParentCon
 	default:
 		t.Fatalf("unsupported parent-connect event metadata invalidity %d", invalidity)
 	}
-	writeClosedVariantFile(t, root, "flows/producer/events.yaml",
+	writeClosedVariantFile(t, root, "producer/events.yaml",
 		closedMetadataEvent("flow.started", flowStartedRole, false)+
 			closedMetadataEvent("work.requested", "", true)+
 			closedMetadataEvent("work.ready", firstClosedRole(producerWorkReadyRole, consumerWorkReadyRole), true)+
 			closedMetadataEvent("deploy.done", "", true))
-	writeClosedVariantFile(t, root, "flows/consumer/events.yaml",
+	writeClosedVariantFile(t, root, "consumer/events.yaml",
 		closedMetadataEvent("deploy.completed", "", true))
 	return root
 }

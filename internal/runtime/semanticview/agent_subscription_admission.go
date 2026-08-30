@@ -14,7 +14,6 @@ type FlowOwnedAgentSubscriptionRequest struct {
 	AgentID       string
 	FlowID        string
 	FlowPath      string
-	PackageKey    string
 	LocalEvents   map[string]struct{}
 	Subscriptions []string
 }
@@ -57,29 +56,24 @@ func (a FlowOwnedAgentSubscriptionAdmission) CarrierOnly() FlowOwnedAgentSubscri
 	return a
 }
 
-// AdmitFlowOwnedAgentSubscriptions derives same-scope route identities and
-// consumes the imported-package wildcard/grant owner when a wildcard crosses a
-// package boundary. Qualified exact subscriptions never create boundary edges.
+// AdmitFlowOwnedAgentSubscriptions derives route identities from the owning
+// flow and its filesystem descendants.
 func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscriptionRequest) (FlowOwnedAgentSubscriptionAdmission, error) {
 	req.AgentID = strings.TrimSpace(req.AgentID)
 	req.FlowID = strings.TrimSpace(req.FlowID)
 	req.FlowPath = eventidentity.Normalize(req.FlowPath)
-	req.PackageKey = strings.TrimSpace(req.PackageKey)
 	if req.AgentID == "" {
 		return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent subscription admission requires agent id")
 	}
 
-	localEvents := cloneImportBoundaryEventSet(req.LocalEvents)
+	localEvents := cloneSubscriptionEventSet(req.LocalEvents)
 	if source != nil && req.FlowID != "" {
 		if scope, ok := source.FlowScopeByID(req.FlowID); ok {
-			if req.FlowPath == "" {
+			if req.FlowPath == "" && req.FlowID != "." {
 				req.FlowPath = eventidentity.Normalize(scope.Path)
 				if req.FlowPath == "" {
 					req.FlowPath = eventidentity.Normalize(source.FlowPath(req.FlowID))
 				}
-			}
-			if req.PackageKey == "" {
-				req.PackageKey = normalizeImportPackageKey(scope.PackageKey)
 			}
 			if len(localEvents) == 0 {
 				localEvents = agentSubscriptionLocalEvents(scope)
@@ -87,9 +81,6 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 		}
 	}
 
-	if req.PackageKey != "" {
-		req.PackageKey = normalizeImportPackageKey(req.PackageKey)
-	}
 	persisted := make([]string, 0, len(req.Subscriptions))
 	routes := make([]string, 0, len(req.Subscriptions))
 	for _, authored := range req.Subscriptions {
@@ -98,7 +89,6 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 			ConsumerID:   req.AgentID,
 			FlowID:       req.FlowID,
 			FlowPath:     req.FlowPath,
-			PackageKey:   req.PackageKey,
 			LocalEvents:  localEvents,
 			Authored:     authored,
 		})
@@ -106,7 +96,7 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 			continue
 		}
 		if !admission.Admitted() {
-			return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("%s; declare a receiver-local event or typed bind.observe grant and use package.yaml connect for delivery", admission.Message())
+			return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("%s; declare a receiver-local event or use schema.yaml connect for cross-flow delivery", admission.Message())
 		}
 		persisted = append(persisted, admission.PersistedValue())
 		routes = append(routes, admission.RoutePatterns()...)
@@ -118,6 +108,17 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 		persistedSubscriptions: normalizedAgentSubscriptionValues(persisted),
 		routePatterns:          normalizedAgentSubscriptionValues(routes),
 	}, nil
+}
+
+func cloneSubscriptionEventSet(in map[string]struct{}) map[string]struct{} {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
 }
 
 func agentSubscriptionLocalEvents(scope FlowScope) map[string]struct{} {
@@ -153,11 +154,11 @@ func admitSameScopeAgentExact(flowPath, raw string) (string, error) {
 		return flowPath + "/" + raw, nil
 	}
 	if flowPath == "" || !strings.HasPrefix(raw, flowPath+"/") {
-		return "", fmt.Errorf("qualified exact subscriptions cannot cross a flow boundary; declare package.yaml connect")
+		return "", fmt.Errorf("qualified exact subscriptions cannot cross a flow boundary; declare connect in the nearest common ancestor schema.yaml")
 	}
 	local := strings.TrimPrefix(raw, flowPath+"/")
 	if local == "" || strings.Contains(local, "/") {
-		return "", fmt.Errorf("qualified exact subscriptions cannot address a descendant flow; declare package.yaml connect")
+		return "", fmt.Errorf("qualified exact subscriptions cannot address a descendant flow; declare connect in the nearest common ancestor schema.yaml")
 	}
 	return raw, nil
 }

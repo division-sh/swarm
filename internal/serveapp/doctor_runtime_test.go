@@ -43,18 +43,17 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t, dockerBin),
-		ContractsPath:      doctorAgentContractsPath,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "not-a-store",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
-		Dev:                true,
-		LocalRun:           true,
+		ConfigPath:       writeDoctorClaudeConfig(t, dockerBin),
+		SourceRoot:       doctorAgentContractsPath,
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "not-a-store",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
+		Output:           &out,
+		Dev:              true,
+		LocalRun:         true,
 	})
 	if code == 0 {
 		t.Fatalf("Run unexpectedly succeeded\noutput:\n%s", out.String())
@@ -90,18 +89,17 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:         configPath,
-		ContractsPath:      doctorAgentContractsPath,
-		PlatformSpecPath:   defaultPlatformSpecPath,
-		StoreMode:          "not-a-store",
-		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:0",
-		SelfCheck:          true,
-		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
-		Dev:                true,
-		LocalRun:           true,
+		ConfigPath:       configPath,
+		SourceRoot:       doctorAgentContractsPath,
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "not-a-store",
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		Verbose:          true,
+		Output:           &out,
+		Dev:              true,
+		LocalRun:         true,
 	})
 	if code != 1 {
 		t.Fatalf("Run code = %d, want config load failure\noutput:\n%s", code, out.String())

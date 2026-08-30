@@ -161,11 +161,7 @@ func workflowLoopPlan(source semanticview.Source, flowID, loopID string) (runtim
 	loopID = strings.TrimSpace(loopID)
 	for _, plan := range semanticview.WorkflowLoops(source) {
 		planFlowID := strings.TrimSpace(plan.FlowID)
-		flowMatches := planFlowID == flowID
-		if planFlowID == "" {
-			flowMatches = flowID == "" || flowID == strings.TrimSpace(source.WorkflowName())
-		}
-		if flowMatches && strings.TrimSpace(plan.ID) == loopID {
+		if planFlowID == flowID && strings.TrimSpace(plan.ID) == loopID {
 			return plan, true
 		}
 	}

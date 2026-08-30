@@ -1,8 +1,0 @@
-name: test-compose-rules-fanout-data
-version: 1.0.0
-description: 'Composition: rules with 3 branches, winning branch triggers fan_out
-  over payload items, data_accumulation stores the fan_out count.
-
-  '
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

@@ -17,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -65,7 +66,7 @@ func (h *Harness) Context(identity string) context.Context {
 	ctx := runtimeeffects.WithLifecycleToken(context.Background(), h.Token)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewCompletionController(h, h, h, h).WithExecutionPosture(executionposture.Live))
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, h.Token.AgentID, h.Token.Generation, "", "effect-test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, h.Token.AgentID, h.Token.Generation, "", "effect-test-actors", sourceartifactfixture.BundleHash, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -112,10 +113,7 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	if err != nil {
 		panic(err)
 	}
-	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		panic(err)
-	}
+	bundleSource := sourceartifactfixture.Fact()
 	claim, err := runtimedelivery.AdmitPersistedClaim(
 		"44444444-4444-4444-8444-444444444444", target.RunID, "effect-test-agent-route",
 		"55555555-5555-4555-8555-555555555555", 1, runtimedelivery.SubscriberAgent, h.Token.AgentID,
@@ -125,7 +123,7 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	}
 	ctx = runtimedelivery.WithClaim(ctx, claim)
 	ctx = managedcapabilities.WithContext(ctx, surface)
-	return runtimecorrelation.WithBundleSourceFact(ctx, bundleSource)
+	return runtimecorrelation.WithSourceArtifactFact(ctx, bundleSource)
 }
 
 func (h *Harness) StartupProbeContext(ctx context.Context, surface managedcapabilities.Surface) context.Context {

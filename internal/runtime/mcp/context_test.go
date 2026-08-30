@@ -44,11 +44,11 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	)
 	switch executionKind {
 	case managedcapabilities.ExecutionNormalAgent:
-		admission, err = managedexecution.New(managedexecution.KindNormalRuntime, "normal-claude-execution", harness.Token.Generation, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+		admission, err = managedexecution.New(managedexecution.KindNormalRuntime, "normal-claude-execution", harness.Token.Generation, "", "test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 		authority = runtimeeffects.NormalAgentAuthority(harness.Token, "normal-claude-owner", time.Now().UTC().Add(time.Minute))
 	case managedcapabilities.ExecutionSelectedContractFork:
 		executionID := uuid.NewString()
-		admission, err = managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, target.RunID, "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+		admission, err = managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, target.RunID, "test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 		authority = runtimeeffects.Authority{
 			Kind: runtimeeffects.AuthoritySelectedContractFork, ID: executionID,
 			SelectedFork: runtimeeffects.SelectedContractForkAuthority{
@@ -186,14 +186,14 @@ func TestTurnContextRegistryRejectsSameSlugSiblingCapabilityPrincipal(t *testing
 func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentity(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
 	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
-	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	scope := runtimeauthoractivity.BundleScope("runtime-instance", bundleHash)
-	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	source, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
-		t.Fatalf("NewEphemeralBundleSourceFact: %v", err)
+		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 
 	token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Hour, surface)
@@ -204,8 +204,8 @@ func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentit
 	if !turn.HasAuthorActivityScope || turn.AuthorActivityScope != scope {
 		t.Fatalf("author activity scope = %#v present=%v, want %#v", turn.AuthorActivityScope, turn.HasAuthorActivityScope, scope)
 	}
-	if !turn.HasBundleSourceFact || turn.BundleSourceFact != source {
-		t.Fatalf("bundle source fact = %#v present=%v, want %#v", turn.BundleSourceFact, turn.HasBundleSourceFact, source)
+	if !turn.HasSourceArtifactFact || turn.SourceArtifactFact != source {
+		t.Fatalf("bundle source fact = %#v present=%v, want %#v", turn.SourceArtifactFact, turn.HasSourceArtifactFact, source)
 	}
 	if !turn.HasExecutionMode || turn.ExecutionMode != runtimeeffects.ExecutionModeLive {
 		t.Fatalf("execution mode = %q present=%v, want live", turn.ExecutionMode, turn.HasExecutionMode)
@@ -215,7 +215,7 @@ func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentit
 	if got, ok := runtimeauthoractivity.ScopeFromContext(restored); !ok || got != scope {
 		t.Fatalf("restored author activity scope = %#v present=%v, want %#v", got, ok, scope)
 	}
-	if got, ok := runtimecorrelation.BundleSourceFactFromContext(restored); !ok || got != source {
+	if got, ok := runtimecorrelation.SourceArtifactFactFromContext(restored); !ok || got != source {
 		t.Fatalf("restored bundle source fact = %#v present=%v, want %#v", got, ok, source)
 	}
 	if got, ok := runtimeeffects.ExecutionModeFromContext(restored); !ok || got != runtimeeffects.ExecutionModeLive {

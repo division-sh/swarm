@@ -1,1 +1,8 @@
 name: template-select-existing
+connect:
+  - event: account.setup
+    from: producer
+    to: account
+  - event: account.ready
+    from: producer
+    to: account

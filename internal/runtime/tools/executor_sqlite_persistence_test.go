@@ -353,7 +353,6 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			}
 			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "", "provider_record:\n  status: text\n")
 			bundle.FlowTree.ByID["provider"].Path = flowPath
-			bundle.FlowTree.ByID["provider"].Paths.PackageKey = "provider-package"
 			source := semanticview.Wrap(bundle)
 			declarations := semanticview.AgentDeclarations(source)
 			if len(declarations) != 1 {
@@ -369,7 +368,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
-			ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 			ctx = runtimetools.WithActor(ctx, requester)
 			input := map[string]any{
 				"scope": "flow", "category": "review", "description": "Review provider response",
@@ -424,7 +423,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 
 			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, "provider-turn/tool-call-1")
-			forkCtx = runtimecorrelation.WithBundleSourceFact(forkCtx, authorActivityTestBundleSourceFact)
+			forkCtx = runtimecorrelation.WithSourceArtifactFact(forkCtx, authorActivityTestSourceArtifactFact)
 			forkCtx = runtimetools.WithActor(forkCtx, requester)
 			forked, err := exec.Execute(forkCtx, "ask_human", input)
 			if err != nil {
@@ -446,9 +445,9 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
 	case *store.SQLiteRuntimeStore:
-		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
 	default:
 		t.Fatalf("unsupported reply tool store %T", persistence)
 	}
@@ -534,5 +533,5 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
-	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
 }

@@ -98,16 +98,16 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 			if !ok {
 				t.Fatalf("selected store %T does not expose standing persistence", fixture.store)
 			}
-			seedStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
+			requireStoreTestPersistedBundle(t, fixture.db, runLifecycleCandidateParityBundleHash)
 			workflow := newPostgresWorkflowTestCoordinator(t, fixture.db, selected)
 			if fixture.sqlite {
 				workflow = newSQLiteWorkflowTestCoordinator(t, fixture.db, selected)
 			}
-			packageKey, flowID := "effect-recovery", "invalid-current"
+			flowPath := "effect-recovery/invalid-current"
 			candidate := runtimepipeline.StandingServiceCandidate{
-				ServiceID:  runtimeflowidentity.StandingServiceID(packageKey, flowID),
-				PackageKey: packageKey, FlowID: flowID, InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-				Source: mustStoreTestPersistedBundleSourceFact(runLifecycleCandidateParityBundleHash),
+				ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
+				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+				Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 			}
 			standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
 			if err != nil {

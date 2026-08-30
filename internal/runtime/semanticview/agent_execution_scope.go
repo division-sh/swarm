@@ -51,14 +51,19 @@ func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig)
 	}
 	scope := AgentExecutionSemanticScope{declaration: declaration, identity: identity}
 	if ownerFlowID == "" {
-		if identity.Route.Presence != agentidentity.RouteRoot {
-			return AgentExecutionSemanticScope{}, fmt.Errorf("root agent declaration requires an explicit root identity route")
-		}
-		return scope, nil
+		return AgentExecutionSemanticScope{}, fmt.Errorf("agent declaration requires canonical owning flow path")
 	}
 	flow, ok := source.FlowScopeByID(ownerFlowID)
 	if !ok {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent declaration references missing owning flow %q", ownerFlowID)
+	}
+	if ownerFlowID == "." {
+		if identity.Route.Presence != agentidentity.RouteRoot {
+			return AgentExecutionSemanticScope{}, fmt.Errorf("root agent declaration requires an explicit root identity route")
+		}
+		scope.flow = flow
+		scope.hasFlow = true
+		return scope, nil
 	}
 	if identity.Route.Presence != agentidentity.RoutePresent {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("flow agent declaration %q requires a concrete flow identity route", ownerFlowID)

@@ -119,6 +119,7 @@ func TestCredentialChecksRetainAllMockToolUsedByLiveWorkflowActivity(t *testing.
 			},
 		},
 	}
+	bundle.FlowTree.Root.Nodes = bundle.Nodes
 	source = semanticview.Wrap(bundle)
 	reachability := mockConnectorEffectReachability(t, source, plan)
 	if sites := reachability.LiveWorkflowActivitySites("provider.send"); len(sites) != 2 ||
@@ -159,6 +160,7 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 			},
 		},
 	}
+	bundle.FlowTree.Root.Nodes = bundle.Nodes
 	mockSource = semanticview.Wrap(bundle)
 	reachability, err := ResolveSourceBootEffectReachability(mockSource, profile, exactPlan, executionposture.MockOnly)
 	if err != nil {
@@ -178,7 +180,7 @@ func TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) 
 	reachability := mockConnectorEffectReachability(t, source, plan)
 	liveAgents := strings.Join(reachability.LiveAgentIDs(), "\n")
 	for _, want := range []string{
-		"project packages/project-live agent shared-worker",
+		"flow project-live agent shared-worker",
 		"flow flow-live agent shared-worker",
 	} {
 		if !strings.Contains(liveAgents, want) {
@@ -190,7 +192,7 @@ func TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) 
 		EffectReachability: reachability,
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") ||
-		!credentialFindingContains(findings, "provider_credential", "project packages/project-live agent shared-worker") ||
+		!credentialFindingContains(findings, "provider_credential", "flow project-live agent shared-worker") ||
 		!credentialFindingContains(findings, "provider_credential", "flow flow-live agent shared-worker") {
 		t.Fatalf("credential findings = %#v, want both hidden scoped live declarations", findings)
 	}
@@ -215,8 +217,8 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 	}
 	sites := strings.Join(reachability.LiveWorkflowActivitySites("provider.send"), "\n")
 	for _, want := range []string{
-		"package packages/project-live node shared-sender handler provider.requested",
-		"package . flow flow-live node shared-sender handler provider.requested",
+		"flow project-live flow project-live node shared-sender handler provider.requested",
+		"flow flow-live flow flow-live node shared-sender handler provider.requested",
 	} {
 		if !strings.Contains(sites, want) {
 			t.Fatalf("scoped activity sites = %q, want %q", sites, want)
@@ -227,8 +229,8 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 		EffectReachability: reachability,
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") ||
-		!credentialFindingContains(findings, "provider_credential", "package packages/project-live node shared-sender") ||
-		!credentialFindingContains(findings, "provider_credential", "package . flow flow-live node shared-sender") {
+		!credentialFindingContains(findings, "provider_credential", "flow project-live flow project-live node shared-sender") ||
+		!credentialFindingContains(findings, "provider_credential", "flow flow-live flow flow-live node shared-sender") {
 		t.Fatalf("credential findings = %#v, want both hidden scoped activity declarations", findings)
 	}
 }
@@ -238,8 +240,8 @@ func TestNativeToolChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) 
 	findings := newCheckerContext(context.Background(), source, Options{}).nativeTools()
 	joined := fmt.Sprint(findings)
 	for _, want := range []string{
-		"project packages/project-live agent shared-worker",
-		"project packages/project-mock agent shared-worker",
+		"flow project-live agent shared-worker",
+		"flow project-mock agent shared-worker",
 		"flow flow-live agent shared-worker",
 		"flow flow-mock agent shared-worker",
 	} {
@@ -355,21 +357,6 @@ func scopedAliasMockConnectorFixtureWithNativeTools(t *testing.T, includeLive bo
 func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeInvalidNativeTools bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-alias-reachability
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-mock
-  - path: packages/project-live
-flows:
-  - id: flow-mock
-    flow: flow-mock
-    mode: static
-  - id: flow-live
-    flow: flow-live
-    mode: static
-`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-alias-reachability\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	writeScopedReachabilityAgentFile(t, filepath.Join(root, "agents.yaml"), "root-mock", "mocks/root-mock.py", false)
@@ -381,36 +368,21 @@ root-node:
   event_handlers: {}
 `)
 
-	for _, project := range []struct {
+	for _, child := range []struct {
 		name string
 		live bool
 	}{
 		{name: "project-mock"},
 		{name: "project-live", live: includeLive},
+		{name: "flow-mock"},
+		{name: "flow-live", live: includeLive},
 	} {
-		dir := filepath.Join(root, "packages", project.name)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
+		dir := filepath.Join(root, child.name)
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+child.name+"\nmode: static\ninitial_state: active\nstates: [active]\n")
 		module := "mocks/shared-worker.py"
-		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, project.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
-		if !project.live {
+		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, child.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
+		if !child.live {
 			writeBootverifyFixtureFile(t, filepath.Join(dir, filepath.FromSlash(module)), "def handle(input):\n    return {'text': 'mock'}\n")
-		}
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "nodes.yaml"), scopedReachabilityNodeYAML())
-	}
-
-	for _, flow := range []struct {
-		id   string
-		live bool
-	}{
-		{id: "flow-mock"},
-		{id: "flow-live", live: includeLive},
-	} {
-		dir := filepath.Join(root, "flows", flow.id)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flow.id+"\nmode: static\ninitial_state: active\nstates: [active]\n")
-		module := filepath.ToSlash(filepath.Join("flows", flow.id, "mocks", "shared-worker.py"))
-		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, flow.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
-		if !flow.live {
-			writeBootverifyFixtureFile(t, filepath.Join(root, module), "def handle(input):\n    return {'text': 'mock'}\n")
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "nodes.yaml"), scopedReachabilityNodeYAML())
 	}
@@ -468,24 +440,16 @@ shared-sender:
 
 func addScopedAliasActivities(t *testing.T, source semanticview.Source) {
 	t.Helper()
-	foundProject := false
-	for _, scope := range source.ProjectScopes() {
-		if scope.Key != "packages/project-live" {
-			continue
-		}
-		scope.Nodes["shared-sender"] = scopedReachabilityActivityNode()
-		foundProject = true
-	}
-	foundFlow := false
+	found := map[string]bool{"project-live": false, "flow-live": false}
 	for _, scope := range source.FlowScopes() {
-		if scope.ID != "flow-live" {
+		if _, wanted := found[scope.ID]; !wanted {
 			continue
 		}
 		scope.Nodes["shared-sender"] = scopedReachabilityActivityNode()
-		foundFlow = true
+		found[scope.ID] = true
 	}
-	if !foundProject || !foundFlow {
-		t.Fatalf("scoped activity fixture missing project=%v flow=%v", foundProject, foundFlow)
+	if !found["project-live"] || !found["flow-live"] {
+		t.Fatalf("scoped activity fixture missing child flows: %#v", found)
 	}
 }
 

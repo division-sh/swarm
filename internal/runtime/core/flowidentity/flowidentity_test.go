@@ -38,7 +38,7 @@ func TestPersistedRowIDKeepsEntityFactSeparateFromRouteAddress(t *testing.T) {
 }
 
 func TestStandingForService_UsesCanonicalStableFlowInstanceRoute(t *testing.T) {
-	serviceID := StandingServiceID("root", "service")
+	serviceID := StandingServiceID("service")
 	instance := StandingForService(nil, "service", serviceID)
 	if instance.ScopeKey != "service" || instance.InstanceID != serviceID || instance.InstancePath != "service/"+serviceID {
 		t.Fatalf("standing identity = %#v, want canonical service route", instance)

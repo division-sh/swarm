@@ -40,12 +40,13 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 const (
-	gateRecoveryBundle = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	otherGateBundle    = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	gateRecoveryBundle = sourceartifactfixture.BundleHash
+	otherGateBundle    = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func withLiveGateExecution(ctx context.Context) context.Context {
@@ -349,9 +350,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			bundle := proposedEffectProofBundle(server.URL)
 			source := semanticview.Wrap(bundle)
-			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
+			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, BundleSourceFact: bundleSource,
+				ContractBundle: source, SourceArtifactFact: bundleSource,
 			},
 				"support.reply_drafted",
 				"support/send_support_reply.revision_requested",
@@ -364,7 +365,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				source:   source,
 				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}}, nil),
 				nodes: []runtimepipeline.WorkflowNode{{
-					Node: externalPipelineSourceNode(t, source, "", "support"), Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
+					Node: externalPipelineSourceNode(t, source, ".", "support"), Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
@@ -376,8 +377,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 				return newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 					Module: module, Persistence: selected.persistence, DecisionCards: selected.cards,
-					BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
-					Credentials:      credentials,
+					SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(bundleHash),
+					Credentials:        credentials,
 				})
 			}
 			coordinator := newCoordinator(gateRecoveryBundle)
@@ -385,11 +386,11 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
+			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 				EntityType: "test_entity",
@@ -402,7 +403,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
-			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, externalPipelineSourceNode(t, source, "", "support"), entityID)
+			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, externalPipelineSourceNode(t, source, ".", "support"), entityID)
 			if !sourceRoute.Target.ExistingEntity() || sourceRoute.Target.Route().EntityID != entityID {
 				t.Fatalf("approval execution target = %#v, want exact existing owner %s", sourceRoute.Target, entityID)
 			}
@@ -559,7 +560,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
-				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, externalPipelineSourceNode(t, source, "", "support"), entityID)
+				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, externalPipelineSourceNode(t, source, ".", "support"), entityID)
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
 				proposalDelivery, deliveryErr := events.NewDeliveryEvent(proposal, proposalRoute)
 				if deliveryErr != nil {
@@ -648,7 +649,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
 				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
-					Owner: supportOwner, ExecutionFlowID: "support",
+					Owner: supportOwner, ExecutionFlowID: ".",
 					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 				})
 				continuation := decisioncard.ProposedEffectContinuation{
@@ -659,7 +660,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-					EntityID: entityID, NodeID: supportOwner.Key(), FlowID: "support", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
+					EntityID: entityID, NodeID: supportOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
@@ -675,7 +676,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 					RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
 					Scope:  decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: runID, EntityID: entityID},
-					Source: eventtest.StaticFlowRoutingSource("support", runID, entityID),
+					Source: eventtest.RootRoutingSource(entityID),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -727,7 +728,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				bus := &proposedEffectRouteProofBus{eventBus: canonicalBus}
 				coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
+					DecisionCards: selected.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
 				})
 				forward, emitted, _, err := coordinator.Intercept(withLiveGateExecution(ctx), decisionEvent)
 				if err != nil || forward || len(emitted) != 0 {
@@ -760,7 +761,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				beforeOutbox, beforePublished := len(bus.outbox), len(bus.published)
 				changed := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(otherGateBundle),
+					DecisionCards: selected.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(otherGateBundle),
 				})
 				if _, _, _, err := changed.Intercept(withLiveGateExecution(ctx), decisionEvent); err != nil {
 					t.Fatalf("%s terminal route replay under changed bundle: %v", verdict, err)
@@ -789,10 +790,10 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
 
 			source := semanticview.Wrap(bundle)
-			supportNode := externalPipelineSourceNode(t, source, "", "support")
-			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
+			supportNode := externalPipelineSourceNode(t, source, ".", "support")
+			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, BundleSourceFact: bundleSource,
+				ContractBundle: source, SourceArtifactFact: bundleSource,
 			}, "support.reply_drafted")
 			if err != nil {
 				t.Fatal(err)
@@ -809,17 +810,17 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			}
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence, DecisionCards: selected.cards,
-				BundleSourceFact: bundleSource,
+				SourceArtifactFact: bundleSource,
 			})
 			bus.SetInterceptors(coordinator)
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
+			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 				EntityType: "test_entity",
@@ -1082,10 +1083,10 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	setupCoordinator := newGateRecoveryCoordinator(setupBus, tc, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
-		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
+		DecisionCards: tc.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
 	})
 	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 		EntityType: "test_entity",
@@ -1197,13 +1198,13 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 		return newGateRecoveryCoordinator(bus, tc, runtimepipeline.PipelineCoordinatorOptions{
 			Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
-			DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
+			DecisionCards: tc.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(bundleHash),
 		})
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 		EntityType: "test_entity",
@@ -1251,7 +1252,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		runID,
 		runtimerunlifecycle.NewTerminalCatalog(
 			bundle.Semantics.TerminalStages,
-			map[string][]string{bundle.Semantics.Name: bundle.Semantics.TerminalStages},
+			map[string][]string{".": bundle.Semantics.TerminalStages},
 		),
 	)
 	if err != nil {
@@ -1293,17 +1294,17 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
 		return newGateRecoveryCoordinator(bus, tc, runtimepipeline.PipelineCoordinatorOptions{
-			Module:           gateRecoveryModule{source: semanticview.Wrap(bundle)},
-			Persistence:      tc.persistence,
-			DecisionCards:    tc.cards,
-			BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
+			Module:             gateRecoveryModule{source: semanticview.Wrap(bundle)},
+			Persistence:        tc.persistence,
+			DecisionCards:      tc.cards,
+			SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(bundleHash),
 		})
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 		EntityType: "test_entity",
@@ -1475,7 +1476,7 @@ func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContr
 			}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
 		},
 	}
-	return bundle
+	return canonicalRootGateRecoveryBundle(bundle)
 }
 
 func waitForGateRecoveryQuiescence(t *testing.T, bus *runtimebus.EventBus, ctx context.Context) {
@@ -1539,7 +1540,7 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, node runtimeidentity.ExecutableNode, entityID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
-	target := events.RouteIdentity{FlowID: "support", FlowInstance: evt.RunID(), EntityID: entityID}
+	target := events.RouteIdentity{FlowID: ".", FlowInstance: evt.RunID(), EntityID: entityID}
 	owner := events.MustExistingEntityTarget(target)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: owner}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
@@ -1587,7 +1588,7 @@ func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase
 }
 
 func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:   nil,
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -1596,27 +1597,42 @@ func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", Version: "1", InitialStage: "awaiting_review",
 			Gates: []runtimecontracts.WorkflowGatePlan{{
-				Stage: "awaiting_review", Decision: "launch_review",
+				FlowID: ".", Stage: "awaiting_review", Decision: "launch_review",
 				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {Verdict: "approve", AdvancesTo: "operating", Emit: runtimecontracts.EmitSpec{Event: "launch.approved"}},
 				},
 			}},
 		},
 	}
+	return canonicalRootGateRecoveryBundle(bundle)
 }
 
 func gateRecoveryTerminalContractBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:   nil,
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", Version: "1", InitialStage: "awaiting_review", TerminalStages: []string{"completed"},
 			Gates: []runtimecontracts.WorkflowGatePlan{{
-				Stage: "awaiting_review", Decision: "launch_review",
+				FlowID: ".", Stage: "awaiting_review", Decision: "launch_review",
 				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "completed"}},
 			}},
 		},
 	}
+	return canonicalRootGateRecoveryBundle(bundle)
+}
+
+func canonicalRootGateRecoveryBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	root := &runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: bundle.Semantics.Name},
+		Nodes:  bundle.Nodes, Events: bundle.Events,
+	}
+	bundle.FlowTree.Root = root
+	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{".": root}
+	bundle.RootSchema = &root.Schema
+	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema}
+	return bundle
 }
 
 func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string) {
@@ -1638,7 +1654,7 @@ func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.P
 	if err != nil {
 		t.Fatalf("StateCarrierFromPersisted: %v", err)
 	}
-	activation, found, err := gateruntime.Load(carrier.StateBuckets, "", "launch_review")
+	activation, found, err := gateruntime.Load(carrier.StateBuckets, ".", "launch_review")
 	if err != nil || !found || instance.CurrentState != stage || activation.Status != status {
 		t.Fatalf("gate state = stage:%s activation:%#v found:%v err:%v, want %s/%s", instance.CurrentState, activation, found, err, stage, status)
 	}

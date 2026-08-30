@@ -82,9 +82,8 @@ func (s SessionSeed) Validate() error {
 	return nil
 }
 
-type BundleSource struct {
-	Hash   string `json:"hash"`
-	Source string `json:"source"`
+type SourceArtifact struct {
+	Hash string `json:"hash"`
 }
 
 type Intent struct {
@@ -110,7 +109,7 @@ type Provider struct {
 }
 
 type SessionContract struct {
-	Bundle         BundleSource           `json:"bundle"`
+	SourceArtifact SourceArtifact         `json:"source_artifact"`
 	AgentIdentity  agentidentity.Identity `json:"agent_identity"`
 	Role           string                 `json:"role,omitempty"`
 	FlowID         string                 `json:"flow_id,omitempty"`
@@ -334,16 +333,15 @@ func (c ToolContinuation) Draft(event events.Event) TurnDraft {
 }
 
 type Completion struct {
-	BundleHash   string
-	BundleSource string
-	Surface      managedcapabilities.Surface
+	BundleHash string
+	Surface    managedcapabilities.Surface
 }
 
 func Complete(seed SessionSeed, draft TurnDraft, completion Completion) (Frame, error) {
 	if err := seed.Validate(); err != nil {
 		return Frame{}, err
 	}
-	session, err := completeSession(seed, completion.BundleHash, completion.BundleSource)
+	session, err := completeSession(seed, completion.BundleHash)
 	if err != nil {
 		return Frame{}, err
 	}
@@ -366,13 +364,9 @@ func Complete(seed SessionSeed, draft TurnDraft, completion Completion) (Frame, 
 	return frame, frame.Validate()
 }
 
-func completeSession(seed SessionSeed, bundleHash, bundleSource string) (SessionContract, error) {
+func completeSession(seed SessionSeed, bundleHash string) (SessionContract, error) {
 	if err := bundleidentity.ValidateCanonicalHash(strings.TrimSpace(bundleHash)); err != nil {
 		return SessionContract{}, fmt.Errorf("bundle hash: %w", err)
-	}
-	bundleSource = strings.TrimSpace(bundleSource)
-	if bundleSource != "persisted" && bundleSource != "ephemeral" {
-		return SessionContract{}, fmt.Errorf("bundle source must be persisted or ephemeral")
 	}
 	prompt, err := seed.ProviderPrompt.Text()
 	if err != nil {
@@ -383,10 +377,10 @@ func completeSession(seed SessionSeed, bundleHash, bundleSource string) (Session
 		return SessionContract{}, err
 	}
 	return SessionContract{
-		Bundle:        BundleSource{Hash: strings.TrimSpace(bundleHash), Source: bundleSource},
-		AgentIdentity: seed.AgentIdentity.Normalize(),
-		Role:          strings.TrimSpace(seed.Role),
-		FlowID:        strings.Trim(strings.TrimSpace(seed.FlowID), "/"),
+		SourceArtifact: SourceArtifact{Hash: strings.TrimSpace(bundleHash)},
+		AgentIdentity:  seed.AgentIdentity.Normalize(),
+		Role:           strings.TrimSpace(seed.Role),
+		FlowID:         strings.Trim(strings.TrimSpace(seed.FlowID), "/"),
 		Intent: Intent{
 			Kind: string(seed.Intent.Kind), Coordinate: seed.Intent.Coordinate, Provenance: seed.Intent.Provenance,
 			Content: seed.Intent.Content, ContentHash: seed.Intent.ContentHash, Identity: seed.Intent.Identity,

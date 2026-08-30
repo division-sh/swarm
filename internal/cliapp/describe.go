@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
@@ -14,7 +15,7 @@ import (
 )
 
 type describeCommandOptions struct {
-	contractsPath    string
+	sourceRoot       string
 	platformSpecPath string
 	configPath       string
 	graph            bool
@@ -28,7 +29,7 @@ type describeCommandOutput struct {
 }
 
 type describeRoutesCommandOptions struct {
-	contractsPath    string
+	sourceRoot       string
 	platformSpecPath string
 	configPath       string
 	output           cliOutputOptions
@@ -44,8 +45,9 @@ func defaultDescribeCommandOptions() describeCommandOptions {
 func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultDescribeCommandOptions()
 	cmd := &cobra.Command{
-		Use:   "describe",
-		Short: "Render the expanded authoring view for local Swarm contracts.",
+		Use:   "describe [directory]",
+		Short: "Render the expanded authoring view for an admitted Swarm source tree.",
+		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -56,8 +58,8 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			if len(args) > 0 {
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			if len(args) == 1 {
+				opts.sourceRoot = args[0]
 			}
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
@@ -69,7 +71,6 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
@@ -81,14 +82,15 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := describeRoutesCommandOptions{logging: defaultCLILoggingOptions()}
 	cmd := &cobra.Command{
-		Use:   "routes",
+		Use:   "routes [directory]",
 		Short: "Render the frozen authored routing topology.",
+		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			if len(args) > 0 {
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			if len(args) == 1 {
+				opts.sourceRoot = args[0]
 			}
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
@@ -100,7 +102,6 @@ func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
@@ -116,8 +117,8 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
 		return 2
 	}
-	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
 	})
 	if err != nil {
 		writeCLIAPIError(errOut, err)
@@ -165,8 +166,8 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 2
 	}
-	_, bundle, resolvedPaths, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.contractsPath,
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLISourcePlatformSpecPathOptions{
+		SourceRoot:       opts.sourceRoot,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
 	})
@@ -174,7 +175,6 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	contractsRoot := resolvedPaths.ContractsPath
 	source := semanticview.Wrap(bundle)
 	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
 	if err != nil {
@@ -192,7 +192,6 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 1
 	}
-	view.ContractsRoot = contractsRoot
 	output := describeCommandOutput{
 		View:             view,
 		WorkspaceBackend: workspaceBackendDetail,
@@ -211,7 +210,7 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "describe: contracts=%s\n", view.ContractsRoot)
+	fmt.Fprintf(out, "describe: source=%s\n", view.SourceHash)
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
 	if strings.TrimSpace(workspaceBackendDetail) != "" {
 		fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
@@ -453,8 +452,7 @@ func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) 
 	if len(topology.RootInputSources) > 0 {
 		fmt.Fprintln(out, "  root input sources:")
 		for _, source := range topology.RootInputSources {
-			target := firstNonEmpty(source.Target.FlowPath, source.Target.FlowID)
-			fmt.Fprintf(out, "    - [%s] %s/%s -> flow %s admission=%s", source.Kind, source.Alias, source.Provider, target, source.Admission.Kind)
+			fmt.Fprintf(out, "    - [%s] %s/%s -> flow %s admission=%s", source.Kind, source.Alias, source.Provider, source.Target.FlowPath, source.Admission.Kind)
 			if source.Admission.PackID != "" {
 				fmt.Fprintf(out, " pack_id=%s", source.Admission.PackID)
 			}
@@ -558,8 +556,8 @@ func routingResolutionDetail(resolution *routingtopology.Resolution) string {
 
 func describeQuietValues(view authoringview.View) []string {
 	values := make([]string, 0, len(view.Flows)+1)
-	if strings.TrimSpace(view.ContractsRoot) != "" {
-		values = append(values, strings.TrimSpace(view.ContractsRoot))
+	if strings.TrimSpace(view.SourceHash) != "" {
+		values = append(values, strings.TrimSpace(view.SourceHash))
 	}
 	for _, flow := range view.Flows {
 		if id := strings.TrimSpace(flow.ID); id != "" {

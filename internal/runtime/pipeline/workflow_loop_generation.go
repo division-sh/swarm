@@ -79,8 +79,5 @@ func loopPlanOwnsStage(source semanticview.Source, flowID, loopID, stage string)
 
 func loopFlowIDMatches(source semanticview.Source, declared, actual string) bool {
 	declared, actual = strings.TrimSpace(declared), strings.TrimSpace(actual)
-	if declared == actual {
-		return true
-	}
-	return declared == "" && actual == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
+	return declared == actual
 }

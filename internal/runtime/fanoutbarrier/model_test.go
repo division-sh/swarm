@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -98,7 +99,7 @@ func TestRegistrationRejectsCrossIntentAndRoutingContradictions(t *testing.T) {
 	registration := testRegistration(t)
 	for name, mutate := range map[string]func(*Registration){
 		"triggering delivery": func(value *Registration) { value.IntentKey.TriggeringDeliveryID = uuid.NewString() },
-		"element":             func(value *Registration) { value.IntentKey.ElementRef.ElementID = uuid.NewString() },
+		"declaration":         func(value *Registration) { value.IntentKey.ElementRef.SemanticPath += ".other" },
 		"route":               func(value *Registration) { value.Route.InstancePath = "worker/other" },
 		"entity":              func(value *Registration) { value.EntityID = uuid.NewString() },
 		"routing source": func(value *Registration) {
@@ -118,14 +119,16 @@ func TestRegistrationRejectsCrossIntentAndRoutingContradictions(t *testing.T) {
 func testRegistration(t *testing.T) Registration {
 	t.Helper()
 	triggeringDeliveryID := uuid.NewString()
-	elementID := uuid.NewString()
+	declaration, err := runtimeidentity.AdmitDeclarationIdentity("worker", "fan_out", `nodes["producer"].handlers["batch.requested"].fan_out`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ref, err := timeridentity.NewFanOutDeliveryJoinRef(
 		identitytest.FlowNode(t, "worker", "producer"),
 		"batch.requested",
 		"all-items-delivered",
-		"root",
-		elementID,
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		declaration,
+		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	)
 	if err != nil {
@@ -146,8 +149,8 @@ func testRegistration(t *testing.T) Registration {
 		t.Fatal(err)
 	}
 	planRef := runtimecontracts.FanOutPlanRef{
-		BundleHash:     "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ElementRef:     runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: elementID},
+		BundleHash:     "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ElementRef:     runtimecontracts.FanOutElementRefFrom(declaration),
 		SemanticDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}
 	return Registration{

@@ -13,8 +13,7 @@ import (
 type CandidateTarget struct {
 	Selector             string                       `json:"selector"`
 	ServiceID            string                       `json:"service_id"`
-	PackageKey           string                       `json:"package_key"`
-	FlowID               string                       `json:"flow_id"`
+	FlowPath             string                       `json:"flow_path"`
 	Alias                string                       `json:"alias"`
 	Provider             string                       `json:"provider"`
 	Generation           uint64                       `json:"generation"`
@@ -28,7 +27,7 @@ func (t CandidateTarget) Validate() error {
 	if err != nil {
 		return fmt.Errorf("channel onboarding target selector %q: %w", strings.TrimSpace(t.Selector), err)
 	}
-	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.PackageKey) != parsed.PackageKey || strings.TrimSpace(t.FlowID) != parsed.FlowID || strings.TrimSpace(t.Provider) != parsed.Provider || strings.TrimSpace(t.Alias) == "" || t.Generation == 0 || t.PublicationSequence < 1 || !t.AdmissionGeneration.Valid() {
+	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || strings.TrimSpace(t.Alias) == "" || t.Generation == 0 || t.PublicationSequence < 1 || !t.AdmissionGeneration.Valid() {
 		return fmt.Errorf("channel onboarding target contradicts its exact selector")
 	}
 	return nil
@@ -95,7 +94,7 @@ func NewCandidateCatalog(candidates []Candidate) (*CandidateCatalog, error) {
 		if err := candidate.Validate(); err != nil {
 			return nil, err
 		}
-		key := candidate.Coordinate.BundleHash + "\x00" + candidate.Coordinate.BundleSource + "\x00" + candidate.Interface.Key() + "\x00" + candidate.Target.Selector
+		key := candidate.Coordinate.BundleHash + "\x00" + candidate.Interface.Key() + "\x00" + candidate.Target.Selector
 		if _, duplicate := seen[key]; duplicate {
 			return nil, fmt.Errorf("duplicate channel onboarding candidate %s", candidateDiagnostic(candidate))
 		}

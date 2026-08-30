@@ -111,7 +111,7 @@ var corruptPipelineScopeDisposition = storepipeline.CorruptPipelineScopeDisposit
 var projectBusRunLifecycleSnapshot = storerunlifecycle.ProjectBusRunLifecycleSnapshot
 
 func postgresActiveRunSourceOwner(store *PostgresStore, tx *sql.Tx) storerunfork.ActiveRunSourceOwnerFunc {
-	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 		return store.runLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 	}
 }

@@ -10,7 +10,7 @@ import (
 func CopyRootIngressServedFollowUp(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "name: routing-root-ingress\n", "name: served-event-publish-followup\n")
+
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 initial_state: pending
 terminal_states: [done]
@@ -29,11 +29,9 @@ states: [new, waiting, done]
 `, `    item.received:
       rules:
         initialize:
-          element_id: 00000000-0000-4000-8000-000000000005
           condition: "payload.item_id != 'emit'"
           advances_to: waiting
         emit_processed:
-          element_id: 00000000-0000-4000-8000-000000000006
           condition: "payload.item_id == 'emit'"
           emit:
             event: item.processed
@@ -55,7 +53,6 @@ states: [new, waiting, done]
     item.processed:
       rules:
         complete:
-          element_id: 00000000-0000-4000-8000-000000000007
           condition: "payload.item_id == 'review'"
           advances_to: done
 `)
@@ -84,12 +81,8 @@ external.observed:
 func CopyRootIngressServedConversationFork(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedExternalEvent(t)
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
-  - id: fork-source
-    flow: fork-source
-    mode: static
-`)
-	writeClosedVariantFile(t, root, "flows/fork-source/schema.yaml", `name: fork-source
+
+	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `name: fork-source
 mode: static
 pins:
   inputs:
@@ -97,10 +90,10 @@ pins:
       - event: fork.source_message
         source: external
 `)
-	writeClosedVariantFile(t, root, "flows/fork-source/events.yaml", `fork.source_message:
+	writeClosedVariantFile(t, root, "fork-source/events.yaml", `fork.source_message:
   note: text
 `)
-	writeClosedVariantFile(t, root, "flows/fork-source/agents.yaml", `fork-source-agent:
+	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
   id: fork-source-agent
   role: researcher
   intent: prompts/fork-source-agent.md
@@ -109,7 +102,7 @@ pins:
   subscriptions:
     - fork.source_message
 `)
-	writeClosedVariantFile(t, root, "flows/fork-source/prompts/fork-source-agent.md", "Preserve the source conversation used by the operator fork proof.\n")
+	writeClosedVariantFile(t, root, "fork-source/prompts/fork-source-agent.md", "Preserve the source conversation used by the operator fork proof.\n")
 	return root
 }
 
@@ -127,12 +120,8 @@ func CopyRootIngressServedActiveLoad(t testing.TB) string {
 func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
-  - id: hold
-    flow: hold
-    mode: static
-`)
-	writeClosedVariantFile(t, root, "flows/hold/schema.yaml", `name: hold
+
+	writeClosedVariantFile(t, root, "hold/schema.yaml", `name: hold
 mode: static
 pins:
   inputs:
@@ -140,10 +129,10 @@ pins:
       - event: item.agent_hold
         source: external
 `)
-	writeClosedVariantFile(t, root, "flows/hold/events.yaml", `item.agent_hold:
+	writeClosedVariantFile(t, root, "hold/events.yaml", `item.agent_hold:
   note: text
 `)
-	writeClosedVariantFile(t, root, "flows/hold/agents.yaml", `load-agent:
+	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
   intent: prompts/load-agent.md
@@ -152,7 +141,7 @@ pins:
   subscriptions:
     - item.agent_hold
 `)
-	writeClosedVariantFile(t, root, "flows/hold/prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
+	writeClosedVariantFile(t, root, "hold/prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
 	return root
 }
 
@@ -184,7 +173,7 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "flows/operating/schema.yaml", `
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `
 name: operating
 mode: template
 instance: product_id
@@ -200,12 +189,12 @@ pins:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
-	writeClosedVariantFile(t, root, "flows/operating/entities.yaml", `
+	writeClosedVariantFile(t, root, "operating/entities.yaml", `
 product:
   product_id: text
   note: text
 `)
-	writeClosedVariantFile(t, root, "flows/operating/events.yaml", `
+	writeClosedVariantFile(t, root, "operating/events.yaml", `
 opco.product_initialization_requested:
   swarm:
     source: external
@@ -215,7 +204,7 @@ opco.product_review_requested:
     source: external
   note: string
 `)
-	writeClosedVariantFile(t, root, "flows/operating/nodes.yaml", `
+	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
@@ -245,7 +234,7 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "flows/operating/schema.yaml", `
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `
 name: operating
 mode: template
 instance: product_id
@@ -255,17 +244,17 @@ states: [initializing, spawning, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
-	writeClosedVariantFile(t, root, "flows/operating/entities.yaml", `
+	writeClosedVariantFile(t, root, "operating/entities.yaml", `
 product:
   product_id: text
 `)
-	writeClosedVariantFile(t, root, "flows/operating/events.yaml", `
+	writeClosedVariantFile(t, root, "operating/events.yaml", `
 opco.product_initialization_requested:
   product_id: string
 component_scaffold.spawn_requested:
   product_id: string
 `)
-	writeClosedVariantFile(t, root, "flows/operating/nodes.yaml", `
+	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
@@ -296,11 +285,7 @@ component-scaffold:
 
 func addLegacyTemplateRoot(t testing.TB, root string) {
 	t.Helper()
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
-  - id: operating
-    flow: operating
-    mode: template
-`)
+
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 initial_state: pending
 terminal_states: [done]
@@ -325,7 +310,11 @@ pins:
         source: external
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
-	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "item: {}\n", `portfolio:
+	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), `item:
+  item_id:
+    type: text
+    _unused_reason: external root instance identity
+`, `portfolio:
   owner: text
 `)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:

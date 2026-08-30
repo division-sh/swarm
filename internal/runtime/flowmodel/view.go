@@ -16,22 +16,3 @@ type View[P, S, N, E, A, T any] struct {
 	Children  []View[P, S, N, E, A, T]
 	Parent    *View[P, S, N, E, A, T]
 }
-
-func ProjectAsFlowView[PP, PM, FP, FS, N, E, A, T any](
-	paths FP,
-	project PackageView[PP, PM, N, E, A, T],
-) View[FP, FS, N, E, A, T] {
-	return View[FP, FS, N, E, A, T]{
-		Paths:     paths,
-		Nodes:     project.Nodes,
-		Events:    project.Events,
-		Agents:    project.Agents,
-		Tools:     project.Tools,
-		Policy:    project.Policy,
-		NodeURIs:  map[string]string{},
-		AgentURIs: project.AgentURIs,
-		EventURIs: map[string]string{},
-		Children:  nil,
-		Parent:    nil,
-	}
-}

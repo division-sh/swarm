@@ -42,37 +42,37 @@ func CopyTemplateReplyVariant(t testing.TB, opts TemplateReplyVariantOptions) st
 func CopyTemplateReplyWithInertFrom(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateReply)
-	applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "requester", "schema.yaml"),
 		"          mode: reply", "          mode: reply\n          from: payload.ignored")
 	return root
 }
 
 func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	t.Helper()
-	requesterSchema := filepath.Join(root, "flows", "requester", "schema.yaml")
+	requesterSchema := filepath.Join(root, "requester", "schema.yaml")
 	applyClosedReplacement(t, requesterSchema,
 		"          replies_to: provider.requested\n",
 		"          replies_to: provider.requested\n          correlation_key: provider_request_id\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "events.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "requester", "events.yaml"),
 		"provider.requested:\n", "provider.requested:\n  key: provider_request_id\n  provider_request_id: text\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "provider", "events.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "provider", "events.yaml"),
 		"provider.replied:\n", "provider.replied:\n  key: provider_request_id\n  provider_request_id: text\n")
-	initiatorEvents := filepath.Join(root, "flows", "initiator", "events.yaml")
+	initiatorEvents := filepath.Join(root, "initiator", "events.yaml")
 	applyClosedReplacement(t, initiatorEvents,
 		"request.submitted:\n  account_id: text?\n",
 		"request.submitted:\n  account_id: text?\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,
 		"requester.requested:\n  account_id: text\n",
 		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
-	initiatorNodes := filepath.Join(root, "flows", "initiator", "nodes.yaml")
+	initiatorNodes := filepath.Join(root, "initiator", "nodes.yaml")
 	applyClosedReplacement(t, initiatorNodes,
 		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",
 		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n          provider_request_id: payload.provider_request_id\n")
-	requesterNodes := filepath.Join(root, "flows", "requester", "nodes.yaml")
+	requesterNodes := filepath.Join(root, "requester", "nodes.yaml")
 	applyClosedReplacement(t, requesterNodes,
 		"          account_id: payload.account_id\n",
 		"          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
-	providerNodes := filepath.Join(root, "flows", "provider", "nodes.yaml")
+	providerNodes := filepath.Join(root, "provider", "nodes.yaml")
 	applyClosedReplacement(t, providerNodes,
 		"        fields:\n          account_id: payload.account_id\n",
 		"        fields:\n          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
@@ -82,13 +82,13 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
 	t.Helper()
 	requestKey = closedScalarLiteral(t, "request key", requestKey, "human-request")
 	accountID = closedScalarLiteral(t, "account ID", accountID, "account-a")
-	providerSchema := filepath.Join(root, "flows", "provider", "schema.yaml")
+	providerSchema := filepath.Join(root, "provider", "schema.yaml")
 	applyClosedReplacement(t, providerSchema, "      - provider.requested\n  outputs:\n", `      - provider.requested
       - human_task.deferred
       - human_task.approved
   outputs:
 `)
-	writeClosedVariantFile(t, root, "flows/provider/nodes.yaml", `provider-node:
+	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
   id: provider-node
   execution_type: system_node
   subscribes_to: [provider.requested, human_task.deferred, human_task.approved]

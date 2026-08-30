@@ -186,7 +186,7 @@ func TestServeCommandCapturesStoreFlagForCanonicalResolver(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--store", "sqlite"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--store", "sqlite"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -197,7 +197,7 @@ func TestServeCommandCapturesStoreFlagForCanonicalResolver(t *testing.T) {
 
 func TestServeHelpDocumentsSQLiteDefaultAndPostgresOptIn(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--help"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--help"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
 		t.Fatalf("serve --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}

@@ -873,8 +873,8 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 			TemplateID: "component-scaffold", ScopeKey: "component-scaffold", InstanceID: "active",
 			InstancePath: "component-scaffold/active", EntityID: entityID, HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", WorkflowVersion: "1.0.0", ExecutionMode: "live",
+		RunID: runID, BundleHash: authorActivityTestBundleHash,
+		WorkflowVersion: "1.0.0", ExecutionMode: "live",
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize readiness plan: %v", err)
@@ -918,8 +918,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
 	}
-	if got.BundleHash != "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
-		got.BundleSource != "ephemeral" ||
+	if got.BundleHash != authorActivityTestBundleHash ||
 		got.WorkflowVersion != "1.0.0" {
 		t.Fatalf("semantic source = %#v, want exact run bundle and workflow version", got)
 	}
@@ -948,6 +947,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransac
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ensureFlowInstanceRouteTables(t, ctx, db)
+	requireDefaultSourceArtifactForTest(t, ctx, pg)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

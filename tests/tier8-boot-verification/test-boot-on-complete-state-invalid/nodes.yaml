@@ -6,6 +6,5 @@ test-node:
   event_handlers:
     task.requested:
       on_complete:
-        - element_id: e0c5a153-22c6-4d4c-a754-7bf0125b748a
-          condition: "payload.score >= 70"
+        - condition: "payload.score >= 70"
           advances_to: nonexistent

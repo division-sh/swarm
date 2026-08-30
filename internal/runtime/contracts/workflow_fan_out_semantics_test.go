@@ -5,33 +5,24 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *testing.T) {
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", "dispatcher")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "dispatcher")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := []string{
-		"00000000-0000-4000-8000-000000002271",
-		"00000000-0000-4000-8000-000000002272",
-		"00000000-0000-4000-8000-000000002273",
-	}
-	newSpec := func(raw string) *FanOutSpec {
-		id, err := contractelementidentity.ParseContractElementID(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return &FanOutSpec{ElementID: id, ItemsFrom: "payload.items", As: "row_item", Identity: "row_item.id", Emit: EmitSpec{
+	newSpec := func() *FanOutSpec {
+		return &FanOutSpec{ItemsFrom: "payload.items", As: "row_item", Identity: "row_item.id", Emit: EmitSpec{
 			Event: "item.requested", Fields: map[string]ExpressionValue{"id": CELExpression("row_item.id")},
 		}}
 	}
 	handler := SystemNodeEventHandler{
-		FanOut:     newSpec(ids[0]),
-		Rules:      []HandlerRuleEntry{{Condition: "payload.ready", FanOut: newSpec(ids[1])}},
-		OnComplete: []HandlerRuleEntry{{Condition: "else", FanOut: newSpec(ids[2])}},
+		FanOut:     newSpec(),
+		Rules:      []HandlerRuleEntry{{Condition: "payload.ready", FanOut: newSpec()}},
+		OnComplete: []HandlerRuleEntry{{Condition: "else", FanOut: newSpec()}},
 	}
 	bundle := fanOutPlanRegistryTestBundle(t, handler)
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
@@ -46,8 +37,11 @@ func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *tes
 		if wantIndex, ok := wantKinds[plan.Site.Kind]; !ok || plan.Site.Index != wantIndex {
 			t.Fatalf("compiled site = %#v, want closed site-kind/index set %#v", plan.Site, wantKinds)
 		}
-		if plan.Ref.BundleHash == "" || plan.Ref.SemanticDigest == "" || plan.Ref.ElementRef.ElementID == "" {
+		if plan.Ref.BundleHash == "" || plan.Ref.SemanticDigest == "" {
 			t.Fatalf("compiled plan lacks durable identity: %#v", plan.Ref)
+		}
+		if _, err := plan.Ref.ElementRef.DeclarationIdentity(); err != nil {
+			t.Fatalf("compiled plan lacks canonical declaration identity: %v", err)
 		}
 	}
 
@@ -66,23 +60,28 @@ func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *tes
 func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) *WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	packageFile := filepath.Join(root, "package.yaml")
+	schemaFile := filepath.Join(root, "schema.yaml")
 	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(packageFile, []byte("name: fan-out-plan-registry-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(schemaFile, []byte("name: fan-out-plan-registry-test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &WorkflowContractBundle{
-		Paths:  ContractPaths{ContractsRoot: root, ProjectPackageFile: packageFile, PlatformSpecFile: platformFile},
-		Nodes:  map[string]SystemNodeContract{"dispatcher": {ID: "dispatcher", EventHandlers: map[string]SystemNodeEventHandler{"batch.ready": handler}}},
-		Events: map[string]EventCatalogEntry{"batch.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[json]"}}}}},
+		SourceArtifact: artifact,
+		Paths:          ContractPaths{PlatformSpecFile: platformFile},
+		Nodes:          map[string]SystemNodeContract{"dispatcher": {ID: "dispatcher", EventHandlers: map[string]SystemNodeEventHandler{"batch.ready": handler}}},
+		Events:         map[string]EventCatalogEntry{"batch.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[json]"}}}}},
 	}
 }
 
 func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) {
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", "dispatcher")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "dispatcher")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,10 +141,5 @@ func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) 
 }
 
 func completeFanOutSemanticsTestIdentity(node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) (SystemNodeEventHandler, error) {
-	elementID, err := contractelementidentity.ParseContractElementID("00000000-0000-4000-8000-000000002274")
-	if err != nil {
-		return SystemNodeEventHandler{}, err
-	}
-	handler.FanOut.ElementID = elementID
-	return QualifySystemNodeHandlerRuleRefs(node, handler)
+	return QualifySystemNodeHandlerRuleRefsForEvent(node, "test.event", handler)
 }

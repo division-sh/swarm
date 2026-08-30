@@ -21,7 +21,7 @@ func TestCatalogReplayTranscriptIdentityAdmissionFailsClosed(t *testing.T) {
 	transcript := buildCatalogExecutionTranscript(t, fixture)
 	bundle := loadFixtureBundle(t, fixture.Root)
 	repo := repoRootFromCatalogE2E(t)
-	if err := validateCatalogTranscriptIdentity(repo, fixture.Root, bundle, transcript); err != nil {
+	if err := validateCatalogTranscriptIdentity(repo, bundle, transcript); err != nil {
 		t.Fatalf("valid transcript rejected: %v", err)
 	}
 
@@ -29,8 +29,7 @@ func TestCatalogReplayTranscriptIdentityAdmissionFailsClosed(t *testing.T) {
 		"unrevisioned":        func(got *catalogExecutionTranscript) { got.version = "" },
 		"unknown revision":    func(got *catalogExecutionTranscript) { got.version = "catalog-replay-transcript/v99" },
 		"stale platform spec": func(got *catalogExecutionTranscript) { got.platformSpecDigest = "sha256:" + strings.Repeat("0", 64) },
-		"wrong bundle":        func(got *catalogExecutionTranscript) { got.bundleHash = "bundle-v1:sha256:" + strings.Repeat("0", 64) },
-		"wrong source":        func(got *catalogExecutionTranscript) { got.bundleSource = "catalog-fixture:tests/other" },
+		"wrong bundle":        func(got *catalogExecutionTranscript) { got.bundleHash = "bundle-v2:sha256:" + strings.Repeat("0", 64) },
 		"wrong run":           func(got *catalogExecutionTranscript) { got.runID = eventtest.UUID("wrong-run") },
 		"unknown input kind":  func(got *catalogExecutionTranscript) { got.groups[0].steps[0].inputKind = "database_snapshot" },
 		"partial input":       func(got *catalogExecutionTranscript) { got.groups[0].steps[0].eventID = "" },
@@ -43,12 +42,12 @@ func TestCatalogReplayTranscriptIdentityAdmissionFailsClosed(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			candidate := cloneCatalogTranscriptForUnit(transcript)
 			mutate(candidate)
-			if err := validateCatalogTranscriptIdentity(repo, fixture.Root, bundle, candidate); err == nil {
+			if err := validateCatalogTranscriptIdentity(repo, bundle, candidate); err == nil {
 				t.Fatal("invalid transcript was admitted")
 			}
 		})
 	}
-	if err := validateCatalogTranscriptIdentity(repo, fixture.Root, bundle, nil); err == nil {
+	if err := validateCatalogTranscriptIdentity(repo, bundle, nil); err == nil {
 		t.Fatal("nil transcript was admitted")
 	}
 }

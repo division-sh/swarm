@@ -14,7 +14,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -286,22 +285,16 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	artifact := storeTestSourceArtifact("runtime-log-source-lineage")
+	ctx := testAuthorActivityContextForBundle(artifact.BundleHash())
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
-	sourceFact := mustStoreTestPersistedBundleSourceFact(
-		"bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: test', '{}'::jsonb)
-	`, sourceFact.BundleHash()); err != nil {
-		t.Fatalf("seed bundle row: %v", err)
-	}
+	sourceFact := mustStoreTestSourceArtifactFact(artifact.BundleHash())
+	seedStoreTestPersistedArtifact(t, db, artifact)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(subjectEventID,
 
 		events.EventType("validation/validation.package_ready"),
@@ -321,16 +314,16 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 		t.Fatalf("RuntimeLogger.Log postgres: %v", err)
 	}
 
-	var gotHash, gotSource, sourceEventID string
+	var gotHash, sourceEventID string
 	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource); err != nil {
+	`, runID).Scan(&gotHash); err != nil {
 		t.Fatalf("load postgres run bundle source: %v", err)
 	}
-	if gotHash != sourceFact.BundleHash() || gotSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("postgres run bundle source = hash:%q source:%q, want %#v", gotHash, gotSource, sourceFact)
+	if gotHash != sourceFact.BundleHash() {
+		t.Fatalf("postgres run bundle source = hash:%q, want %#v", gotHash, sourceFact)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(source_event_id::text, '')

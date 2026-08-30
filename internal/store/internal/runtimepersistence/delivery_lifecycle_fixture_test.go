@@ -221,15 +221,15 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, dialect deliveryadapter.Dialect, runID string) (runtimedelivery.ExecutionAuthority, error) {
-	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	query := `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
 	if dialect == deliveryadapter.DialectSQLite {
-		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+		query = `SELECT bundle_hash FROM runs WHERE run_id=?`
 	}
-	var bundleHash, bundleSource string
-	if err := queryer.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
+	var bundleHash string
+	if err := queryer.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
 		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("load delivery fixture run authority: %w", err)
 	}
-	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
 	}

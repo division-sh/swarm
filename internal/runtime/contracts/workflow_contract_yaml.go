@@ -42,6 +42,11 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 	if instanceNode := yamlMappingValue(node, "instance"); instanceNode != nil && strings.EqualFold(strings.TrimSpace(instanceNode.Tag), "!!null") {
 		return fmt.Errorf("retired template instance form; use `instance: <field>` with one non-empty scalar identity field")
 	}
+	if activation := yamlMappingValue(node, "activation"); activation != nil {
+		if activation.Kind != yaml.ScalarNode || activation.Tag == "!!null" || activation.Value != FlowActivationStanding {
+			return fmt.Errorf("schema activation must be exactly %q", FlowActivationStanding)
+		}
+	}
 	type alias FlowSchemaDocument
 	var aux alias
 	if err := node.Decode(&aux); err != nil {
@@ -55,9 +60,36 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (i *FlowSchemaImports) UnmarshalYAML(node *yaml.Node) error {
+	if i == nil {
+		return nil
+	}
+	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) == 0 {
+		return fmt.Errorf("schema imports must be a non-empty mapping")
+	}
+	allowed := map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}
+	if err := validateClosedMapping("schema imports", node, allowed); err != nil {
+		return err
+	}
+	type raw FlowSchemaImports
+	var out raw
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	if len(out.ConnectorPacks) == 0 && len(out.ProviderTriggerEvents) == 0 {
+		return fmt.Errorf("schema imports must declare at least one connector_packs or provider_trigger_events row")
+	}
+	*i = FlowSchemaImports(out)
+	return nil
+}
+
 var flowSchemaDocumentFields = map[string]struct{}{
 	"name":                {},
 	"mode":                {},
+	"activation":          {},
+	"ingress":             {},
+	"connect":             {},
+	"imports":             {},
 	"entity":              {},
 	"instance":            {},
 	"initial_state":       {},

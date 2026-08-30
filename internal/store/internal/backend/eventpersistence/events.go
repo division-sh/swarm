@@ -348,7 +348,7 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, story
 	if runID == "" {
 		return nil
 	}
-	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}

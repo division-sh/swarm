@@ -14,8 +14,8 @@ type Source interface {
 	WorkflowName() string
 	DurableDataDeclarations() []runtimecontracts.DurableDataDeclaration
 	StaticData() []durabledata.StaticData
-	StaticDataForAgent(packageKey, flowID, logicalID string) []durabledata.StaticData
-	DurableDataForAgent(packageKey, flowID, logicalID string) []durabledata.DeclarationRef
+	StaticDataForAgent(flowPath, logicalID string) []durabledata.StaticData
+	DurableDataForAgent(flowPath, logicalID string) []durabledata.DeclarationRef
 	DataProjectionRequired() bool
 	PlatformSpec() runtimecontracts.PlatformSpecDocument
 	WorkflowEntitySchema() runtimecontracts.EntitySchema
@@ -41,7 +41,6 @@ type Source interface {
 	FlowInitialStage(flowID string) string
 	FlowStates(flowID string) []string
 	FlowTerminalStages(flowID string) []string
-	ProjectScopes() []ProjectScope
 	FlowScopes() []FlowScope
 	FlowScopeByID(id string) (FlowScope, bool)
 	FlowSchemaByID(id string) (runtimecontracts.FlowSchemaDocument, bool)

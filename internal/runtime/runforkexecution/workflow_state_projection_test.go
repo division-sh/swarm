@@ -50,7 +50,7 @@ func TestSelectedContractWorkflowStateProjectionMapsRootPlatformActivityToRunSco
 	if err != nil {
 		t.Fatalf("selectedContractWorkflowStateProjection: %v", err)
 	}
-	if len(states) != 1 || states[0].FlowID != "activity-fork-proof" ||
+	if len(states) != 1 || states[0].FlowID != "." ||
 		states[0].AddressKind != runfork.RunForkSelectedContractWorkflowStateRunScope {
 		t.Fatalf("workflow states = %#v, want root run-scope activity state", states)
 	}

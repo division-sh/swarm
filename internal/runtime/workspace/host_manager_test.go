@@ -14,17 +14,14 @@ import (
 )
 
 func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	root := filepath.Join(t.TempDir(), "host-workspaces")
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       root,
-		DataMountPoint:      "/data",
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    root,
+		DataMountPoint:   "/data",
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(context.Background(), source); err != nil {
@@ -41,18 +38,15 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 }
 
 func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	root := filepath.Join(t.TempDir(), "host-workspaces")
 	canonicalRoot := canonicalTestPath(t, root)
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       root,
-		DataMountPoint:      "/data",
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    root,
+		DataMountPoint:   "/data",
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -84,8 +78,8 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	shared, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "shared-agent",
-		Identity:       runtimeagentidentitytest.Declared(t, "shared-agent", "test/agents.yaml", "flows/acme", "review", "flows/acme/review"),
-		FlowPath:       "flows/acme/review",
+		Identity:       runtimeagentidentitytest.Declared(t, "shared-agent", "test/agents.yaml", "acme", "review", "acme/review"),
+		FlowPath:       "acme/review",
 		WorkspaceClass: "shared_flow",
 	})
 	if err != nil {
@@ -99,39 +93,29 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 }
 
-func TestHostManagerRejectsWorkspaceRootOverlappingContractsSource(t *testing.T) {
-	root := t.TempDir()
-	contractsDir := filepath.Join(root, "contracts")
-	if err := os.MkdirAll(contractsDir, 0o755); err != nil {
-		t.Fatalf("mkdir contracts: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+func TestHostManagerRejectsWorkspaceRootOverlappingSourceProjection(t *testing.T) {
+	sourceProjection, contractsDir := testRuntimeSourceProjection(t)
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       root,
-		DataMountPoint:      "/data",
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    contractsDir,
+		DataMountPoint:   "/data",
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
-	if err == nil || !strings.Contains(err.Error(), "must not overlap /opt/swarm/contracts source") {
-		t.Fatalf("ValidateSource error = %v, want contracts overlap rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "must not overlap /opt/swarm/source projection") {
+		t.Fatalf("ValidateSource error = %v, want source-projection overlap rejection", err)
 	}
 }
 
 func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, contractsDir := testRuntimeSourceProjection(t)
 	for _, tt := range []struct {
 		name       string
 		target     string
 		wantSource string
 	}{
-		{name: "contracts", target: contractsDir, wantSource: "/opt/swarm/contracts source"},
+		{name: "source", target: contractsDir, wantSource: "/opt/swarm/source projection"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rootLink := filepath.Join(t.TempDir(), "host-workspaces")
@@ -140,10 +124,10 @@ func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.
 			}
 			manager := NewHostManager()
 			manager.SetConfig(HostConfig{
-				WorkspaceRoot:       rootLink,
-				DataMountPoint:      "/data",
-				ContractsSource:     contractsDir,
-				ContractsMountPoint: "/opt/swarm/contracts",
+				WorkspaceRoot:    rootLink,
+				DataMountPoint:   "/data",
+				SourceProjection: sourceProjection,
+				SourceMountPoint: "/opt/swarm/source",
 			})
 			err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 			if err == nil || !strings.Contains(err.Error(), "must not overlap "+tt.wantSource) {
@@ -154,10 +138,7 @@ func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.
 }
 
 func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	root := filepath.Join(t.TempDir(), "host-workspaces")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("mkdir root: %v", err)
@@ -168,10 +149,10 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 	}
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       root,
-		DataMountPoint:      "/data",
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    root,
+		DataMountPoint:   "/data",
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(context.Background(), source); err != nil {
@@ -192,20 +173,17 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 }
 
 func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, contractsDir := testRuntimeSourceProjection(t)
 	rootLink := filepath.Join(t.TempDir(), "host-workspaces")
 	if err := os.Symlink(contractsDir, rootLink); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       rootLink,
-		DataMountPoint:      "/data",
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    rootLink,
+		DataMountPoint:   "/data",
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 
@@ -214,7 +192,7 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 		ID:            "agent-1",
 		Identity:      runtimeagentidentitytest.RootDeclared(t, "agent-1", "test/agents.yaml"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "must not overlap /opt/swarm/contracts source") {
+	if err == nil || !strings.Contains(err.Error(), "must not overlap /opt/swarm/source projection") {
 		t.Fatalf("ResolveWorkspace error = %v, want validation-before-create overlap rejection", err)
 	}
 	if _, err := os.Stat(filepath.Join(contractsDir, "agents")); !os.IsNotExist(err) {
@@ -223,16 +201,13 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 }
 
 func TestHostManagerRejectsRetiredAmbientDataSource(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
-		WorkspaceRoot:       t.TempDir(),
-		SharedDataSource:    t.TempDir(),
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    t.TempDir(),
+		SharedDataSource: t.TempDir(),
+		SourceProjection: sourceProjection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
 	err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 	if err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {

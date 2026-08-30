@@ -154,7 +154,7 @@ func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPaylo
 			entityID := eventtest.UUID("join-declaration-application-owner-" + backend)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-				WorkflowName: source.WorkflowName(), WorkflowVersion: "1", CurrentState: "awaiting",
+				WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting",
 				Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed exact declaration target: %v", err)
@@ -173,7 +173,7 @@ func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPaylo
 				"runtime.generic_schedule", handle.TaskID(), payload, 0, testPipelineRunID, "",
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), routingSource, time.Now().UTC(),
 			)
-			target := events.RouteIdentity{FlowID: source.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID}.Normalized()
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}.Normalized()
 			handlerFact, err := NewDeliveryTargetHandler(plan.Node)
 			if err != nil {
 				t.Fatal(err)
@@ -207,10 +207,10 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 			} else {
 				ctx = testPipelineRunContext(t, db)
 			}
-			node := pipelineNode(t, "review", "node-a")
+			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
-			target := events.RouteIdentity{FlowID: "review", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), "is missing at execution") {
 				t.Fatalf("missing exact target error = %v", err)
@@ -264,7 +264,7 @@ func TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBoth
 				case "complete":
 					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: wrongRunID, StorageRef: wrongRunID, EntityID: entityID,
-						WorkflowName: "review", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
+						WorkflowName: ".", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
 						CurrentState: "active", Fields: map[string]any{"marker": "unchanged"},
 						EntityType: "test_entity",
 					})); err != nil {
@@ -291,14 +291,14 @@ func TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBoth
 					return count
 				}
 				stateBefore, lifecycleBefore := countRows("entity_state"), countRows("flow_instances")
-				node := pipelineNode(t, "review", "node-a")
+				node := pipelineNode(t, ".", "node-a")
 				handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 				evt := handlerTestRootIngress(
 					uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-					handlerTestWorkflowEnvelope("review", wrongRunID, entityID), now,
+					handlerTestWorkflowEnvelope(".", wrongRunID, entityID), now,
 				)
-				route := events.RouteIdentity{FlowID: "review", FlowInstance: wrongRunID, EntityID: entityID}
+				route := events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}
 				owner := testCase.owner(route)
 
 				for attempt, coordinator := range []*PipelineCoordinator{newCoordinator(), newCoordinator()} {
@@ -398,7 +398,7 @@ func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
 	}
 	child := runtimecontracts.FlowContractView{
 		Path:  "review/child",
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", Mode: runtimecontracts.FlowModeTemplate},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review/child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "child", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
 			States: []string{"active", "done"}, TerminalStates: []string{"done"},
@@ -406,11 +406,11 @@ func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
 	}
 	parent.Children = append(parent.Children, child)
 	childView := &parent.Children[len(parent.Children)-1]
-	bundle.FlowTree.ByID["child"] = childView
+	bundle.FlowTree.ByID["review/child"] = childView
 	if bundle.FlowSchemas == nil {
 		bundle.FlowSchemas = make(map[string]runtimecontracts.FlowSchemaDocument)
 	}
-	bundle.FlowSchemas["child"] = childView.Schema
+	bundle.FlowSchemas["review/child"] = childView.Schema
 	return semanticview.Wrap(bundle)
 }
 
@@ -455,7 +455,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					t.Helper()
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: "terminated-status", StorageRef: instancePath, EntityID: entityID,
-						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+						WorkflowName: ".", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
 						Fields:     map[string]any{"marker": "unchanged"},
 						EntityType: "test_entity",
 					})
@@ -478,7 +478,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					t.Helper()
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: "draining-status", StorageRef: instancePath, EntityID: entityID,
-						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+						WorkflowName: ".", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
 						Fields:     map[string]any{"marker": "unchanged"},
 						EntityType: "test_entity",
 					})
@@ -513,11 +513,11 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				entityID := eventtest.UUID("invalid-persistence-" + backend + "-" + testCase.name)
 				testCase.seed(t, ctx, instancePath, entityID, store, db)
 
-				node := pipelineNode(t, "review", "node-a")
+				node := pipelineNode(t, ".", "node-a")
 				handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
-				target := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
-				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC())
+				target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
+				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", handlerTestWorkflowEnvelope(".", instancePath, entityID), time.Now().UTC())
 				if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), testCase.wantError) {
 					t.Fatalf("invalid %s persistence error = %v, want %q", testCase.name, err, testCase.wantError)
 				}
@@ -570,7 +570,7 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 				entityID := eventtest.UUID("non-active-delivery-target-" + backend + "-" + engine)
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
-					WorkflowName: "review", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
+					WorkflowName: ".", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
 					Fields:     map[string]any{"marker": "unchanged"},
 					EntityType: "test_entity",
 				})); err != nil {
@@ -586,9 +586,9 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 
 				evt := handlerTestRootIngress(
 					uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0,
-					testPipelineRunID, "", handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC(),
+					testPipelineRunID, "", handlerTestWorkflowEnvelope(".", instancePath, entityID), time.Now().UTC(),
 				)
-				node := pipelineNode(t, "review", "node-a")
+				node := pipelineNode(t, ".", "node-a")
 				route := seedExactOnceEventDelivery(t, first, ctx, evt, node)
 				handler := runtimecontracts.SystemNodeEventHandler{
 					Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
@@ -676,11 +676,11 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0,
-				testPipelineRunID, "", handlerTestWorkflowEnvelope("review", instancePath, entityID), occurredAt.Add(time.Minute),
+				testPipelineRunID, "", handlerTestWorkflowEnvelope(".", instancePath, entityID), occurredAt.Add(time.Minute),
 			)
 			seedExactOnceEvent(t, store, ctx, evt)
-			node := pipelineNode(t, "review", "node-a")
-			target := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
+			node := pipelineNode(t, ".", "node-a")
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target:    events.MustExistingEntityTarget(target),
@@ -726,22 +726,22 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 			entityID := eventtest.UUID("scoped-gates-existing-target")
 			persisted := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
-				WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-				Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"review/approved": true},
+				WorkflowName: ".", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
+				Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"./approved": true},
 				EntityType: "test_entity",
 			})
 			if err := store.upsert(ctx, persisted); err != nil {
 				t.Fatalf("seed exact scoped-gate target: %v", err)
 			}
 
-			node := pipelineNode(t, "review", "node-a")
+			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-				handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC(),
+				handlerTestWorkflowEnvelope(".", instancePath, entityID), time.Now().UTC(),
 			)
-			target := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			application, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
 			if err != nil {
 				t.Fatalf("prepare scoped-gate application: %v", err)
@@ -753,12 +753,12 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 
 			executionCtx := withDeliveryTargetApplication(ctx, application)
 			stateRepo := pipelineEngineStateRepo{coordinator: pc}
-			address := testEngineStateAddress("review", instancePath, entityID)
+			address := testEngineStateAddress(".", instancePath, entityID)
 			snapshot, exists, err := stateRepo.LoadState(executionCtx, address)
 			if err != nil || !exists {
 				t.Fatalf("load execution snapshot: exists=%t err=%v", exists, err)
 			}
-			if !snapshot.StateCarrier.Gates["approved"] || !snapshot.StateCarrier.Gates["review/approved"] || snapshot.StateCarrier.Fields["marker"] != "current" {
+			if !snapshot.StateCarrier.Gates["approved"] || !snapshot.StateCarrier.Gates["./approved"] || snapshot.StateCarrier.Fields["marker"] != "current" {
 				t.Fatalf("execution gates = %#v, want local and qualified facts", snapshot.StateCarrier.Gates)
 			}
 			snapshot.StateCarrier.Gates["approved"] = false
@@ -769,7 +769,7 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 				t.Fatalf("fresh immutable snapshot = %#v exists=%t err=%v", fresh, exists, err)
 			}
 			stored, exists, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
-			if err != nil || !exists || stored.Gates["approved"] || !stored.Gates["review/approved"] || stored.Fields["marker"] != "current" {
+			if err != nil || !exists || stored.Gates["approved"] || !stored.Gates["./approved"] || stored.Fields["marker"] != "current" {
 				t.Fatalf("durable state changed by execution projection: exists=%t err=%v instance=%#v", exists, err, stored)
 			}
 		})
@@ -779,14 +779,14 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 func TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsConflict(t *testing.T) {
 	source := handlerEntityRequirementExecutionSource()
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
-	node := pipelineNode(t, "review", "node-a")
+	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 	entityID := eventtest.UUID("preview-exact-target")
-	target := events.RouteIdentity{FlowID: "review", FlowInstance: testPipelineRunID, EntityID: entityID}
+	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
 	evt := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-		handlerTestWorkflowEnvelope("review", target.FlowInstance, entityID), time.Now().UTC(),
+		handlerTestWorkflowEnvelope(".", target.FlowInstance, entityID), time.Now().UTC(),
 	)
 
 	application, err := pc.prepareDeliveryTargetApplication(

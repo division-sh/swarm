@@ -11,12 +11,12 @@ import (
 
 func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
-	composition := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing")
+	composition := mustYAMLPath(t, root, "flow_model", "composition_routing")
 
 	assertScalarValue(t, mustMappingValue(t, composition, "status"), "scalar_receiver_identity_authoritative")
 	assertScalarValue(t, mustMappingValue(t, composition, "promoted_by"), "#1467")
 	assertScalarValue(t, mustMappingValue(t, composition, "parent_decision"), "#1466")
-	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
+	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.composition_routing")
 	wave2 := mustMappingValue(t, composition, "w2_compiled_pin_edge_ownership")
 	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "target-free public/provider input edges uniformly reject")
 	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "bound producer schema already declares the receiver instance field")
@@ -24,8 +24,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "schema-only imported pin may stage typed intrinsic projection metadata")
 	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "reply and fan-in cannot declare resolution.from")
 	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "Every W2 mapping key is byte-exact")
-	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Parent-authored composition routing is the canonical source authority")
-	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Producer emit sites MUST NOT own consumer routing")
+	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "LCA-owned schema.yaml connect is the sole authored cross-flow edge owner")
+	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "without producer routing")
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
 	outputPin := mustMappingValue(t, authored, "output_event_pin")
@@ -42,7 +42,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "mode"), "exhaustive typed value")
 
 	connect := mustMappingValue(t, authored, "parent_connect")
-	assertScalarValue(t, mustMappingValue(t, connect, "location"), "parent package.yaml connect")
+
 	assertScalarContains(t, mustMappingValue(t, connect, "canonical_form"), "event-centric structured connections")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "event"), "source event identity")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer flow ID")
@@ -85,9 +85,9 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	}
 
 	lowering := mustMappingValue(t, composition, "route_plan_lowering")
-	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering")
+	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.composition_routing.route_plan_lowering")
 	for _, want := range []string{
-		"parent package.yaml connect entries",
+		"admitted LCA-owned schema.yaml connect entries",
 		"producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints",
 		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
 		"receiver input same-named required payload source or exact resolution.from override and resolution mode",
@@ -109,7 +109,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_interface_adaptation", "owner_consumed"), "pin_alias_interface_adaptation")
 	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "role"), "retired on presence")
-	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "migration"), "bundle-wide preflight")
+	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "migration"), "fails strict admission")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 established EventBus publish/preflight/outbox")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#2114 closed selected-contract frontier/history")
 	slice1473 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1473")
@@ -131,8 +131,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	retirement := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1827_connect_delivery_reply_retirement")
 	assertScalarValue(t, mustMappingValue(t, retirement, "status"), "merge_bearing_aggressive_retirement")
 	assertScalarContains(t, mustMappingValue(t, retirement, "rule"), "ConnectRoutePlan expose no delivery or raw reply compatibility fields")
-	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_one"), "swarm migrate-connect-delivery-one")
-	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_reply_and_reply_map"), "resolution.mode: reply")
+	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "rule"), "no codemod or compatibility reader exists")
+	if !sequenceContainsScalar(mustMappingValue(t, retirement, "preserved"), "receiver resolution create, select, select-or-create, fan-in, and reply") {
+		t.Fatal("connect retirement must preserve receiver-owned reply semantics")
+	}
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
 	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "retired_by_2087")
@@ -148,7 +150,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		t.Fatal("implementation_slice_1475 missing complete retirement proof surface")
 	}
 	slice1508 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1508")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "the confined compiled-connect owner resolves package-aware root endpoints once, and static verification plus runtime delivery consume its typed graph projections") {
+	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "the confined compiled-connect owner resolves flow-path-aware root endpoints once, and static verification plus runtime delivery consume its typed graph projections") {
 		t.Fatal("implementation_slice_1508 must name the confined compiled graph owner")
 	}
 
@@ -164,27 +166,24 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "invalid")
 }
 
-func TestPlatformSpecProducerRoutingMigrationCoversWholeBundle(t *testing.T) {
+func TestPlatformSpecProducerRoutingRetirementHasNoMigrationSurface(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
-	behavior := mustYAMLPath(t, root, "cli_specification", "command_catalog", "migrate_producer_routing", "behavior")
+	retirement := mustYAMLPath(t, root, "flow_model", "composition_routing", "producer_routing_retirement")
+	assertScalarContains(t, mustMappingValue(t, retirement, "role"), "retired on presence")
+	assertScalarContains(t, mustMappingValue(t, retirement, "migration"), "fails strict admission")
 
-	for _, want := range []string{
-		"nodes.yaml",
-		"schema.yaml",
-		"loops.*.escape.emit",
-		"stages.*.gate.outcomes.*.emit",
-		"whole bundle",
-		"before writing any file",
-		"entire bundle byte-for-byte unchanged",
-	} {
-		assertScalarContains(t, behavior, want)
+	commandCatalog := mustYAMLPath(t, root, "cli_specification", "command_catalog")
+	for _, retired := range []string{"migrate_producer_routing", "migrate_connect_delivery_one"} {
+		if hasMappingKey(commandCatalog, retired) {
+			t.Fatalf("retired migration command %q remains in the command catalog", retired)
+		}
 	}
 }
 
 func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	reply := mustYAMLPath(t, root, "engine", "cross_flow_routing", "reply_resolution")
-	slice := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
+	slice := mustYAMLPath(t, root, "flow_model", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
 	sliceReply := mustYAMLPath(t, slice, "modes", "reply")
 
 	assertScalarValue(t, mustMappingValue(t, reply, "status"), "runnable_v1")
@@ -198,7 +197,7 @@ func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testi
 
 func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
-	slice := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
+	slice := mustYAMLPath(t, root, "flow_model", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
 	owner := mustMappingValue(t, slice, "instance_identity_owner_2021")
 	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
@@ -264,7 +263,7 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	root := loadPlatformSpecYAMLNode(t)
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
-	assertScalarValue(t, mustMappingValue(t, crossFlow, "canonical_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
+	assertScalarValue(t, mustMappingValue(t, crossFlow, "canonical_owner"), "platform-spec.yaml#flow_model.composition_routing")
 	assertScalarValue(t, mustMappingValue(t, crossFlow, "implementation_status"), "typed_composition_authority_complete_for_supported_surface")
 	if !sequenceContainsScalar(mustYAMLPath(t, crossFlow, "target_resolution", "precedence"), "lowered parent connect route plan") {
 		t.Fatal("cross_flow_routing target precedence must start from lowered parent connect route plan")
@@ -284,11 +283,11 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 
 	pinAuthority := mustYAMLPath(t, root, "flow_model", "pins", "routing_authority")
 	assertScalarContains(t, pinAuthority, "Parent package connect entries own common inter-flow topology")
-	assertScalarContains(t, pinAuthority, "flow_model.flow_package.composition_routing")
+	assertScalarContains(t, pinAuthority, "flow_model.composition_routing")
 	assertScalarContains(t, mustYAMLPath(t, root, "flow_model", "pins", "output_event_pins", "description"), "no lowered connect route applies")
 
 	pinTargetResolution := mustYAMLPath(t, root, "static_analyzer", "slice_3a_pin_target_resolution")
-	assertScalarValue(t, mustMappingValue(t, pinTargetResolution, "canonical_replacement"), "flow_model.flow_package.composition_routing.analyzer_verify_requirements")
+	assertScalarValue(t, mustMappingValue(t, pinTargetResolution, "canonical_replacement"), "flow_model.composition_routing.analyzer_verify_requirements")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "lowered_parent_connect", "rule"), "Parent connect")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "typed_same_flow_consumer", "rule"), "typed pub/sub")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "harness_sink", "rule"), "Production admission rejects")
@@ -379,7 +378,7 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "selected_contract_runfork_readiness"), "Closed by #2114")
 	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "parent_composition_routing_closure"), "Closed by #1466")
 
-	composition := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing")
+	composition := mustYAMLPath(t, root, "flow_model", "composition_routing")
 	splitBoundaries := mustMappingValue(t, composition, "split_boundaries")
 	assertScalarContains(t, mustMappingValue(t, splitBoundaries, "runtime_route_consumption"), "#2114 closed selected-contract")
 	assertScalarContains(t, mustMappingValue(t, splitBoundaries, "parser_model_support"), "#2086 closes strict parser/model retirement")
@@ -426,7 +425,7 @@ func TestPlatformSpecExecutableNodeIdentityIsExactAndCanonicalOnly(t *testing.T)
 	root := loadPlatformSpecYAMLNode(t)
 	rule := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "executable_node_identity")
 	for _, fragment := range []string{
-		"exact package_key",
+		"exact flow_path",
 		"owning flow_id",
 		"local node_id",
 		"explicitly empty flow_id",

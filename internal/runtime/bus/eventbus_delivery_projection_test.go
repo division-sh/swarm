@@ -320,7 +320,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 		uuid.NewString(), eventType, eventtest.Producer(events.EventProducerNode, "selected-node"), "fork-task",
 		[]byte(`{"selected":true}`), 0, lineage, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	prepared, err := eb.PrepareSelectedForkPublish(testAuthorActivityContext(context.Background()), evt)
+	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("prepare selected-fork publication: %v", err)
 	}

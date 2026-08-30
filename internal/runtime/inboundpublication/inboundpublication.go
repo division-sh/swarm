@@ -42,8 +42,7 @@ type Request struct {
 	RequestFingerprint          string
 	RequestProjectionVersion    string
 	StableServiceID             string
-	PackageKey                  string
-	FlowID                      string
+	FlowPath                    string
 	InstanceID                  string
 	TargetAlias                 string
 	TargetFlowInstance          string
@@ -68,8 +67,7 @@ func (r Request) Normalized() Request {
 		r.RequestProjectionVersion = RequestSemanticProjectionVersion
 	}
 	r.StableServiceID = strings.TrimSpace(r.StableServiceID)
-	r.PackageKey = strings.TrimSpace(r.PackageKey)
-	r.FlowID = strings.TrimSpace(r.FlowID)
+	r.FlowPath = strings.TrimSpace(r.FlowPath)
 	r.InstanceID = strings.TrimSpace(r.InstanceID)
 	r.TargetAlias = strings.Trim(strings.TrimSpace(r.TargetAlias), "/")
 	r.TargetFlowInstance = strings.Trim(strings.TrimSpace(r.TargetFlowInstance), "/")
@@ -93,8 +91,7 @@ func (r Request) Validate() error {
 		"provider_event_id":          r.ProviderEventID,
 		"request_fingerprint":        r.RequestFingerprint,
 		"stable_service_id":          r.StableServiceID,
-		"package_key":                r.PackageKey,
-		"flow_id":                    r.FlowID,
+		"flow_path":                  r.FlowPath,
 		"instance_id":                r.InstanceID,
 		"target_alias":               r.TargetAlias,
 		"target_flow_instance":       r.TargetFlowInstance,

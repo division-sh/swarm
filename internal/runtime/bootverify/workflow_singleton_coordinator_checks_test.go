@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -238,8 +237,8 @@ coordinator-node:
         stage: active
         members: {from: payload.job, by: payload.vertical_id}
         output: payload.job
-        on_complete: {element_id: 00000000-0000-4000-8000-000000000407, advances_to: done}
-        timeout: {element_id: 00000000-0000-4000-8000-000000000408, after: 1h, advances_to: failed}
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
 `,
 			wantKind:   "workflow_join",
 			wantTarget: "active",
@@ -282,139 +281,6 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 		}
 	}
 	t.Fatalf("duplicate scoped-node demands = %#v, want flow a shared-node items write", demands)
-}
-
-func TestBuildSingletonCoordinatorDemandProjection_IncludesNestedProjectPackageNodes(t *testing.T) {
-	bundle := loadSingletonCoordinatorFixtureBundle(t, `
-name: coordinator
-mode: singleton
-pins:
-  inputs:
-    events: [job.received]
-`, `
-coordinator_state:
-  verticals:
-    type: "[VerticalState]"
-    initial: []
-`, "", `
-coordinator-node:
-  id: coordinator-node
-  execution_type: system_node
-  subscribes_to: [job.received]
-  event_handlers:
-    job.received: {}
-`)
-	flow := bundle.FlowTree.ByID["coordinator"]
-	if flow == nil {
-		t.Fatal("coordinator flow view is missing")
-	}
-	elementID, err := contractelementidentity.ParseContractElementID("06825f28-d51d-46ed-87fc-edb9d6a91476")
-	if err != nil {
-		t.Fatal(err)
-	}
-	flow.Children = append(flow.Children, runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			PackageKey: "flows/coordinator/nested",
-			NodesFile:  "flows/coordinator/nested/nodes.yaml",
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"nested-reader": {
-				ID: "nested-reader",
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"job.received": {FanOut: &runtimecontracts.FanOutSpec{
-						ElementID: elementID, ItemsFrom: "entity.verticals", As: "vertical", Identity: "vertical.status",
-						Emit: runtimecontracts.EmitSpec{Event: "job.received", Fields: map[string]runtimecontracts.ExpressionValue{
-							"vertical_id": runtimecontracts.CELExpression("vertical.status"),
-							"job":         runtimecontracts.LiteralExpression(map[string]any{"id": "nested", "title": "nested"}),
-						}},
-					}},
-				},
-			},
-		},
-	})
-	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
-		t.Fatalf("prepare nested project-package fan-out owner: %v", failures)
-	}
-
-	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
-		if demand.FlowID == "coordinator" && demand.Node.NodeID() == "nested-reader" && demand.Kind == "entity_read.fan_out.items_from" && demand.Target == "entity.verticals" && demand.SourceFile == "flows/coordinator/nested/nodes.yaml" {
-			return
-		}
-	}
-	t.Fatalf("nested project-package reader missing from coordinator demand: %#v", BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)))
-}
-
-func TestBuildSingletonCoordinatorDemandProjection_ResolvesNestedProjectAgentAgainstOwningFlow(t *testing.T) {
-	repoRoot := repoRootForBootverifyTest(t)
-	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: nested-project-agent-demand
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: singleton
-  - id: zeta
-    flow: zeta
-    mode: singleton
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-project-agent-demand\n")
-	for _, flowID := range []string{"alpha", "zeta"} {
-		flowDir := filepath.Join(root, "flows", flowID)
-		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: "+flowID+"\nmode: singleton\n")
-		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "entities.yaml"), "coordinator_state:\n  verticals: map[text]text\n")
-	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "zeta", "package.yaml"), `
-name: zeta-package
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-packages:
-  - path: extensions/writers
-`)
-	nestedDir := filepath.Join(root, "flows", "zeta", "extensions", "writers")
-	writeBootverifyFixtureFile(t, filepath.Join(nestedDir, "package.yaml"), `
-name: zeta-writers
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(nestedDir, "agents.yaml"), `
-nested-writer:
-  id: nested-writer
-  type: factory
-  role: writer
-  intent:
-    inline: Persist the authorized coordinator field.
-  model: regular
-  memory: false
-  subscriptions: []
-  entity_writes:
-    coordinator_state:
-      save: [verticals]
-`)
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
-	foundZeta := false
-	for _, demand := range demands {
-		if demand.AgentID != "nested-writer" {
-			continue
-		}
-		if demand.FlowID == "alpha" {
-			t.Fatalf("nested project agent demand resolved through lexical entity fallback: %#v", demands)
-		}
-		if demand.FlowID == "zeta" && demand.Kind == "agent_entity_writes.save" && demand.Field == "verticals" {
-			foundZeta = true
-		}
-	}
-	if !foundZeta {
-		t.Fatalf("nested project agent demand = %#v, want zeta-owned verticals write", demands)
-	}
 }
 
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
@@ -519,8 +385,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "on complete activity input",
 			operator: `on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000409
-          condition: "true"
+        - condition: "true"
           activity:
             tool: review
             input:
@@ -626,8 +491,8 @@ coordinator-node:
         stage: active
         members: {from: payload.job, by: payload.vertical_id}
         output: payload.job
-        on_complete: {element_id: 00000000-0000-4000-8000-000000000410, advances_to: done}
-        timeout: {element_id: 00000000-0000-4000-8000-000000000411, after: 1h, advances_to: failed}
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
 `
 	tests := []struct {
 		name       string
@@ -673,28 +538,21 @@ func loadSingletonCoordinatorFixtureBundle(t *testing.T, flowSchema, flowEntitie
 	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: singleton-coordinator-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: coordinator
-    flow: coordinator
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "events.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:
   vertical_id: text
   job: Job
 `)
 	if strings.TrimSpace(flowAgents) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "agents.yaml"), strings.TrimSpace(flowAgents)+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "agents.yaml"), strings.TrimSpace(flowAgents)+"\n")
 	}
 	if strings.TrimSpace(flowNodes) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), strings.TrimSpace(flowNodes)+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "nodes.yaml"), strings.TrimSpace(flowNodes)+"\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

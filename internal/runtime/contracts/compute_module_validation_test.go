@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestValidateWorkflowComputeModuleContractsAcceptsPinnedFixture(t *testing.T) {
-	bundle, _ := computeModuleValidationBundle(t)
+	bundle, _, _ := computeModuleValidationBundle(t)
 	errs := validateWorkflowComputeModuleContracts(bundle)
 	if len(errs) > 0 {
 		t.Fatalf("validateWorkflowComputeModuleContracts errors = %v", errs)
@@ -18,7 +20,7 @@ func TestValidateWorkflowComputeModuleContractsAcceptsPinnedFixture(t *testing.T
 }
 
 func TestValidateWorkflowComputeModuleContractsRejectsDigestMismatchAndFloats(t *testing.T) {
-	bundle, module := computeModuleValidationBundle(t)
+	bundle, module, _ := computeModuleValidationBundle(t)
 	module.Digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	module.OutputSchema = map[string]any{
 		"type": "object",
@@ -37,30 +39,31 @@ func TestValidateWorkflowComputeModuleContractsRejectsDigestMismatchAndFloats(t 
 	}
 }
 
-func TestResolvePolicyModulePathRejectsSymlink(t *testing.T) {
-	bundle, module := computeModuleValidationBundle(t)
-	modulePath := filepath.Join(bundle.Paths.ContractsRoot, filepath.FromSlash(module.Path))
-	outside := filepath.Join(t.TempDir(), "external.wasm")
-	if err := os.WriteFile(outside, []byte("\x00asm"), 0o644); err != nil {
+func TestPolicyModuleBytesRemainBoundToAdmittedArtifact(t *testing.T) {
+	bundle, module, root := computeModuleValidationBundle(t)
+	want, _, err := PolicyModuleBytes(bundle, module)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(modulePath); err != nil {
+	modulePath := filepath.Join(root, filepath.FromSlash(module.Path))
+	if err := os.WriteFile(modulePath, []byte("host mutation"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, modulePath); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
+	got, _, err := PolicyModuleBytes(bundle, module)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, err := ResolvePolicyModulePath(bundle, module)
-	if err == nil {
-		t.Fatal("ResolvePolicyModulePath error = nil, want symlink rejection")
+	if string(got) != string(want) {
+		t.Fatalf("admitted module changed after host mutation: got %q want %q", got, want)
 	}
-	if !strings.Contains(err.Error(), "symlinks are not allowed") {
-		t.Fatalf("ResolvePolicyModulePath error = %v, want symlink rejection", err)
+	module.Path = "modules/missing.wasm"
+	if _, err := ResolvePolicyModulePath(bundle, module); err == nil || !strings.Contains(err.Error(), "not an admitted source member") {
+		t.Fatalf("unadmitted module error = %v", err)
 	}
 }
 
 func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T) {
-	_, module := computeModuleValidationBundle(t)
+	_, module, _ := computeModuleValidationBundle(t)
 	policy := PolicyDocument{Modules: map[string]PolicyModule{"structured_renderer": module}}
 	spec := &ComputeModuleSpec{
 		RowID:  "render_bundle",
@@ -85,7 +88,7 @@ func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T)
 	}
 }
 
-func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, PolicyModule) {
+func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, PolicyModule, string) {
 	t.Helper()
 	root := t.TempDir()
 	raw, err := os.ReadFile(filepath.Join("..", "computemodule", "testdata", "structured_renderer.wasm"))
@@ -97,6 +100,13 @@ func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, Polic
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
@@ -136,22 +146,23 @@ func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, Polic
 		},
 	}
 	flow := FlowContractView{
-		Paths: FlowContractPaths{ID: "render", Flow: "render"},
+		Paths: FlowContractPaths{FlowPath: "."},
 		Policy: PolicyDocument{
 			Modules: map[string]PolicyModule{"structured_renderer": module},
 		},
 	}
 	bundle := &WorkflowContractBundle{
-		Paths:       ContractPaths{ContractsRoot: root},
-		FlowSchemas: map[string]FlowSchemaDocument{"render": {}},
+		SourceArtifact: artifact,
+		FlowSchemas:    map[string]FlowSchemaDocument{".": {}},
 		FlowTree: FlowTree{
 			Root: &flow,
 			ByID: map[string]*FlowContractView{
-				"render": &flow,
+				".": &flow,
 			},
+			ByPath: map[string]*FlowContractView{".": &flow},
 		},
 	}
-	return bundle, module
+	return bundle, module, root
 }
 
 func errorsContain(errs []error, want string) bool {

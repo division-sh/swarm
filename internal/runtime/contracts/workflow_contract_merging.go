@@ -287,7 +287,3 @@ func mergeToolContracts(bundle *WorkflowContractBundle, entries map[string]ToolS
 	}
 	return nil
 }
-func contractSourceWithFile(source ContractItemSource, file string) ContractItemSource {
-	source.File = file
-	return source
-}

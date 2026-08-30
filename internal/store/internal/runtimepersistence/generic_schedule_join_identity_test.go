@@ -159,9 +159,8 @@ func selectedStoreJoinScheduleHostileCases(generation attemptgeneration.Generati
 				t.Fatal(err)
 			}
 		}},
-		{name: "package_key_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "package_key") })},
+		{name: "flow_path_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "flow_path") })},
 		{name: "flow_id_runtime_alias", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["flow_id"] = "workflow-runtime-name" })},
-		{name: "flow_id_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "flow_id") })},
 		{name: "node_id", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["node_id"] = "other-node" })},
 		{name: "handler_event", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["handler_event"] = "other.completed" })},
 		{name: "stage", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["stage"] = "other-stage" })},

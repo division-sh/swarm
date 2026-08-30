@@ -7,10 +7,9 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
@@ -203,31 +202,22 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 
 func completeBootverifyFanOutFixture(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string) {
 	t.Helper()
-	node := bundle.Nodes[nodeID]
-	handler := node.EventHandlers[eventType]
-	assign := func(context string, index int, spec *runtimecontracts.FanOutSpec) {
-		if spec == nil || spec.ElementID.Valid() {
-			return
-		}
-		value := uuid.NewSHA1(uuid.NameSpaceOID, []byte("bootverify-fan-out\x00"+nodeID+"\x00"+eventType+"\x00"+context+"\x00"+string(rune(index)))).String()
-		elementID, err := contractelementidentity.ParseContractElementID(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		spec.ElementID = elementID
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: fan-out-validation\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	assign("handler", 0, handler.FanOut)
-	for index := range handler.Rules {
-		assign("rules", index, handler.Rules[index].FanOut)
-	}
-	for index := range handler.OnComplete {
-		assign("on_complete", index, handler.OnComplete[index].FanOut)
-	}
-	owner, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", nodeID)
+	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefs(owner, handler)
+	bundle.SourceArtifact = artifact
+	node := bundle.Nodes[nodeID]
+	handler := node.EventHandlers[eventType]
+	owner, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,20 +231,6 @@ func completeBootverifyFanOutFixture(t testing.TB, bundle *runtimecontracts.Work
 	}
 	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 
-	root := t.TempDir()
-	packageFile := filepath.Join(root, "package.yaml")
-	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(packageFile, []byte("name: bootverify-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bundle.Paths = runtimecontracts.ContractPaths{
-		ContractsRoot:      root,
-		ProjectPackageFile: packageFile,
-		PlatformSpecFile:   platformFile,
-	}
 	bundle.PrepareFanOutPlans()
 }
 

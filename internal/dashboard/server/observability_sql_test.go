@@ -21,10 +21,11 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const dashboardObservabilityBundleHash = "bundle-v1:sha256:dadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
+const dashboardObservabilityBundleHash = sourceartifactfixture.BundleHash
 
 func dashboardObservabilityAgentRoute(t testing.TB, agentID string) events.DeliveryRoute {
 	t.Helper()

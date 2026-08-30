@@ -44,11 +44,11 @@ func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
 
 func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *testing.T) {
 	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
-	root, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "join-node")
+	root, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "join-node")
 	if err != nil {
 		t.Fatal(err)
 	}
-	orders, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/orders", "orders", "join-node")
+	orders, err := runtimeidentity.AdmitExecutableNodeDeclaration("orders", "join-node")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 			t.Fatalf("plan for node %#v = %#v, ok=%v", node, plan, ok)
 		}
 	}
-	hostileNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/unrelated", "unrelated", "join-node")
+	hostileNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("unrelated", "join-node")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +80,13 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	}
 }
 
-func TestWorkflowJoinPlanForRefPreservesSameFlowPackageDeclarationsInEitherOrder(t *testing.T) {
+func TestWorkflowJoinPlanForRefPreservesDistinctFlowDeclarationsInEitherOrder(t *testing.T) {
 	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
-	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "orders", "shared")
+	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("orders/a", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "orders", "shared")
+	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("orders/b", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}

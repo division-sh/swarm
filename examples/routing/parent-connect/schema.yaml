@@ -1,1 +1,5 @@
 name: routing-parent-connect
+connect:
+  - event: work.ready
+    from: producer
+    to: consumer

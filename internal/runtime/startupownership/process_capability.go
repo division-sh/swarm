@@ -11,7 +11,6 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -29,7 +28,6 @@ const (
 
 type GrantRequest struct {
 	BundleHash        string
-	BundleSource      string
 	RuntimeInstanceID string
 	RuntimeGeneration uint64
 	SourceSetRevision string
@@ -38,11 +36,6 @@ type GrantRequest struct {
 func (r GrantRequest) Validate() error {
 	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(r.BundleHash)); err != nil {
 		return fmt.Errorf("runtime generation grant bundle_hash is invalid: %w", err)
-	}
-	switch strings.TrimSpace(r.BundleSource) {
-	case "persisted", "ephemeral":
-	default:
-		return errors.New("runtime generation grant bundle_source must be persisted or ephemeral")
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(r.RuntimeInstanceID)); err != nil {
 		return fmt.Errorf("runtime generation grant runtime_instance_id is invalid: %w", err)
@@ -62,7 +55,6 @@ type GrantEvidence struct {
 	ProcessOwnerID     string     `json:"process_owner_id"`
 	ProcessBootID      string     `json:"process_boot_id"`
 	BundleHash         string     `json:"bundle_hash"`
-	BundleSource       string     `json:"bundle_source"`
 	RuntimeInstanceID  string     `json:"runtime_instance_id"`
 	RuntimeGeneration  uint64     `json:"runtime_generation"`
 	SourceSetRevision  string     `json:"source_set_revision"`
@@ -85,7 +77,7 @@ func (e GrantEvidence) Validate() error {
 		return errors.New("runtime generation grant process evidence is incomplete")
 	}
 	if err := (GrantRequest{
-		BundleHash: e.BundleHash, BundleSource: e.BundleSource,
+		BundleHash:        e.BundleHash,
 		RuntimeInstanceID: e.RuntimeInstanceID, RuntimeGeneration: e.RuntimeGeneration,
 		SourceSetRevision: e.SourceSetRevision,
 	}).Validate(); err != nil {
@@ -117,8 +109,6 @@ type ProcessCapability interface {
 	IssueGenerationGrant(context.Context, GrantRequest) (GenerationGrant, error)
 	InstallCompleteSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
-	ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error)
-	ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
 	ApplyDestructiveResetTopology(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	Release(context.Context) error
@@ -223,7 +213,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 		return nil, errors.New("runtime generation grant requires the current complete source set")
 	}
 	wantedSource := runtimeagenttopology.SourceCoordinate{
-		BundleHash: req.BundleHash, BundleSource: req.BundleSource,
+		BundleHash: req.BundleHash,
 	}.Normalize()
 	sourceCurrent := false
 	for _, source := range plan.Sources {
@@ -238,7 +228,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	evidence := GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: authority.AuthorityID,
 		ProcessOwnerID: authority.OwnerID, ProcessBootID: authority.BootID,
-		BundleHash: strings.TrimSpace(req.BundleHash), BundleSource: strings.TrimSpace(req.BundleSource),
+		BundleHash:        strings.TrimSpace(req.BundleHash),
 		RuntimeInstanceID: strings.TrimSpace(req.RuntimeInstanceID), RuntimeGeneration: req.RuntimeGeneration,
 		SourceSetRevision: strings.TrimSpace(req.SourceSetRevision), StateVersion: 1, State: GrantPrepared,
 	}
@@ -267,44 +257,6 @@ func (p *processCapability) InstallCompleteSourceSet(ctx context.Context, req ru
 
 func (p *processCapability) RestoreSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
 	return p.commitSourceSet(ctx, runtimeagenttopology.OperationRestoreSourceSet, req)
-}
-
-func (p *processCapability) ApplyBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	if p == nil {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("process startup/topology capability is missing")
-	}
-	if topology != nil {
-		topology.Operation = runtimeagenttopology.OperationRemoveBundleSource
-		if err := topology.Validate(); err != nil {
-			return runtimebundledelete.FinalMutationResult{}, err
-		}
-	}
-	p.opMu.Lock()
-	defer p.opMu.Unlock()
-	if err := p.proveCurrent(ctx); err != nil {
-		return runtimebundledelete.FinalMutationResult{}, err
-	}
-	result, err := p.session.ApplyBundleDeleteFinalMutation(ctx, req, topology)
-	if err != nil {
-		p.retireOnPossessionFailure(err)
-	}
-	return result, err
-}
-
-func (p *processCapability) ReplayBundleDeleteResult(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	if p == nil {
-		return runtimebundledelete.Result{}, errors.New("process startup/topology capability is missing")
-	}
-	p.opMu.Lock()
-	defer p.opMu.Unlock()
-	if err := p.proveCurrent(ctx); err != nil {
-		return runtimebundledelete.Result{}, err
-	}
-	result, err := p.session.ReplayBundleDeleteResult(ctx, req)
-	if err != nil {
-		p.retireOnPossessionFailure(err)
-	}
-	return result, err
 }
 
 func (p *processCapability) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
@@ -616,7 +568,6 @@ func (g *generationGrant) ProcessExecutionBinding() (runtimemanager.ProcessExecu
 		ProcessBootID:      evidence.ProcessBootID,
 		GenerationGrantID:  evidence.GrantID,
 		BundleHash:         evidence.BundleHash,
-		BundleSource:       evidence.BundleSource,
 		RuntimeInstanceID:  evidence.RuntimeInstanceID,
 		RuntimeGeneration:  evidence.RuntimeGeneration,
 	}
@@ -750,7 +701,6 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 		ProcessBootID:      evidence.ProcessBootID,
 		GenerationGrantID:  evidence.GrantID,
 		BundleHash:         evidence.BundleHash,
-		BundleSource:       evidence.BundleSource,
 		RuntimeInstanceID:  evidence.RuntimeInstanceID,
 		RuntimeGeneration:  evidence.RuntimeGeneration,
 	}
@@ -759,7 +709,7 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 	}
 	if req.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
 		static := req.Topology.Authority.Static
-		if static.SourceSetRevision != evidence.SourceSetRevision || static.BundleHash != evidence.BundleHash || static.BundleSource != evidence.BundleSource {
+		if static.SourceSetRevision != evidence.SourceSetRevision || static.BundleHash != evidence.BundleHash {
 			return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("static lifecycle topology authority differs from runtime generation grant")
 		}
 	}

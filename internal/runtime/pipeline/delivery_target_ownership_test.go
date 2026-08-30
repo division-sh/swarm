@@ -239,7 +239,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	runID := eventtest.UUID("selected-root-run")
 	existingEntityID := eventtest.UUID("selected-root-owner")
 	flow := runtimecontracts.FlowContractView{
-		Path: "timer-proof", Paths: runtimecontracts.FlowContractPaths{ID: "timer-proof", Flow: "timer-proof"},
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{InitialState: "waiting", States: []string{"waiting", "done"}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -254,20 +254,20 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "timer-proof"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{"timer-proof": &flow},
+			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{".": &flow},
 		},
 	})
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("selected-root-event"), "timer.cancel", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{},
 	)
-	node := pipelineNode(t, "timer-proof", "controller")
+	node := pipelineNode(t, ".", "controller")
 	handler, err := AdmitDeliveryTargetHandler(source, node)
 	if err != nil {
 		t.Fatalf("admit handler: %v", err)
 	}
 	request := DeliveryTargetOwnershipRequest{
 		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
-		Blueprint: events.RouteIdentity{FlowID: "timer-proof"},
+		Blueprint: events.RouteIdentity{FlowID: ".", FlowInstance: runID},
 		Handler:   handler.ForEvent("timer.cancel"),
 	}
 
@@ -276,7 +276,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	if err != nil {
 		t.Fatalf("classify existing selected-run owner: %v", err)
 	}
-	wantExisting := events.RouteIdentity{FlowID: "timer-proof", FlowInstance: runID, EntityID: existingEntityID}
+	wantExisting := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: existingEntityID}
 	if !owner.ExistingEntity() || owner.Route() != wantExisting {
 		t.Fatalf("existing owner = %#v, want %#v", owner, wantExisting)
 	}
@@ -286,7 +286,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	if err != nil {
 		t.Fatalf("classify first-delivery selected-run owner: %v", err)
 	}
-	wantMaterializing := events.RouteIdentity{FlowID: "timer-proof", FlowInstance: runID, EntityID: FlowInstanceEntityID(runID)}
+	wantMaterializing := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: FlowInstanceEntityID(runID)}
 	if !owner.MaterializingEntity() || owner.Route() != wantMaterializing {
 		t.Fatalf("materializing owner = %#v, want %#v", owner, wantMaterializing)
 	}
@@ -479,6 +479,7 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 	plan.Node = mustPipelineNode("", "join-node")
 	source := exactWorkflowJoinSource{
 		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
+		nodeFlowID: "", overrideNodeOwner: true,
 	}
 	entityID := eventtest.UUID("join-declaration-owner")
 	routingSource, err := events.NewRootRoutingSource(entityID)
@@ -488,16 +489,23 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 	handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinTimeout)
 	evt := exactJoinOccurrenceEvent(t, "join-declaration-owner", handle, routingSource, events.EventEnvelope{EntityID: entityID})
 	target := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: evt.RunID(), EntityID: entityID,
+		FlowID: ".", FlowInstance: evt.RunID(), EntityID: entityID,
 	}.Normalized()
 	targetHandler, err := NewDeliveryTargetHandler(plan.Node)
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, resolvedTarget, resolvedHandler, resolved, resolveErr := ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
+	if resolveErr != nil || !resolved {
+		t.Fatalf("resolve declaration-bound join occurrence: target=%#v handler=%#v resolved=%t err=%v", resolvedTarget, resolvedHandler, resolved, resolveErr)
+	}
+	if _, admitted := resolvedHandler.resolve(source, evt.Type()); !admitted {
+		t.Fatalf("resolved declaration-bound join handler %s/%s is not executable for %s: admission=%#v", resolvedHandler.FlowID(), resolvedHandler.NodeID(), evt.Type(), semanticview.ClassifyExecutableNodeSubscription(source, resolvedHandler.Node(), "item.completed"))
+	}
 	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
 		Context: context.Background(), Source: source, Event: evt,
 		Recipient: events.MustNodeDeliveryRecipient(plan.Node), Blueprint: target,
-		Handler:    targetHandler.ForEvent("item.completed"),
+		Handler:    targetHandler.ForEvent(events.EventType(handle.EventType())),
 		Candidates: []DeliveryTargetOwnerCandidate{{Route: target}},
 	})
 	if err != nil {
@@ -694,37 +702,29 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 
 func TestCompiledFanOutEntityRequirementRejectsEntitylessOwnershipAcrossSites(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"package.yaml": `name: compiled-fan-out-entity-requirement
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: review
-    flow: review
-    mode: template
-`,
+
 		"schema.yaml": "name: compiled-fan-out-entity-requirement\n",
-		"flows/review/schema.yaml": `name: review
+		"review/schema.yaml": `name: review
 mode: template
 initial_state: active
 states: [active]
 `,
-		"flows/review/entities.yaml": `review_entity:
+		"review/entities.yaml": `review_entity:
   items:
     type: "[text]"
 `,
-		"flows/review/events.yaml": `top.ready: {}
+		"review/events.yaml": `top.ready: {}
 nested.ready: {}
 item.requested:
   item: string
 `,
-		"flows/review/nodes.yaml": `top-level-reader:
+		"review/nodes.yaml": `top-level-reader:
   id: top-level-reader
   execution_type: system_node
   subscribes_to: [top.ready]
   event_handlers:
     top.ready:
       fan_out:
-        element_id: 00000000-0000-4000-8000-000000002275
         items_from: entity.items
         as: row
         identity: row
@@ -740,10 +740,8 @@ nested-reader:
     nested.ready:
       rules:
         entity-rows:
-          element_id: 00000000-0000-4000-8000-000000002276
           condition: "true"
           fan_out:
-            element_id: 00000000-0000-4000-8000-000000002277
             items_from: entity.items
             as: row
             identity: row
@@ -910,7 +908,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated,
 				EntityType: "review_entity"}
-			if got := deliveryTargetWorkflowInstanceUnavailable(source, "review", instance); got != testCase.unavailable {
+			if got := deliveryTargetWorkflowInstanceUnavailable(source, ".", instance); got != testCase.unavailable {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
 			}
 		})
@@ -920,7 +918,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeTemplate, PackageKey: "."},
+		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
@@ -949,7 +947,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 			}),
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},

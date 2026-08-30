@@ -3,12 +3,12 @@ package scenarioderivation
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -133,71 +133,46 @@ func requiredCanonicalText(object map[string]any, key, path string) (string, err
 	return canonical, nil
 }
 
-func LoadDeclarations(contractsRoot string) ([]LocatedDeclaration, error) {
-	root, err := filepath.Abs(strings.TrimSpace(contractsRoot))
-	if err != nil {
-		return nil, err
+func LoadDeclarations(artifact *sourceartifact.AdmittedSourceArtifact) ([]LocatedDeclaration, error) {
+	if artifact == nil {
+		return nil, fmt.Errorf("scenario declaration discovery requires an admitted source artifact")
 	}
-	var paths []string
-	for _, candidate := range []string{filepath.Join(root, "tests"), filepath.Join(root, "flows")} {
-		if _, err := os.Stat(candidate); err != nil {
-			if os.IsNotExist(err) {
+	root := artifact.Root()
+	if root == nil {
+		return nil, fmt.Errorf("scenario declaration discovery requires an admitted flow tree")
+	}
+	out := make([]LocatedDeclaration, 0)
+	var visit func(*sourceartifact.FlowNode) error
+	visit = func(flow *sourceartifact.FlowNode) error {
+		for _, label := range flow.Resources("tests") {
+			ext := strings.ToLower(path.Ext(label))
+			if ext != ".yaml" && ext != ".yml" {
 				continue
 			}
-			return nil, fmt.Errorf("inspect scenario declaration root %s: %w", candidate, err)
+			entry, ok := artifact.Entry(label)
+			if !ok {
+				return fmt.Errorf("scenario resource %q is missing from its admitted source artifact", label)
+			}
+			declaration, found, err := ParseDeclaration(entry.Bytes())
+			if err != nil {
+				return fmt.Errorf("%s: %w", label, err)
+			}
+			if found {
+				out = append(out, LocatedDeclaration{Path: label, Declaration: declaration})
+			}
 		}
-		if err := filepath.WalkDir(candidate, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
+		for _, child := range flow.Children() {
+			if err := visit(child); err != nil {
+				return err
 			}
-			if entry.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if (ext == ".yaml" || ext == ".yml") && isScenarioDeclarationPath(root, path) {
-				paths = append(paths, path)
-			}
-			return nil
-		}); err != nil {
-			return nil, err
 		}
+		return nil
 	}
-	sort.Strings(paths)
-	out := make([]LocatedDeclaration, 0)
-	for _, path := range paths {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		declaration, found, err := ParseDeclaration(raw)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		if found {
-			out = append(out, LocatedDeclaration{Path: path, Declaration: declaration})
-		}
+	if err := visit(root); err != nil {
+		return nil, err
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
-}
-
-func isScenarioDeclarationPath(contractsRoot, path string) bool {
-	relative, err := filepath.Rel(contractsRoot, path)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return false
-	}
-	parts := strings.Split(filepath.ToSlash(relative), "/")
-	if len(parts) >= 2 && parts[0] == "tests" {
-		return true
-	}
-	if len(parts) < 4 || parts[0] != "flows" {
-		return false
-	}
-	for index := 2; index < len(parts)-1; index++ {
-		if parts[index] == "tests" {
-			return true
-		}
-	}
-	return false
 }
 
 func cloneDeclarationMap(input map[string]any) map[string]any {

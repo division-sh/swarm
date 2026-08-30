@@ -173,21 +173,20 @@ const (
 // a subscriber and bundle identify work, but do not authorize its execution.
 type ExecutionAuthority struct {
 	kind         ExecutionAuthorityKind
-	bundleSource runtimecorrelation.BundleSourceFact
+	bundleSource runtimecorrelation.SourceArtifactFact
 	executionID  string
 	forkRunID    string
 	generation   uint64
 }
 
-func NewExecutionAuthority(source runtimecorrelation.BundleSourceFact, admission managedexecution.Admission) (ExecutionAuthority, error) {
+func NewExecutionAuthority(source runtimecorrelation.SourceArtifactFact, admission managedexecution.Admission) (ExecutionAuthority, error) {
 	if err := source.Validate(); err != nil {
 		return ExecutionAuthority{}, fmt.Errorf("delivery execution authority source: %w", err)
 	}
 	if err := admission.Validate(); err != nil {
 		return ExecutionAuthority{}, fmt.Errorf("delivery execution admission: %w", err)
 	}
-	bundleHash, _ := source.StorageValues()
-	if admission.BundleHash != bundleHash {
+	if admission.BundleHash != source.BundleHash() {
 		return ExecutionAuthority{}, fmt.Errorf("delivery execution admission bundle does not match source")
 	}
 	authority := ExecutionAuthority{
@@ -207,7 +206,7 @@ func NewExecutionAuthority(source runtimecorrelation.BundleSourceFact, admission
 	return authority, authority.Validate()
 }
 
-func NewNormalExecutionAuthority(source runtimecorrelation.BundleSourceFact, executionID string, generation uint64) (ExecutionAuthority, error) {
+func NewNormalExecutionAuthority(source runtimecorrelation.SourceArtifactFact, executionID string, generation uint64) (ExecutionAuthority, error) {
 	authority := ExecutionAuthority{
 		kind: ExecutionAuthorityNormalRuntime, bundleSource: source,
 		executionID: strings.TrimSpace(executionID), generation: generation,
@@ -215,7 +214,7 @@ func NewNormalExecutionAuthority(source runtimecorrelation.BundleSourceFact, exe
 	return authority, authority.Validate()
 }
 
-func NewSelectedExecutionAuthority(source runtimecorrelation.BundleSourceFact, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
+func NewSelectedExecutionAuthority(source runtimecorrelation.SourceArtifactFact, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
 	authority := ExecutionAuthority{
 		kind: ExecutionAuthoritySelectedContractFork, bundleSource: source,
 		executionID: strings.TrimSpace(executionID), forkRunID: strings.TrimSpace(forkRunID), generation: generation,
@@ -223,8 +222,8 @@ func NewSelectedExecutionAuthority(source runtimecorrelation.BundleSourceFact, e
 	return authority, authority.Validate()
 }
 
-func DecodeExecutionAuthority(kind ExecutionAuthorityKind, bundleHash, bundleSource, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
-	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+func DecodeExecutionAuthority(kind ExecutionAuthorityKind, bundleHash, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return ExecutionAuthority{}, err
 	}
@@ -264,7 +263,7 @@ func (a ExecutionAuthority) Kind() ExecutionAuthorityKind { return a.kind }
 func (a ExecutionAuthority) ExecutionID() string          { return a.executionID }
 func (a ExecutionAuthority) ForkRunID() string            { return a.forkRunID }
 func (a ExecutionAuthority) Generation() uint64           { return a.generation }
-func (a ExecutionAuthority) BundleSource() runtimecorrelation.BundleSourceFact {
+func (a ExecutionAuthority) SourceArtifact() runtimecorrelation.SourceArtifactFact {
 	return a.bundleSource
 }
 
@@ -839,7 +838,7 @@ type NodeExecution = AgentExecution
 // do not cross this boundary.
 type Store interface {
 	ActivateDeliveryAuthority(context.Context, ExecutionAuthority) error
-	InspectDeliveryRecovery(context.Context, runtimecorrelation.BundleSourceFact) (RecoveryInventory, error)
+	InspectDeliveryRecovery(context.Context, runtimecorrelation.SourceArtifactFact) (RecoveryInventory, error)
 	ClaimDelivery(context.Context, ExecutionAuthority, events.Event, events.DeliveryRoute) (ClaimResult, error)
 	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)
 	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)

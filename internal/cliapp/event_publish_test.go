@@ -35,7 +35,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"--payload-json", `{"topic":"sample","count":2}`,
 		"--run-id", "run-1",
 		"--source-event-id", "event-parent-1",
-		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--emitter", "cli:test",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -53,7 +53,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		},
 		"run_id":          "run-1",
 		"source_event_id": "event-parent-1",
-		"bundle_hash":     "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"bundle_hash":     "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"emitter":         "cli:test",
 		"idempotency_key": "idem-1",
 	}
@@ -141,7 +141,7 @@ func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", eventName,
 		"--payload-json", `{"topic":"sample"}`,
-		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
@@ -175,12 +175,12 @@ func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *tes
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", "scan.requested",
 		"--payload-json", `{}`,
-		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if got := captured.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if got := captured.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("bundle_hash = %#v", got)
 	}
 	if !strings.Contains(stderr.String(), "UNSUPPORTED_BUNDLE_HASH") {
@@ -211,7 +211,7 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"event", "publish", "thing.created",
 		"--payload-json", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`,
-		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--idempotency-key", "idem-cli-create-entity-supplied-id",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 6 {
@@ -224,7 +224,7 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 	if payload["entity_id"] != "11111111-1111-4111-8111-111111111111" || payload["amount"] != float64(50) {
 		t.Fatalf("payload = %#v, want supplied entity_id and amount", payload)
 	}
-	if got := captured.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if got := captured.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("bundle_hash = %#v", got)
 	}
 	if got := captured.Params["idempotency_key"]; got != "idem-cli-create-entity-supplied-id" {
@@ -320,7 +320,7 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "target entity without flow instance", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-entity-id", "entity-1"}, wantStderr: "--target-entity-id requires --target-flow-instance"},
 		{name: "target without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--target-flow-instance", "flow/inst-1", "--target-entity-id", "entity-1"}, wantStderr: "target route flags require --run-id"},
 		{name: "blank bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "  "}, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "invalid bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>"},
 		{name: "retired bundle flag", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", retiredBundleIdentityFlag(), "sha256:BAD"}, wantStderr: "unknown flag"},
 		{name: "blank emitter", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--emitter", "  "}, wantStderr: "--emitter must be non-empty"},
 		{name: "blank idempotency key", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},

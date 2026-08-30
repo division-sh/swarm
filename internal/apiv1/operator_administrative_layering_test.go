@@ -7,56 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConnection(t *testing.T) {
-	t.Run("bundle delete", testBundleDeleteLayeredPostgresCapacity)
 	t.Run("runtime nuke", testRuntimeNukeLayeredPostgresCapacity)
-}
-
-func testBundleDeleteLayeredPostgresCapacity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	db.SetMaxOpenConns(1)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
-
-	external := newBlockingAdministrativeExternalWork()
-	coordinator := &bundledelete.Coordinator{
-		Planner: selected, Cleaner: selected, Finalizer: selected, Locks: selected,
-		ContainerInventory: external,
-		Containers:         noopBundleDeleteContainers{},
-		RuntimeQuiescer:    noopBundleRuntimeQuiescer{},
-	}
-	req := Request{
-		Method: "bundle.delete", ActorTokenID: "operator-layered", RequestHash: "bundle-delete-hash",
-		Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "bundle-delete-layered"},
-	}
-	result := make(chan error, 1)
-	go func() {
-		_, err := executeBundleDelete(ctx, req, BundleDeleteHandlerOptions{Executor: coordinator, Idempotency: selected}, time.Now().UTC())
-		result <- err
-	}()
-	external.waitUntilBlocked(t, ctx)
-	assertAdministrativeUnrelatedQueryProgresses(t, ctx, db)
-	external.release()
-	if err := <-result; err != nil {
-		t.Fatalf("bundle.delete layered execution: %v", err)
-	}
-	assertAdministrativeCapacityReleased(t, db)
-
-	if _, err := executeBundleDelete(ctx, req, BundleDeleteHandlerOptions{Executor: coordinator, Idempotency: selected}, time.Now().UTC()); err != nil {
-		t.Fatalf("bundle.delete replay: %v", err)
-	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
-		t.Fatalf("bundle.delete idempotency rows = %d, want 1", count)
-	}
 }
 
 func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
@@ -77,7 +34,7 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	}
 	req := Request{
 		Method: "runtime.nuke", ActorTokenID: "operator-layered", RequestHash: "runtime-nuke-hash",
-		Params: map[string]any{"include_bundles": false, "idempotency_key": "runtime-nuke-layered"},
+		Params: map[string]any{"include_source_artifacts": false, "idempotency_key": "runtime-nuke-layered"},
 	}
 	result := make(chan error, 1)
 	go func() {
@@ -156,17 +113,6 @@ func (w *blockingAdministrativeExternalWork) release() {
 	}
 }
 
-type noopBundleRuntimeQuiescer struct{}
-
-func (noopBundleRuntimeQuiescer) QuiesceBundleRuntime(context.Context, string) (bundledelete.RuntimeQuiescence, error) {
-	return noopBundleRuntimeQuiescence{}, nil
-}
-
-type noopBundleRuntimeQuiescence struct{}
-
-func (noopBundleRuntimeQuiescence) Restore(context.Context) error { return nil }
-func (noopBundleRuntimeQuiescence) Commit()                       {}
-
 func assertAdministrativeUnrelatedQueryProgresses(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -216,51 +162,6 @@ func TestAdministrativeLeaseDoesNotBorrowSurroundingTransaction(t *testing.T) {
 }
 
 func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.T) {
-	t.Run("bundle delete", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
-		db.SetMaxOpenConns(1)
-		seedOperatorBundleDeleteBundle(t, context.Background(), db, runStartTestBundleHash)
-
-		external := newBlockingAdministrativeExternalWork()
-		coordinator := &bundledelete.Coordinator{
-			Planner: selected, Cleaner: selected, Finalizer: selected, Locks: selected,
-			ContainerInventory: external,
-			Containers:         noopBundleDeleteContainers{},
-			RuntimeQuiescer:    noopBundleRuntimeQuiescer{},
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		result := make(chan error, 1)
-		go func() {
-			_, err := executeBundleDelete(ctx, Request{
-				Method: "bundle.delete", ActorTokenID: "operator-cancel", RequestHash: "bundle-delete-cancel",
-				Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "bundle-delete-cancel"},
-			}, BundleDeleteHandlerOptions{Executor: coordinator, Idempotency: selected}, time.Now().UTC())
-			result <- err
-		}()
-		blockedCtx, blockedCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer blockedCancel()
-		external.waitUntilBlocked(t, blockedCtx)
-		cancel()
-		if err := <-result; !errors.Is(err, context.Canceled) {
-			t.Fatalf("bundle.delete cancellation error = %v, want context canceled", err)
-		}
-		if count := countAPIIdempotencyRows(t, db); count != 0 {
-			t.Fatalf("bundle.delete cancellation idempotency rows = %d, want 0", count)
-		}
-		assertAdministrativeCapacityReleased(t, db)
-		leaseCtx, leaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer leaseCancel()
-		lease, acquired, err := selected.AcquireBundleDelete(leaseCtx)
-		if err != nil || !acquired || lease == nil {
-			t.Fatalf("reacquire bundle.delete lease after cancellation: lease=%v acquired=%v err=%v", lease, acquired, err)
-		}
-		if err := lease.Release(leaseCtx); err != nil {
-			t.Fatalf("release reacquired bundle.delete lease: %v", err)
-		}
-	})
-
 	t.Run("runtime nuke", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -280,7 +181,7 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 		go func() {
 			_, err := executeRuntimeNuke(ctx, Request{
 				Method: "runtime.nuke", ActorTokenID: "operator-cancel", RequestHash: "runtime-nuke-cancel",
-				Params: map[string]any{"include_bundles": false, "idempotency_key": "runtime-nuke-cancel"},
+				Params: map[string]any{"include_source_artifacts": false, "idempotency_key": "runtime-nuke-cancel"},
 			}, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC())
 			result <- err
 		}()

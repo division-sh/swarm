@@ -11,3 +11,7 @@ pins:
     events:
       - event: task.done
         sink: harness
+connect:
+  - event: child.done
+    from: child
+    to: .

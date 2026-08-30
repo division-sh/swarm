@@ -229,7 +229,7 @@ func validateLoopRegionHandlers(source semanticview.Source, plan runtimecontract
 	findings := make([]Finding, 0)
 	for _, record := range source.ExecutableNodeRecords() {
 		nodeRef, _ := record.Identity()
-		if nodeRef.FlowID() != strings.TrimSpace(plan.FlowID) {
+		if nodeRef.FlowPath() != strings.TrimSpace(plan.FlowID) {
 			continue
 		}
 		nodeID := nodeRef.Key()

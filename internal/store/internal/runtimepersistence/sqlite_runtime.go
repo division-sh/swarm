@@ -34,13 +34,13 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storebudgetspend "github.com/division-sh/swarm/internal/store/internal/budgetspend"
-	storebundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	storesourceartifact "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
@@ -57,7 +57,6 @@ type SQLiteRuntimeStore struct {
 	activityResultSQLiteOwner    *storeactivityresult.ActivityResultSQLiteOwner
 	sQLiteOwner                  *storeapiidempotency.SQLiteOwner
 	budgetSQLiteOwner            *storebudgetspend.BudgetSQLiteOwner
-	sQLite                       *storebundlecatalog.SQLite
 	decisionSQLiteOwner          *storedecision.DecisionSQLiteOwner
 	deliverySQLiteOwner          *storedelivery.DeliverySQLiteOwner
 	entitySQLiteOwner            *storeentity.EntitySQLiteOwner
@@ -81,6 +80,7 @@ type SQLiteRuntimeStore struct {
 	genericScheduleSQLiteOwner   *storegenericschedule.SQLiteOwner
 	operatorChannelSQLiteOwner   *storeoperatorchannel.SQLiteOwner
 	durableDataOwner             *storedurabledata.Owner
+	sourceArtifactOwner          *storesourceartifact.SQLite
 	channelOnboardingSQLiteOwner *storechannelonboarding.SQLiteOwner
 
 	schema                *SQLiteSchemaStore

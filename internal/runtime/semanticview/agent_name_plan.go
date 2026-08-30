@@ -88,10 +88,6 @@ func ScopedAgentNamePlan(source Source, declaration AgentDeclaration) (AgentName
 	return declaration.NamePlan()
 }
 
-func ProjectAgentNamePlan(source Source, scope ProjectScope, localID string) (AgentNamePlan, error) {
-	return agentNamePlanForScope(source, "project", scope.Key, scope.OwningFlowID, scope.AgentURIs[localID], localID)
-}
-
 func FlowAgentNamePlan(source Source, scope FlowScope, localID string) (AgentNamePlan, error) {
 	return agentNamePlanForScope(source, "flow", scope.ID, scope.ID, scope.AgentURIs[localID], localID)
 }

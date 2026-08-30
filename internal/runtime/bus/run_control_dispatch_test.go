@@ -309,7 +309,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 
 func seedRunControlTestRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 }
 
 type runControlRecordingInterceptor struct {

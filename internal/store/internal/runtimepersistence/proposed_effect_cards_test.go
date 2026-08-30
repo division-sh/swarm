@@ -256,7 +256,7 @@ func TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores(t 
 			{
 				name: "bundle_hash",
 				apply: func(card *decisioncard.Card, continuation *decisioncard.ProposedEffectContinuation) {
-					continuation.BundleHash = "bundle-v1:sha256:" + strings.Repeat("b", 64)
+					continuation.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 					card.BundleHash = continuation.BundleHash
 				},
 			},

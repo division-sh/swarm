@@ -3,8 +3,8 @@
 Use this when one carried key should reuse exactly one active instance or atomically create it when missing.
 
 ```sh
-swarm verify --contracts examples/routing/template-select-or-create
-swarm serve --contracts examples/routing/template-select-or-create
+swarm verify examples/routing/template-select-or-create
+swarm serve examples/routing/template-select-or-create
 swarm event publish producer/account.requested --payload-json '{"account_id":"account-1"}'
 ```
 

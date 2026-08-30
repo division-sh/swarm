@@ -137,7 +137,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 		nodeRef, _ := record.Identity()
 		nodeID := nodeRef.Key()
 		nodeLabel := executableNodeDiagnostic(nodeRef)
-		flowID := nodeRef.FlowID()
+		flowID := nodeRef.FlowPath()
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)

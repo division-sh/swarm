@@ -12,6 +12,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestCheckComputeModuleValueRowsValidatesABIAndConsumption(t *testing.T) {
@@ -52,6 +53,7 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeComputeModuleSchema(t, root)
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
 		Path:   "modules/structured_renderer.wasm",
@@ -92,7 +94,7 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 		})
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		SourceArtifact: mustAdmitComputeModuleSource(t, root),
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
 		}},
@@ -118,6 +120,7 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeComputeModuleSchema(t, root)
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
 		Path:   "modules/structured_renderer.py",
@@ -159,7 +162,7 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 		},
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		SourceArtifact: mustAdmitComputeModuleSource(t, root),
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
 		}},
@@ -172,6 +175,22 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 			},
 		},
 	})
+}
+
+func writeComputeModuleSchema(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: compute-module-check\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustAdmitComputeModuleSource(t *testing.T, root string) *sourceartifact.AdmittedSourceArtifact {
+	t.Helper()
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }
 
 func computeModuleFindingContains(findings []Finding, want string) bool {

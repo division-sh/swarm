@@ -3,8 +3,8 @@
 This recipe prefigures an Empire portfolio waiting for an explicit ordered set of `operating[*]` reports. The receiver pin owns arrival identity and the join owns the finite membership snapshot, completion, timeout, persistence, and replay.
 
 ```sh
-swarm verify --contracts examples/routing/fan-in/barrier
-swarm serve --contracts examples/routing/fan-in/barrier
+swarm verify examples/routing/fan-in/barrier
+swarm serve examples/routing/fan-in/barrier
 swarm event publish portfolio.setup --payload-json '{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}'
 ```
 

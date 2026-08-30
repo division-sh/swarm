@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -49,11 +48,11 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			})
 
 			catalog := testProviderTriggerCatalog(t)
-			contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+			sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 			repoRoot := repoRootForTest()
 			selectedModule, selectedBundle, err := cliapp.NewSwarmWorkflowModule(
 				repoRoot,
-				contractsRoot,
+				sourceRoot,
 				cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath),
 			)
 			if err != nil {
@@ -63,14 +62,13 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("hash selected standing module: %v", err)
 			}
-			primaryHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+			primaryHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 			if primaryHash == selectedHash {
-				primaryHash = "bundle-v1:sha256:" + strings.Repeat("b", 64)
+				primaryHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
 			}
-			primaryFact := mustServeTestPersistedBundleSourceFact(primaryHash)
-			selectedFact := mustServeTestPersistedBundleSourceFact(selectedHash)
-			expectedBundleSource := "persisted"
-			seedStandingRuntimeContextBundle(t, selectedStores.ServeBundleIngestWriter(), selectedBundle)
+			primaryFact := mustServeTestPersistedSourceArtifactFact(primaryHash)
+			selectedFact := mustServeTestPersistedSourceArtifactFact(selectedHash)
+			seedStandingRuntimeContextBundle(t, selectedStores.SourceArtifactWriter(), selectedBundle)
 			runtimeInstanceID := uuid.NewString()
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Platform: selectedBundle.Platform,
@@ -79,7 +77,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog)
 
 			selectedCtx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(runtimeInstanceID, selectedHash))
-			selectedCtx = runtimecorrelation.WithBundleSourceFact(selectedCtx, selectedFact)
+			selectedCtx = runtimecorrelation.WithSourceArtifactFact(selectedCtx, selectedFact)
 			selectedCtx = worklifetime.WithRuntimeOccurrence(selectedCtx, selected.WorkOccurrence())
 			targets, activations, err := selected.EnsureStandingTargets(selectedCtx)
 			if err != nil {
@@ -95,10 +93,10 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 				t.Fatalf("selected standing capability subjects: %v", err)
 			}
 			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
-				BundleSourceFact: primaryFact, Source: primaryModule.SemanticSource(), Runtime: primary, WorkOwner: primary.WorkOccurrence(),
+				SourceArtifactFact: primaryFact, Source: primaryModule.SemanticSource(), Runtime: primary, WorkOwner: primary.WorkOccurrence(),
 				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			}), completeServeTestPackContext(t, runtimepkg.BundleContext{
-				BundleSourceFact: selectedFact, Source: selectedModule.SemanticSource(), Runtime: selected, WorkOwner: selected.WorkOccurrence(), StandingTargets: targets,
+				SourceArtifactFact: selectedFact, Source: selectedModule.SemanticSource(), Runtime: selected, WorkOwner: selected.WorkOccurrence(), StandingTargets: targets,
 				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			}))
 			if err != nil {
@@ -182,23 +180,20 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("list selected standing statuses: %v", err)
 			}
-			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].BundleSource != expectedBundleSource || selectedStatuses[0].Generation != 2 {
+			if len(selectedStatuses) != 1 || selectedStatuses[0].BundleHash != selectedHash || selectedStatuses[0].Generation != 2 {
 				t.Fatalf("selected standing source/generation = %#v", selectedStatuses)
 			}
 		})
 	}
 }
 
-func seedStandingRuntimeContextBundle(t *testing.T, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) {
+func seedStandingRuntimeContextBundle(t *testing.T, writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
-		t.Fatalf("project standing runtime-context bundle: %v", err)
+		t.Fatalf("project standing runtime-context source data: %v", err)
 	}
-	if _, err := writer.UpsertBundleCatalogWithData(context.Background(), bundlecatalog.Upsert{
-		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML,
-		ParsedJSON: projection.ParsedJSON, DataBlob: projection.DataBlob, Metadata: projection.Metadata,
-	}, projection.DataCatalog); err != nil {
+	if _, err := writer.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
 		t.Fatalf("persist standing runtime-context bundle: %v", err)
 	}
 }
@@ -243,7 +238,7 @@ func newStandingRuntimeContextRuntime(
 	process *worklifetime.Process,
 	stores *selectedStoreOwner,
 	module runtimepipeline.WorkflowModule,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 	runtimeInstanceID string,
 	catalog *providertriggers.CatalogSnapshot,
 ) *runtimepkg.Runtime {
@@ -253,7 +248,7 @@ func newStandingRuntimeContextRuntime(
 		"webhook_signing.telegram": "standing-owner-signing-secret",
 	}
 	deps := runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
-		WorkflowModule: module, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
+		WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeInstanceID,
 		ProcessWorkOwner: process, ProviderTriggerCatalog: catalog,
 		Credentials: credentials, ProviderCredentials: credentials,
 		DisablePersistentStartupRecovery: true, LLMRuntime: servedNoopLLMRuntime{},
@@ -272,7 +267,7 @@ func newStandingRuntimeContextRuntime(
 func registerStandingRuntimeContextSignal(
 	t *testing.T,
 	pipeline *runtimepipeline.PipelineCoordinator,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 	owner string,
 	signals *atomic.Int32,
 ) *runtimepipeline.DeliveryContinuationSignalRegistration {

@@ -42,26 +42,23 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	contractsPath := writeScenarioRunnerFixture(t)
+	sourceRoot := writeScenarioRunnerFixture(t)
 	configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              configPath,
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"test",
+		"test", sourceRoot,
 		"--config", configPath,
-		"--contracts", contractsPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "10s",
 		"--poll-interval", "25ms",
@@ -82,7 +79,7 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
-func TestSwarmTestConsumesLiveBundleSourceAcrossSupportedBackendsAndModes(t *testing.T) {
+func TestSwarmTestConsumesLiveSourceArtifactAcrossSupportedBackendsAndModes(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		for _, dev := range []bool{false, true} {
 			if dev && backend != storebackend.BackendSQLite {
@@ -99,8 +96,8 @@ func TestSwarmTestConsumesLiveBundleSourceAcrossSupportedBackendsAndModes(t *tes
 				t.Setenv("ANTHROPIC_API_KEY", "")
 				t.Setenv("TELEGRAM_BOT_TOKEN", "")
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-				contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
-				testsDir := filepath.Join(contractsPath, "tests")
+				sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+				testsDir := filepath.Join(sourceRoot, "tests")
 				if err := os.MkdirAll(testsDir, 0o755); err != nil {
 					t.Fatalf("create authored scenario directory: %v", err)
 				}
@@ -120,9 +117,9 @@ expect:
 				configPath := ""
 				repo := repoRootForTest()
 				opts := cliapp.ServeOptions{
-					ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+					SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
-					SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+					SelfCheck: true, Verbose: true,
 					TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 				}
 				switch backend {
@@ -130,7 +127,7 @@ expect:
 					stubServeRuntimeWorkspaceLifecycle(t)
 					sqlitePath := filepath.Join(t.TempDir(), "source-posture.sqlite")
 					if dev {
-						repo = contractsPath
+						repo = sourceRoot
 						sqlitePath = ""
 					}
 					configPath = writeMockAgentRuntimeConfig(t, backend.String(), sqlitePath)
@@ -147,8 +144,8 @@ expect:
 				process.waitForReadyLine()
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 				for _, args := range [][]string{
-					{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
-					{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
+					{"test", sourceRoot, "--timeout", "5s", "--poll-interval", "10ms"},
+					{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 				} {
 					var stdout, stderr bytes.Buffer
 					commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
@@ -172,8 +169,8 @@ func TestServeDoesNotExposeRetiredProjectReloadSurface(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-	testsDir := filepath.Join(contractsPath, "tests")
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	testsDir := filepath.Join(sourceRoot, "tests")
 	if err := os.MkdirAll(testsDir, 0o755); err != nil {
 		t.Fatalf("create authored scenario directory: %v", err)
 	}
@@ -191,11 +188,11 @@ expect:
 	}
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), "")
 	managerReady := make(chan *runtimepkg.RuntimeContextManager, 1)
-	process := startServeRuntimeTestProcessAtRepo(t, contractsPath, cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsPath,
+	process := startServeRuntimeTestProcessAtRepo(t, sourceRoot, cliapp.ServeOptions{
+		ConfigPath: configPath, SourceRoot: sourceRoot,
 		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		Dev: true, NoFeed: true, SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
+		Dev: true, NoFeed: true, SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestRuntimeContextsReadyHook: func(manager *runtimepkg.RuntimeContextManager) {
 			managerReady <- manager
@@ -207,22 +204,22 @@ expect:
 
 	var predecessorIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &predecessorIdentity)
-	if len(predecessorIdentity.BundleSources) != 1 {
+	if len(predecessorIdentity.SourceArtifacts) != 1 {
 		t.Fatalf("predecessor runtime identity = %#v, want one source", predecessorIdentity)
 	}
-	predecessorHash := predecessorIdentity.BundleSources[0].BundleHash
+	predecessorHash := predecessorIdentity.SourceArtifacts[0].BundleHash
 
-	packagePath := filepath.Join(contractsPath, "package.yaml")
-	packageBody, err := os.ReadFile(packagePath)
+	scenarioPath := filepath.Join(testsDir, "authored.yaml")
+	scenarioBody, err := os.ReadFile(scenarioPath)
 	if err != nil {
-		t.Fatalf("read package manifest: %v", err)
+		t.Fatalf("read authored scenario: %v", err)
 	}
-	replaced := strings.Replace(string(packageBody), `version: "1.0.0"`, `version: "1.0.1"`, 1)
-	if replaced == string(packageBody) {
-		t.Fatalf("package manifest did not contain replacement version:\n%s", packageBody)
+	replaced := strings.Replace(string(scenarioBody), "authored-replacement", "authored-successor", 1)
+	if replaced == string(scenarioBody) {
+		t.Fatalf("scenario did not contain replacement payload:\n%s", scenarioBody)
 	}
-	if err := os.WriteFile(packagePath, []byte(replaced), 0o644); err != nil {
-		t.Fatalf("write changed-hash package manifest: %v", err)
+	if err := os.WriteFile(scenarioPath, []byte(replaced), 0o644); err != nil {
+		t.Fatalf("write changed-hash scenario: %v", err)
 	}
 	manager := <-managerReady
 	publication, err := manager.CurrentPublication()
@@ -236,7 +233,7 @@ expect:
 
 	var successorIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &successorIdentity)
-	if len(successorIdentity.BundleSources) != 1 || successorIdentity.BundleSources[0].BundleHash != successorHash || successorIdentity.BundleSources[0].BundleSource != "persisted" {
+	if len(successorIdentity.SourceArtifacts) != 1 || successorIdentity.SourceArtifacts[0].BundleHash != successorHash {
 		t.Fatalf("runtime identity = %#v, want retained persisted source %s", successorIdentity, successorHash)
 	}
 	var health struct {
@@ -249,8 +246,8 @@ expect:
 	requireServedHealthSubscriptionBundle(t, endpoint, successorHash)
 
 	for _, args := range [][]string{
-		{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
-		{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
+		{"test", sourceRoot, "--timeout", "5s", "--poll-interval", "10ms"},
+		{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 	} {
 		var stdout, stderr bytes.Buffer
 		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
@@ -321,7 +318,7 @@ func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
-	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "channel-projection.sqlite"))
 	rawConfig, err := os.ReadFile(configPath)
 	if err != nil {
@@ -338,10 +335,10 @@ channels:
 		t.Fatal(err)
 	}
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsPath,
+		ConfigPath: configPath, SourceRoot: sourceRoot,
 		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
+		SelfCheck: true,
 	})
 	process.waitForReadyLine()
 	rt := servedTestProcessRuntime(t, process)
@@ -459,13 +456,13 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-	contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var db *sql.DB
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	switch backend {
@@ -552,19 +549,17 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var db *sql.DB
 	var configPath string
 	opts := cliapp.ServeOptions{
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -595,7 +590,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	opts.ConfigPath = configPath
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"verify", "--contracts", contractsPath, "--config", configPath,
+		"verify", sourceRoot, "--config", configPath,
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
@@ -604,10 +599,9 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	scenario := filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "public-mock-approval.yaml"))
+	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "public-mock-approval.yaml"))
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "45s",
@@ -662,16 +656,16 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
 
 	var db *sql.DB
 	var configPath string
 	var postgresDSN string
 	platformSpecPath := filepath.Join(repoRootForTest(), defaultPlatformSpecPath)
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsPath, PlatformSpecPath: platformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: platformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	switch backend {
@@ -757,8 +751,8 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"test", "--derive", "fulfillment", "--input", "fulfillment.requested",
-		"--contracts", contractsPath, "--config", configPath,
+		"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested",
+		"--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s", "--poll-interval", "25ms",
 	}, &stdout, &stderr, nil)
@@ -827,14 +821,12 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	scaffoldRoot := scaffoldConformanceArchetype(t, archetype)
-	contractsPath := scaffoldRoot
-	if archetype == "webhook-responder" {
-		contractsPath = filepath.Join(scaffoldRoot, "bot")
-	}
-	configPath := filepath.Join(contractsPath, "swarm.yaml")
+	sourceRoot := scaffoldRoot
+	configPath := filepath.Join(sourceRoot, "swarm.yaml")
+	scenarioPath := filepath.Join("tests", "smoke.yaml")
 
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), contractsPath, []string{"verify", "--config", configPath, "--contracts", contractsPath}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--config", configPath}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s generated verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
@@ -847,10 +839,10 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 		return stores, err
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-	endpoint, rt := startServedEventPublishFollowUpRuntimeAtRepo(t, contractsPath, cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+	endpoint, rt := startServedEventPublishFollowUpRuntimeAtRepo(t, sourceRoot, cliapp.ServeOptions{
+		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 	if db == nil || rt == nil {
@@ -858,10 +850,10 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	}
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := executeCLIFrom(context.Background(), contractsPath, []string{
-		"test", "--config", configPath, "--contracts", contractsPath,
+	code := executeCLIFrom(context.Background(), sourceRoot, []string{
+		"test", sourceRoot, "--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
-		"--timeout", "30s", "--poll-interval", "25ms", filepath.Join("tests", "smoke.yaml"),
+		"--timeout", "30s", "--poll-interval", "25ms", scenarioPath,
 	}, &stdout, &stderr, nil)
 	if code != 0 {
 		t.Fatalf("%s generated scenario code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
@@ -1013,19 +1005,17 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		http.Error(w, "generated input proof must not call provider transport", http.StatusInternalServerError)
 	}))
 	t.Cleanup(provider.Close)
-	contractsPath := writeGeneratedTelegramScenarioFixture(t, provider.URL)
+	sourceRoot := writeGeneratedTelegramScenarioFixture(t, provider.URL)
 
 	var db *sql.DB
 	var configPath string
 	var runtimeContexts *runtimepkg.RuntimeContextManager
 	opts := cliapp.ServeOptions{
-		ContractsPath:           contractsPath,
+		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
-		RequireBundleMatch:      false,
-		NoRequireBundleMatch:    true,
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestRuntimeContextsReadyHook: func(manager *runtimepkg.RuntimeContextManager) {
@@ -1086,10 +1076,9 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	}
 
 	var stdout, stderr bytes.Buffer
-	scenario := filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "generated-input.yaml"))
+	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "generated-input.yaml"))
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"test",
-		"--contracts", contractsPath,
+		"test", sourceRoot,
 		"--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s",
@@ -1126,16 +1115,16 @@ func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) str
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	root := filepath.Join(exampleRoot, "bot")
 	for _, name := range []string{
-		"flows/telegram-chat/agents.yaml",
-		"flows/telegram-chat/events.yaml",
-		"flows/telegram-chat/tools.yaml",
+		"telegram-chat/agents.yaml",
+		"telegram-chat/events.yaml",
+		"telegram-chat/tools.yaml",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("omit generated Telegram declaration file %s: %v", path, err)
 		}
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-input-observer:
   id: telegram-input-observer
   execution_type: system_node
@@ -1143,7 +1132,7 @@ telegram-input-observer:
   event_handlers:
     inbound.telegram.text_message: {}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "generated-input.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "generated-input.yaml"), `
 name: generated Telegram normalized input
 steps:
   - publish: inbound.telegram.text_message
@@ -1156,7 +1145,7 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	t.Helper()
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	root := filepath.Join(exampleRoot, "bot")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:
   id: telegram-responder
   execution_type: system_node
@@ -1177,7 +1166,7 @@ telegram-revision:
   event_handlers:
     telegram_send_message.revision_requested: {}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "public-mock-approval.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "public-mock-approval.yaml"), `
 name: public generated Telegram mock approval
 steps:
   - publish: inbound.telegram.text_message
@@ -1327,7 +1316,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 		t.Run(string(test.example), func(t *testing.T) {
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
-			contractsPath := canonicalrouting.ExampleRoot(t, test.example)
+			sourceRoot := canonicalrouting.ExampleRoot(t, test.example)
 			sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 			oldBuildStores := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
@@ -1343,13 +1332,11 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 			options := cliapp.ServeOptions{
 				ConfigPath:              configPath,
-				ContractsPath:           contractsPath,
+				SourceRoot:              sourceRoot,
 				PlatformSpecPath:        defaultPlatformSpecPath,
 				APIListenAddr:           "127.0.0.1:0",
 				MCPListenAddr:           "127.0.0.1:0",
 				SelfCheck:               true,
-				RequireBundleMatch:      false,
-				NoRequireBundleMatch:    true,
 				Verbose:                 true,
 				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 			}
@@ -1369,9 +1356,8 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 
 			var stdout, stderr bytes.Buffer
 			code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-				"test",
+				"test", sourceRoot,
 				"--config", configPath,
-				"--contracts", contractsPath,
 				"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--timeout", "20s",
 				"--poll-interval", "25ms",
@@ -1460,14 +1446,14 @@ func canonicalRoutingSQLiteDebug(t *testing.T, db *sql.DB) string {
 
 func writeScenarioRunnerFixture(t *testing.T) string {
 	t.Helper()
-	contractsPath := writeServedEventPublishFollowUpFixture(t)
-	if err := os.RemoveAll(filepath.Join(contractsPath, "tests")); err != nil {
+	sourceRoot := writeServedEventPublishFollowUpFixture(t)
+	if err := os.RemoveAll(filepath.Join(sourceRoot, "tests")); err != nil {
 		t.Fatalf("remove inherited canonical scenarios: %v", err)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "fixtures", "item-received.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "fixtures", "item-received.yaml"), `
 item_id: fixture
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "empire-routing.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "empire-routing.yaml"), `
 name: empire-style deterministic routing
 steps:
   - publish: item.received
@@ -1497,5 +1483,5 @@ expect:
     - type: item
       current_state: done
 `)
-	return contractsPath
+	return sourceRoot
 }

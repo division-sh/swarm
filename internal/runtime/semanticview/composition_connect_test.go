@@ -80,7 +80,7 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 	}
 	source := Wrap(bundle)
 
-	outputPins := source.FlowOutputEventPins("")
+	outputPins := source.FlowOutputEventPins(".")
 	if len(outputPins) != 1 {
 		t.Fatalf("root FlowOutputEventPins = %#v, want one", outputPins)
 	}

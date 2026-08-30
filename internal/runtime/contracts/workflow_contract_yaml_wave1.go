@@ -21,41 +21,6 @@ var builtinWave1ScalarTypes = map[string]struct{}{
 	"uuid":      {},
 }
 
-var projectPackageDocumentFields = map[string]struct{}{
-	"name":                    {},
-	"version":                 {},
-	"platform_version":        {},
-	"author":                  {},
-	"description":             {},
-	"keywords":                {},
-	"license":                 {},
-	"repository":              {},
-	"extra":                   {},
-	"requires":                {},
-	"flows":                   {},
-	"packages":                {},
-	"connect":                 {},
-	"connector_packs":         {},
-	"provider_trigger_events": {},
-	"handoffs":                {},
-}
-
-var projectFlowRefFields = map[string]struct{}{
-	"id":         {},
-	"flow":       {},
-	"namespace":  {},
-	"mode":       {},
-	"activation": {},
-	"ingress":    {},
-	"bind":       {},
-}
-
-var projectPackageRefFields = map[string]struct{}{
-	"id":   {},
-	"path": {},
-	"bind": {},
-}
-
 var projectFlowIngressFields = map[string]struct{}{
 	"alias":     {},
 	"providers": {},
@@ -85,142 +50,6 @@ var projectFlowIngressAuthenticationFields = map[string]struct{}{
 
 var projectFlowIngressDeliveryIDFields = map[string]struct{}{
 	"source": {}, "header": {}, "json_path": {},
-}
-
-func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	if hasYAMLMappingKey(node, "entity_schema") {
-		return fmt.Errorf("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml")
-	}
-	if err := validateProjectPackageDocumentFields(node); err != nil {
-		return err
-	}
-	if err := validateProjectPackageRefs(yamlMappingValue(node, "packages")); err != nil {
-		return err
-	}
-	var aux struct {
-		Name                  string                      `yaml:"name"`
-		Version               string                      `yaml:"version"`
-		PlatformVersion       string                      `yaml:"platform_version"`
-		Author                string                      `yaml:"author"`
-		Description           string                      `yaml:"description"`
-		Requires              FlowPackageRequires         `yaml:"requires"`
-		Flows                 []ProjectFlowRef            `yaml:"flows"`
-		Packages              []ProjectPackageRef         `yaml:"packages"`
-		Connect               []FlowPackageConnect        `yaml:"connect"`
-		ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
-		ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
-		Handoffs              []ProjectHandoff            `yaml:"handoffs"`
-	}
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	for i := range aux.Packages {
-		aux.Packages[i].ID = strings.TrimSpace(aux.Packages[i].ID)
-		aux.Packages[i].Path = strings.TrimSpace(aux.Packages[i].Path)
-		aux.Packages[i].Bind = aux.Packages[i].Bind.normalized()
-	}
-	keywords, err := decodePackageKeywordsYAML(yamlMappingValue(node, "keywords"))
-	if err != nil {
-		return err
-	}
-	license, err := decodePackageLicenseYAML(yamlMappingValue(node, "license"))
-	if err != nil {
-		return err
-	}
-	repository, err := decodePackageRepositoryYAML(yamlMappingValue(node, "repository"))
-	if err != nil {
-		return err
-	}
-	extra, err := decodePackageExtraYAML(yamlMappingValue(node, "extra"))
-	if err != nil {
-		return err
-	}
-	*p = ProjectPackageDocument{
-		Name:                  aux.Name,
-		Version:               aux.Version,
-		PlatformVersion:       aux.PlatformVersion,
-		Author:                aux.Author,
-		Description:           aux.Description,
-		Keywords:              keywords,
-		License:               license,
-		Repository:            repository,
-		Extra:                 extra,
-		Requires:              aux.Requires.normalized(),
-		Flows:                 append([]ProjectFlowRef(nil), aux.Flows...),
-		Packages:              append([]ProjectPackageRef(nil), aux.Packages...),
-		Connect:               cloneFlowPackageConnects(aux.Connect),
-		ConnectorPacks:        aux.ConnectorPacks.normalized(),
-		ProviderTriggerEvents: aux.ProviderTriggerEvents.normalized(),
-		Handoffs:              append([]ProjectHandoff(nil), aux.Handoffs...),
-	}
-	return nil
-}
-
-func validateProjectPackageDocumentFields(node *yaml.Node) error {
-	if node == nil || node.Kind == 0 {
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return NewPackageDocumentMappingDiagnostic(nil)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		switch key {
-		case "children", "subpackages":
-			return fmt.Errorf("RETIRED: package.yaml %s is no longer supported; declare imported child packages under packages", key)
-		}
-		if _, ok := projectPackageDocumentFields[key]; !ok {
-			return NewUndefinedFieldDiagnostic("package.yaml", key, projectPackageDocumentFields)
-		}
-	}
-	return nil
-}
-
-func validateProjectPackageRefs(node *yaml.Node) error {
-	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
-		return nil
-	}
-	if node.Kind != yaml.SequenceNode {
-		return fmt.Errorf("package.yaml packages must be a sequence")
-	}
-	for index, entry := range node.Content {
-		if entry == nil || entry.Kind != yaml.MappingNode {
-			return fmt.Errorf("package.yaml packages[%d] must be a mapping", index)
-		}
-		for i := 0; i+1 < len(entry.Content); i += 2 {
-			key := strings.TrimSpace(entry.Content[i].Value)
-			switch key {
-			case "package", "dir":
-				return fmt.Errorf("RETIRED: package child reference %s is no longer supported; declare the child location with path", key)
-			}
-		}
-		if err := validateKnownMappingFields(entry, fmt.Sprintf("package.yaml packages[%d]", index), projectPackageRefFields); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f *ProjectFlowRef) UnmarshalYAML(node *yaml.Node) error {
-	if f == nil {
-		return nil
-	}
-	if err := validateKnownMappingFields(node, "ProjectFlowRef package flow entry", projectFlowRefFields); err != nil {
-		return err
-	}
-	type rawProjectFlowRef ProjectFlowRef
-	var out rawProjectFlowRef
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*f = ProjectFlowRef(out)
-	return nil
 }
 
 func (i *ProjectFlowIngress) UnmarshalYAML(node *yaml.Node) error {
@@ -350,22 +179,6 @@ func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-var flowPackageRequiresFieldOptions = map[string]struct{}{
-	"inputs":           {},
-	"outputs":          {},
-	"policy":           {},
-	"credentials":      {},
-	"platform_version": {},
-}
-
-var flowPackageBindFieldOptions = map[string]struct{}{
-	"inputs":      {},
-	"outputs":     {},
-	"policy":      {},
-	"credentials": {},
-	"observe":     {},
-}
-
 var connectorPackFieldOptions = map[string]struct{}{
 	"imports": {},
 }
@@ -384,14 +197,7 @@ var providerTriggerEventImportFieldOptions = map[string]struct{}{
 	"event":    {},
 }
 
-var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
-	"default":     {},
-	"type":        {},
-	"description": {},
-	"required":    {},
-}
-
-var flowPackageConnectFieldOptions = map[string]struct{}{
+var flowConnectFieldOptions = map[string]struct{}{
 	"event":  {},
 	"from":   {},
 	"to":     {},
@@ -421,101 +227,6 @@ var schemaLengthRefinementFieldOptions = map[string]struct{}{
 var schemaRangeRefinementFieldOptions = map[string]struct{}{
 	"min": {},
 	"max": {},
-}
-
-func (r *FlowPackageRequires) UnmarshalYAML(node *yaml.Node) error {
-	if r == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*r = FlowPackageRequires{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("requires must be a mapping")
-	}
-	var out FlowPackageRequires
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "inputs":
-			if err := value.Decode(&out.Inputs); err != nil {
-				return fmt.Errorf("requires.inputs: %w", err)
-			}
-		case "outputs":
-			if err := value.Decode(&out.Outputs); err != nil {
-				return fmt.Errorf("requires.outputs: %w", err)
-			}
-		case "policy":
-			policy, defaults, err := decodeFlowPackagePolicyRequires(value)
-			if err != nil {
-				return fmt.Errorf("requires.policy: %w", err)
-			}
-			out.Policy = policy
-			out.PolicyDefaults = defaults
-		case "credentials":
-			if err := value.Decode(&out.Credentials); err != nil {
-				return fmt.Errorf("requires.credentials: %w", err)
-			}
-		case "platform_version":
-			if err := value.Decode(&out.PlatformVersion); err != nil {
-				return fmt.Errorf("requires.platform_version: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("requires", key, flowPackageRequiresFieldOptions)
-		}
-	}
-	*r = out.normalized()
-	return nil
-}
-
-func (b *FlowPackageBind) UnmarshalYAML(node *yaml.Node) error {
-	if b == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*b = FlowPackageBind{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("bind must be a mapping")
-	}
-	var out FlowPackageBind
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "inputs":
-			if err := value.Decode(&out.Inputs); err != nil {
-				return fmt.Errorf("bind.inputs: %w", err)
-			}
-		case "outputs":
-			if err := value.Decode(&out.Outputs); err != nil {
-				return fmt.Errorf("bind.outputs: %w", err)
-			}
-		case "policy":
-			if err := value.Decode(&out.Policy); err != nil {
-				return fmt.Errorf("bind.policy: %w", err)
-			}
-		case "credentials":
-			if err := value.Decode(&out.Credentials); err != nil {
-				return fmt.Errorf("bind.credentials: %w", err)
-			}
-		case "observe":
-			if err := value.Decode(&out.Observe); err != nil {
-				return fmt.Errorf("bind.observe: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("bind", key, flowPackageBindFieldOptions)
-		}
-	}
-	*b = out.normalized()
-	return nil
 }
 
 func (c *ConnectorPackImports) UnmarshalYAML(node *yaml.Node) error {
@@ -578,7 +289,11 @@ func (i *ConnectorPackImport) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("connector_packs.imports", key, connectorPackImportFieldOptions)
 		}
 	}
-	*i = out.normalized()
+	normalized := out.normalized()
+	if out.Provider != normalized.Provider || out.Tool != normalized.Tool || normalized.Provider == "" || normalized.Tool == "" {
+		return fmt.Errorf("connector_packs import provider and tool must be exact non-empty canonical values")
+	}
+	*i = normalized
 	return nil
 }
 
@@ -660,7 +375,11 @@ func (i *ProviderTriggerEventImport) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("provider_trigger_events.imports", key, providerTriggerEventImportFieldOptions)
 		}
 	}
+	raw := out
 	out = out.normalized()
+	if raw.Provider != out.Provider || raw.Event != out.Event || !eventidentity.IsValidName(out.Event) {
+		return fmt.Errorf("provider_trigger_events import provider and event must be exact canonical values")
+	}
 	if out.Provider == "" {
 		return fmt.Errorf("provider_trigger_events.imports provider is required")
 	}
@@ -693,143 +412,12 @@ func normalizeConnectorPackToken(raw string) string {
 	return strings.Trim(raw, "_")
 }
 
-func (r FlowPackageRequires) normalized() FlowPackageRequires {
-	return FlowPackageRequires{
-		Inputs:          normalizeStrings(r.Inputs),
-		Outputs:         normalizeStrings(r.Outputs),
-		Policy:          normalizeStrings(r.Policy),
-		PolicyDefaults:  normalizePolicyDefaults(r.PolicyDefaults),
-		Credentials:     normalizeStrings(r.Credentials),
-		PlatformVersion: strings.TrimSpace(r.PlatformVersion),
-	}
-}
-
-func decodeFlowPackagePolicyRequires(node *yaml.Node) ([]string, map[string]PolicyValue, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil, nil
-	}
-	switch node.Kind {
-	case yaml.SequenceNode:
-		var values []string
-		if err := node.Decode(&values); err != nil {
-			return nil, nil, err
-		}
-		return values, nil, nil
-	case yaml.MappingNode:
-		var policy []string
-		defaults := map[string]PolicyValue{}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			if key == "" {
-				continue
-			}
-			policy = append(policy, key)
-			defaultValue, ok, err := decodeFlowPackagePolicyDefault(node.Content[i+1])
-			if err != nil {
-				return nil, nil, fmt.Errorf("%s: %w", key, err)
-			}
-			if ok {
-				defaults[key] = PolicyValue{Value: defaultValue}
-			}
-		}
-		if len(defaults) == 0 {
-			defaults = nil
-		}
-		return policy, defaults, nil
-	default:
-		return nil, nil, fmt.Errorf("must be a list of policy keys or a mapping of policy keys to requirement objects")
-	}
-}
-
-func decodeFlowPackagePolicyDefault(node *yaml.Node) (any, bool, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, false, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, false, fmt.Errorf("policy requirement must be a mapping with optional default")
-	}
-	var out any
-	hasDefault := false
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "default":
-			if err := value.Decode(&out); err != nil {
-				return nil, false, fmt.Errorf("default: %w", err)
-			}
-			hasDefault = true
-		case "type", "description", "required":
-			continue
-		default:
-			return nil, false, NewUndefinedFieldDiagnostic("requires.policy", key, flowPackageRequiresPolicyFieldOptions)
-		}
-	}
-	return out, hasDefault, nil
-}
-
-func normalizePolicyDefaults(in map[string]PolicyValue) map[string]PolicyValue {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]PolicyValue, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = PolicyValue{
-			Value:       value.Value,
-			Description: strings.TrimSpace(value.Description),
-			Override:    value.Override,
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func (b FlowPackageBind) normalized() FlowPackageBind {
-	return FlowPackageBind{
-		Inputs:      normalizeStringMap(b.Inputs),
-		Outputs:     normalizeStringMap(b.Outputs),
-		Policy:      normalizeStringMap(b.Policy),
-		Credentials: normalizeStringMap(b.Credentials),
-		Observe:     normalizeFlowPackageObserveGrants(b.Observe),
-	}
-}
-
-func normalizeFlowPackageObserveGrants(in []FlowPackageObserveGrant) []FlowPackageObserveGrant {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]FlowPackageObserveGrant, 0, len(in))
-	for _, grant := range in {
-		source := strings.TrimSpace(grant.Source)
-		events := normalizeStrings(grant.Events)
-		if source == "" && len(events) == 0 {
-			continue
-		}
-		out = append(out, FlowPackageObserveGrant{
-			Source: source,
-			Events: events,
-		})
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
+func (c *FlowConnect) UnmarshalYAML(node *yaml.Node) error {
 	if c == nil {
 		return nil
 	}
 	if node == nil || node.Kind == 0 {
-		*c = FlowPackageConnect{}
+		*c = FlowConnect{}
 		return nil
 	}
 	if node.Kind != yaml.MappingNode {
@@ -838,7 +426,7 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 	if err := validateExactW2MappingKeys(node, "connect entry"); err != nil {
 		return err
 	}
-	out := FlowPackageConnect{SourceLine: node.Line}
+	out := FlowConnect{SourceLine: node.Line}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		value := node.Content[i+1]
@@ -878,7 +466,7 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 		case "reply":
 			return NewRetiredConnectReplyDiagnostic()
 		default:
-			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
+			return NewUndefinedFieldDiagnostic("connect", key, flowConnectFieldOptions)
 		}
 	}
 	event := out.Event

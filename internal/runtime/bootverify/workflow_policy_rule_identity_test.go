@@ -8,11 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestPolicyValueRowCarrierUsesQualifiedElementIdentity(t *testing.T) {
+func TestPolicyValueRowCarrierUsesDeclarationIdentity(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`rules:
   lookup:
-    element_id: 00000000-0000-4000-8000-000000000412
     lookup:
       on: payload.kind
       entries: [{key: service, value: selected}]
@@ -21,16 +20,16 @@ func TestPolicyValueRowCarrierUsesQualifiedElementIdentity(t *testing.T) {
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/scout", "scout", "router")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("scout", "router")
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "route.requested", handler)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref := policyRuleElementRef(handler.Rules[0])
-	if !ref.Valid() || ref.PackageKey().String() != "flows/scout" || ref.ElementID().String() != "00000000-0000-4000-8000-000000000412" {
+	if !ref.Valid() || ref.Flow().String() != "scout" || ref.Family() != "handler_rule" || ref.SemanticPath() != `nodes["router"].handlers["route.requested"].rules[0]` {
 		t.Fatalf("policy rule ref = %#v", ref)
 	}
 }

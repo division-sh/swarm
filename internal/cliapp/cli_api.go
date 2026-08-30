@@ -203,7 +203,6 @@ type cliServeConfig struct {
 type cliPathsConfig struct {
 	SwarmDir         string
 	SwarmDirSet      bool
-	ContractsPath    string
 	PlatformSpecPath string
 }
 

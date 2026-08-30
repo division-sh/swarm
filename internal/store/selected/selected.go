@@ -11,13 +11,11 @@ import (
 	"time"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -31,6 +29,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
@@ -98,18 +97,15 @@ type requiredPorts struct {
 	dataAccess             durabledata.ResourceAccessStore
 	runBundleAvailability  runbundle.AvailabilityStore
 	runStalled             runtimerunstalled.ProjectionReader
-	serveBundleIngest      bundlecatalog.ServeIngestWriter
+	sourceArtifacts        SourceArtifactDataWriter
+	sourceArtifactReader   runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
+}
+
+type SourceArtifactDataWriter interface {
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 }
 
 type productPorts struct {
-	bundleCatalog            apiv1.BundleCatalogReadStore
-	bundleCatalogAvailable   bool
-	bundleRuntimeCatalog     runtimerunforkexecution.BundleCatalogSelectedContractSourceStore
-	bundleRuntimeAvailable   bool
-	bundleRegister           apiv1.BundleCatalogRegisterStore
-	bundleRegisterAvailable  bool
-	bundleDelete             BundleDelete
-	bundleDeleteAvailable    bool
 	conversationFork         ConversationFork
 	conversationAvailable    bool
 	runFork                  RunFork
@@ -119,18 +115,6 @@ type productPorts struct {
 	startupRecovery          StartupRecovery
 	startupRecoveryAvailable bool
 }
-
-// BundleDelete is the immutable selected-store projection consumed by the
-// bundle-delete coordinator.
-type BundleDelete struct {
-	planner runtimebundledelete.Planner
-	cleaner runtimebundledelete.PreservationCleaner
-	locks   runtimebundledelete.LockManager
-}
-
-func (o BundleDelete) Planner() runtimebundledelete.Planner             { return o.planner }
-func (o BundleDelete) Cleaner() runtimebundledelete.PreservationCleaner { return o.cleaner }
-func (o BundleDelete) Locks() runtimebundledelete.LockManager           { return o.locks }
 
 // ConversationFork is the exact read/lifecycle family projection.
 type ConversationFork struct {
@@ -153,16 +137,14 @@ func (o DestructiveReset) Inventory() runtimedestructivereset.InventoryReader  {
 func (o DestructiveReset) Locks() runtimedestructivereset.LockManager          { return o.locks }
 func (o DestructiveReset) Quiescence() runtimedestructivereset.QuiescenceStore { return o.quiescence }
 
-// StartupRecovery is the exact availability/cleanup family projection.
+// StartupRecovery is the exact source-artifact availability projection.
 type StartupRecovery struct {
 	availability runtimestartuprecovery.AvailabilityReader
-	cleanup      runtimestartuprecovery.PreservationCleanupStore
 }
 
 func (o StartupRecovery) Availability() runtimestartuprecovery.AvailabilityReader {
 	return o.availability
 }
-func (o StartupRecovery) Cleanup() runtimestartuprecovery.PreservationCleanupStore { return o.cleanup }
 
 type runForkPlannerMaterializer interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
@@ -303,17 +285,13 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
 			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
-			runStalled: selected, serveBundleIngest: selected,
+			runStalled: selected, sourceArtifacts: selected, sourceArtifactReader: selected,
 		},
 		products: productPorts{
-			bundleCatalog: selected, bundleCatalogAvailable: true,
-			bundleRuntimeCatalog: selected, bundleRuntimeAvailable: true,
-			bundleRegister: selected, bundleRegisterAvailable: true,
-			bundleDelete: BundleDelete{planner: selected, cleaner: selected, locks: selected}, bundleDeleteAvailable: true,
 			conversationFork: ConversationFork{reader: selected, lifecycle: selected}, conversationAvailable: true,
 			runFork: runFork, runForkAvailable: true,
 			destructiveReset: DestructiveReset{inventory: selected, locks: selected, quiescence: selected}, destructiveAvailable: true,
-			startupRecovery: StartupRecovery{availability: selected, cleanup: selected}, startupRecoveryAvailable: true,
+			startupRecovery: StartupRecovery{availability: selected}, startupRecoveryAvailable: true,
 		},
 	}, nil
 }
@@ -361,11 +339,9 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
 			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
-			runStalled: selected, serveBundleIngest: selected,
+			runStalled: selected, sourceArtifacts: selected, sourceArtifactReader: selected,
 		},
 		products: productPorts{
-			bundleCatalog: selected, bundleCatalogAvailable: true,
-			bundleRegister: selected, bundleRegisterAvailable: true,
 			conversationFork: ConversationFork{reader: selected, lifecycle: selected}, conversationAvailable: true,
 			runFork: runFork, runForkAvailable: true,
 		},

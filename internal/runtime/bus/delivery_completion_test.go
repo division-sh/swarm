@@ -27,32 +27,26 @@ func (s *publishAndWaitCommitSpy) CommitPublication(ctx context.Context, command
 	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
-func TestEventBusBundleSourceAdmissionRejectsConflictingOwnersBeforeCommit(t *testing.T) {
-	const ownedHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	owned, err := runtimecorrelation.NewPersistedBundleSourceFact(ownedHash)
+func TestEventBusSourceArtifactAdmissionRejectsConflictingOwnersBeforeCommit(t *testing.T) {
+	const ownedHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	owned, err := runtimecorrelation.NewSourceArtifactFact(ownedHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreign, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	foreign, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(ownedHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for name, contextFact := range map[string]runtimecorrelation.BundleSourceFact{
-		"different hash":             foreign,
-		"same hash different source": wrongSource,
+	for name, contextFact := range map[string]runtimecorrelation.SourceArtifactFact{
+		"different hash": foreign,
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &publishAndWaitCommitSpy{}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{BundleSourceFact: owned})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{SourceArtifactFact: owned})
 			if err != nil {
 				t.Fatalf("create event bus: %v", err)
 			}
-			ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), contextFact)
+			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), contextFact)
 
 			err = eb.Publish(ctx, completionTreeEvent("11111111-1111-4111-8111-111111111144", "custom.root"))
 			if err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
@@ -65,8 +59,8 @@ func TestEventBusBundleSourceAdmissionRejectsConflictingOwnersBeforeCommit(t *te
 	}
 }
 
-func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testing.T) {
-	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+func TestEventBusSourceArtifactAdmissionAllowsContextOwnedSelectedForkBus(t *testing.T) {
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +71,13 @@ func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testi
 	if err != nil {
 		t.Fatalf("create ownerless selected-fork event bus: %v", err)
 	}
-	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), sourceFact)
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact)
 
-	admitted, err := eb.AdmitBundleSourceFact(ctx)
+	admitted, err := eb.AdmitSourceArtifactFact(ctx)
 	if err != nil {
-		t.Fatalf("AdmitBundleSourceFact: %v", err)
+		t.Fatalf("AdmitSourceArtifactFact: %v", err)
 	}
-	got, ok := runtimecorrelation.BundleSourceFactFromContext(admitted)
+	got, ok := runtimecorrelation.SourceArtifactFactFromContext(admitted)
 	if !ok || !got.Matches(sourceFact) {
 		t.Fatalf("admitted source fact = %#v/%v, want exact context-owned fact", got, ok)
 	}

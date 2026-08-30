@@ -13,94 +13,41 @@ type inboundEventContextKey struct{}
 type runIDContextKey struct{}
 type handlerIDContextKey struct{}
 type runtimeLineageContextKey struct{}
-type bundleSourceFactContextKey struct{}
+type sourceArtifactFactContextKey struct{}
 
-type BundleSourceFact struct {
+type SourceArtifactFact struct {
 	bundleHash string
-	source     executableBundleSource
 }
 
-type executableBundleSource uint8
-
-const (
-	executableBundleSourcePersisted executableBundleSource = iota + 1
-	executableBundleSourceEphemeral
-)
-
-func NewPersistedBundleSourceFact(bundleHash string) (BundleSourceFact, error) {
-	return newBundleSourceFact(bundleHash, executableBundleSourcePersisted)
+func NewSourceArtifactFact(bundleHash string) (SourceArtifactFact, error) {
+	return DecodeSourceArtifactFact(bundleHash)
 }
 
-func NewEphemeralBundleSourceFact(bundleHash string) (BundleSourceFact, error) {
-	return newBundleSourceFact(bundleHash, executableBundleSourceEphemeral)
-}
-
-func DecodeBundleSourceFact(bundleHash, bundleSource string) (BundleSourceFact, error) {
-	if bundleSource != strings.TrimSpace(bundleSource) {
-		return BundleSourceFact{}, fmt.Errorf("bundle_source must not contain surrounding whitespace")
-	}
-	switch bundleSource {
-	case "persisted":
-		return NewPersistedBundleSourceFact(bundleHash)
-	case "ephemeral":
-		return NewEphemeralBundleSourceFact(bundleHash)
-	default:
-		return BundleSourceFact{}, fmt.Errorf("bundle_source must be persisted or ephemeral")
-	}
-}
-
-func newBundleSourceFact(bundleHash string, source executableBundleSource) (BundleSourceFact, error) {
+func DecodeSourceArtifactFact(bundleHash string) (SourceArtifactFact, error) {
 	if bundleHash != strings.TrimSpace(bundleHash) {
-		return BundleSourceFact{}, fmt.Errorf("bundle_hash must not contain surrounding whitespace")
+		return SourceArtifactFact{}, fmt.Errorf("bundle_hash must not contain surrounding whitespace")
 	}
 	if err := runtimebundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
-		return BundleSourceFact{}, err
+		return SourceArtifactFact{}, err
 	}
-	switch source {
-	case executableBundleSourcePersisted, executableBundleSourceEphemeral:
-	default:
-		return BundleSourceFact{}, fmt.Errorf("bundle source provenance is invalid")
-	}
-	return BundleSourceFact{bundleHash: bundleHash, source: source}, nil
+	return SourceArtifactFact{bundleHash: bundleHash}, nil
 }
 
-func (f BundleSourceFact) Validate() error {
-	if f.bundleHash == "" || f.source == 0 {
-		return fmt.Errorf("bundle source fact is required")
+func (f SourceArtifactFact) Validate() error {
+	if f.bundleHash == "" {
+		return fmt.Errorf("source artifact fact is required")
 	}
-	_, err := newBundleSourceFact(f.bundleHash, f.source)
+	_, err := DecodeSourceArtifactFact(f.bundleHash)
 	return err
 }
 
-func (f BundleSourceFact) BundleHash() string {
+func (f SourceArtifactFact) BundleHash() string {
 	return f.bundleHash
 }
 
-func (f BundleSourceFact) IsPersisted() bool {
-	return f.source == executableBundleSourcePersisted
-}
-
-func (f BundleSourceFact) IsEphemeral() bool {
-	return f.source == executableBundleSourceEphemeral
-}
-
-func (f BundleSourceFact) Matches(other BundleSourceFact) bool {
+func (f SourceArtifactFact) Matches(other SourceArtifactFact) bool {
 	return f.Validate() == nil && other.Validate() == nil &&
-		f.bundleHash == other.bundleHash && f.source == other.source
-}
-
-func (f BundleSourceFact) StorageValues() (bundleHash, bundleSource string) {
-	if f.Validate() != nil {
-		return "", ""
-	}
-	switch f.source {
-	case executableBundleSourcePersisted:
-		return f.bundleHash, "persisted"
-	case executableBundleSourceEphemeral:
-		return f.bundleHash, "ephemeral"
-	default:
-		return "", ""
-	}
+		f.bundleHash == other.bundleHash
 }
 
 type runtimeInstanceIDContextKey struct{}
@@ -321,26 +268,26 @@ func HandlerIDFromContext(ctx context.Context) string {
 	return strings.TrimSpace(handlerID)
 }
 
-func WithBundleSourceFact(ctx context.Context, fact BundleSourceFact) context.Context {
+func WithSourceArtifactFact(ctx context.Context, fact SourceArtifactFact) context.Context {
 	if ctx == nil {
 		return nil
 	}
 	if fact.Validate() != nil {
 		return ctx
 	}
-	return context.WithValue(ctx, bundleSourceFactContextKey{}, fact)
+	return context.WithValue(ctx, sourceArtifactFactContextKey{}, fact)
 }
 
-func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
+func SourceArtifactFactFromContext(ctx context.Context) (SourceArtifactFact, bool) {
 	if ctx == nil {
-		return BundleSourceFact{}, false
+		return SourceArtifactFact{}, false
 	}
-	fact, ok := ctx.Value(bundleSourceFactContextKey{}).(BundleSourceFact)
+	fact, ok := ctx.Value(sourceArtifactFactContextKey{}).(SourceArtifactFact)
 	if !ok {
-		return BundleSourceFact{}, false
+		return SourceArtifactFact{}, false
 	}
 	if fact.Validate() != nil {
-		return BundleSourceFact{}, false
+		return SourceArtifactFact{}, false
 	}
 	return fact, true
 }

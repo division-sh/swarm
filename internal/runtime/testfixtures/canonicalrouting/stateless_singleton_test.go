@@ -9,17 +9,17 @@ import (
 
 func TestStatelessSingletonFixturesContainNoCoordinatorCeremony(t *testing.T) {
 	standing := CopyExample(t, TelegramAgent)
-	assertCanonicalFileExcludes(t, filepath.Join(standing, "flows", "telegram-ingress", "entities.yaml"), "active_chats")
+	assertCanonicalFileExcludes(t, filepath.Join(standing, "telegram-ingress", "entities.yaml"), "active_chats")
 
 	matrix := CopyInboundAdmissionPolicyMatrix(t)
-	assertCanonicalFileExcludes(t, filepath.Join(matrix, "flows", "matrix", "entities.yaml"), "records")
+	assertCanonicalFileExcludes(t, filepath.Join(matrix, "matrix", "entities.yaml"), "records")
 
 	stream := ExampleRoot(t, FanInStream)
-	entities := readCanonicalFixtureFile(t, filepath.Join(stream, "flows", "portfolio", "default", "entities.yaml"))
+	entities := readCanonicalFixtureFile(t, filepath.Join(stream, "portfolio", "entities.yaml"))
 	if strings.Contains(entities, "_unused_reason") || !strings.Contains(entities, "reports:") {
 		t.Fatalf("fan-in stream reports declaration = %q, want real field without _unused_reason", entities)
 	}
-	nodes := readCanonicalFixtureFile(t, filepath.Join(stream, "flows", "portfolio", "default", "nodes.yaml"))
+	nodes := readCanonicalFixtureFile(t, filepath.Join(stream, "portfolio", "nodes.yaml"))
 	for _, want := range []string{"op: set", "target: entity.reports", "payload.operating_id", "value: {ref: payload}"} {
 		if !strings.Contains(nodes, want) {
 			t.Fatalf("fan-in stream nodes missing %q:\n%s", want, nodes)

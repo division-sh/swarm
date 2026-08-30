@@ -17,7 +17,7 @@ import (
 type packCommandOptions struct {
 	repoRoot         string
 	root             rootCommandOptions
-	contractsPath    string
+	sourceRoot       string
 	platformSpecPath string
 	output           cliOutputOptions
 }
@@ -63,8 +63,11 @@ func newPacksCommand(ctx context.Context, invocationRoot InvocationRoot, root ro
 func newPacksListCommand(_ context.Context, repo string, root rootCommandOptions) *cobra.Command {
 	opts := packCommandOptions{repoRoot: repo, root: root}
 	cmd := &cobra.Command{
-		Use: "list", Short: "List the exact effective pack inventory.", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use: "list [directory]", Short: "List the exact effective pack inventory.", Args: argcount.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				opts.sourceRoot = args[0]
+			}
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -92,8 +95,11 @@ func newPacksListCommand(_ context.Context, repo string, root rootCommandOptions
 func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions) *cobra.Command {
 	opts := packCommandOptions{repoRoot: repo, root: root}
 	cmd := &cobra.Command{
-		Use: "show <pack-id>", Short: "Show one selected pack and its provenance.", Args: argcount.ExactArgs(1),
+		Use: "show <pack-id> [directory]", Short: "Show one selected pack and its provenance.", Args: argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				opts.sourceRoot = args[1]
+			}
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -131,8 +137,11 @@ func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions
 func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
 	opts := packCommandOptions{repoRoot: invocationRoot.Path(), root: root}
 	cmd := &cobra.Command{
-		Use: "import <pack-id>", Short: "Import an embedded pack into the selected project.", Args: argcount.ExactArgs(1),
+		Use: "import <pack-id> [directory]", Short: "Import an embedded pack into the selected source tree.", Args: argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				opts.sourceRoot = args[1]
+			}
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -144,7 +153,7 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
+			sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -157,7 +166,7 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
 			id := strings.TrimSpace(args[0])
-			changed, err := packartifact.ImportEmbeddedPack(contractsRoot, id, embedded)
+			changed, err := packartifact.ImportEmbeddedPack(sourceRoot, id, embedded)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -177,7 +186,6 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 }
 
 func bindPackSourceFlags(cmd *cobra.Command, opts *packCommandOptions) {
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to the project contracts root")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
 }
 
@@ -201,25 +209,11 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(paths.ContractsPath) == "" {
-		inventory, err := packartifact.NewEffectivePackInventory(base, nil)
-		if err != nil {
-			return nil, err
-		}
-		platformSpec, err := loadChannelPlatformSpecDocument(paths.PlatformSpecPath)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := packadmission.Admit(inventory, platformSpec); err != nil {
-			return nil, err
-		}
-		return inventory, nil
-	}
-	contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
+	sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, sourceRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -228,9 +222,9 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 	return bundle.PackInventory, nil
 }
 
-func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigLoadResult) (CLIContractPlatformSpecPaths, error) {
-	return resolveCLIContractPlatformSpecPathsFromConfig(opts.repoRoot, CLIContractPlatformSpecPathOptions{
-		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath,
+func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigLoadResult) (CLISourcePlatformSpecPaths, error) {
+	return resolveCLISourcePlatformSpecPathsFromConfig(opts.repoRoot, CLISourcePlatformSpecPathOptions{
+		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath,
 	}, cfgResult.cli)
 }
 

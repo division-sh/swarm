@@ -47,7 +47,7 @@ func receiptTestEvent(id string) events.Event {
 	return eventtest.RunCreatingRootIngress(id, events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 }
 
-func (*recordingReceiptBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*recordingReceiptBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 
@@ -208,17 +208,17 @@ func managerDrainedCompletionFrame(ctx context.Context, event events.Event, surf
 	if err != nil {
 		return agentframe.Frame{}, err
 	}
-	bundle, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	bundle, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return agentframe.Frame{}, errors.New("manager drain frame requires bundle source")
 	}
-	bundleHash, bundleSource := bundle.StorageValues()
+	bundleHash := bundle.BundleHash()
 	return agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: surface.ActorIdentity, Role: "manager-drain", FlowID: surface.ActorIdentity.FlowInstance(),
 		Intent: intent, ProviderPrompt: prompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+		BundleHash: bundleHash, Surface: surface,
 	})
 }
 
@@ -288,7 +288,7 @@ type partialOutputRetryBus struct {
 	succeeded  []string
 }
 
-func (*partialOutputRetryBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*partialOutputRetryBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 

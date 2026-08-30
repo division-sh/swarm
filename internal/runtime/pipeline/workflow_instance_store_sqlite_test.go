@@ -218,9 +218,7 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunne
 		}) {
 			return errors.New("queue pipeline post-commit action")
 		}
-		source, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-			"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		)
+		source, err := runtimecorrelation.NewSourceArtifactFact(pipelineTestBundleHash)
 		if err != nil {
 			return err
 		}
@@ -381,18 +379,18 @@ func (r *recordingRuntimeMutationRunner) RequireActiveRun(ctx context.Context, r
 	return m.RequireActiveRun(ctx, runID)
 }
 
-func (r *recordingRuntimeMutationRunner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (r *recordingRuntimeMutationRunner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	m, err := r.lifecycleMutation(ctx)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return m.RequirePresentRunSource(ctx, runID)
 }
 
-func (r *recordingRuntimeMutationRunner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (r *recordingRuntimeMutationRunner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	m, err := r.lifecycleMutation(ctx)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return m.RequireActiveRunSource(ctx, runID)
 }
@@ -521,11 +519,17 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{
+		`CREATE TABLE source_artifacts (
+			bundle_hash TEXT PRIMARY KEY,
+			source_blob BLOB NOT NULL,
+			member_count INTEGER NOT NULL,
+			total_bytes INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE runs (
 				run_id TEXT PRIMARY KEY,
 				status TEXT,
 				bundle_hash TEXT,
-				bundle_source TEXT,
 				origin_kind TEXT NOT NULL,
 				trigger_event_id TEXT,
 				trigger_event_type TEXT,
@@ -718,7 +722,6 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			connect_execution_claim TEXT NOT NULL,
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
-			authority_bundle_source TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,
 			execution_authority_generation INTEGER NOT NULL,
 			selected_execution_id TEXT,
@@ -744,10 +747,11 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
 			selection_context TEXT NOT NULL CHECK (selection_context IN ('none', 'handler_rules', 'handler_on_complete', 'join_on_complete', 'join_timeout')),
 			disposition TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'evaluation_failed', 'not_applicable')),
-			package_coordinate TEXT,
-			element_id TEXT,
+			flow_path TEXT,
+			declaration_family TEXT,
+			semantic_path TEXT,
 			display_label TEXT NOT NULL DEFAULT '',
-			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
+			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(flow_path, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(declaration_family, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(semantic_path, '')), '') IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(flow_path, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(declaration_family, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(semantic_path, '')), '') IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL AND display_label = ''))
 		)`,
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL,
@@ -871,8 +875,9 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE fan_out_intents (
 			run_id TEXT NOT NULL,
 			triggering_delivery_id TEXT NOT NULL,
-			package_key TEXT NOT NULL,
-			element_id TEXT NOT NULL,
+			flow_path TEXT NOT NULL,
+			declaration_family TEXT NOT NULL,
+			semantic_path TEXT NOT NULL,
 			bundle_hash TEXT NOT NULL,
 			semantic_digest TEXT NOT NULL,
 			source_kind TEXT NOT NULL,
@@ -881,7 +886,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			source_entity_id TEXT,
 			source_field TEXT,
 			source_mutation_id TEXT,
-			source_resource_package_key TEXT,
+			source_resource_flow_path TEXT,
 			source_resource_event_name TEXT,
 			source_resource_version_id TEXT,
 			cardinality INTEGER NOT NULL,
@@ -897,20 +902,22 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			blocked_reason TEXT,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id)
+			PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path)
 		)`,
 		`CREATE TABLE fan_out_outcomes (
 			run_id TEXT NOT NULL,
 			triggering_delivery_id TEXT NOT NULL,
-			package_key TEXT NOT NULL,
-			element_id TEXT NOT NULL,
+			flow_path TEXT NOT NULL,
+			declaration_family TEXT NOT NULL,
+			semantic_path TEXT NOT NULL,
 			ordinal INTEGER NOT NULL,
 			outcome_kind TEXT NOT NULL,
 			event_id TEXT,
 			source_event_id TEXT,
+			inherited_disposition TEXT,
 			failure TEXT,
 			created_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id, ordinal)
+			PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal)
 		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {

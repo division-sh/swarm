@@ -2168,11 +2168,17 @@ func seedActivityRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{
+		`CREATE TABLE source_artifacts (
+			bundle_hash TEXT PRIMARY KEY,
+			source_blob BLOB NOT NULL,
+			member_count INTEGER NOT NULL,
+			total_bytes INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE runs (
 			run_id TEXT PRIMARY KEY,
 			status TEXT NOT NULL DEFAULT 'running',
 			bundle_hash TEXT NOT NULL,
-			bundle_source TEXT NOT NULL,
 			origin_kind TEXT NOT NULL,
 			trigger_event_id TEXT,
 			trigger_event_type TEXT,

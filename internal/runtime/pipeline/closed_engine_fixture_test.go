@@ -234,19 +234,24 @@ func commitPipelineTestFanOutIntent(ctx context.Context, tx *sql.Tx, dialect wor
 		status = "closed"
 	}
 	args := []any{
-		request.Key.RunID, request.Key.TriggeringDeliveryID, request.Key.ElementRef.PackageKey, request.Key.ElementRef.ElementID,
+		request.Key.RunID, request.Key.TriggeringDeliveryID, request.Key.ElementRef.FlowPath, request.Key.ElementRef.Family, request.Key.ElementRef.SemanticPath,
 		request.PlanRef.BundleHash, request.PlanRef.SemanticDigest, string(request.Source.Kind), request.Source.EventID,
-		request.Source.Field, request.Cardinality, status, fanoutobligation.InitialChunkSize, string(capsule), createdAt.UTC(),
+		nil, nil, request.Source.Field, nil, nil, nil, nil,
+		request.Cardinality, status, fanoutobligation.InitialChunkSize, string(capsule), createdAt.UTC(),
 	}
 	insert := `INSERT INTO fan_out_intents (
-		run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,
-		source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
-	) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)`
+		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,
+		source_kind,source_event_id,source_run_id,source_entity_id,source_field,source_mutation_id,
+		source_resource_flow_path,source_resource_event_name,source_resource_version_id,
+		cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)`
 	if dialect == workflowStoreDialectPostgres {
 		insert = `INSERT INTO fan_out_intents (
-			run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,
-			source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11,$12,$13::jsonb,$14,$14)`
+			run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,
+			source_kind,source_event_id,source_run_id,source_entity_id,source_field,source_mutation_id,
+			source_resource_flow_path,source_resource_event_name,source_resource_version_id,
+			cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,0,$18,$19,$20::jsonb,$21,$21)`
 	} else {
 		args = append(args, createdAt.UTC())
 	}

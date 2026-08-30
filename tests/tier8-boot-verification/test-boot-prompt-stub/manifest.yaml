@@ -1,0 +1,6 @@
+name: test-boot-prompt-stub
+version: 1.0.0
+description: >
+  Boot verification warns when the resolved intent contains an open TODO marker.
+
+platform_version: ">=0.7.0 <0.8.0"

@@ -43,7 +43,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		const (
 			runID        = "9a000000-0000-0000-0000-000000000001"
 			entityID     = "9a000000-0000-0000-0000-000000000002"
-			flowInstance = "github-app-issue-comment-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -72,7 +72,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		const (
 			runID        = "9b000000-0000-0000-0000-000000000001"
 			entityID     = "9b000000-0000-0000-0000-000000000002"
-			flowInstance = "github-app-issue-comment-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -376,8 +376,9 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 			"inbound.github.issue_comment": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "github", Tool: "github.create_issue_comment"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment"}},
@@ -403,20 +404,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 			},
 		},
 	}))
-	importSource := slackManagedConnectorPackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "github", Tool: "github.create_issue_comment"}},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, githubAppIssueCommentPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, githubAppIssueCommentPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}

@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -12,32 +11,6 @@ type PrimaryEntityContract struct {
 	EntityType string
 	Contract   EntityContract
 	Types      TypeCatalogDocument
-}
-
-func ResolveEffectiveFlowMode(flowID, packageMode, schemaMode string) (string, error) {
-	flowID = strings.TrimSpace(flowID)
-	packageMode = strings.ToLower(strings.TrimSpace(packageMode))
-	schemaMode = strings.ToLower(strings.TrimSpace(schemaMode))
-	for _, declared := range []struct {
-		source string
-		mode   string
-	}{
-		{source: "package.yaml", mode: packageMode},
-		{source: "schema.yaml", mode: schemaMode},
-	} {
-		switch declared.mode {
-		case "", FlowModeStatic, FlowModeTemplate, FlowModeSingleton:
-		default:
-			return "", fmt.Errorf("INVALID-FLOW-MODE: flow %s %s mode %q is unsupported; use static, template, or singleton", defaultPrimaryEntityFlowLabel(flowID), declared.source, declared.mode)
-		}
-	}
-	if packageMode != "" && schemaMode != "" && packageMode != schemaMode {
-		return "", fmt.Errorf("INVALID-FLOW-MODE: flow %s package.yaml mode %q contradicts schema.yaml mode %q", defaultPrimaryEntityFlowLabel(flowID), packageMode, schemaMode)
-	}
-	if schemaMode != "" {
-		return schemaMode, nil
-	}
-	return packageMode, nil
 }
 
 func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (TemplateInstanceContract, error) {
@@ -384,31 +357,6 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
 	}
-	if legacyScope, ok := bundleLegacyEntitySchemaScope(bundle); ok {
-		return &LoadValidationError{Items: []error{
-			errString("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml (legacy scope: " + legacyScope + ")"),
-		}}
-	}
-	flowScopedTypesFiles, flowScopedEntityFiles := flowScopedContractFiles(bundle)
-	for _, pkg := range bundle.PackageTree {
-		if strings.TrimSpace(pkg.Key) == "." {
-			continue
-		}
-		if path := existingFile(filepath.Join(pkg.Paths.Dir, "types.yaml")); path != "" {
-			if _, ok := flowScopedTypesFiles[filepath.Clean(path)]; !ok {
-				return &LoadValidationError{Items: []error{
-					errString("RETIRED: package-scoped types.yaml is not supported; move declarations to bundle root or flow scope (" + path + ")"),
-				}}
-			}
-		}
-		if path := existingFile(filepath.Join(pkg.Paths.Dir, "entities.yaml")); path != "" {
-			if _, ok := flowScopedEntityFiles[filepath.Clean(path)]; !ok {
-				return &LoadValidationError{Items: []error{
-					errString("RETIRED: package-scoped entities.yaml is not supported; move declarations to bundle root or flow scope (" + path + ")"),
-				}}
-			}
-		}
-	}
 	for entityType, contract := range bundle.RootEntities {
 		if strings.TrimSpace(contract.Owner) != "" {
 			return &LoadValidationError{Items: []error{
@@ -434,25 +382,6 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 		}
 	}
 	return nil
-}
-
-func flowScopedContractFiles(bundle *WorkflowContractBundle) (map[string]struct{}, map[string]struct{}) {
-	typesFiles := map[string]struct{}{}
-	entityFiles := map[string]struct{}{}
-	if bundle == nil {
-		return typesFiles, entityFiles
-	}
-	for _, pkg := range bundle.PackageTree {
-		for _, flow := range pkg.Paths.Flows {
-			if path := strings.TrimSpace(flow.TypesFile); path != "" {
-				typesFiles[filepath.Clean(path)] = struct{}{}
-			}
-			if path := strings.TrimSpace(flow.EntitiesFile); path != "" {
-				entityFiles[filepath.Clean(path)] = struct{}{}
-			}
-		}
-	}
-	return typesFiles, entityFiles
 }
 
 func validateRootPrimaryEntityLoadBoundary(bundle *WorkflowContractBundle) error {
@@ -501,26 +430,6 @@ func sortedFlowSchemaIDs(schemas map[string]FlowSchemaDocument) []string {
 	}
 	sort.Strings(ids)
 	return ids
-}
-
-func bundleLegacyEntitySchemaScope(bundle *WorkflowContractBundle) (string, bool) {
-	if bundle == nil {
-		return "", false
-	}
-	for _, pkg := range bundle.PackageTree {
-		if pkg.Manifest.EntitySchema.Empty() {
-			continue
-		}
-		scope := strings.TrimSpace(pkg.Key)
-		if scope == "" {
-			scope = "."
-		}
-		return scope, true
-	}
-	if !bundle.Package.EntitySchema.Empty() {
-		return ".", true
-	}
-	return "", false
 }
 
 type errString string
@@ -580,7 +489,7 @@ func (b *WorkflowContractBundle) ResolveFlowPrimaryEntity(flowID string) (Primar
 	if b == nil {
 		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s primary entity is unavailable: bundle is nil", defaultPrimaryEntityFlowLabel(flowID))
 	}
-	if flowID == "" {
+	if flowID == "" || flowID == "." {
 		return b.ResolveRootPrimaryEntity()
 	}
 	schema, ok := b.FlowSchemas[flowID]
@@ -598,7 +507,7 @@ func (b *WorkflowContractBundle) ResolveRootPrimaryEntity() (PrimaryEntityContra
 	if b.RootSchema != nil {
 		entity = b.RootSchema.Entity
 	}
-	return resolvePrimaryEntityContract("", entity, b.RootEntities, b.RootTypeCatalog())
+	return resolvePrimaryEntityContract(".", entity, b.RootEntities, b.RootTypeCatalog())
 }
 
 func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityType string) (PrimaryEntityContract, error) {
@@ -606,9 +515,9 @@ func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityTyp
 	if err == nil {
 		return primary, nil
 	}
-	if strings.TrimSpace(flowID) == "" && strings.TrimSpace(entityType) == "default" && len(b.RootEntities) == 0 {
+	if strings.TrimSpace(flowID) == "." && strings.TrimSpace(entityType) == "default" && len(b.RootEntities) == 0 {
 		return PrimaryEntityContract{
-			FlowID:     "",
+			FlowID:     ".",
 			EntityType: "default",
 			Contract:   EntityContract{Fields: map[string]EntityFieldDecl{}},
 			Types:      b.RootTypeCatalog(),

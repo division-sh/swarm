@@ -29,9 +29,7 @@ type StandingIngressBinding struct {
 }
 
 type StandingTargetDeclaration struct {
-	PackageKey string
 	SourcePath string
-	FlowID     string
 	FlowPath   string
 	Alias      string
 	Ingress    []StandingIngressBinding
@@ -40,9 +38,7 @@ type StandingTargetDeclaration struct {
 type StandingTarget struct {
 	BundleHash          string
 	ServiceID           string
-	PackageKey          string
 	SourcePath          string
-	FlowID              string
 	FlowPath            string
 	Alias               string
 	Provider            string
@@ -59,8 +55,7 @@ type StandingTarget struct {
 type StandingActivation struct {
 	BundleHash          string
 	ServiceID           string
-	PackageKey          string
-	FlowID              string
+	FlowPath            string
 	RunID               string
 	Generation          int64
 	PublicationSequence int64
@@ -84,9 +79,7 @@ type standingTargetPlan struct {
 func (t StandingTarget) normalized() StandingTarget {
 	t.BundleHash = strings.TrimSpace(t.BundleHash)
 	t.ServiceID = strings.TrimSpace(t.ServiceID)
-	t.PackageKey = strings.TrimSpace(t.PackageKey)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
-	t.FlowID = strings.TrimSpace(t.FlowID)
 	t.FlowPath = strings.Trim(strings.TrimSpace(t.FlowPath), "/")
 	t.Alias = strings.Trim(strings.TrimSpace(t.Alias), "/")
 	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
@@ -128,95 +121,90 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 	}
 	declarations := make([]StandingTargetDeclaration, 0)
 	aliases := map[string]string{}
-	for _, pkg := range bundle.PackageTree {
-		for _, ref := range pkg.Manifest.Flows {
-			activation := strings.ToLower(strings.TrimSpace(ref.Activation))
-			flowID := strings.TrimSpace(ref.ID)
-			location := standingDeclarationLocation(pkg, flowID)
-			if activation != "" && activation != runtimecontracts.ProjectFlowActivationStanding {
-				return nil, fmt.Errorf("%s activation %q is unsupported; supported value: standing", location, ref.Activation)
+	for _, view := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.FlowPath)
+		activation := strings.ToLower(strings.TrimSpace(view.Schema.Activation))
+		location := strings.TrimSpace(view.Paths.SchemaFile)
+		if location == "" {
+			location = "schema.yaml"
+		}
+		if activation != "" && activation != runtimecontracts.FlowActivationStanding {
+			return nil, fmt.Errorf("%s activation %q is unsupported; supported value: standing", location, view.Schema.Activation)
+		}
+		if view.Schema.Ingress != nil && activation != runtimecontracts.FlowActivationStanding {
+			return nil, fmt.Errorf("%s ingress requires activation: standing", location)
+		}
+		if activation != runtimecontracts.FlowActivationStanding {
+			continue
+		}
+		if flowID == "" {
+			return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
+		}
+		if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
+			return nil, fmt.Errorf("%s standing singleton is invalid: %w", location, err)
+		}
+		decl := StandingTargetDeclaration{
+			SourcePath: location,
+			FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+		}
+		if flowID == "." {
+			decl.FlowPath = "."
+		}
+		if view.Schema.Ingress != nil {
+			alias := strings.TrimSpace(view.Schema.Ingress.Alias)
+			if alias == "" {
+				return nil, fmt.Errorf("%s standing ingress alias is required and is never derived from the flow path", location)
 			}
-			if ref.Ingress != nil && activation != runtimecontracts.ProjectFlowActivationStanding {
-				return nil, fmt.Errorf("%s ingress requires activation: standing", location)
+			alias, err := NormalizeStandingIngressAlias(alias)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", location, err)
 			}
-			if !ref.HasStandingActivation() {
-				continue
+			decl.Alias = alias
+			if len(view.Schema.Ingress.Providers) == 0 {
+				return nil, fmt.Errorf("%s ingress.providers must contain at least one provider binding", location)
 			}
-			if flowID == "" {
-				return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
-			}
-			if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
-				return nil, fmt.Errorf("%s standing singleton is invalid: %w", location, err)
-			}
-			decl := StandingTargetDeclaration{
-				PackageKey: strings.TrimSpace(pkg.Key),
-				SourcePath: strings.TrimSpace(pkg.Paths.PackageFile),
-				FlowID:     flowID,
-				FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
-				Alias:      flowID,
-			}
-			if decl.FlowPath == "" {
-				decl.FlowPath = flowID
-			}
-			if ref.Ingress != nil {
-				alias := strings.TrimSpace(ref.Ingress.Alias)
-				if alias == "" {
-					alias = flowID
+			seenProviders := map[string]struct{}{}
+			for _, binding := range view.Schema.Ingress.Providers {
+				provider := providertriggers.NormalizeProviderName(binding.Provider)
+				if provider == "" {
+					return nil, fmt.Errorf("%s ingress provider is required", location)
 				}
-				alias, err := NormalizeStandingIngressAlias(alias)
+				if _, exists := seenProviders[provider]; exists {
+					return nil, fmt.Errorf("%s declares duplicate ingress provider %q; remove one binding", location, provider)
+				}
+				seenProviders[provider] = struct{}{}
+				secret := strings.TrimSpace(binding.SigningSecret)
+				plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+					Alias: decl.Alias, Provider: provider, SigningSecret: secret,
+					Declaration: providerAdmissionDeclaration(binding.Admission),
+				})
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", location, err)
 				}
-				decl.Alias = alias
-				if len(ref.Ingress.Providers) == 0 {
-					return nil, fmt.Errorf("%s ingress.providers must contain at least one provider binding", location)
+				rawOutput, ok := plan.RawOutput()
+				if !ok {
+					return nil, fmt.Errorf("%s: ingress provider %q compiled no raw output", location, provider)
 				}
-				seenProviders := map[string]struct{}{}
-				for _, binding := range ref.Ingress.Providers {
-					provider := providertriggers.NormalizeProviderName(binding.Provider)
-					if provider == "" {
-						return nil, fmt.Errorf("%s ingress provider is required", location)
-					}
-					if _, exists := seenProviders[provider]; exists {
-						return nil, fmt.Errorf("%s declares duplicate ingress provider %q; remove one binding", location, provider)
-					}
-					seenProviders[provider] = struct{}{}
-					secret := strings.TrimSpace(binding.SigningSecret)
-					plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-						Alias: decl.Alias, Provider: provider, SigningSecret: secret,
-						Declaration: providerAdmissionDeclaration(binding.Admission),
-					})
-					if err != nil {
-						return nil, fmt.Errorf("%s: %w", location, err)
-					}
-					rawOutput, ok := plan.RawOutput()
-					if !ok {
-						return nil, fmt.Errorf("%s: ingress provider %q compiled no raw output", location, provider)
-					}
-					literal := strings.TrimSpace(rawOutput.EventName.Literal)
-					template := strings.TrimSpace(rawOutput.EventName.Template)
-					if err := validateStandingIngressRawPin(source, flowID, provider, rawOutput.EventName); err != nil {
-						return nil, fmt.Errorf("%s: %w", location, err)
-					}
-					decl.Ingress = append(decl.Ingress, StandingIngressBinding{
-						Provider: provider, SigningSecret: secret, RawEventLiteral: literal, RawEventTemplate: template, AdmissionPlan: plan,
-					})
+				literal := strings.TrimSpace(rawOutput.EventName.Literal)
+				template := strings.TrimSpace(rawOutput.EventName.Template)
+				if err := validateStandingIngressRawPin(source, flowID, provider, rawOutput.EventName); err != nil {
+					return nil, fmt.Errorf("%s: %w", location, err)
 				}
+				decl.Ingress = append(decl.Ingress, StandingIngressBinding{
+					Provider: provider, SigningSecret: secret, RawEventLiteral: literal, RawEventTemplate: template, AdmissionPlan: plan,
+				})
 			}
-			if len(decl.Ingress) > 0 {
-				if previous, exists := aliases[decl.Alias]; exists {
-					return nil, fmt.Errorf("duplicate standing ingress alias %q from %s and %s; rename one ingress alias", decl.Alias, previous, location)
-				}
-				aliases[decl.Alias] = location
-			}
-			declarations = append(declarations, decl)
 		}
+		if len(decl.Ingress) > 0 {
+			if previous, exists := aliases[decl.Alias]; exists {
+				return nil, fmt.Errorf("duplicate standing ingress alias %q from %s and %s; rename one ingress alias", decl.Alias, previous, location)
+			}
+			aliases[decl.Alias] = location
+		}
+		declarations = append(declarations, decl)
 	}
 	sort.Slice(declarations, func(i, j int) bool {
-		if declarations[i].PackageKey == declarations[j].PackageKey {
-			return declarations[i].FlowID < declarations[j].FlowID
-		}
-		return declarations[i].PackageKey < declarations[j].PackageKey
+		return declarations[i].FlowPath < declarations[j].FlowPath
 	})
 	return declarations, nil
 }
@@ -429,14 +417,6 @@ func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.
 	return packs.NormalizeSubjects(subjects)
 }
 
-func standingDeclarationLocation(pkg runtimecontracts.LoadedProjectPackage, flowID string) string {
-	path := strings.TrimSpace(pkg.Paths.PackageFile)
-	if path == "" {
-		path = "package.yaml"
-	}
-	return fmt.Sprintf("%s flows[%s]", path, firstNonEmpty(flowID, "<missing>"))
-}
-
 func validateStandingIngressRawPin(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {
 	literal := strings.TrimSpace(eventNames.Literal)
 	template := strings.TrimSpace(eventNames.Template)
@@ -529,7 +509,7 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 	if rt.Pipeline == nil || rt.Manager == nil {
 		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	source := rt.Options.WorkflowModule.SemanticSource()
 	selectedPlans := make([]standingTargetPlan, 0, len(plans))
 	mutations := make([]runtimepipeline.StandingTargetMutation, 0, len(plans))
@@ -543,18 +523,18 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
 			Candidate: runtimepipeline.StandingServiceCandidate{
-				ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
+				ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
 				InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact,
 			},
 			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				Instance:       instance,
-				InitialState:   source.FlowInitialStage(declaration.FlowID),
+				InitialState:   source.FlowInitialStage(declaration.FlowPath),
 				Config:         map[string]any{},
 				Bookkeeping: map[string]any{
-					"activation":  runtimecontracts.ProjectFlowActivationStanding,
+					"activation":  runtimecontracts.FlowActivationStanding,
 					"bundle_hash": fact.BundleHash(),
-					"package_key": declaration.PackageKey,
+					"flow_path":   declaration.FlowPath,
 				},
 				OccurredAt: observedAt,
 			},
@@ -578,8 +558,8 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 		reconciliation := result.Reconciliation
 		if !reconciliation.RestartDisposition.Executable() {
 			activations = append(activations, StandingActivation{
-				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
-				FlowID: declaration.FlowID, RunID: reconciliation.RunID, Generation: reconciliation.Generation,
+				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, FlowPath: declaration.FlowPath,
+				RunID: reconciliation.RunID, Generation: reconciliation.Generation,
 				PublicationSequence: reconciliation.PublicationSequence, InstanceID: instance.InstanceID,
 				FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
 				EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: false,
@@ -587,7 +567,7 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 			continue
 		}
 		activations = append(activations, StandingActivation{
-			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
+			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
 			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: result.PublicationSequence, InstanceID: instance.InstanceID,
 			FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
 			EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: result.Created,
@@ -607,7 +587,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	if rt == nil || rt.Pipeline == nil {
 		return nil
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	restored := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
 		runID := strings.TrimSpace(activation.RunID)
@@ -619,7 +599,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 		}
 		restored[runID] = struct{}{}
 		runCtx := runtimecorrelation.WithRunID(ctx, runID)
-		runCtx = runtimecorrelation.WithBundleSourceFact(runCtx, fact)
+		runCtx = runtimecorrelation.WithSourceArtifactFact(runCtx, fact)
 		if err := rt.Pipeline.RestoreWorkflowTimers(runCtx); err != nil {
 			return fmt.Errorf("restore adopted standing run %s workflow timers: %w", runID, err)
 		}
@@ -647,11 +627,11 @@ func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingSe
 	if err != nil {
 		return nil, err
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
 	for _, plan := range plans {
 		out = append(out, runtimepipeline.StandingServiceCandidate{
-			ServiceID: plan.serviceID, PackageKey: plan.declaration.PackageKey, FlowID: plan.declaration.FlowID,
+			ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
 			InstanceID: plan.instance.InstanceID, EntityID: plan.instance.EntityID, Source: fact,
 		})
 	}
@@ -670,21 +650,21 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	if len(declarations) == 0 {
 		return nil, nil
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	if err := fact.Validate(); err != nil {
 		return nil, fmt.Errorf("standing target bundle source fact: %w", err)
 	}
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
-		serviceID := runtimeflowidentity.StandingServiceID(declaration.PackageKey, declaration.FlowID)
+		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
 		generation := int64(1)
 		runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
-		instance := runtimeflowidentity.StandingForService(source, declaration.FlowID, serviceID)
+		instance := runtimeflowidentity.StandingForService(source, declaration.FlowPath, serviceID)
 		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, generation: generation, runID: runID, instance: instance}
 		for _, binding := range declaration.Ingress {
 			plan.targets = append(plan.targets, StandingTarget{
-				BundleHash: fact.BundleHash(), ServiceID: serviceID, PackageKey: declaration.PackageKey, SourcePath: declaration.SourcePath,
-				FlowID: declaration.FlowID, FlowPath: declaration.FlowPath, Alias: declaration.Alias,
+				BundleHash: fact.BundleHash(), ServiceID: serviceID, SourcePath: declaration.SourcePath,
+				FlowPath: declaration.FlowPath, Alias: declaration.Alias,
 				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
 				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,
 				EntityID: instance.EntityID, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,

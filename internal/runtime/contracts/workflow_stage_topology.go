@@ -18,6 +18,9 @@ func BuildWorkflowStageTopology(
 	gates ...[]WorkflowGatePlan,
 ) WorkflowStageTopology {
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		flowID = "."
+	}
 	initial = strings.TrimSpace(initial)
 	stageSet := normalizedStringSet(stages)
 	terminalSet := normalizedStringSet(terminal)
@@ -34,7 +37,7 @@ func BuildWorkflowStageTopology(
 		TerminalStages: sortedStringSet(terminalSet),
 	}
 	for _, transition := range transitions {
-		if transition.Node.FlowID() != flowID {
+		if transition.Node.FlowPath() != flowID {
 			continue
 		}
 		handlerStages := append([]string{}, nonTerminal...)

@@ -10,19 +10,28 @@ import (
 
 func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "fake-docker-state")
-	validCreate := validReleaseScaffoldCreateArgs(root)
+	releaseRoot := filepath.Dir(root)
+	admittedRoot := filepath.Join(releaseRoot, "contracts")
+	writeReleaseFile(t, filepath.Join(admittedRoot, "schema.yaml"), "stages: {}\n")
+	projectionRoot, err := os.MkdirTemp("", "swarm-source-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(projectionRoot) })
+	copyReleaseTree(t, admittedRoot, projectionRoot)
+	validCreate := validReleaseScaffoldCreateArgs(projectionRoot)
 	if err := validateReleaseDockerCommand(root, validCreate); err != nil {
 		t.Fatalf("valid fixture create rejected: %v", err)
 	}
-	validAdmissionAgent := validReleaseAgentCreateArgs(root, false)
+	validAdmissionAgent := validReleaseAgentCreateArgs(projectionRoot, false)
 	if err := validateReleaseDockerCommand(root, validAdmissionAgent); err != nil {
 		t.Fatalf("valid run-independent agent create rejected: %v", err)
 	}
-	validExecutionAgent := validReleaseAgentCreateArgs(root, true)
+	validExecutionAgent := validReleaseAgentCreateArgs(projectionRoot, true)
 	if err := validateReleaseDockerCommand(root, validExecutionAgent); err != nil {
 		t.Fatalf("valid run-bound agent create rejected: %v", err)
 	}
-	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-scaffold"}); err != nil {
+	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-" + releaseE2EFixtureScope + "-scaffold"}); err != nil {
 		t.Fatalf("runtime identity label inspection rejected: %v", err)
 	}
 	cases := map[string][]string{
@@ -31,6 +40,8 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 		"image name":       {"image", "inspect", "wrong-image"},
 		"preflight shape":  {"run", "definitely-not-a-valid-preflight"},
 		"inspect target":   {"inspect", "--format", "{{.State.Running}}", "wrong-container"},
+		"unscoped target":  {"inspect", "--format", "{{.State.Running}}", "swarm-scaffold"},
+		"malformed scope":  {"inspect", "--format", "{{.State.Running}}", "swarm-bundle-not-hex-scaffold"},
 		"lifecycle target": {"start", "wrong-container"},
 		"removal target":   {"rm", "--force", "wrong-container"},
 		"inventory shape":  {"container", "ls"},
@@ -64,6 +75,13 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 			t.Fatal("wrong create identity was accepted")
 		}
 	})
+	t.Run("create bundle scope mismatch", func(t *testing.T) {
+		args := append([]string(nil), validCreate...)
+		replaceReleaseArgValuePrefix(args, "--label", "dev.swarm.bundle_hash=", "dev.swarm.bundle_hash=bundle-v2:sha256:"+strings.Repeat("b", 64))
+		if err := validateReleaseDockerCommand(root, args); err == nil {
+			t.Fatal("create name and bundle hash with different scopes were accepted")
+		}
+	})
 	for name, mutate := range map[string]func([]string) []string{
 		"missing data mount": func(args []string) []string {
 			return removeReleaseCreateMount(args, "/data")
@@ -93,9 +111,8 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 		})
 	}
 
-	releaseRoot := filepath.Dir(root)
 	projectMounts := map[string]string{
-		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
+		"/opt/swarm/source": projectionRoot,
 	}
 	for target, source := range projectMounts {
 		t.Run("missing "+target, func(t *testing.T) {
@@ -162,7 +179,7 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 		},
 		"wrong container": func(args []string) []string {
 			for index, arg := range args {
-				if arg == releaseE2EAgentContainer {
+				if arg == releaseE2EFixtureAgent {
 					args[index] = "totally-wrong-container"
 					break
 				}
@@ -311,7 +328,7 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 		"-e", "SWARM_TOOL_GATEWAY_URL=" + releaseE2ERawMCPURL,
 		"-e", "CLAUDE_CODE_OAUTH_TOKEN=" + releaseE2EOAuthToken,
 		"-w", releaseE2EAgentWorkdir,
-		releaseE2EAgentContainer, "claude",
+		releaseE2EFixtureAgent, "claude",
 		"-p",
 		"--session-id", "11111111-1111-1111-1111-111111111111",
 		"--output-format", "stream-json",
@@ -326,40 +343,41 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 	}
 }
 
-func validReleaseScaffoldCreateArgs(root string) []string {
-	releaseRoot := filepath.Dir(filepath.Clean(root))
+func validReleaseScaffoldCreateArgs(sourceProjection string) []string {
+	name := "swarm-" + releaseE2EFixtureScope + "-scaffold"
 	return []string{
 		"create",
-		"--name", "swarm-scaffold",
+		"--name", name,
 		"--network", releaseE2ENetwork,
-		"--label", "dev.swarm.bundle_hash=bundle-v1:sha256:" + strings.Repeat("a", 64),
+		"--label", "dev.swarm.bundle_hash=bundle-v2:sha256:" + strings.Repeat("a", 64),
 		"--label", "dev.swarm.container.kind=scaffold",
-		"--label", "dev.swarm.container.name=swarm-scaffold",
+		"--label", "dev.swarm.container.name=" + name,
 		"--label", "dev.swarm.creation_source=workspace.EnsureSystemWorkspaces",
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=false",
 		"--label", "dev.swarm.workspace.scope=scaffold",
-		"-v", filepath.Join(releaseRoot, "contracts") + ":/opt/swarm/contracts:ro",
-		"-v", "scaffold:/opt/swarm/scaffold",
+		"-v", sourceProjection + ":/opt/swarm/source:ro",
+		"-v", name + ":/opt/swarm/scaffold",
 		"-w", "/opt/swarm/scaffold",
 		releaseE2EWorkspaceImage, "sleep", "infinity",
 	}
 }
 
-func validReleaseAgentCreateArgs(root string, runBound bool) []string {
+func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []string {
 	args := []string{
 		"create",
-		"--name", releaseE2EAgentContainer,
+		"--name", releaseE2EFixtureAgent,
 		"--network", releaseE2ENetwork,
+		"--label", "dev.swarm.bundle_hash=bundle-v2:sha256:" + strings.Repeat("a", 64),
 		"--label", "dev.swarm.agent_flow_instance_id=worker",
 		"--label", "dev.swarm.agent_flow_instance_path=worker",
 		"--label", "dev.swarm.agent_flow_scope_key=worker",
 		"--label", "dev.swarm.agent_id=release-worker",
-		"--label", "dev.swarm.agent_name_owner=claude-cli-release-lifecycle://flows/worker/release-worker",
+		"--label", "dev.swarm.agent_name_owner=swarm://worker/release-worker",
 		"--label", "dev.swarm.agent_name_source=declared",
 		"--label", "dev.swarm.agent_route_presence=present",
 		"--label", "dev.swarm.container.kind=agent",
-		"--label", "dev.swarm.container.name=" + releaseE2EAgentContainer,
+		"--label", "dev.swarm.container.name=" + releaseE2EFixtureAgent,
 		"--label", "dev.swarm.creation_source=workspace.ResolveWorkspace",
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=true",
@@ -373,13 +391,13 @@ func validReleaseAgentCreateArgs(root string, runBound bool) []string {
 		)
 	}
 	args = append(args,
-		"-v", filepath.Join(filepath.Dir(filepath.Clean(root)), "contracts")+":/opt/swarm/contracts:ro",
+		"-v", sourceProjection+":/opt/swarm/source:ro",
 	)
 	if runBound {
 		args = append(args, "-v", filepath.Join(os.TempDir(), "swarm", "data-projections", "a_"+strings.Repeat("b", 64))+":/data:ro")
 	}
 	return append(args,
-		"-v", releaseE2EAgentVolume+":"+releaseE2EAgentWorkdir,
+		"-v", releaseE2EFixtureAgentVol+":"+releaseE2EAgentWorkdir,
 		"-w", releaseE2EAgentWorkdir,
 		releaseE2EWorkspaceImage, "sleep", "infinity",
 	)

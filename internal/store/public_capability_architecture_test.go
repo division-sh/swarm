@@ -37,8 +37,8 @@ func TestAPIMethodsDeclareExactCapabilities(t *testing.T) {
 	capabilities := readArchitectureFile(t, root, "internal/apiv1/operator_capabilities.go")
 	for _, family := range []string{
 		"RunReadHandlerOptions", "EntityHandlerOptions", "AgentConversationHandlerOptions",
-		"ObservabilityHandlerOptions", "BundleCatalogHandlerOptions", "BundleDeleteHandlerOptions",
-		"RuntimeNukeHandlerOptions", "EventPublicationOptions", "SubscriptionOptions",
+		"ObservabilityHandlerOptions", "RuntimeNukeHandlerOptions", "EventPublicationOptions",
+		"SubscriptionOptions",
 	} {
 		if !strings.Contains(capabilities, "type "+family+" struct") {
 			t.Errorf("exact API capability family %s is missing", family)
@@ -139,7 +139,6 @@ func TestDigestHasNoProductionPersistenceSurface(t *testing.T) {
 func TestAdministrativeLeasesAreOperationSpecific(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	for _, dir := range []string{
-		"internal/runtime/bundledelete",
 		"internal/runtime/destructivereset",
 		"internal/store/internal/adminpersistence",
 	} {
@@ -155,7 +154,7 @@ func TestAdministrativeLeasesAreOperationSpecific(t *testing.T) {
 		})
 	}
 	locks := readArchitectureFile(t, root, "internal/store/internal/adminpersistence/destructive_reset_lock.go")
-	for _, operation := range []string{"AcquireBundleDelete", "AcquireDestructiveReset"} {
+	for _, operation := range []string{"AcquireDestructiveReset"} {
 		if !strings.Contains(locks, operation) {
 			t.Errorf("operation-specific lease %s is missing", operation)
 		}

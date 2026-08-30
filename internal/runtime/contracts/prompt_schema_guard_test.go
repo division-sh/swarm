@@ -37,7 +37,7 @@ func TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution(t *testing.T) {
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 schema-ref-agent:
   role: schema_ref
-  intent: intent/shared-schema-prompt.md
+  intent: prompts/shared-schema-prompt.md
   emit_events:
     - schema.prompt.created
 `, "\n"))...)
@@ -54,7 +54,7 @@ schema.prompt.created:
 When you call emit_schema_prompt_created with:
 - item_id: the created item id
 `)
-	if err := os.WriteFile(filepath.Join(root, "intent", "shared-schema-prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "prompts", "shared-schema-prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write shared schema prompt: %v", err)
 	}
 
@@ -89,24 +89,32 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		EmitEvents:     []string{"review.completed"},
 	}
 	flowAgent := AgentRegistryEntry{
-		ResolvedIntent: resolve("flows/review/agents.yaml#agents.reviewer.intent", "Flow reviewer intent."),
+		ResolvedIntent: resolve("review/agents.yaml#agents.reviewer.intent", "Flow reviewer intent."),
 		EmitEvents:     []string{"review.completed"},
 	}
 	events := map[string]EventCatalogEntry{
 		"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
 	}
 	flow := FlowContractView{
-		Paths:  FlowContractPaths{ID: "review", Flow: "review"},
+		Paths:  FlowContractPaths{FlowPath: "review"},
 		Path:   "review",
 		Agents: map[string]AgentRegistryEntry{"reviewer": flowAgent},
 		Events: events,
 	}
+	root := &FlowContractView{
+		Paths:    FlowContractPaths{FlowPath: ".", AgentsFile: "agents.yaml"},
+		Path:     ".",
+		Agents:   map[string]AgentRegistryEntry{"reviewer": rootAgent},
+		Events:   events,
+		Children: []FlowContractView{flow},
+	}
 	bundle := &WorkflowContractBundle{
 		Events: events,
-		projectContracts: map[string]ProjectContractView{
-			".": {Paths: ProjectPackagePaths{Key: "."}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}, Events: events},
+		FlowTree: flowmodel.Tree[FlowContractView]{
+			Root:   root,
+			ByPath: map[string]*FlowContractView{".": root, "review": &root.Children[0]},
+			ByID:   map[string]*FlowContractView{".": root, "review": &root.Children[0]},
 		},
-		FlowTree: flowmodel.Tree[FlowContractView]{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
 	}
 
 	cases := DerivePromptSchemaGuards(bundle)
@@ -147,7 +155,7 @@ func writePromptTestBundle(t *testing.T, repoRoot string) string {
 ops-lead:
   id: ops-lead
   role: ops_lead
-  intent: intent/ops-lead.md
+  intent: prompts/ops-lead.md
   manager_fallback: control-plane
   emit_events:
     - item.created
@@ -156,7 +164,7 @@ ops-lead:
 		t.Fatalf("write %s: %v", agentsPath, err)
 	}
 
-	intentDir := filepath.Join(dstRoot, "intent")
+	intentDir := filepath.Join(dstRoot, "prompts")
 	if err := os.MkdirAll(intentDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", intentDir, err)
 	}

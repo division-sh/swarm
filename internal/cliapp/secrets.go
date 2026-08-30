@@ -20,18 +20,13 @@ import (
 )
 
 type secretsListOptions struct {
-	contractsPath    string
-	platformSpecPath string
-	asJSON           bool
-	missing          bool
-	present          bool
-	source           string
+	asJSON  bool
+	present bool
+	source  string
 }
 
 type secretsCheckOptions struct {
-	contractsPath    string
-	platformSpecPath string
-	asJSON           bool
+	asJSON bool
 }
 
 type secretRecord struct {
@@ -126,9 +121,6 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "List local secret metadata without values.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.missing && opts.present {
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--missing and --present are mutually exclusive"))
-			}
 			opts.source = strings.TrimSpace(opts.source)
 			if opts.source != "" && opts.source != runtimecredentials.SourceEnv && opts.source != runtimecredentials.SourceFile {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--source must be env or file"))
@@ -137,11 +129,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
-			source, err := loadSecretsSource(cmd, repo, opts.contractsPath, opts.platformSpecPath, opts.missing)
-			if err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
-			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
+			providerRequirements, err := loadSecretsProviderRequirements(repo)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -149,7 +137,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure provider credential store: %w", err))
 			}
-			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, source, providerRequirements)
+			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, nil, providerRequirements)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -162,10 +150,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root for required_by metadata")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
-	cmd.Flags().BoolVar(&opts.missing, "missing", false, "Show required secrets that are missing")
 	cmd.Flags().BoolVar(&opts.present, "present", false, "Show present secrets")
 	cmd.Flags().StringVar(&opts.source, "source", "", "Filter present secrets by effective source: env or file")
 	return cmd
@@ -182,11 +167,7 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
-			source, err := loadSecretsSource(cmd, repo, opts.contractsPath, opts.platformSpecPath, true)
-			if err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
-			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
+			providerRequirements, err := loadSecretsProviderRequirements(repo)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -194,7 +175,7 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure provider credential store: %w", err))
 			}
-			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, source, providerRequirements)
+			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, nil, providerRequirements)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -206,7 +187,7 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 					return err
 				}
 			} else if result.OK {
-				fmt.Fprintln(cmd.OutOrStdout(), "all required secrets present")
+				fmt.Fprintln(cmd.OutOrStdout(), "all configured secret requirements present")
 			} else {
 				fmt.Fprintln(cmd.OutOrStdout(), "missing required secrets:")
 				writeSecretsTable(cmd.OutOrStdout(), records)
@@ -217,8 +198,6 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
 	return cmd
 }
@@ -311,38 +290,8 @@ func trimSecretInputTerminator(value string) string {
 	return value
 }
 
-func loadSecretsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath string, required bool) (semanticview.Source, error) {
-	configPath, _, configErr := effectiveCommandConfigPath(cmd, "", false)
-	if configErr != nil {
-		return nil, configErr
-	}
-	source, err := loadSecretsSourceRequired(repo, contractsPath, platformSpecPath, configPath)
-	if err == nil {
-		return source, nil
-	}
-	if required || cmd.Flags().Changed("contracts") || cmd.Flags().Changed("platform-spec") {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func loadSecretsSourceRequired(repo, contractsPath, platformSpecPath, configPath string) (semanticview.Source, error) {
-	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath:    contractsPath,
-		PlatformSpecPath: platformSpecPath,
-		ConfigPath:       configPath,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("load Swarm contracts: %w", err)
-	}
-	return semanticview.Wrap(bundle), nil
-}
-
-func loadSecretsProviderRequirements(repo string, source semanticview.Source) (map[string][]runtimecredentials.Requirement, error) {
+func loadSecretsProviderRequirements(repo string) (map[string][]runtimecredentials.Requirement, error) {
 	requirements := map[string][]runtimecredentials.Requirement{}
-	if !sourceDeclaresAgents(source) {
-		return requirements, nil
-	}
 	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
 		return nil, fmt.Errorf("load runtime config for provider secret requirements: %w", err)
@@ -480,9 +429,6 @@ func secretRecordFromDescriptor(desc runtimecredentials.Descriptor) secretRecord
 func filterSecretRecords(records []secretRecord, opts secretsListOptions) []secretRecord {
 	out := make([]secretRecord, 0, len(records))
 	for _, record := range records {
-		if opts.missing && (record.Present || len(record.RequiredBy) == 0) {
-			continue
-		}
 		if opts.present && !record.Present {
 			continue
 		}

@@ -10,40 +10,22 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
 type ContractPaths struct {
-	ContractsRoot         string
-	WorkflowDir           string
-	RootSchemaFile        string
-	RootTypesFile         string
-	RootEntitiesFile      string
-	ProjectPackageFile    string
-	ProjectPackages       []ProjectPackagePaths
-	ProjectNodesFile      string
-	ProjectEventsFile     string
-	ProjectAgentsFile     string
-	ProjectToolsFile      string
-	ProjectPolicyFile     string
-	PlatformSpecFile      string
-	VerificationGatesFile string
-	ToolingLockFile       string
-	DDLFile               string
-	AgentConfigMapFile    string
-	Flows                 []FlowContractPaths
+	PlatformSpecFile string
 }
 type WorkflowContractBundle struct {
+	SourceArtifact        *sourceartifact.AdmittedSourceArtifact
+	FlowSources           map[string]FlowSource
 	Paths                 ContractPaths
-	Package               ProjectPackageDocument
-	PackageTree           []LoadedProjectPackage
-	projectContracts      map[string]ProjectContractView
 	flowTypes             map[string]TypeCatalogDocument
 	flowEntities          map[string]EntityContractsDocument
 	eventOwnership        []eventSchemaOwnershipRow
@@ -85,8 +67,6 @@ type WorkflowContractBundle struct {
 	PackInventory         *packartifact.EffectivePackInventory
 	PackAdmission         PackAdmissionProjection
 	ProjectPacks          packartifact.ProjectPackSet
-	PackSelectionPath     string
-	PackSelectionBody     []byte
 	fanOutPlansBySite     map[FanOutSiteRef]FanOutCompiledPlan
 	fanOutPlansByElement  map[FanOutElementRef]FanOutCompiledPlan
 	fanOutPlanFailures    []FanOutPlanFailure
@@ -118,7 +98,7 @@ type WorkflowSemanticView struct {
 	flowOutputEventPins    map[string][]CompiledFlowOutputPin
 	flowReads              map[string]CompiledFlowEntityPermissions
 	flowWrites             map[string]CompiledFlowEntityPermissions
-	CompositionConnects    []FlowPackageConnect
+	CompositionConnects    []FlowConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	RootAgentFacts         []RequiredAgentFact
 	FlowAgentFacts         map[string][]RequiredAgentFact
@@ -336,26 +316,25 @@ type HandlerTransitionSemantic struct {
 	Clear                *ClearSpec
 }
 type HandlerRuleEntry struct {
-	ElementID        contractelementidentity.ContractElementID `yaml:"element_id"`
-	ID               string                                    `yaml:"id"`
-	Description      string                                    `yaml:"description"`
-	Condition        string                                    `yaml:"condition"`
-	PolicyRow        PolicySheetRowMetadata                    `yaml:"-"`
-	AdvancesTo       string                                    `yaml:"advances_to"`
-	Emit             EmitSpec                                  `yaml:"emit"`
-	Action           ActionSpec                                `yaml:"action"`
-	Activity         ActivitySpec                              `yaml:"activity"`
-	DataAccumulation WorkflowDataAccumulation                  `yaml:"data_accumulation"`
-	Compute          *ComputeSpec                              `yaml:"compute"`
-	FanOut           *FanOutSpec                               `yaml:"fan_out"`
-	elementRef       contractelementidentity.ContractElementRef
-	authored         bool
+	ID                  string                   `yaml:"id"`
+	Description         string                   `yaml:"description"`
+	Condition           string                   `yaml:"condition"`
+	PolicyRow           PolicySheetRowMetadata   `yaml:"-"`
+	AdvancesTo          string                   `yaml:"advances_to"`
+	Emit                EmitSpec                 `yaml:"emit"`
+	Action              ActionSpec               `yaml:"action"`
+	Activity            ActivitySpec             `yaml:"activity"`
+	DataAccumulation    WorkflowDataAccumulation `yaml:"data_accumulation"`
+	Compute             *ComputeSpec             `yaml:"compute"`
+	FanOut              *FanOutSpec              `yaml:"fan_out"`
+	declarationIdentity runtimeidentity.DeclarationIdentity
+	authored            bool
 }
 
 func (r HandlerRuleEntry) Authored() bool { return r.authored }
 
-func (r HandlerRuleEntry) ContractElementRef() (contractelementidentity.ContractElementRef, bool) {
-	return r.elementRef, r.authored && r.elementRef.Valid()
+func (r HandlerRuleEntry) DeclarationIdentity() (runtimeidentity.DeclarationIdentity, bool) {
+	return r.declarationIdentity, r.authored && r.declarationIdentity.Valid()
 }
 
 type WorkflowJoinPlan struct {
@@ -698,19 +677,18 @@ const (
 )
 
 type FanOutSpec struct {
-	ElementID   contractelementidentity.ContractElementID `yaml:"element_id"`
-	ItemsFrom   string                                    `yaml:"items_from"`
-	ItemsPath   paths.Path                                `yaml:"-"`
-	As          string                                    `yaml:"as"`
-	Identity    string                                    `yaml:"identity"`
-	MaxItems    int                                       `yaml:"max_items"`
-	MaxItemsSet bool                                      `yaml:"-"`
-	Emit        EmitSpec                                  `yaml:"emit"`
-	elementRef  contractelementidentity.ContractElementRef
+	ItemsFrom           string     `yaml:"items_from"`
+	ItemsPath           paths.Path `yaml:"-"`
+	As                  string     `yaml:"as"`
+	Identity            string     `yaml:"identity"`
+	MaxItems            int        `yaml:"max_items"`
+	MaxItemsSet         bool       `yaml:"-"`
+	Emit                EmitSpec   `yaml:"emit"`
+	declarationIdentity runtimeidentity.DeclarationIdentity
 }
 
-func (f FanOutSpec) ContractElementRef() (contractelementidentity.ContractElementRef, bool) {
-	return f.elementRef, f.elementRef.Valid()
+func (f FanOutSpec) DeclarationIdentity() (runtimeidentity.DeclarationIdentity, bool) {
+	return f.declarationIdentity, f.declarationIdentity.Valid()
 }
 
 func EffectiveFanOutMaxItems(spec FanOutSpec) int {
@@ -1161,30 +1139,8 @@ type ManagedCredentialRef struct {
 	TokenRequest        managedcredentialmodel.TokenRequestProfile `yaml:"token_request,omitempty"`
 	InstallationIDInput string                                     `yaml:"installation_id_input,omitempty"`
 }
-type ProjectPackagePaths struct {
-	Key               string
-	ParentKey         string
-	OwningFlowID      string
-	Depth             int
-	Dir               string
-	PackageFile       string
-	ProjectNodesFile  string
-	ProjectEventsFile string
-	ProjectAgentsFile string
-	ProjectToolsFile  string
-	ProjectPolicyFile string
-	DataFile          string
-	Flows             []FlowContractPaths
-}
 type FlowContractPaths struct {
-	ID           string
-	Flow         string
-	Mode         string
-	Namespace    string
-	PackageKey   string
-	PackageDir   string
-	Dir          string
-	DataDir      string
+	FlowPath     string
 	SchemaFile   string
 	TypesFile    string
 	EntitiesFile string
@@ -1194,26 +1150,6 @@ type FlowContractPaths struct {
 	ToolsFile    string
 	PolicyFile   string
 }
-type ProjectPackageDocument struct {
-	Name                  string                      `yaml:"name"`
-	Version               string                      `yaml:"version"`
-	PlatformVersion       string                      `yaml:"platform_version"`
-	Author                string                      `yaml:"author"`
-	Description           string                      `yaml:"description"`
-	Keywords              []string                    `yaml:"keywords"`
-	License               string                      `yaml:"license"`
-	Repository            string                      `yaml:"repository"`
-	Extra                 map[string]string           `yaml:"extra"`
-	Requires              FlowPackageRequires         `yaml:"requires"`
-	Flows                 []ProjectFlowRef            `yaml:"flows"`
-	Packages              []ProjectPackageRef         `yaml:"packages"`
-	Connect               []FlowPackageConnect        `yaml:"connect"`
-	ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
-	ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
-	Handoffs              []ProjectHandoff            `yaml:"handoffs"`
-	EntitySchema          EntitySchema                `yaml:"entity_schema"`
-}
-
 type ConnectorPackImports struct {
 	Imports []ConnectorPackImport `yaml:"imports"`
 }
@@ -1298,27 +1234,6 @@ type EntityFieldDecl struct {
 	UnusedReason       string            `yaml:"_unused_reason"`
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
-type ProjectPackageRef struct {
-	ID   string          `yaml:"id"`
-	Path string          `yaml:"path"`
-	Bind FlowPackageBind `yaml:"bind"`
-}
-type ProjectFlowRef struct {
-	ID         string              `yaml:"id"`
-	Flow       string              `yaml:"flow"`
-	Namespace  string              `yaml:"namespace"`
-	Mode       string              `yaml:"mode"`
-	Activation string              `yaml:"activation"`
-	Ingress    *ProjectFlowIngress `yaml:"ingress"`
-	Bind       FlowPackageBind     `yaml:"bind"`
-}
-
-const ProjectFlowActivationStanding = "standing"
-
-func (r ProjectFlowRef) HasStandingActivation() bool {
-	return strings.EqualFold(strings.TrimSpace(r.Activation), ProjectFlowActivationStanding)
-}
-
 type ProjectFlowIngress struct {
 	Alias     string                       `yaml:"alias"`
 	Providers []ProjectFlowIngressProvider `yaml:"providers"`
@@ -1356,45 +1271,6 @@ type ProjectFlowIngressDeliveryID struct {
 	Header   string `yaml:"header"`
 	JSONPath string `yaml:"json_path"`
 }
-type FlowPackageRequires struct {
-	Inputs          []string               `yaml:"inputs"`
-	Outputs         []string               `yaml:"outputs"`
-	Policy          []string               `yaml:"policy"`
-	PolicyDefaults  map[string]PolicyValue `yaml:"-"`
-	Credentials     []string               `yaml:"credentials"`
-	PlatformVersion string                 `yaml:"platform_version"`
-}
-type FlowPackageBind struct {
-	Inputs      map[string]string         `yaml:"inputs"`
-	Outputs     map[string]string         `yaml:"outputs"`
-	Policy      map[string]string         `yaml:"policy"`
-	Credentials map[string]string         `yaml:"credentials"`
-	Observe     []FlowPackageObserveGrant `yaml:"observe"`
-}
-type FlowPackageObserveGrant struct {
-	Source string   `yaml:"source"`
-	Events []string `yaml:"events"`
-}
-type ProjectHandoff struct {
-	Event       string `yaml:"event"`
-	CreatesFlow string `yaml:"creates_flow"`
-	Namespace   string `yaml:"namespace"`
-}
-type LoadedProjectPackage struct {
-	Key       string
-	ParentKey string
-	Depth     int
-	Paths     ProjectPackagePaths
-	Manifest  ProjectPackageDocument
-}
-type ProjectContractView = flowmodel.PackageView[
-	ProjectPackagePaths,
-	ProjectPackageDocument,
-	SystemNodeContract,
-	EventCatalogEntry,
-	AgentRegistryEntry,
-	ToolSchemaEntry,
-]
 type FlowContractView = flowmodel.View[
 	FlowContractPaths,
 	FlowSchemaDocument,
@@ -1405,10 +1281,9 @@ type FlowContractView = flowmodel.View[
 ]
 type FlowTree = flowmodel.Tree[FlowContractView]
 type ContractItemSource struct {
-	PackageKey string
-	FlowID     string
-	Layer      string
-	File       string
+	FlowPath string
+	Family   string
+	File     string
 }
 
 // ScopedNodeRecord preserves the exact declaration scope for one authored
@@ -1420,12 +1295,16 @@ type ScopedNodeRecord struct {
 }
 
 func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
-	return runtimeidentity.AdmitExecutableNodeDeclaration(r.Source.PackageKey, r.Source.FlowID, r.LogicalID)
+	return runtimeidentity.AdmitExecutableNodeDeclaration(r.Source.FlowPath, r.LogicalID)
 }
 
 type FlowSchemaDocument struct {
 	Name                   string                   `yaml:"name"`
 	Mode                   string                   `yaml:"mode"`
+	Activation             string                   `yaml:"activation"`
+	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
+	Connect                []FlowConnect            `yaml:"connect"`
+	Imports                FlowSchemaImports        `yaml:"imports"`
 	Entity                 string                   `yaml:"entity"`
 	Instance               TemplateInstanceField    `yaml:"instance"`
 	InitialState           string                   `yaml:"initial_state"`
@@ -1444,6 +1323,13 @@ type FlowSchemaDocument struct {
 	RequiredAgentsDeclared bool                     `yaml:"-"`
 	InstanceVariables      FlowInstanceVariables    `yaml:"instance_variables"`
 	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+}
+
+const FlowActivationStanding = "standing"
+
+type FlowSchemaImports struct {
+	ConnectorPacks        []ConnectorPackImport        `yaml:"connector_packs"`
+	ProviderTriggerEvents []ProviderTriggerEventImport `yaml:"provider_trigger_events"`
 }
 
 const (
@@ -1621,14 +1507,14 @@ type FlowInputPinResolution struct {
 	RepliesTo      string                  `yaml:"replies_to"`
 	CorrelationKey string                  `yaml:"correlation_key"`
 }
-type FlowPackageConnect struct {
-	PackageKey string `yaml:"-"`
-	SourceFile string `yaml:"-"`
-	SourceLine int    `yaml:"-"`
-	Event      string `yaml:"event"`
-	From       string `yaml:"from"`
-	To         string `yaml:"to"`
-	Rename     string `yaml:"rename"`
+type FlowConnect struct {
+	OwnerFlowPath string `yaml:"-"`
+	SourceFile    string `yaml:"-"`
+	SourceLine    int    `yaml:"-"`
+	Event         string `yaml:"event"`
+	From          string `yaml:"from"`
+	To            string `yaml:"to"`
+	Rename        string `yaml:"rename"`
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`
@@ -1759,7 +1645,7 @@ type WorkflowTimerContract struct {
 
 func (t WorkflowTimerContract) OwningFlowID() string {
 	if t.Node.Valid() {
-		return t.Node.FlowID()
+		return t.Node.FlowPath()
 	}
 	return strings.TrimSpace(t.FlowID)
 }

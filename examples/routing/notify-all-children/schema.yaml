@@ -1,1 +1,8 @@
 name: notify-all-children
+connect:
+  - event: account.registered
+    from: portfolio
+    to: account
+  - event: account.notify.requested
+    from: portfolio
+    to: account

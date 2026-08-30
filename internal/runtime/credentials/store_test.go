@@ -138,36 +138,15 @@ func TestListDescriptors_IndexesToolsMCPServersAndWebSearchProvider(t *testing.T
 	}
 }
 
-func TestBuildRequirementIndex_IndexesImportedPackageCredentialBindings(t *testing.T) {
+func TestBuildRequirementIndex_IndexesDirectFilesystemFlowCredentialBindings(t *testing.T) {
 	repoRoot := credentialsRepoRootForTest(t)
 	root := t.TempDir()
-	writeCredentialsFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: credential-binding
-version: "1.0.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: static
-    bind:
-      credentials:
-        provider_key: tenant_alpha_key
-  - id: beta
-    flow: beta
-    mode: static
-    bind:
-      credentials:
-        provider_key: tenant_beta_key
-`)
+
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: credential-binding\n")
 	for _, flowID := range []string{"alpha", "beta"} {
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "package.yaml"), `
-name: worker-package
-version: "1.0.0"
-requires:
-  credentials: [provider_key]
-`)
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), `
+
+		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "tools.yaml"), `
 call_provider:
   handler_type: http
   credentials: [provider_key]
@@ -183,18 +162,12 @@ call_provider:
 
 	index := BuildRequirementIndex(semanticview.Wrap(bundle))
 
-	if refs := index["provider_key"]; len(refs) != 0 {
-		t.Fatalf("raw package credential handle indexed as deployment key: %#v", refs)
-	}
-	if refs := index["tenant_alpha_key"]; len(refs) != 1 || refs[0].Kind != "tool" || refs[0].Name != "call_provider" {
-		t.Fatalf("tenant_alpha_key refs = %#v, want call_provider tool", refs)
-	}
-	if refs := index["tenant_beta_key"]; len(refs) != 1 || refs[0].Kind != "tool" || refs[0].Name != "call_provider" {
-		t.Fatalf("tenant_beta_key refs = %#v, want call_provider tool", refs)
+	if refs := index["provider_key"]; len(refs) != 1 || refs[0].Kind != "tool" || refs[0].Name != "call_provider" {
+		t.Fatalf("provider_key refs = %#v, want one deduplicated call_provider tool requirement", refs)
 	}
 }
 
-func TestMissingRequired_IndexesImportedNativeWebSearchCredentialBinding(t *testing.T) {
+func TestMissingRequired_IndexesDirectFilesystemNativeWebSearchCredentialBinding(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
@@ -206,31 +179,16 @@ func TestMissingRequired_IndexesImportedNativeWebSearchCredentialBinding(t *test
 
 	repoRoot := credentialsRepoRootForTest(t)
 	root := t.TempDir()
-	writeCredentialsFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: native-web-search-credential-binding
-version: "1.0.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-    bind:
-      credentials:
-        provider_key: tenant_provider_key
-`)
+
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: native-web-search-credential-binding\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
-name: worker-package
-version: "1.0.0"
-requires:
-  credentials: [provider_key]
-`)
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), `
+
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "policy.yaml"), `
 web_search_provider:
   provider: brave
   credentials_key: provider_key
 `)
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
+	writeCredentialsFixtureFile(t, filepath.Join(root, "worker", "agents.yaml"), `
 worker-agent:
   id: worker-agent
   model: regular
@@ -246,22 +204,16 @@ worker-agent:
 	}
 	source := semanticview.Wrap(bundle)
 	index := BuildRequirementIndex(source)
-	if refs := index["provider_key"]; len(refs) != 0 {
-		t.Fatalf("raw provider_key refs = %#v, want none", refs)
-	}
-	if refs := index["tenant_provider_key"]; len(refs) != 1 || refs[0].Kind != "web_search_provider" || refs[0].Name != "brave" {
-		t.Fatalf("tenant_provider_key refs = %#v, want brave web_search_provider", refs)
+	if refs := index["provider_key"]; len(refs) != 1 || refs[0].Kind != "web_search_provider" || refs[0].Name != "brave" {
+		t.Fatalf("provider_key refs = %#v, want brave web_search_provider", refs)
 	}
 
 	missing, err := MissingRequired(ctx, store, source)
 	if err != nil {
 		t.Fatalf("MissingRequired: %v", err)
 	}
-	if len(missing) != 1 || missing[0].Key != "tenant_provider_key" {
-		t.Fatalf("MissingRequired = %#v, want only tenant_provider_key", missing)
-	}
-	if len(missing[0].RequiredBy) != 1 || missing[0].RequiredBy[0].Kind != "web_search_provider" || missing[0].RequiredBy[0].Name != "brave" {
-		t.Fatalf("tenant_provider_key RequiredBy = %#v, want brave web_search_provider", missing[0].RequiredBy)
+	if len(missing) != 0 {
+		t.Fatalf("MissingRequired = %#v, want provider_key to satisfy the direct flow requirement", missing)
 	}
 
 	descriptors, err := ListDescriptors(ctx, store, source)
@@ -272,8 +224,8 @@ worker-agent:
 	for _, desc := range descriptors {
 		byKey[desc.Key] = desc
 	}
-	if got := byKey["provider_key"]; !got.Present || len(got.RequiredBy) != 0 {
-		t.Fatalf("raw provider_key descriptor = %+v, want present with no requirement", got)
+	if got := byKey["provider_key"]; !got.Present || len(got.RequiredBy) != 1 || got.RequiredBy[0].Kind != "web_search_provider" || got.RequiredBy[0].Name != "brave" {
+		t.Fatalf("provider_key descriptor = %+v, want present brave web_search requirement", got)
 	}
 }
 

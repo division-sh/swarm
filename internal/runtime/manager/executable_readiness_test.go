@@ -431,7 +431,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 		_ = restarted.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
 	})
 	armedBefore := len(instances.armedEntries)
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, false); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
@@ -487,7 +487,7 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 	restartBus := &flowActivationTestBus{routeStore: routeStore}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true)
 	if err != nil {
 		t.Fatalf("canonicalize sibling startup topology: %v", err)
 	}

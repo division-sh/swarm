@@ -460,7 +460,7 @@ func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceS
 	t.Helper()
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
-		WorkOwner:      conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash()),
+		WorkOwner:      conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash()),
 	}))
 	if err != nil {
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
@@ -662,7 +662,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
 	)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		WorkOwner:      workOwner,
@@ -738,14 +738,14 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	})
 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		BaseContext:       testAuthorActivityContext(context.Background()),
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkflowInstances: coordinator,
-		WorkOwner:         workOwner,
-		DeliveryStore:     backend,
-		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		BaseContext:        testAuthorActivityContext(context.Background()),
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     source,
+		WorkflowInstances:  coordinator,
+		WorkOwner:          workOwner,
+		DeliveryStore:      backend,
+		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator}
 }

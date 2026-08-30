@@ -80,7 +80,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 	for _, subscription := range census.InvalidAuthoredSubscriptions() {
 		location := invalidAuthoredSubscriptionLocation(subscription)
 		message := subscription.Admission.Message()
-		remediation := "Use a receiver-local exact event name. Declare output/input pins and package.yaml connect for delivery across a flow boundary; imported wildcard observation requires typed bind.observe authorization."
+		remediation := "Use a receiver-local exact event name. Declare output/input pins and schema.yaml connect at the nearest common ancestor for delivery across a flow boundary; imported wildcard observation requires typed bind.observe authorization."
 		evidence := []string{fmt.Sprintf("rejected authored subscription %q at %q (%s)", subscription.Consumer.Event.Authored, location, subscription.Admission.Failure())}
 		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", location, message, remediation, evidence...))
 	}

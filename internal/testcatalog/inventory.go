@@ -154,7 +154,7 @@ func discoverFixtures(repoRoot string) ([]Fixture, error) {
 				continue
 			}
 			root := filepath.Join(testsRoot, tier.Name(), entry.Name())
-			expectedPath := filepath.Join(root, "expected.yaml")
+			expectedPath := filepath.Join(root, "tests", "expected.yaml")
 			metadata, err := loadMetadata(expectedPath)
 			if err != nil {
 				return nil, fmt.Errorf("catalog fixture %s/%s: %w", tier.Name(), entry.Name(), err)

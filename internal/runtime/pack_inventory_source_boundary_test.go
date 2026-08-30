@@ -27,13 +27,8 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 			"internal/cliapp/provider_trigger_packs.go",
 			"internal/testutil/packfixture/packfixture.go",
 		),
-		"LoadProjectPackSet": pathSet(
-			"internal/cliapp/doctor.go",
-			"internal/runtime/contracts/workflow_contract_loading.go",
-		),
 		"NewEffectivePackInventory": pathSet(
 			"internal/cliapp/doctor.go",
-			"internal/cliapp/pack_commands.go",
 			"internal/runtime/contracts/workflow_contract_loading.go",
 			"internal/testutil/packfixture/packfixture.go",
 		),
@@ -133,21 +128,6 @@ func TestPackPublishingSurfacesCarryExplicitBaseAndAdmissionOwners(t *testing.T)
 				_, hasBases := fields["PlatformPackBases"]
 				if !hasBase && !hasBases {
 					t.Errorf("%s workflow pack load options omit an explicit selected-base owner", path)
-				}
-			case "BundleCatalogRuntimeLoadRequest", "BundleRegisterHandlerOptions":
-				if len(fields) == 0 {
-					return true
-				}
-				for _, required := range []string{"PlatformPackBases", "AdmitPackInventory"} {
-					if _, ok := fields[required]; !ok {
-						t.Errorf("%s %s omits %s", path, name, required)
-					}
-				}
-			case "BundleBuildRequest":
-				if len(fields) > 0 {
-					if _, ok := fields["LoadOptions"]; !ok {
-						t.Errorf("%s bundle build request omits explicit pack load options", path)
-					}
 				}
 			}
 			return true

@@ -5,7 +5,6 @@ import (
 	context "context"
 	json "encoding/json"
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
-	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
 	channelonboarding "github.com/division-sh/swarm/internal/channelonboarding"
 	events "github.com/division-sh/swarm/internal/events"
 	mailbox "github.com/division-sh/swarm/internal/mailbox"
@@ -18,7 +17,6 @@ import (
 	agentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
 	authoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	budgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
-	bundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	bus "github.com/division-sh/swarm/internal/runtime/bus"
 	computemodule "github.com/division-sh/swarm/internal/runtime/computemodule"
 	agentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -43,9 +41,7 @@ import (
 	manager "github.com/division-sh/swarm/internal/runtime/manager"
 	pipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	pipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	preservationcleanup "github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	replycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	runbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -60,10 +56,6 @@ import (
 
 func (s *PostgresStore) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, error) {
 	return s.lLMPostgresOwner.Acquire(ctx, identity, lockOwner)
-}
-
-func (s *PostgresStore) AcquireBundleDelete(ctx context.Context) (bundledelete.LockLease, bool, error) {
-	return s.bundleDeletePostgresOwner.AcquireBundleDelete(ctx)
 }
 
 func (s *PostgresStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
@@ -122,24 +114,12 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runqui
 	return s.runLifecyclePostgresOwner.ApplyActiveRunQuiescence(ctx, req)
 }
 
-func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req bundledelete.FinalMutationRequest) (bundledelete.FinalMutationResult, error) {
-	return s.bundleDeletePostgresOwner.ApplyBundleDeleteFinalMutation(ctx, req)
-}
-
-func (s *PostgresStore) ApplyBundleForceDeletePreservationCleanup(ctx context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
-	return s.preservationPostgresOwner.ApplyBundleForceDeletePreservationCleanup(ctx, req)
-}
-
 func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
 	return s.destructiveResetPostgresOwner.ApplyDestructiveResetCleanup(ctx, req)
 }
 
 func (s *PostgresStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {
 	return s.runLifecyclePostgresOwner.ApplyServeAbandonActiveRunQuiescence(ctx, at)
-}
-
-func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
-	return s.preservationPostgresOwner.ApplyUnavailableBundleStartupPreservationCleanup(ctx, req)
 }
 
 func (s *PostgresStore) AuthorActivityEventCatalogRegistered(scope authoractivity.Scope) bool {
@@ -490,15 +470,15 @@ func (s *PostgresStore) InspectAuthority(ctx context.Context) (startupownership.
 	return s.startupPostgresOwner.InspectAuthority(ctx)
 }
 
-func (s *PostgresStore) InspectDeliveryRecovery(ctx context.Context, source correlation.BundleSourceFact) (deliverylifecycle.RecoveryInventory, error) {
+func (s *PostgresStore) InspectDeliveryRecovery(ctx context.Context, source correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error) {
 	return s.deliveryPostgresOwner.InspectDeliveryRecovery(ctx, source)
 }
 
-func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.BundleSourceFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.SourceArtifactFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
 	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
@@ -528,14 +508,6 @@ func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts authoractiv
 
 func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
 	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx, terminalStates)
-}
-
-func (s *PostgresStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
-	return s.postgres.ListBundleCatalog(ctx, opts)
-}
-
-func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
-	return s.postgres.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
 func (s *PostgresStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
@@ -700,14 +672,6 @@ func (s *PostgresStore) LoadAgentLifecycleState(ctx context.Context, identity ag
 
 func (s *PostgresStore) LoadAgentsSpec(ctx context.Context) ([]manager.PersistedAgent, error) {
 	return s.agentPostgresOwner.LoadAgentsSpec(ctx)
-}
-
-func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.Detail, error) {
-	return s.postgres.LoadBundleCatalog(ctx, bundleHash)
-}
-
-func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (runbundle.BundleCatalogRuntimeRecord, error) {
-	return s.postgres.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
 }
 
 func (s *PostgresStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
@@ -942,10 +906,6 @@ func (s *PostgresStore) PipelineObligations() pipelineobligation.Store {
 	return s.pipelinePostgresOwner.PipelineObligations()
 }
 
-func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.Request) (bundledelete.Plan, error) {
-	return s.bundleDeletePostgresOwner.PlanBundleDelete(ctx, req)
-}
-
 func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	return s.runForkPostgresOwner.PlanRunFork(ctx, req)
 }
@@ -1094,7 +1054,7 @@ func (s *PostgresStore) RequireActiveRun(ctx context.Context, runID string) erro
 	return s.runLifecyclePostgresOwner.RequireActiveRun(ctx, runID)
 }
 
-func (s *PostgresStore) RequireActiveRunSource(ctx context.Context, runID string) (correlation.BundleSourceFact, error) {
+func (s *PostgresStore) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
 	return s.runLifecyclePostgresOwner.RequireActiveRunSource(ctx, runID)
 }
 
@@ -1106,7 +1066,7 @@ func (s *PostgresStore) RequirePresentRun(ctx context.Context, runID string) err
 	return s.runLifecyclePostgresOwner.RequirePresentRun(ctx, runID)
 }
 
-func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID string) (correlation.BundleSourceFact, error) {
+func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
 	return s.runLifecyclePostgresOwner.RequirePresentRunSource(ctx, runID)
 }
 
@@ -1300,10 +1260,6 @@ func (s *PostgresStore) UnbindOperatorChannel(ctx context.Context, req operatorc
 
 func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
 	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, update)
-}
-
-func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
-	return s.postgres.UpsertBundleCatalog(ctx, req)
 }
 
 func (s *PostgresStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {
@@ -1734,15 +1690,15 @@ func (s *SQLiteRuntimeStore) InspectAuthority(ctx context.Context) (startupowner
 	return s.startupSQLiteOwner.InspectAuthority(ctx)
 }
 
-func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(ctx context.Context, source correlation.BundleSourceFact) (deliverylifecycle.RecoveryInventory, error) {
+func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(ctx context.Context, source correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error) {
 	return s.deliverySQLiteOwner.InspectDeliveryRecovery(ctx, source)
 }
 
-func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.BundleSourceFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.SourceArtifactFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
 	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
@@ -1772,14 +1728,6 @@ func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts author
 
 func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
 	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx, terminalStates)
-}
-
-func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
-	return s.sQLite.ListBundleCatalog(ctx, opts)
-}
-
-func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
-	return s.sQLite.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
@@ -1920,10 +1868,6 @@ func (s *SQLiteRuntimeStore) LoadActivityAttempt(ctx context.Context, requestEve
 
 func (s *SQLiteRuntimeStore) LoadAgentLifecycleState(ctx context.Context, identity agentidentity.Identity) (manager.AgentLifecycleState, bool, error) {
 	return s.agentSQLiteOwner.LoadAgentLifecycleState(ctx, identity)
-}
-
-func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.Detail, error) {
-	return s.sQLite.LoadBundleCatalog(ctx, bundleHash)
 }
 
 func (s *SQLiteRuntimeStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
@@ -2298,7 +2242,7 @@ func (s *SQLiteRuntimeStore) RequireActiveRun(ctx context.Context, runID string)
 	return s.runLifecycleSQLiteOwner.RequireActiveRun(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) RequireActiveRunSource(ctx context.Context, runID string) (correlation.BundleSourceFact, error) {
+func (s *SQLiteRuntimeStore) RequireActiveRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
 	return s.runLifecycleSQLiteOwner.RequireActiveRunSource(ctx, runID)
 }
 
@@ -2310,7 +2254,7 @@ func (s *SQLiteRuntimeStore) RequirePresentRun(ctx context.Context, runID string
 	return s.runLifecycleSQLiteOwner.RequirePresentRun(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) RequirePresentRunSource(ctx context.Context, runID string) (correlation.BundleSourceFact, error) {
+func (s *SQLiteRuntimeStore) RequirePresentRunSource(ctx context.Context, runID string) (correlation.SourceArtifactFact, error) {
 	return s.runLifecycleSQLiteOwner.RequirePresentRunSource(ctx, runID)
 }
 
@@ -2504,10 +2448,6 @@ func (s *SQLiteRuntimeStore) UnbindOperatorChannel(ctx context.Context, req oper
 
 func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
 	return s.lLMSQLiteOwner.UpdateLiveSessionWatchdog(ctx, update)
-}
-
-func (s *SQLiteRuntimeStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
-	return s.sQLite.UpsertBundleCatalog(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {

@@ -72,7 +72,7 @@ func TestNoDeliveryDispositionRendersAuthorWarningAndNDJSON(t *testing.T) {
 	if draft.Transition != "event_no_delivery" || draft.Projection.ReasonCode != "matched_no_recipient" || draft.Projection.InstancePath != instancePath || len(draft.Projection.PlanSHA256) != 1 || draft.Projection.PlanSHA256[0] != planID.String() {
 		t.Fatalf("warning draft = %#v", draft)
 	}
-	draft.Scope = runtimeauthoractivity.BundleScope("runtime-1", "bundle-v1:sha256:"+strings.Repeat("1", 64))
+	draft.Scope = runtimeauthoractivity.BundleScope("runtime-1", "bundle-v2:sha256:"+strings.Repeat("1", 64))
 	occurrence := runtimeauthoractivity.Occurrence{
 		OccurrenceID: uuid.NewString(), Sequence: 1, Kind: draft.Kind, Version: runtimeauthoractivity.Version,
 		Transition: draft.Transition, SourceOwner: draft.SourceOwner, SourceIdentity: draft.SourceIdentity,

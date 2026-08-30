@@ -31,10 +31,9 @@ func ResolveWorkflowJoinOccurrenceDeliveryTarget(
 	if err != nil || !ok {
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, ok, err
 	}
-	executionFlowID := resolution.Ref.FlowID()
+	executionFlowID := resolution.Ref.FlowPath()
 	target := events.RouteIdentity{EntityID: strings.TrimSpace(evt.EntityID())}
-	if executionFlowID == "" {
-		executionFlowID = semanticview.RootExecutionFlowID(source)
+	if executionFlowID == semanticview.RootExecutionFlowID(source) {
 		target.FlowID = executionFlowID
 		target.FlowInstance = strings.TrimSpace(evt.RunID())
 	} else {
@@ -74,7 +73,7 @@ func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event)
 	if route.EntityID != strings.TrimSpace(evt.EntityID()) {
 		return workflowJoinOccurrenceResolution{}, false, fmt.Errorf("join lifecycle event routing source disagrees with its entity")
 	}
-	if ref.FlowID() == "" {
+	if ref.FlowPath() == semanticview.RootExecutionFlowID(source) {
 		flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 		if routing.Kind() != events.RoutingSourceRoot || route.FlowID != "" ||
 			(flowInstance != "" && flowInstance != strings.TrimSpace(evt.RunID())) {
@@ -83,7 +82,7 @@ func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event)
 				routing.Kind(), route, evt.FlowInstance(),
 			)
 		}
-	} else if routing.Kind() != events.RoutingSourceFlowOwnedControl || route.FlowID != ref.FlowID() || route.FlowInstance != strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") {
+	} else if routing.Kind() != events.RoutingSourceFlowOwnedControl || route.FlowID != ref.FlowPath() || route.FlowInstance != strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") {
 		return workflowJoinOccurrenceResolution{}, false, fmt.Errorf("flow-owned join lifecycle event contradicts its declaration route")
 	}
 	plan, ok := semanticview.WorkflowJoinPlanForRef(source, ref)
@@ -136,15 +135,15 @@ func workflowJoinDeclarationRef(source semanticview.Source, node runtimeidentity
 	case runtimecontracts.WorkflowJoinModeArrival:
 		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
 	case runtimecontracts.WorkflowJoinModeFanOutDelivery:
-		ref, err = timeridentity.NewFanOutDeliveryJoinRef(
-			plan.Node,
-			handlerEvent,
-			handler.Join.EffectiveID(),
-			plan.FanOut.FanOut.ElementRef.PackageKey,
-			plan.FanOut.FanOut.ElementRef.ElementID,
-			plan.FanOut.FanOut.BundleHash,
-			plan.FanOut.FanOut.SemanticDigest,
-		)
+		fanOutDeclaration, identityErr := plan.FanOut.FanOut.ElementRef.DeclarationIdentity()
+		if identityErr != nil {
+			err = identityErr
+		} else {
+			ref, err = timeridentity.NewFanOutDeliveryJoinRef(
+				plan.Node, handlerEvent, handler.Join.EffectiveID(), fanOutDeclaration,
+				plan.FanOut.FanOut.BundleHash, plan.FanOut.FanOut.SemanticDigest,
+			)
+		}
 	default:
 		err = fmt.Errorf("join handler has invalid compiled mode")
 	}

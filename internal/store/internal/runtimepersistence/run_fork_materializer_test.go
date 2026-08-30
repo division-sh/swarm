@@ -46,7 +46,7 @@ func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("test bundle source fact is missing")
 	}
@@ -117,7 +117,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	at := time.Unix(1700000500, 0).UTC()
 	fieldOnlyAt := at.Add(30 * time.Second)
 	afterAt := at.Add(time.Minute)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -229,19 +229,19 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		)
 	}
 
-	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleHash, forkBundleSource string
+	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleHash string
 	if err := db.QueryRowContext(ctx, `
-		SELECT status, forked_from_run_id::text, forked_from_event_id::text, bundle_hash, bundle_source
+		SELECT status, forked_from_run_id::text, forked_from_event_id::text, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleHash, &forkBundleSource); err != nil {
+	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleHash); err != nil {
 		t.Fatalf("load fork run: %v", err)
 	}
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
-		t.Fatalf("fork bundle identity = hash:%q source:%q, want inherited canonical identity", forkBundleHash, forkBundleSource)
+	if forkBundleHash != authorActivityTestBundleHash {
+		t.Fatalf("fork bundle identity = hash:%q, want inherited canonical identity", forkBundleHash)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
@@ -418,7 +418,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	postEventID := uuid.NewString()
 	at := time.Unix(1700000505, 0).UTC()
 	afterAt := at.Add(time.Minute)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -514,7 +514,7 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	eventID := uuid.NewString()
 	at := time.Unix(1700000507, 0).UTC()
 	afterAt := at.Add(time.Minute)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_metadata", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -668,10 +668,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	selection := runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		ContractsRoot:   "/tmp/selected-contracts",
-		WorkflowName:    "selected-workflow",
-		WorkflowVersion: "v2",
+		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
@@ -696,9 +693,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
 	}
 	if loaded.Owner != runfork.RunForkSelectedContractBindingOwner ||
-		loaded.ContractSelection.ContractsRoot != selection.ContractsRoot ||
-		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
-		loaded.ContractSelection.WorkflowVersion != selection.WorkflowVersion {
+		loaded.ContractSelection != selection {
 		t.Fatalf("loaded selected binding = %#v", loaded)
 	}
 
@@ -745,23 +740,22 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	targetHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	seedStoreTestPersistedBundle(t, db, targetHash)
+	targetArtifact := storeTestSourceArtifact("fork-selected-contract-binding")
+	targetHash := targetArtifact.BundleHash()
+	seedStoreTestPersistedArtifact(t, db, targetArtifact)
 	selection := runfork.RunForkContractSelection{
-		Mode:            runfork.RunForkContractSelectionModeBundleHash,
-		BundleHash:      targetHash,
-		WorkflowName:    "selected-workflow",
-		WorkflowVersion: "v2",
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
+		BundleHash: targetHash,
 	}
-	targetSource, err := runtimecorrelation.NewPersistedBundleSourceFact(targetHash)
+	targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
 	if err != nil {
-		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
+		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID:       sourceRunID,
-		At:                eventID,
-		BundleSourceFact:  targetSource,
-		ContractSelection: &selection,
+		SourceRunID:        sourceRunID,
+		At:                 eventID,
+		SourceArtifactFact: targetSource,
+		ContractSelection:  &selection,
 	})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
@@ -771,22 +765,19 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
 	}
 	if loaded.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
-		loaded.ContractSelection.BundleHash != targetHash ||
-		loaded.ContractSelection.ContractsRoot != "" ||
-		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
-		loaded.ContractSelection.WorkflowVersion != selection.WorkflowVersion {
+		loaded.ContractSelection.BundleHash != targetHash {
 		t.Fatalf("loaded bundle_hash binding = %#v", loaded)
 	}
-	var forkBundleHash, forkBundleSource string
+	var forkBundleHash string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+		SELECT COALESCE(bundle_hash, '')
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
+	`, materialized.ForkRunID).Scan(&forkBundleHash); err != nil {
 		t.Fatalf("load fork bundle identity: %v", err)
 	}
-	if forkBundleHash != targetHash || forkBundleSource != "persisted" {
-		t.Fatalf("fork bundle identity = %s/%s, want %s/persisted", forkBundleHash, forkBundleSource, targetHash)
+	if forkBundleHash != targetHash {
+		t.Fatalf("fork bundle identity = %s, want %s", forkBundleHash, targetHash)
 	}
 }
 
@@ -806,23 +797,19 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	invalidSelection := runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		WorkflowName:    "selected-workflow",
-		WorkflowVersion: "v2",
+		Mode:       runfork.RunForkContractSelectionModeSelectedContracts,
+		BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
 		ContractSelection: &invalidSelection,
-	}); err == nil || !strings.Contains(err.Error(), "contracts_root") {
-		t.Fatalf("MaterializeRunFork invalid selection error = %v, want contracts_root failure", err)
+	}); err == nil || !strings.Contains(err.Error(), "cannot carry bundle_hash") {
+		t.Fatalf("MaterializeRunFork invalid selection error = %v, want selected_contracts/hash conflict", err)
 	}
 
 	validSelection := runfork.RunForkContractSelection{
-		Mode:            "selected_contracts",
-		ContractsRoot:   "/tmp/selected-contracts",
-		WorkflowName:    "selected-workflow",
-		WorkflowVersion: "v2",
+		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
@@ -835,11 +822,11 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_event_id,
-			mode, contracts_root, workflow_name, workflow_version
+			mode, bundle_hash
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3::uuid,
-			'selected_contracts', '/tmp/duplicate', 'workflow', 'v1'
+			'selected_contracts', NULL
 		)
 	`, materialized.ForkRunID, sourceRunID, eventID)
 	if err == nil {
@@ -857,7 +844,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	eventID := uuid.NewString()
 	clearEventID := uuid.NewString()
 	at := time.Unix(1700000600, 0).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	sourceEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -2113,7 +2100,7 @@ func (n *sqlNullTime) Scan(value any) error {
 func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

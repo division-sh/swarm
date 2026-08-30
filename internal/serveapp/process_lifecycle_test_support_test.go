@@ -61,7 +61,7 @@ func testPlatformPackBaseGenerations(t *testing.T) *packartifact.PlatformPackBas
 }
 
 func runtimeContextTestHash(fill string) string {
-	return "bundle-v1:sha256:" + strings.Repeat(fill, 64)
+	return "bundle-v2:sha256:" + strings.Repeat(fill, 64)
 }
 
 func newSupervisorTestRuntimeOccurrence(t *testing.T, bundleHash string) *worklifetime.RuntimeOccurrence {
@@ -131,6 +131,7 @@ func (s stubWorkspaceLifecycle) EnsurePrereqs(context.Context) error { return s.
 func (s stubWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error {
 	return s.systemErr
 }
+func (stubWorkspaceLifecycle) SetBundleScope(string)                                {}
 func (stubWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error  { return nil }
 func (stubWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error    { return nil }
 func (stubWorkspaceLifecycle) SetDataProjectionProvider(runtimedataaccess.Provider) {}

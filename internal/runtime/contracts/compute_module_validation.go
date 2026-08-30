@@ -26,30 +26,16 @@ func validateWorkflowComputeModuleContracts(bundle *WorkflowContractBundle) []er
 		return nil
 	}
 	errs := []error{}
-	errs = append(errs, validateProjectPolicyModulesUnsupported(bundle)...)
 	errs = append(errs, validateFlowPolicyModules(bundle)...)
 	errs = append(errs, validatePolicySheetComputeModuleRows(bundle)...)
 	return errs
 }
 
-func validateProjectPolicyModulesUnsupported(bundle *WorkflowContractBundle) []error {
-	errs := []error{}
-	for _, view := range bundle.ProjectViews() {
-		if len(view.Policy.Modules) == 0 {
-			continue
-		}
-		errs = append(errs, fmt.Errorf("%w: project policy %s declares modules; modules must be declared in flow policy.yaml", ErrInvalidField, strings.TrimSpace(view.Paths.Key)))
-	}
-	return errs
-}
-
 func validateFlowPolicyModules(bundle *WorkflowContractBundle) []error {
 	errs := []error{}
-	for _, flowID := range sortedFlowSchemaIDs(bundle.FlowSchemas) {
-		view, ok := bundle.FlowViewByID(flowID)
-		if !ok || view == nil {
-			continue
-		}
+	for _, value := range bundle.FlowViews() {
+		view := value
+		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		for _, moduleID := range sortedPolicyModuleNames(view.Policy.Modules) {
 			context := "flow " + flowID + " policy.modules." + moduleID
 			errs = append(errs, validatePolicyModuleDeclaration(bundle, context, moduleID, view.Policy.Modules[moduleID])...)

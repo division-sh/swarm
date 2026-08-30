@@ -125,7 +125,7 @@ func TestCLIIdentifierRegistryRejectsUnsupportedFamilyPolicy(t *testing.T) {
 		{
 			name: "known source from another family",
 			mutate: func(policy *cliIdentifierFamilyPolicy) {
-				policy.CandidateSource = cliIdentifierSourceBundleList
+				policy.CandidateSource = cliIdentifierSourceRunList
 			},
 			want: "unsupported source/scope/normalization combination",
 		},
@@ -298,8 +298,8 @@ func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
 			return true
 		})
 	}
-	if count != 7 {
-		t.Fatalf("literal production resolver callsites=%d, want 7", count)
+	if count != 5 {
+		t.Fatalf("literal production resolver callsites=%d, want 5", count)
 	}
 }
 
@@ -311,9 +311,6 @@ func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 		"agents.go\x00EVENT ID":            cliIdentifierFamilyEvent,
 		"agents.go\x00RUN":                 cliIdentifierFamilyRun,
 		"agents.go\x00ENTITY":              cliIdentifierFamilyEntity,
-		"bundle.go\x00BUNDLE":              cliIdentifierFamilyBundle,
-		"bundle.go\x00AGENT":               cliIdentifierFamilyAgent,
-		"bundle.go\x00FLOW_INSTANCE":       cliIdentifierFamilyFlowInstance,
 		"context_command.go\x00NAME":       cliIdentifierFamilyContext,
 		"control_mailbox.go\x00MAILBOX_ID": cliIdentifierFamilyMailbox,
 		"conversations.go\x00SESSION_ID":   cliIdentifierFamilySession,
@@ -674,140 +671,6 @@ func TestCLIIdentifierAmbiguityListsCandidatesAndStops(t *testing.T) {
 	}
 }
 
-func TestCLIIdentifierBundleDigestPrefixPagesToCompletion(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	wantHash := validBundleHash("a")
-	methods := []string{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request jsonRPCRequest
-		_ = json.NewDecoder(r.Body).Decode(&request)
-		methods = append(methods, request.Method)
-		switch request.Method {
-		case bundleListMethod:
-			if request.Params["cursor"] == nil {
-				writeJSONRPCResult(t, w, request.ID, map[string]any{"bundles": []map[string]any{validBundleSummary(validBundleHash("b"))}, "next_cursor": "page-2"})
-				return
-			}
-			writeJSONRPCResult(t, w, request.ID, map[string]any{"bundles": []map[string]any{validBundleSummary(wantHash)}})
-		case bundleGetMethod:
-			if request.Params["bundle_hash"] != wantHash {
-				t.Fatalf("bundle_hash=%v, want %s", request.Params["bundle_hash"], wantHash)
-			}
-			writeJSONRPCResult(t, w, request.ID, validBundleDetail(wantHash))
-		default:
-			t.Fatalf("unexpected method %q", request.Method)
-		}
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "show", "AAAA"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if got, want := strings.Join(methods, ","), "bundle.list,bundle.list,bundle.get"; got != want {
-		t.Fatalf("methods=%s, want %s", got, want)
-	}
-}
-
-func TestCLIIdentifierBundleAcceptsRegisteredPrefixForms(t *testing.T) {
-	for _, input := range []string{"bundle-v1:sha256:CCCC", "sha256:CCCC"} {
-		t.Run(input, func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			wantHash := validBundleHash("c")
-			methods := []string{}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var request jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&request)
-				methods = append(methods, request.Method)
-				switch request.Method {
-				case bundleListMethod:
-					writeJSONRPCResult(t, w, request.ID, map[string]any{"bundles": []map[string]any{validBundleSummary(wantHash)}})
-				case bundleGetMethod:
-					if request.Params["bundle_hash"] != wantHash {
-						t.Fatalf("bundle_hash=%v, want %s", request.Params["bundle_hash"], wantHash)
-					}
-					writeJSONRPCResult(t, w, request.ID, validBundleDetail(wantHash))
-				default:
-					t.Fatalf("unexpected method %q", request.Method)
-				}
-			}))
-			defer server.Close()
-
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "show", input}, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 0 {
-				t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-			}
-			if got, want := strings.Join(methods, ","), "bundle.list,bundle.get"; got != want {
-				t.Fatalf("methods=%s, want %s", got, want)
-			}
-		})
-	}
-}
-
-func TestCLIIdentifierBundleAgentsConsumesResolvedHash(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	wantHash := validBundleHash("c")
-	methods := []string{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request jsonRPCRequest
-		_ = json.NewDecoder(r.Body).Decode(&request)
-		methods = append(methods, request.Method)
-		switch request.Method {
-		case bundleListMethod:
-			writeJSONRPCResult(t, w, request.ID, map[string]any{"bundles": []map[string]any{validBundleSummary(wantHash)}})
-		case bundleAgentsMethod:
-			if request.Params["bundle_hash"] != wantHash {
-				t.Fatalf("bundle_hash=%v, want %s", request.Params["bundle_hash"], wantHash)
-			}
-			writeJSONRPCResult(t, w, request.ID, map[string]any{"agents": []map[string]any{validBundleAgent("agent-alpha")}})
-		default:
-			t.Fatalf("unexpected method %q", request.Method)
-		}
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "agents", "cccc"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if got, want := strings.Join(methods, ","), "bundle.list,bundle.agents"; got != want {
-		t.Fatalf("methods=%s, want %s", got, want)
-	}
-}
-
-func TestCLIIdentifierBundlePagingFailsClosedOnRepeatedCursor(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	methods := []string{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request jsonRPCRequest
-		_ = json.NewDecoder(r.Body).Decode(&request)
-		methods = append(methods, request.Method)
-		if request.Method != bundleListMethod {
-			t.Fatalf("unexpected method %q", request.Method)
-		}
-		writeJSONRPCResult(t, w, request.ID, map[string]any{
-			"bundles":     []map[string]any{validBundleSummary(validBundleHash("b"))},
-			"next_cursor": "same-page",
-		})
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "show", "aaaa"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != CLIExitRuntime {
-		t.Fatalf("code=%d, want %d; stderr=%s", code, CLIExitRuntime, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), `repeated next_cursor "same-page"`) {
-		t.Fatalf("stderr=%q", stderr.String())
-	}
-	if got, want := strings.Join(methods, ","), "bundle.list,bundle.list"; got != want {
-		t.Fatalf("methods=%s, want %s", got, want)
-	}
-}
-
 func TestCLIIdentifierScopedEntityPrefixUsesRunScope(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	methods := []string{}
@@ -976,18 +839,26 @@ func cliIdentifierStructuralRowCovers(command, selector string) bool {
 }
 
 var cliIdentifierNonResourcePositionals = map[string]bool{
-	cliIdentifierRegistryKey("swarm agent directive", "arg:message"):                    true,
-	cliIdentifierRegistryKey("swarm bundle register", "arg:registration-envelope-yaml"): true,
-	cliIdentifierRegistryKey("swarm event publish", "arg:event-name"):                   true,
-	cliIdentifierRegistryKey("swarm help", "arg:command"):                               true,
-	cliIdentifierRegistryKey("swarm incidents", "arg:filters"):                          true,
-	cliIdentifierRegistryKey("swarm logs", "arg:filters"):                               true,
-	cliIdentifierRegistryKey("swarm new", "arg:archetype"):                              true,
-	cliIdentifierRegistryKey("swarm test", "arg:scenario-file"):                         true,
+	cliIdentifierRegistryKey("swarm agent directive", "arg:message"):   true,
+	cliIdentifierRegistryKey("swarm describe", "arg:directory"):        true,
+	cliIdentifierRegistryKey("swarm describe routes", "arg:directory"): true,
+	cliIdentifierRegistryKey("swarm event publish", "arg:event-name"):  true,
+	cliIdentifierRegistryKey("swarm help", "arg:command"):              true,
+	cliIdentifierRegistryKey("swarm import", "arg:directory"):          true,
+	cliIdentifierRegistryKey("swarm incidents", "arg:filters"):         true,
+	cliIdentifierRegistryKey("swarm logs", "arg:filters"):              true,
+	cliIdentifierRegistryKey("swarm new", "arg:archetype"):             true,
+	cliIdentifierRegistryKey("swarm packs list", "arg:directory"):      true,
+	cliIdentifierRegistryKey("swarm packs show", "arg:directory"):      true,
+	cliIdentifierRegistryKey("swarm run start", "arg:directory"):       true,
+	cliIdentifierRegistryKey("swarm serve", "arg:directory"):           true,
+	cliIdentifierRegistryKey("swarm test", "arg:directory"):            true,
+	cliIdentifierRegistryKey("swarm test", "arg:scenario-label"):       true,
+	cliIdentifierRegistryKey("swarm verify", "arg:directory"):          true,
 }
 
 var cliIdentifierGlobalNonResourceStringFlags = map[string]bool{
-	"api-server": true, "api-token-file": true, "config": true, "contracts": true,
+	"api-server": true, "api-token-file": true, "config": true,
 	"data": true, "log-level": true, "platform-spec": true,
 }
 
@@ -1004,11 +875,6 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:delivery-status"):      true,
 	cliIdentifierRegistryKey("swarm agent diagnose", "flag:queue-cursor"):           true,
 	cliIdentifierRegistryKey("swarm agent list", "flag:role"):                       true,
-	cliIdentifierRegistryKey("swarm bundle build", "flag:output"):                   true,
-	cliIdentifierRegistryKey("swarm bundle build", "flag:report"):                   true,
-	cliIdentifierRegistryKey("swarm bundle agents", "flag:cursor"):                  true,
-	cliIdentifierRegistryKey("swarm bundle list", "flag:cursor"):                    true,
-	cliIdentifierRegistryKey("swarm bundle register", "flag:data-blob"):             true,
 	cliIdentifierRegistryKey("swarm connections callback", "flag:state"):            true,
 	cliIdentifierRegistryKey("swarm connections connect", "flag:account"):           true,
 	cliIdentifierRegistryKey("swarm connections connect", "flag:api-base-url"):      true,

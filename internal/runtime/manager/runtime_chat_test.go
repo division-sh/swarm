@@ -90,7 +90,7 @@ type directiveTestBus struct {
 	admitCalls int
 }
 
-func (b *directiveTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (b *directiveTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	b.admitCalls++
 	if b.admitErr != nil {
 		return ctx, b.admitErr

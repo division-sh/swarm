@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -24,6 +23,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -36,6 +36,7 @@ import (
 type runForkGateSelectedStore interface {
 	workflowTestSelectedStore
 	storeTestDurableEventBusStore
+	testAuthorActivityCatalogRegistrar
 }
 
 type runForkGateWorkflowModule struct {
@@ -220,19 +221,8 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				db, selected = store.backend.ConstructionHandle(), store
 			} else {
 				_, db, _ = testutil.StartPostgres(t)
-				postgres := admitTestPostgresStore(t, db)
-				scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-				if !ok {
-					t.Fatal("fork root gate proof author-activity scope is unavailable")
-				}
-				lease, err := postgres.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
-					EventType: "run_fork.root_gate_approved", Disposition: runtimeauthoractivity.StoryAuthored,
-				}})
-				if err != nil {
-					t.Fatalf("register fork root gate output descriptor: %v", err)
-				}
-				t.Cleanup(lease.Release)
-				selected = postgres
+				selected = admitTestPostgresStore(t, db)
+				registerTestAuthorActivityCatalog(t, selected)
 			}
 
 			sourceRunID := "00000000-0000-0000-0000-000000023620"
@@ -252,12 +242,12 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
-			sourceActivation, err := gateruntime.New(sourceRunID, sourceRunID, sourceRunID, "", "awaiting_review", "root_review", authorActivityTestBundleHash, rootRoutes, "event-root", now)
+			sourceActivation, err := gateruntime.New(sourceRunID, sourceRunID, sourceRunID, ".", "awaiting_review", "root_review", authorActivityTestBundleHash, rootRoutes, "event-root", now)
 			if err != nil {
 				t.Fatal(err)
 			}
 			sourceAnchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-				Route: runtimeflowidentity.RouteForInstancePath(sourceRunID), EntityID: sourceRunID,
+				Route: runtimeflowidentity.RouteForInstancePath(sourceRunID), FlowID: ".", EntityID: sourceRunID,
 				Source: eventtest.RootRoutingSource(sourceRunID), Stage: sourceActivation.Stage,
 				StageActivationID: sourceActivation.ActivationID,
 			})
@@ -286,7 +276,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
 				t.Fatalf("create source root proposed effect: %v", err)
 			}
-			forkActivation, err := gateruntime.New(forkRunID, forkRunID, forkRunID, "", "awaiting_review", "root_review", sourceActivation.BundleHash, sourceActivation.RoutesJSON, sourceActivation.StartedByEvent, sourceActivation.OpenedAt)
+			forkActivation, err := gateruntime.New(forkRunID, forkRunID, forkRunID, ".", "awaiting_review", "root_review", sourceActivation.BundleHash, sourceActivation.RoutesJSON, sourceActivation.StartedByEvent, sourceActivation.OpenedAt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,12 +291,12 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			flowInstanceConfig := fmt.Sprintf(`{"workflow_version":"1","instance_id":%q,"storage_ref":%q,"flow_path":%q}`, forkRunID, forkRunID, forkRunID)
 			flowInstanceQuery := `
 				INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-				VALUES (?, 'root', 'static', ?, 'active', ?)
+				VALUES (?, '.', 'static', ?, 'active', ?)
 			`
 			if backend == "postgres" {
 				flowInstanceQuery = `
 					INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-					VALUES ($1, 'root', 'static', $2::jsonb, 'active', $3)
+					VALUES ($1, '.', 'static', $2::jsonb, 'active', $3)
 				`
 			}
 			if _, err := db.ExecContext(ctx, flowInstanceQuery, forkRunID, flowInstanceConfig, now); err != nil {
@@ -343,9 +333,17 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
+			rootFlow := runtimecontracts.FlowContractView{
+				Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+				Schema: runtimecontracts.FlowSchemaDocument{Name: "root", Mode: runtimecontracts.FlowModeStatic},
+			}
 			gateBundle := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Semantics:    runtimecontracts.WorkflowSemanticView{Name: "root", Version: "1"},
 				RootEntities: runtimecontracts.EntityContractsDocument{"default": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
+				FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+					Root: &rootFlow, ByID: map[string]*runtimecontracts.FlowContractView{".": &rootFlow},
+				},
+				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": rootFlow.Schema},
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"run_fork.root_gate_approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
 				},
@@ -356,7 +354,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected), selected)
 			options.Module = runForkGateWorkflowModule{source: gateBundle}
-			options.BundleSourceFact = mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
+			options.SourceArtifactFact = mustStoreTestSourceArtifactFact(authorActivityTestBundleHash)
 			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, options)
 			if coordinator == nil {
 				t.Fatal("construct fork root gate coordinator")
@@ -392,19 +390,26 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err := commitSemanticEventFixture(pipelineCtx, selected, decisionEvent); err != nil {
 				t.Fatalf("commit fork root gate decision event: %v", err)
 			}
-			forward, emitted, _, err := coordinator.Intercept(pipelineCtx, decisionEvent)
+			forward, emitted, outcome, err := coordinator.Intercept(pipelineCtx, decisionEvent)
 			if err != nil || forward || len(emitted) != 0 {
-				t.Fatalf("execute fork root gate through coordinator = forward:%v emitted:%d error:%v", forward, len(emitted), err)
+				t.Fatalf("execute fork root gate through coordinator = forward:%v emitted:%d outcome:%#v error:%v", forward, len(emitted), outcome, err)
 			}
 			var currentState string
 			stateQuery := `SELECT current_state FROM entity_state WHERE run_id = ? AND entity_id = ?`
 			if backend == "postgres" {
 				stateQuery = `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
-			if err := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID).Scan(&currentState); err != nil || currentState != "done" {
-				t.Fatalf("fork root gate state = %q, %v, want done", currentState, err)
-			}
 			routedActivation := loadDecisionCardGateActivation(t, db, backend == "postgres", forkRunID, forkRunID)
+			var outputCount int
+			outputCountQuery := `SELECT COUNT(*) FROM events WHERE event_name = ? AND run_id = ?`
+			if backend == "postgres" {
+				outputCountQuery = `SELECT COUNT(*) FROM events WHERE event_name = $1 AND run_id = $2::uuid`
+			}
+			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID).Scan(&currentState)
+			outputErr := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.root_gate_approved", forkRunID).Scan(&outputCount)
+			if stateErr != nil || currentState != "done" {
+				t.Fatalf("fork root gate state=%q state_err=%v activation=%#v output_count=%d output_err=%v intercept_outcome=%#v, want done/routed/one", currentState, stateErr, routedActivation, outputCount, outputErr, outcome)
+			}
 			if routedActivation.Status != gateruntime.StatusRouted || routedActivation.DecisionEventID != stageDecisionEventID {
 				t.Fatalf("fork root routed activation = %#v", routedActivation)
 			}

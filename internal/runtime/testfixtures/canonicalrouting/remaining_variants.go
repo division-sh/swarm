@@ -38,14 +38,9 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
-	writeClosedVariantFile(t, root, "package.yaml", `name: static-multi-entity-retirement
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: treasury, flow: treasury, mode: static}
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/treasury/schema.yaml", `name: treasury
+	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
 mode: static
 initial_state: active
 states: [active, archived]
@@ -54,14 +49,14 @@ pins:
   inputs:
     events: [opco.spend_requested]
 `)
-	writeClosedVariantFile(t, root, "flows/treasury/events.yaml", `opco.spend_requested:
+	writeClosedVariantFile(t, root, "treasury/events.yaml", `opco.spend_requested:
   swarm: {source: external}
   vertical_id: string
   amount_usd: number
 opco.spend_recorded:
   vertical_id: string
 `)
-	writeClosedVariantFile(t, root, "flows/treasury/entities.yaml", `budget:
+	writeClosedVariantFile(t, root, "treasury/entities.yaml", `budget:
   vertical_id:
     type: string
     indexed: true
@@ -85,7 +80,7 @@ opco.spend_recorded:
 	default:
 		t.Fatalf("unsupported static retirement handler %d", handler)
 	}
-	writeClosedVariantFile(t, root, "flows/treasury/nodes.yaml", `treasury-node:
+	writeClosedVariantFile(t, root, "treasury/nodes.yaml", `treasury-node:
   id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
@@ -102,10 +97,7 @@ func staticRetirementWriteBody() string {
 func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityID RootStaticEntityID) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root-default-static-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-default-static-fixture
 initial_state: active
 states: [active]
@@ -172,10 +164,7 @@ func CopyServedJoinProof(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
 	files := map[string]string{
-		"package.yaml": `name: served-join-proof
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`,
+
 		"schema.yaml": `name: served-join-proof
 stages:
   new:
@@ -250,8 +239,8 @@ join-node:
         members: {from: entity.expected, by: payload.member_id}
         window: {from: entity.dispatch_id, by: payload.dispatch_id}
         output: payload.result
-        on_complete: {element_id: 00000000-0000-4000-8000-000000000015, advances_to: ready}
-        timeout: {element_id: 00000000-0000-4000-8000-000000000016, after: 1h, advances_to: attention}
+        on_complete: {advances_to: ready}
+        timeout: {after: 1h, advances_to: attention}
 fork-probe:
   id: fork-probe
   execution_type: system_node
@@ -274,13 +263,7 @@ func CopyTestSetupValidation(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	files := map[string]string{
-		"package.yaml": `name: review
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: operating, flow: operating, mode: static}
-  - {id: secondary, flow: secondary, mode: static}
-`,
+
 		"schema.yaml": `name: review
 initial_state: new
 terminal_states: [done]
@@ -288,13 +271,13 @@ states: [new, done]
 `,
 		"events.yaml": "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  id: scan-orchestrator\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
-		"flows/operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `name: operating
 mode: static
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, waiting, ready]
 `,
-		"flows/operating/entities.yaml": `product:
+		"operating/entities.yaml": `product:
   product_id: text
   note: text
   review_score: integer
@@ -302,9 +285,9 @@ states: [initializing, waiting, ready]
   feature_list: list<Feature>
   review_scores: map[text]integer
 `,
-		"flows/operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
-		"flows/operating/events.yaml": "opco.product_review_requested:\n  swarm: {source: external}\n  note: text\n",
-		"flows/operating/nodes.yaml": `reviewer:
+		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
+		"operating/events.yaml": "opco.product_review_requested:\n  swarm: {source: external}\n  note: text\n",
+		"operating/nodes.yaml": `reviewer:
   id: reviewer
   execution_type: system_node
   subscribes_to: [opco.product_review_requested]
@@ -315,8 +298,8 @@ states: [initializing, waiting, ready]
       sets_gate: review_ready
       advances_to: ready
 `,
-		"flows/secondary/schema.yaml":   "name: secondary\nmode: static\ninitial_state: open\nterminal_states: [closed]\nstates: [open, closed]\n",
-		"flows/secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
+		"secondary/schema.yaml":   "name: secondary\nmode: static\ninitial_state: open\nterminal_states: [closed]\nstates: [open, closed]\n",
+		"secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -328,25 +311,17 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
 	files := map[string]string{
-		"package.yaml": `name: test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: producer, flow: producer, mode: static}
-  - {id: consumer, flow: consumer, mode: template}
-connect:
-  - {event: deploy.done, from: producer, to: consumer}
-`,
-		"schema.yaml": "name: test\n",
-		"flows/producer/schema.yaml": `name: producer
+
+		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer}\n",
+		"producer/schema.yaml": `name: producer
 mode: static
 pins:
   outputs:
     events:
       - deploy.done
 `,
-		"flows/producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
-		"flows/consumer/schema.yaml": `name: consumer
+		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
+		"consumer/schema.yaml": `name: consumer
 mode: template
 instance: vertical_id
 pins:
@@ -355,8 +330,8 @@ pins:
       - event: deploy.done
         resolution: {mode: select-or-create}
 `,
-		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
-		"flows/consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
+		"consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -368,13 +343,7 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
 	files := map[string]string{
-		"package.yaml": `name: test
-version: 1.0.0
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
+
 		"events.yaml": `approval.completed:
   swarm:
     source: external
@@ -409,20 +378,22 @@ portfolio-node:
       config_from:
         product_id: payload.product_id
 `,
-		"flows/operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `name: operating
+mode: template
+instance: instance_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"flows/operating/entities.yaml": "operating_state: {}\n",
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
+		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/events.yaml": `opco.product_initialization_requested:
   product_id: string?
 component_scaffold.spawn_requested:
   product_id: string?
 `,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+		"operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
@@ -450,15 +421,13 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 		nodes = "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
 	}
 	files := map[string]string{
-		"package.yaml": `name: provider-rollback-proof
+		"manifest.yaml": `name: provider-rollback-proof
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: consumer, flow: consumer, mode: template}
 `,
 		"schema.yaml": "name: provider-rollback-proof\n",
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
-		"flows/consumer/schema.yaml": `name: consumer
+		"consumer/schema.yaml": `name: consumer
 mode: template
 instance: chat_id
 pins:
@@ -468,11 +437,11 @@ pins:
         source: external
         resolution: {mode: select-or-create}
 `,
-		"flows/consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
-		"flows/consumer/nodes.yaml":    nodes,
+		"consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
+		"consumer/nodes.yaml":    nodes,
 	}
 	if nodes == "" {
-		delete(files, "flows/consumer/nodes.yaml")
+		delete(files, "consumer/nodes.yaml")
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -483,7 +452,7 @@ pins:
 func CopyProviderRollbackRenamedSource(t testing.TB, withCarrier bool) string {
 	t.Helper()
 	root := CopyProviderRollback(t, withCarrier)
-	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
 		"        resolution: {mode: select-or-create}",
 		"        resolution: {mode: select-or-create, from: payload.external_chat_id}")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
@@ -513,10 +482,10 @@ func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) strin
 	default:
 		t.Fatalf("provider rollback synthetic collision requires UUID or event-ID source, got %d", mint)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
 		"        resolution: {mode: select-or-create}",
 		"        resolution: {mode: create, from: "+source+"}")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "entities.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "consumer", "entities.yaml"),
 		"    type: text", "    type: uuid")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"  chat_id: text", "  chat_id: uuid")
@@ -548,11 +517,11 @@ func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint,
 	if collision {
 		field = "conversation_reference"
 	}
-	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "schema.yaml"),
 		"instance: conversation_reference", "instance: "+field)
-	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "schema.yaml"),
 		"          mode: select-or-create", "          mode: create\n          from: "+source)
-	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "entities.yaml"),
+	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "entities.yaml"),
 		"  conversation_reference:\n    type: text", "  "+field+":\n    type: uuid")
 	return root
 }

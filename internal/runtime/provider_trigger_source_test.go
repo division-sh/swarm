@@ -79,7 +79,7 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 		t.Fatal("schema-only pack event was misclassified as authored")
 	}
 	projectVisible := false
-	for _, scope := range wrapper.ProjectScopes() {
+	for _, scope := range wrapper.FlowScopes() {
 		if _, exists := scope.Events[eventName]; exists {
 			projectVisible = true
 		}
@@ -114,7 +114,7 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	if len(provenance) != 1 || provenance[0].Provider != "telegram" || provenance[0].Event != eventName ||
 		provenance[0].Kind != "normalized" || provenance[0].PackID != "provider.telegram" ||
 		provenance[0].PackVersion == "" || provenance[0].ManifestHash == "" || provenance[0].SourceProvenance == "" ||
-		!provenance[0].Generation.Equal(catalog.Generation()) || len(provenance[0].ProjectScopes) != 1 {
+		!provenance[0].Generation.Equal(catalog.Generation()) || len(provenance[0].FlowScopes) != 1 {
 		t.Fatalf("provider trigger provenance readback = %#v", provenance)
 	}
 }
@@ -163,10 +163,10 @@ func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *
 		t.Run(test.name, func(t *testing.T) {
 			source, catalog := schemaOnlyTelegramDeclarationSource(t)
 			bundle, ok := semanticview.Bundle(source)
-			if !ok || len(bundle.PackageTree) == 0 {
-				t.Fatal("fixture package tree missing")
+			if !ok {
+				t.Fatal("fixture bundle missing")
 			}
-			bundle.PackageTree[0].Manifest.ProviderTriggerEvents.Imports = append([]runtimecontracts.ProviderTriggerEventImport(nil), test.imports...)
+			setProviderTriggerImports(t, bundle, "coordinator", test.imports)
 			if !test.catalog {
 				catalog = nil
 			}
@@ -181,12 +181,12 @@ func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *
 func TestSourceWithProviderTriggerEventsDeduplicatesMatchingImportAndIngress(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || len(bundle.PackageTree) == 0 {
-		t.Fatal("fixture package tree missing")
+	if !ok {
+		t.Fatal("fixture bundle missing")
 	}
-	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{
+	setProviderTriggerImports(t, bundle, "coordinator", []runtimecontracts.ProviderTriggerEventImport{
 		{Provider: "telegram", Event: "inbound.telegram.text_message"},
-	}}
+	})
 	wrapper, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
@@ -249,16 +249,16 @@ func TestImportedProviderEventReadbacksAreMutationIsolated(t *testing.T) {
 	mutate(resolved)
 	assertFresh("ResolveFlowEventCatalogEntry")
 	mutatedScope := false
-	for _, scope := range wrapped.ProjectScopes() {
+	for _, scope := range wrapped.FlowScopes() {
 		if scoped, exists := scope.Events[eventName]; exists {
 			mutate(scoped)
 			mutatedScope = true
 		}
 	}
 	if !mutatedScope {
-		t.Fatal("ProjectScopes: imported event missing")
+		t.Fatal("FlowScopes: imported event missing")
 	}
-	assertFresh("ProjectScopes")
+	assertFresh("FlowScopes")
 }
 
 func TestSourceWithProviderTriggerEventsRejectsLocalPackEventRedeclaration(t *testing.T) {
@@ -324,12 +324,11 @@ func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) 
 func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || len(bundle.PackageTree) == 0 || len(bundle.PackageTree[0].Manifest.Flows) == 0 {
+	if !ok {
 		t.Fatal("fixture bundle flow declaration is unavailable")
 	}
 	// This unit proof isolates lowering for a non-template receiver. The served
 	// proof covers target-free select-or-create materialization.
-	bundle.PackageTree[0].Manifest.Flows[0].Mode = "static"
 	flow, ok := bundle.FlowViewByID("coordinator")
 	if !ok {
 		t.Fatal("fixture coordinator flow is unavailable")
@@ -615,26 +614,41 @@ func schemaOnlyTelegramDeclarationSource(t testing.TB) (semanticview.Source, *pr
 	t.Helper()
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || len(bundle.PackageTree) == 0 {
-		t.Fatal("fixture package tree missing")
+	if !ok {
+		t.Fatal("fixture bundle missing")
 	}
-	for packageIndex := range bundle.PackageTree {
-		pkg := &bundle.PackageTree[packageIndex]
-		for flowIndex := range pkg.Manifest.Flows {
-			pkg.Manifest.Flows[flowIndex].Ingress = nil
-			pkg.Manifest.Flows[flowIndex].Activation = ""
-			pkg.Manifest.Flows[flowIndex].Mode = runtimecontracts.FlowModeTemplate
-		}
+	flow, exists := bundle.FlowViewByID("coordinator")
+	if !exists {
+		t.Fatal("fixture coordinator flow missing")
 	}
-	if flow, exists := bundle.FlowViewByID("coordinator"); exists {
-		flow.Schema.Mode = runtimecontracts.FlowModeTemplate
+	flow.Schema.Ingress = nil
+	flow.Schema.Activation = ""
+	flow.Schema.Mode = runtimecontracts.FlowModeTemplate
+	schema, exists := bundle.FlowSchemas["coordinator"]
+	if !exists {
+		t.Fatal("fixture coordinator schema missing")
 	}
-	if schema, exists := bundle.FlowSchemas["coordinator"]; exists {
-		schema.Mode = runtimecontracts.FlowModeTemplate
-		bundle.FlowSchemas["coordinator"] = schema
-	}
-	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{
+	schema.Ingress = nil
+	schema.Activation = ""
+	schema.Mode = runtimecontracts.FlowModeTemplate
+	bundle.FlowSchemas["coordinator"] = schema
+	setProviderTriggerImports(t, bundle, "coordinator", []runtimecontracts.ProviderTriggerEventImport{
 		{Provider: "telegram", Event: "inbound.telegram.text_message"},
-	}}
+	})
 	return source, catalog
+}
+
+func setProviderTriggerImports(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, flowPath string, imports []runtimecontracts.ProviderTriggerEventImport) {
+	t.Helper()
+	flow, ok := bundle.FlowViewByID(flowPath)
+	if !ok {
+		t.Fatalf("fixture flow %q missing", flowPath)
+	}
+	flow.Schema.Imports.ProviderTriggerEvents = append([]runtimecontracts.ProviderTriggerEventImport(nil), imports...)
+	schema, ok := bundle.FlowSchemas[flowPath]
+	if !ok {
+		t.Fatalf("fixture schema %q missing", flowPath)
+	}
+	schema.Imports.ProviderTriggerEvents = append([]runtimecontracts.ProviderTriggerEventImport(nil), imports...)
+	bundle.FlowSchemas[flowPath] = schema
 }

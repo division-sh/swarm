@@ -1,0 +1,4 @@
+name: test-reduce-min
+version: 1.0.0
+description: reduce with min operation finds the minimum value.
+platform_version: ">=0.7.0 <0.8.0"

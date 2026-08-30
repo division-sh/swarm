@@ -7,26 +7,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-type ProjectScope struct {
-	Key          string
-	OwningFlowID string
-	Depth        int
-	Manifest     runtimecontracts.ProjectPackageDocument
-	Nodes        map[string]runtimecontracts.SystemNodeContract
-	Events       map[string]runtimecontracts.EventCatalogEntry
-	Agents       map[string]runtimecontracts.AgentRegistryEntry
-	AgentURIs    map[string]string
-	Tools        map[string]runtimecontracts.ToolSchemaEntry
-	Policy       runtimecontracts.PolicyDocument
-}
-
 type FlowScope struct {
 	ID            string
 	OwningFlowID  string
 	Path          string
-	PackageKey    string
 	Mode          string
-	DataDir       string
 	InputEvents   []string
 	OutputEvents  []string
 	AutoEmitEvent string
@@ -36,13 +21,6 @@ type FlowScope struct {
 	AgentURIs     map[string]string
 	Tools         map[string]runtimecontracts.ToolSchemaEntry
 	Policy        runtimecontracts.PolicyDocument
-}
-
-func ProjectScopes(source Source) []ProjectScope {
-	if source == nil {
-		return nil
-	}
-	return source.ProjectScopes()
 }
 
 func FlowScopes(source Source) []FlowScope {
@@ -60,23 +38,16 @@ func FlowScopeByID(source Source, flowID string) (FlowScope, bool) {
 	return source.FlowScopeByID(flowID)
 }
 
-// RootExecutionFlowID returns the authored flow scope used to execute root
-// handlers. Durable declaration identities may still represent root as an
-// explicit empty FlowID.
+// RootExecutionFlowID returns the canonical selected-root flow identity.
 func RootExecutionFlowID(source Source) string {
 	if source == nil {
 		return ""
 	}
 	bundle, ok := Bundle(source)
 	if ok && bundle != nil && bundle.FlowTree.Root != nil {
-		root := bundle.FlowTree.Root
-		for _, candidate := range []string{root.Paths.ID, root.Paths.Flow, root.Path, root.Schema.Name} {
-			if candidate = strings.Trim(strings.TrimSpace(candidate), "/"); candidate != "" {
-				return candidate
-			}
-		}
+		return "."
 	}
-	return strings.TrimSpace(source.WorkflowName())
+	return ""
 }
 
 // RootExecutionCoordinate is the exact root receiver identity for one run.
@@ -119,18 +90,21 @@ func (c RootExecutionCoordinate) Matches(flowID, runID string) bool {
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {
-	return strings.TrimSpace(view.Schema.Mode)
+	if mode := strings.TrimSpace(view.Schema.Mode); mode != "" {
+		return mode
+	}
+	return runtimecontracts.FlowModeStatic
 }
 
 func owningFlowIDFromView(view *runtimecontracts.FlowContractView) string {
 	if view == nil {
 		return ""
 	}
-	if flowID := strings.TrimSpace(view.Paths.ID); flowID != "" {
+	if flowID := strings.TrimSpace(view.Paths.FlowPath); flowID != "" {
 		return flowID
 	}
 	for parent := view.Parent; parent != nil; parent = parent.Parent {
-		if flowID := strings.TrimSpace(parent.Paths.ID); flowID != "" {
+		if flowID := strings.TrimSpace(parent.Paths.FlowPath); flowID != "" {
 			return flowID
 		}
 	}
@@ -139,12 +113,10 @@ func owningFlowIDFromView(view *runtimecontracts.FlowContractView) string {
 
 func flowScopeFromView(view runtimecontracts.FlowContractView, inputEvents, outputEvents []string) FlowScope {
 	return FlowScope{
-		ID:            strings.TrimSpace(view.Paths.ID),
+		ID:            strings.TrimSpace(view.Paths.FlowPath),
 		OwningFlowID:  owningFlowIDFromView(&view),
 		Path:          strings.Trim(strings.TrimSpace(view.Path), "/"),
-		PackageKey:    strings.TrimSpace(view.Paths.PackageKey),
 		Mode:          flowModeFromView(view),
-		DataDir:       strings.TrimSpace(view.Paths.DataDir),
 		InputEvents:   append([]string{}, inputEvents...),
 		OutputEvents:  append([]string{}, outputEvents...),
 		AutoEmitEvent: strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event),

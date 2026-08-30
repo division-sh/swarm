@@ -1082,7 +1082,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if currentState == "" {
 			return true, true, nil
 		}
-		flowID := execCtx.Request.Node.FlowID()
+		flowID := execCtx.Request.Node.FlowPath()
 		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, *state) {
 			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
 				return false, true, nil
@@ -1236,7 +1236,7 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 			return nil, err
 		}
 	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.Node.FlowID(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.Node.FlowPath(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	return out, nil

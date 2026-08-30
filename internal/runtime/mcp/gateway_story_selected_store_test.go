@@ -36,6 +36,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -87,9 +88,10 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 
 			runID := uuid.NewString()
 			runtimeInstanceID := uuid.NewString()
-			sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("c", 64))
+			source, sourceArtifact := loadGatewayStorySource(t, server.URL)
+			sourceFact, err := runtimecorrelation.NewSourceArtifactFact(sourceArtifact.BundleHash())
 			if err != nil {
-				t.Fatalf("NewEphemeralBundleSourceFact: %v", err)
+				t.Fatalf("NewSourceArtifactFact: %v", err)
 			}
 			scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash())
 			actor := models.AgentConfig{
@@ -117,8 +119,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("derive story-writer prompt: %v", err)
 			}
-			lifecycleToken := seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact)
-			source := loadGatewayStorySource(t, server.URL)
+			lifecycleToken := seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact, sourceArtifact)
 			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			if !gatewayStoryToolOffered(executor, actor, "send_story") {
 				t.Fatalf("send_story is not offered to actor: %#v", executor.ToolDefinitionsForActor(actor))
@@ -165,9 +166,9 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 	}
 }
 
-func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, authority runtimeeffects.Authority, admission managedexecution.Admission, token runtimeeffects.LifecycleToken, identity string) context.Context {
+func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.SourceArtifactFact, authority runtimeeffects.Authority, admission managedexecution.Admission, token runtimeeffects.LifecycleToken, identity string) context.Context {
 	ctx = models.WithActor(ctx, actor)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	if scope.Kind != "" {
 		ctx = runtimeauthoractivity.WithScope(ctx, scope)
@@ -234,7 +235,7 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 		uint64(token.Generation),
 		"",
 		"gateway-story-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		[]string{surface.ID},
 	)
 	if err != nil {
@@ -252,28 +253,20 @@ func gatewayStoryToolOffered(executor *runtimetools.Executor, actor models.Agent
 	return false
 }
 
-func loadGatewayStorySource(t *testing.T, serverURL string) semanticview.Source {
+func loadGatewayStorySource(t *testing.T, serverURL string) (semanticview.Source, *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
-	writeGatewayStoryFixture(t, filepath.Join(root, "package.yaml"), `
-name: mcp-gateway-story
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: story
-    flow: story
-    mode: static
-`)
+
 	writeGatewayStoryFixture(t, filepath.Join(root, "schema.yaml"), "name: mcp-gateway-story\n")
-	writeGatewayStoryFixture(t, filepath.Join(root, "flows", "story", "schema.yaml"), `
+	writeGatewayStoryFixture(t, filepath.Join(root, "story", "schema.yaml"), `
 name: story
 mode: static
 initial_state: queued
 states: [queued, done]
 terminal_states: [done]
 `)
-	writeGatewayStoryFixture(t, filepath.Join(root, "flows", "story", "agents.yaml"), `
+	writeGatewayStoryFixture(t, filepath.Join(root, "story", "agents.yaml"), `
 story-writer:
   id: story-writer
   role: story-writer
@@ -282,7 +275,7 @@ story-writer:
     inline: Write and send the requested story.
   tools: [send_story]
 `)
-	writeGatewayStoryFixture(t, filepath.Join(root, "flows", "story", "tools.yaml"), `
+	writeGatewayStoryFixture(t, filepath.Join(root, "story", "tools.yaml"), `
 send_story:
   description: Commit a selected-store story effect.
   handler_type: http
@@ -301,7 +294,10 @@ send_story:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	return semanticview.Wrap(bundle)
+	if bundle.SourceArtifact == nil {
+		t.Fatal("loaded gateway story source is missing its admitted artifact")
+	}
+	return semanticview.Wrap(bundle), bundle.SourceArtifact
 }
 
 func writeGatewayStoryFixture(t *testing.T, path, contents string) {
@@ -314,14 +310,14 @@ func writeGatewayStoryFixture(t *testing.T, path, contents string) {
 	}
 }
 
-func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.BundleSourceFact) runtimeeffects.LifecycleToken {
+func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.SourceArtifactFact, artifact *sourceartifact.AdmittedSourceArtifact) runtimeeffects.LifecycleToken {
 	t.Helper()
 	now := time.Now().UTC()
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	if selected.postgres {
-		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
+		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, Artifact: artifact})
 	} else {
-		runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
+		runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, Artifact: artifact})
 	}
 	if err := storetest.UpsertStaticAgentFixture(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", StartedAt: now,

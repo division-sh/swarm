@@ -68,10 +68,6 @@ func PolicyValueForFlow(source Source, flowID, key string) (runtimecontracts.Pol
 }
 
 func PolicyValueForFlowWithOwner(source Source, flowID, key string) (PolicyValueResolution, bool) {
-	return policyValueForFlowWithOwner(source, flowID, key, map[string]struct{}{})
-}
-
-func policyValueForFlowWithOwner(source Source, flowID, key string, seen map[string]struct{}) (PolicyValueResolution, bool) {
 	if source == nil {
 		return PolicyValueResolution{}, false
 	}
@@ -79,14 +75,6 @@ func policyValueForFlowWithOwner(source Source, flowID, key string, seen map[str
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return PolicyValueResolution{}, false
-	}
-	seenKey := flowID + "\x00" + key
-	if _, ok := seen[seenKey]; ok {
-		return PolicyValueResolution{}, false
-	}
-	seen[seenKey] = struct{}{}
-	if deps, ok := importBoundaryDependencyContext(source, flowID); ok {
-		return importBoundaryPolicyValueWithOwner(source, deps, flowID, key, seen)
 	}
 	return rawPolicyValueForFlowWithOwner(source, flowID, key)
 }
@@ -104,30 +92,20 @@ func rawPolicyValueForFlowWithOwner(source Source, flowID, key string) (PolicyVa
 	return PolicyValueResolution{}, false
 }
 
-func importBoundaryPolicyValueWithOwner(source Source, deps importBoundaryDependencyCtx, flowID, key string, seen map[string]struct{}) (PolicyValueResolution, bool) {
-	required := normalizeDependencySet(deps.child.Manifest.Requires.Policy)
-	if _, ok := required[key]; ok {
-		if ref := strings.TrimSpace(deps.site.Bind.Policy[key]); ref != "" {
-			path, ok := importBoundaryParentPolicyPath(ref)
-			if !ok {
-				return PolicyValueResolution{}, false
-			}
-			return policyValueForFlowWithOwner(source, strings.TrimSpace(deps.parent.OwningFlowID), path, seen)
-		}
-		if value, ok := deps.child.Manifest.Requires.PolicyDefaults[key]; ok {
-			return PolicyValueResolution{Value: clonePolicyValue(value), OwnerKey: policyOwnerPackageKey(deps.child.Key)}, true
-		}
-		return PolicyValueResolution{}, false
+func policyValueAtPath(doc runtimecontracts.PolicyDocument, key string) (runtimecontracts.PolicyValue, bool) {
+	root, rest := splitPolicyKey(strings.TrimSpace(key))
+	if root == "" {
+		return runtimecontracts.PolicyValue{}, false
 	}
-	if flow, ok := source.FlowScopeByID(strings.TrimSpace(flowID)); ok {
-		if value, ok := policyValueAtPath(flow.Policy, key); ok {
-			return PolicyValueResolution{Value: value, OwnerKey: policyOwnerFlowKey(flow.ID)}, true
-		}
+	value, ok := doc.Values[root]
+	if !ok || rest == "" {
+		return value, ok
 	}
-	if value, ok := policyValueAtPath(deps.child.Policy, key); ok {
-		return PolicyValueResolution{Value: value, OwnerKey: policyOwnerPackageKey(deps.child.Key)}, true
+	descended, ok := descendPolicyValue(value.Value, rest)
+	if !ok {
+		return runtimecontracts.PolicyValue{}, false
 	}
-	return PolicyValueResolution{}, false
+	return runtimecontracts.PolicyValue{Value: descended}, true
 }
 
 func policyScopesForFlow(source Source, flowID string) []FlowScope {
@@ -180,14 +158,6 @@ func policyOwnerFlowKey(flowID string) string {
 		return policyOwnerRootKey()
 	}
 	return "flow:" + flowID
-}
-
-func policyOwnerPackageKey(packageKey string) string {
-	packageKey = normalizeImportPackageKey(packageKey)
-	if packageKey == "" {
-		return "package:."
-	}
-	return "package:" + packageKey
 }
 
 func splitPolicyKey(key string) (string, string) {

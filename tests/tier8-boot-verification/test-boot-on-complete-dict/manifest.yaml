@@ -1,0 +1,6 @@
+name: test-boot-on-complete-dict
+version: 1.0.0
+description: >
+  Boot verification: handler on_complete is an ordered list and mapping grammar must fail closed before execution or codemod.
+
+platform_version: ">=0.7.0 <0.8.0"

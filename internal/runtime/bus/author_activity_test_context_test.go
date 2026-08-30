@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -16,39 +17,36 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
-const authorActivityTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-const authorActivityTestBundleSource = "ephemeral"
+const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
-var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
 func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string) []ActiveFlowInstanceDescriptor {
+	return exactTestFlowInstanceDescriptors(in, workflowVersion, authorActivityTestSourceArtifactFact)
+}
+
+func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact) []ActiveFlowInstanceDescriptor {
+	if sourceFact.Validate() != nil {
+		sourceFact = authorActivityTestSourceArtifactFact
+	}
+	bundleHash := sourceFact.BundleHash()
 	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
 	for idx := range out {
 		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
 			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
 		}
 		if strings.TrimSpace(out[idx].BundleHash) == "" {
-			out[idx].BundleHash = authorActivityTestBundleHash
-		}
-		if strings.TrimSpace(out[idx].BundleSource) == "" {
-			out[idx].BundleSource = authorActivityTestBundleSource
+			out[idx].BundleHash = bundleHash
 		}
 		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
 			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
 		}
 	}
 	return out
-}
-
-func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(authorActivityTestBundleHash)
-	if err != nil {
-		panic(err)
-	}
-	return fact
 }
 
 var authorActivityTestDifferentEventTypes = strings.Fields(`
@@ -102,7 +100,6 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		Identity:        req.Instance,
 		RunID:           req.TriggerEvent.RunID(),
 		BundleHash:      authorActivityTestBundleHash,
-		BundleSource:    authorActivityTestBundleSource,
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
 		ExecutionMode:   "live",
 	}
@@ -151,7 +148,7 @@ func (o *testFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivatio
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash(),
+		authorActivityTestSourceArtifactFact.BundleHash(),
 	))
 }
 
@@ -179,6 +176,13 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
+	if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle != nil && bundle.SourceArtifact != nil {
+		fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+		if err != nil {
+			return nil, err
+		}
+		opts.SourceArtifactFact = fact
+	}
 	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
 		owner := newTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
 		opts.TemplateInstancePlanner = owner
@@ -187,14 +191,26 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	if opts.FlowActivationFinalizer == nil {
 		opts.FlowActivationFinalizer, _ = opts.TemplateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if strings.TrimSpace(opts.SourceArtifactFact.BundleHash()) == "" {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	}
+	if err := ensureTestEventBusSourceArtifact(store, opts.ContractBundle, opts.SourceArtifactFact); err != nil {
+		return nil, err
+	}
+	if receiver, ok := store.(interface {
+		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)
+	}); ok {
+		workflowVersion := "1.0.0"
+		if opts.ContractBundle != nil && strings.TrimSpace(opts.ContractBundle.WorkflowVersion()) != "" {
+			workflowVersion = opts.ContractBundle.WorkflowVersion()
+		}
+		receiver.setTestSemanticSource(opts.SourceArtifactFact, workflowVersion)
 	}
 	if opts.WorkOwner == nil {
 		processOwner := worklifetime.NewProcess()
 		owner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
-			BundleHash:        opts.BundleSourceFact.BundleHash(),
+			BundleHash:        opts.SourceArtifactFact.BundleHash(),
 		})
 		if err != nil {
 			return nil, err
@@ -203,7 +219,7 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, err := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			opts.RuntimeInstanceID,
 			1,
 		)
@@ -215,7 +231,7 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()), descriptors,
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()), descriptors,
 		)
 		if err != nil {
 			return nil, err
@@ -236,6 +252,23 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		return nil, err
 	}
 	return bus, nil
+}
+
+func ensureTestEventBusSourceArtifact(store EventStore, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact) error {
+	writer, ok := store.(sourceartifactfixture.Writer)
+	if !ok {
+		return nil
+	}
+	artifact := sourceartifactfixture.Artifact()
+	if bundle, bundled := semanticview.Bundle(source); bundled && bundle != nil && bundle.SourceArtifact != nil {
+		artifact = bundle.SourceArtifact
+	} else if fact.BundleHash() != artifact.BundleHash() {
+		return nil
+	}
+	if artifact.BundleHash() != fact.BundleHash() {
+		return fmt.Errorf("event bus test source artifact %s contradicts selected source %s", artifact.BundleHash(), fact.BundleHash())
+	}
+	return sourceartifactfixture.EnsureArtifact(context.Background(), writer, artifact)
 }
 
 func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeauthoractivity.EventDescriptor {

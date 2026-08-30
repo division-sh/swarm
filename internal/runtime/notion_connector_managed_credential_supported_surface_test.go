@@ -34,7 +34,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		const (
 			runID        = "8a000000-0000-0000-0000-000000000001"
 			entityID     = "8a000000-0000-0000-0000-000000000002"
-			flowInstance = "notion-connector-managed-credential-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -63,7 +63,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		const (
 			runID        = "8b000000-0000-0000-0000-000000000001"
 			entityID     = "8b000000-0000-0000-0000-000000000002"
-			flowInstance = "notion-connector-managed-credential-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -367,8 +367,9 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "notion", Tool: "notion.append_block_children"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
@@ -394,20 +395,7 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 			},
 		},
 	}))
-	importSource := slackManagedConnectorPackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "notion", Tool: "notion.append_block_children"}},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, notionManagedConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, notionManagedConnectorPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}

@@ -109,7 +109,7 @@ func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
 	builder := newEffectiveProvenanceBuilder()
 	owners := map[string]string{}
 	for _, record := range bundle.canonicalCurrentEventDeclarationRecords() {
-		prefix := effectiveEventProvenancePrefix(record.packageKey, record.qualifiedName)
+		prefix := effectiveEventProvenancePrefix(record.flowPath, record.qualifiedName)
 		if prefix == "" {
 			continue
 		}
@@ -117,13 +117,8 @@ func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
 			continue
 		}
 		owners[prefix] = record.layer
-		packIdentity, boundarySnapshot := eventBoundarySnapshotPackIdentity(bundle, record)
 		for relativePath, provenance := range record.entry.admissionProvenance {
 			provenance.InputPaths = qualifyEffectiveEventInputPaths(prefix, provenance.InputPaths)
-			if boundarySnapshot {
-				provenance.Origin = EffectiveValueOriginBoundarySnapshot
-				provenance.PackIdentity = packIdentity
-			}
 			builder.set(prefix+"."+relativePath, provenance)
 		}
 	}
@@ -137,8 +132,8 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 	}
 	for _, row := range effectiveEventSchemaOwnershipRows(bundle) {
 		ownerEvent := resolvedEventSchemaKey(bundle, row.producerFlowID, row.producerEvent)
-		ownerPrefix := effectiveEventProvenancePrefix(row.packageKey, ownerEvent)
-		projectionPrefix := effectiveEventProjectionProvenancePrefix(row.packageKey, row.receiverFlowID, row.receiverEvent)
+		ownerPrefix := effectiveEventProvenancePrefix(row.ownerFlowPath, ownerEvent)
+		projectionPrefix := effectiveEventProjectionProvenancePrefix(row.ownerFlowPath, row.receiverFlowID, row.receiverEvent)
 		if ownerPrefix == "" || projectionPrefix == "" {
 			continue
 		}
@@ -158,27 +153,6 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 			}
 		}
 	}
-}
-
-func eventBoundarySnapshotPackIdentity(bundle *WorkflowContractBundle, record currentEventDeclarationRecord) (string, bool) {
-	packageKey := strings.TrimSpace(record.packageKey)
-	if bundle == nil || packageKey == "" || packageKey == "." || record.layer != "project" {
-		return "", false
-	}
-	view, ok := bundle.projectContracts[packageKey]
-	if !ok {
-		return "", false
-	}
-	candidates := map[string]struct{}{
-		strings.TrimSpace(record.localName):     {},
-		strings.TrimSpace(record.qualifiedName): {},
-	}
-	for _, name := range view.Manifest.Requires.Inputs {
-		if _, ok := candidates[strings.TrimSpace(name)]; ok {
-			return packageKey, true
-		}
-	}
-	return "", false
 }
 
 func effectiveEventProvenancePrefix(packageKey, eventName string) string {

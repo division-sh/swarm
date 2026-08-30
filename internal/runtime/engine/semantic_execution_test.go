@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -22,24 +21,21 @@ const semanticExecutionFixtureRunID = "00000000-0000-0000-0000-000000000001"
 // ExecuteSemanticFixture completes the durable facts that engine unit tests
 // intentionally omit while keeping the production executor fail-closed.
 func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
+	if strings.TrimSpace(req.HandlerEventKey) == "" {
+		req.HandlerEventKey = string(req.Event.Type())
+	}
 	var err error
-	req.Handler, err = completeSemanticFixtureHandlerRuleIdentity(req.Node, req.Handler)
+	req.Handler, err = completeSemanticFixtureHandlerRuleIdentity(req.Node, req.HandlerEventKey, req.Handler)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
 	hasFanOut := len(runtimecontracts.HandlerFanOutSites(req.Handler)) > 0
 	if strings.TrimSpace(req.ExecutionFlowID.String()) == "" {
-		flowID := strings.TrimSpace(req.Node.FlowID())
+		flowID := strings.TrimSpace(req.Node.FlowPath())
 		if flowID == "" && e != nil && e.deps.Source != nil {
-			flowID = strings.TrimSpace(e.deps.Source.WorkflowName())
-		}
-		if flowID == "" && hasFanOut {
-			flowID = "root"
+			flowID = semanticview.RootExecutionFlowID(e.deps.Source)
 		}
 		req.ExecutionFlowID = identity.NormalizeFlowID(flowID)
-	}
-	if strings.TrimSpace(req.HandlerEventKey) == "" {
-		req.HandlerEventKey = string(req.Event.Type())
 	}
 	if hasFanOut {
 		bundle, ok := semanticview.Bundle(e.deps.Source)
@@ -62,7 +58,10 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		)
 	}
 	if req.ProducerSource.Empty() {
-		flowID := strings.TrimSpace(req.Node.FlowID())
+		flowID := strings.TrimSpace(req.Node.FlowPath())
+		if flowID == "." {
+			flowID = ""
+		}
 		entityID := strings.TrimSpace(req.EntityID.String())
 		if entityID == "" {
 			entityID = strings.TrimSpace(req.State.EntityID.String())
@@ -92,10 +91,11 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 	}
 	if hasFanOut && !req.Route.Valid() {
 		scope := strings.Trim(strings.TrimSpace(req.ExecutionFlowID.String()), "/")
-		if scope == "" {
-			scope = "root"
+		if scope == "." {
+			req.Route = runtimeflowidentity.StoredRoute(scope, req.Event.RunID(), req.Event.RunID())
+		} else {
+			req.Route = runtimeflowidentity.DeriveRoute(scope, req.Event.RunID())
 		}
-		req.Route = runtimeflowidentity.DeriveRoute(scope, req.Event.RunID())
 	}
 	if hasFanOut {
 		if _, claimed := runtimedelivery.ClaimFromContext(ctx); !claimed {
@@ -119,33 +119,17 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 	return e.Execute(ctx, req)
 }
 
-func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, handler runtimecontracts.SystemNodeEventHandler) (runtimecontracts.SystemNodeEventHandler, error) {
-	admitFanOut := func(context string, index int, fanOut *runtimecontracts.FanOutSpec) (*runtimecontracts.FanOutSpec, error) {
+func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) (runtimecontracts.SystemNodeEventHandler, error) {
+	admitFanOut := func(fanOut *runtimecontracts.FanOutSpec) *runtimecontracts.FanOutSpec {
 		if fanOut == nil {
-			return nil, nil
+			return nil
 		}
 		admitted := *fanOut
-		if !admitted.ElementID.Valid() {
-			value := uuid.NewSHA1(uuid.NameSpaceOID, []byte(node.Key()+"\x00fan_out\x00"+context+"\x00"+fmt.Sprint(index))).String()
-			var err error
-			admitted.ElementID, err = contractelementidentity.ParseContractElementID(value)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return &admitted, nil
+		return &admitted
 	}
 	admit := func(context string, index int, rule runtimecontracts.HandlerRuleEntry) (runtimecontracts.HandlerRuleEntry, error) {
-		if !rule.ElementID.Valid() {
-			value := uuid.NewSHA1(uuid.NameSpaceOID, []byte(node.Key()+"\x00"+context+"\x00"+fmt.Sprint(index))).String()
-			var err error
-			rule.ElementID, err = contractelementidentity.ParseContractElementID(value)
-			if err != nil {
-				return runtimecontracts.HandlerRuleEntry{}, err
-			}
-		}
 		var admitted runtimecontracts.HandlerRuleEntry
-		if err := yaml.Unmarshal([]byte("element_id: "+rule.ElementID.String()+"\n"), &admitted); err != nil {
+		if err := yaml.Unmarshal([]byte("condition: else\n"), &admitted); err != nil {
 			return runtimecontracts.HandlerRuleEntry{}, err
 		}
 		admitted.ID = rule.ID
@@ -158,11 +142,7 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ha
 		admitted.Activity = rule.Activity
 		admitted.DataAccumulation = rule.DataAccumulation
 		admitted.Compute = rule.Compute
-		admittedFanOut, fanOutErr := admitFanOut(context, index, rule.FanOut)
-		if fanOutErr != nil {
-			return runtimecontracts.HandlerRuleEntry{}, fanOutErr
-		}
-		admitted.FanOut = admittedFanOut
+		admitted.FanOut = admitFanOut(rule.FanOut)
 		return admitted, nil
 	}
 	admitMany := func(context string, rules []runtimecontracts.HandlerRuleEntry) ([]runtimecontracts.HandlerRuleEntry, error) {
@@ -181,10 +161,7 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ha
 	if err != nil {
 		return runtimecontracts.SystemNodeEventHandler{}, err
 	}
-	handler.FanOut, err = admitFanOut("handler", 0, handler.FanOut)
-	if err != nil {
-		return runtimecontracts.SystemNodeEventHandler{}, err
-	}
+	handler.FanOut = admitFanOut(handler.FanOut)
 	handler.OnComplete, err = admitMany("on_complete", handler.OnComplete)
 	if err != nil {
 		return runtimecontracts.SystemNodeEventHandler{}, err
@@ -205,5 +182,5 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ha
 		}
 		handler.Join = &join
 	}
-	return runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	return runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 }

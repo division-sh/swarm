@@ -151,7 +151,7 @@ func TestValidateSourceRejectsScopedDuplicateAgentExposureOfProviderConnector(t 
 	connector := telegramConnectorTool("https://api.telegram.org")
 	alpha := runtimecontracts.FlowContractView{
 		Path:  "alpha",
-		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "alpha"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"sender": {ID: "alpha-sender", Tools: []string{"telegram.send_message"}},
 		},
@@ -159,7 +159,7 @@ func TestValidateSourceRejectsScopedDuplicateAgentExposureOfProviderConnector(t 
 	}
 	beta := runtimecontracts.FlowContractView{
 		Path:  "beta",
-		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "beta"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"sender": {ID: "beta-sender", Tools: []string{"telegram.send_message"}},
 		},
@@ -215,28 +215,10 @@ func loadNestedProviderConnectorAgentSource(t *testing.T) semanticview.Source {
 			t.Fatalf("WriteFile(%s): %v", path, err)
 		}
 	}
-	write(filepath.Join(root, "package.yaml"), `
-name: nested-provider-agent
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - {path: parent}
-`)
 	write(filepath.Join(root, "schema.yaml"), "name: nested-provider-agent\n")
-	write(filepath.Join(root, "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-packages:
-  - {path: child}
-`)
-	write(filepath.Join(root, "parent", "child", "package.yaml"), `
-name: child
-version: "1.0.0"
-flows:
-  - {id: support, flow: support, mode: static}
-`)
-	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
-	write(filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+	write(filepath.Join(root, "parent", "schema.yaml"), "name: parent\n")
+	write(filepath.Join(root, "parent", "child", "schema.yaml"), "name: child\n")
+	flowRoot := filepath.Join(root, "parent", "child", "support")
 	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
 	write(filepath.Join(flowRoot, "agents.yaml"), `
 sender:
@@ -252,14 +234,10 @@ sender:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	entry := bundle.FlowTree.ByID["support"].Agents["sender"]
+	const flowPath = "parent/child/support"
+	entry := bundle.FlowTree.ByID[flowPath].Agents["sender"]
 	entry.Tools = []string{"telegram.send_message"}
-	bundle.FlowTree.ByID["support"].Agents["sender"] = entry
-	for _, project := range bundle.ProjectViews() {
-		if _, ok := project.Agents["sender"]; ok {
-			project.Agents["sender"] = entry
-		}
-	}
+	bundle.FlowTree.ByID[flowPath].Agents["sender"] = entry
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": telegramConnectorTool("https://api.telegram.org"),
 	}
@@ -402,100 +380,6 @@ func TestSurfacesReportBoundAndUnboundRequirementsWithoutSecretValues(t *testing
 	}
 	if len(envBound) != 1 || len(envBound[0].Requirements) != 1 || !requirementSatisfied(envBound[0].Requirements[0]) || envBound[0].Requirements[0].Source != runtimecredentials.SourceEnv || strings.Contains(packs.RenderSubject(envBound[0], true), "env-provider-secret") {
 		t.Fatalf("env-bound subject = %#v", envBound)
-	}
-}
-
-func TestSurfacesResolveImportedFlowCredentialBindings(t *testing.T) {
-	ctx := context.Background()
-	tool := telegramConnectorTool("https://api.telegram.org")
-	source := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"telegram.send_message": tool,
-			},
-		}),
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: "",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					Flows: []runtimecontracts.ProjectFlowRef{
-						{
-							ID:   "worker",
-							Flow: "worker",
-							Bind: runtimecontracts.FlowPackageBind{
-								Credentials: map[string]string{
-									"telegram_bot_token": "tenant_telegram_bot_token",
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Key: "flows/worker",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					Requires: runtimecontracts.FlowPackageRequires{
-						Credentials: []string{"telegram_bot_token"},
-					},
-				},
-			},
-		},
-		flowScopes: []semanticview.FlowScope{
-			{
-				ID:         "worker",
-				PackageKey: "flows/worker",
-				Tools: map[string]runtimecontracts.ToolSchemaEntry{
-					"telegram.send_message": tool,
-				},
-			},
-		},
-	}
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	if err := store.Set(ctx, "tenant_telegram_bot_token", "provider-secret"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-
-	surfaces, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), StaticCredentials: store})
-	if err != nil {
-		t.Fatalf("Surfaces: %v", err)
-	}
-	if len(surfaces) != 1 {
-		t.Fatalf("surfaces = %#v, want one", surfaces)
-	}
-	if len(surfaces[0].Requirements) != 1 || surfaces[0].Requirements[0].Name != "tenant_telegram_bot_token" || !requirementSatisfied(surfaces[0].Requirements[0]) {
-		t.Fatalf("requirements = %#v, want package-local telegram_bot_token marked bound via deployment binding", surfaces[0].Requirements)
-	}
-}
-
-func TestCapabilitySubjectsResolveImportedManagedCredentialBindings(t *testing.T) {
-	ctx := context.Background()
-	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	source := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"slack.post_message": tool}}),
-		projectScopes: []semanticview.ProjectScope{
-			{Key: "", Manifest: runtimecontracts.ProjectPackageDocument{Flows: []runtimecontracts.ProjectFlowRef{{
-				ID: "worker", Flow: "worker", Bind: runtimecontracts.FlowPackageBind{Credentials: map[string]string{"slack_oauth": "tenant_slack_oauth"}},
-			}}}},
-			{Key: "flows/worker", Manifest: runtimecontracts.ProjectPackageDocument{Requires: runtimecontracts.FlowPackageRequires{Credentials: []string{"slack_oauth"}}}},
-		},
-		flowScopes: []semanticview.FlowScope{{ID: "worker", PackageKey: "flows/worker", Tools: map[string]runtimecontracts.ToolSchemaEntry{"slack.post_message": tool}}},
-	}
-	record := runtimemanagedcredentials.Record{
-		Key: "tenant_slack_oauth", Provider: "slack", GrantType: runtimemanagedcredentials.GrantAuthorizationCodePKCE,
-		Scopes: []string{"chat:write"}, AccessToken: "secret", Status: runtimemanagedcredentials.StatusConnected,
-	}
-	subjects, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(record)})
-	if err != nil {
-		t.Fatalf("CapabilitySubjects: %v", err)
-	}
-	if len(subjects) != 1 || len(subjects[0].Requirements) != 1 || subjects[0].Requirements[0].Name != "tenant_slack_oauth" || !requirementSatisfied(subjects[0].Requirements[0]) {
-		t.Fatalf("managed import-boundary subjects = %#v", subjects)
-	}
-	if strings.Contains(packs.RenderSubject(subjects[0], true), "secret") {
-		t.Fatalf("managed subject leaked token: %#v", subjects[0])
 	}
 }
 
@@ -807,8 +691,8 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "notion", "notion.append_block_children"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "notion", "notion.append_block_children"),
 		},
 	}, testPackRegistry(t))
 	if err != nil {
@@ -855,8 +739,8 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "github", "github.create_issue_comment"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "github", "github.create_issue_comment"),
 		},
 	}, testPackRegistry(t))
 	if err != nil {
@@ -905,20 +789,14 @@ func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{
-							{Provider: "github", Tool: "github.add_labels_to_issue"},
-							{Provider: "github", Tool: "github.create_issue"},
-							{Provider: "github", Tool: "github.create_issue_comment"},
-						},
-					},
-				},
+		importScopes: []connectorPackTestImportScope{{
+			Key: ".",
+			Imports: []runtimecontracts.ConnectorPackImport{
+				{Provider: "github", Tool: "github.add_labels_to_issue"},
+				{Provider: "github", Tool: "github.create_issue"},
+				{Provider: "github", Tool: "github.create_issue_comment"},
 			},
-		},
+		}},
 	}, testPackRegistry(t))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
@@ -963,8 +841,8 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "microsoft_graph", "microsoft_graph.send_mail"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "microsoft_graph", "microsoft_graph.send_mail"),
 		},
 	}, testPackRegistry(t))
 	if err != nil {
@@ -1091,8 +969,8 @@ func TestSlackConnectorPackRequiresManagedCredentialDriftFailsClosed(t *testing.
 
 func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
-		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{{Key: "."}},
+		Source:       semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		importScopes: []connectorPackTestImportScope{{Key: "."}},
 	}
 	ambientSource, err := SourceWithConnectorPackImports(ambient, testPackRegistry(t))
 	if err != nil {
@@ -1104,8 +982,8 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 
 	explicit := providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
 		},
 	}
 	source, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
@@ -1140,8 +1018,8 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing.T) {
 	explicit := providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
 		},
 	}
 	imported, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
@@ -1161,8 +1039,8 @@ func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing
 func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
 	explicit := providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "github", "github.create_issue"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "github", "github.create_issue"),
 		},
 	}
 	imported, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
@@ -1204,8 +1082,8 @@ func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *test
 
 func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
-		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{{Key: "."}},
+		Source:       semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		importScopes: []connectorPackTestImportScope{{Key: "."}},
 	}
 	ambientSource, err := SourceWithConnectorPackImports(ambient, testPackRegistry(t))
 	if err != nil {
@@ -1217,8 +1095,8 @@ func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(
 
 	explicit := providerConnectorScopedSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "slack", "slack.post_message"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "slack", "slack.post_message"),
 		},
 	}
 	source, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
@@ -1255,8 +1133,8 @@ func TestConnectorPackImportRejectsCollisionsAndNamesSources(t *testing.T) {
 				"telegram.send_message": telegramConnectorTool("https://api.telegram.org"),
 			},
 		}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
 		},
 	}
 
@@ -1264,7 +1142,7 @@ func TestConnectorPackImportRejectsCollisionsAndNamesSources(t *testing.T) {
 	if err == nil {
 		t.Fatal("SourceWithConnectorPackImports succeeded, want collision")
 	}
-	for _, want := range []string{`provider connector tool "telegram.send_message" collision`, "package . connector_packs.imports", "merged tool source", "remove one"} {
+	for _, want := range []string{`provider connector tool "telegram.send_message" collision`, "flow . schema.yaml imports.connector_packs", "merged tool source", "remove one"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("collision error = %q, want containing %q", err.Error(), want)
 		}
@@ -1278,12 +1156,11 @@ func TestValidateSourceRejectsDirectAgentExposureOfImportedProviderConnector(t *
 		},
 	}
 	base := semanticviewtest.WrapRootAgents(bundle)
-	scope := base.ProjectScopes()[0]
-	scope.Manifest.ConnectorPacks = runtimecontracts.ConnectorPackImports{
-		Imports: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}},
-	}
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: base, projectScopes: []semanticview.ProjectScope{scope},
+		Source: base,
+		importScopes: []connectorPackTestImportScope{
+			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		},
 	}, testPackRegistry(t))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
@@ -1297,20 +1174,29 @@ func TestValidateSourceRejectsDirectAgentExposureOfImportedProviderConnector(t *
 
 type providerConnectorScopedSource struct {
 	semanticview.Source
-	projectScopes []semanticview.ProjectScope
-	flowScopes    []semanticview.FlowScope
+	importScopes []connectorPackTestImportScope
+	flowScopes   []semanticview.FlowScope
+}
+
+type connectorPackTestImportScope struct {
+	Key     string
+	Imports []runtimecontracts.ConnectorPackImport
 }
 
 type providerConnectorSourceWrapper struct {
 	semanticview.Source
 }
 
-func (s providerConnectorScopedSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.projectScopes...)
-}
-
 func (s providerConnectorScopedSource) FlowScopes() []semanticview.FlowScope {
-	return append([]semanticview.FlowScope(nil), s.flowScopes...)
+	out := append([]semanticview.FlowScope(nil), s.flowScopes...)
+	for _, scope := range s.importScopes {
+		flowPath := strings.TrimSpace(scope.Key)
+		if flowPath == "" {
+			flowPath = "."
+		}
+		out = append(out, semanticview.FlowScope{ID: flowPath, Path: flowPath})
+	}
+	return out
 }
 
 func (s providerConnectorScopedSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
@@ -1321,6 +1207,25 @@ func (s providerConnectorScopedSource) FlowScopeByID(id string) (semanticview.Fl
 		}
 	}
 	return semanticview.FlowScope{}, false
+}
+
+func (s providerConnectorScopedSource) FlowSchemaByID(id string) (runtimecontracts.FlowSchemaDocument, bool) {
+	id = strings.TrimSpace(id)
+	for _, scope := range s.importScopes {
+		flowPath := strings.TrimSpace(scope.Key)
+		if flowPath == "" {
+			flowPath = "."
+		}
+		if flowPath == id {
+			return runtimecontracts.FlowSchemaDocument{
+				Name: flowPath,
+				Imports: runtimecontracts.FlowSchemaImports{
+					ConnectorPacks: append([]runtimecontracts.ConnectorPackImport(nil), scope.Imports...),
+				},
+			}, true
+		}
+	}
+	return s.Source.FlowSchemaByID(id)
 }
 
 func testProviderConnectorTool(
@@ -1483,15 +1388,8 @@ func githubAppConnectedRecord() runtimemanagedcredentials.Record {
 	}
 }
 
-func projectScopeWithConnectorPackImport(key, provider, tool string) semanticview.ProjectScope {
-	return semanticview.ProjectScope{
-		Key: key,
-		Manifest: runtimecontracts.ProjectPackageDocument{
-			ConnectorPacks: runtimecontracts.ConnectorPackImports{
-				Imports: []runtimecontracts.ConnectorPackImport{{Provider: provider, Tool: tool}},
-			},
-		},
-	}
+func flowScopeWithConnectorPackImport(key, provider, tool string) connectorPackTestImportScope {
+	return connectorPackTestImportScope{Key: key, Imports: []runtimecontracts.ConnectorPackImport{{Provider: provider, Tool: tool}}}
 }
 
 func connectorPackTestFS(t *testing.T, provider string) fstest.MapFS {

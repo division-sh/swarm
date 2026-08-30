@@ -58,7 +58,7 @@ type dynamicFlowRuntimeReadinessAttempt struct {
 }
 
 type dynamicFlowRuntimeReadinessSource struct {
-	fact   runtimecorrelation.BundleSourceFact
+	fact   runtimecorrelation.SourceArtifactFact
 	source semanticview.Source
 }
 
@@ -76,7 +76,7 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 // DynamicFlowRuntimeStartupReadiness is the one-startup-attempt authority for
 // pending rows admitted by exact source transition or explicit recovery.
 type DynamicFlowRuntimeStartupReadiness struct {
-	sourceFact        runtimecorrelation.BundleSourceFact
+	sourceFact        runtimecorrelation.SourceArtifactFact
 	replayAllowed     bool
 	authorizedPending map[dynamicFlowRuntimeReadinessKey]struct{}
 	empty             bool
@@ -127,7 +127,7 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 	return errors.Join(reconcileErrs...)
 }
 
-func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	if am == nil || am.workflowInstances == nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 	}
@@ -169,7 +169,7 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	return projection, nil
 }
 
-func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.BundleSourceFact, replayAllowed bool) (DynamicFlowRuntimeStartupReadiness, error) {
+func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.SourceArtifactFact, replayAllowed bool) (DynamicFlowRuntimeStartupReadiness, error) {
 	startup := DynamicFlowRuntimeStartupReadiness{
 		sourceFact: sourceFact, replayAllowed: replayAllowed,
 		authorizedPending: make(map[dynamicFlowRuntimeReadinessKey]struct{}),
@@ -408,7 +408,7 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	}
 	expected := current.Plan
 	expected.Identity = req.Instance
-	expected.BundleHash, expected.BundleSource, err = dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	expected.BundleHash, err = dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
@@ -541,11 +541,9 @@ func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
 	}
-	bundleHash, bundleSource := admittedSource.fact.StorageValues()
 	expected := plan
 	expected.Identity = projection.Identity
-	expected.BundleHash = bundleHash
-	expected.BundleSource = bundleSource
+	expected.BundleHash = admittedSource.fact.BundleHash()
 	expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
 	for _, record := range records {
@@ -752,22 +750,18 @@ func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
 			err,
 		)
 	}
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
 			"dynamic flow runtime readiness requires exact bundle source fact",
 		)
 	}
 	if !sourceFact.Matches(owned.fact) {
-		declaredHash, declaredSource := owned.fact.StorageValues()
-		activeHash, activeSource := sourceFact.StorageValues()
 		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
-			"%w: declared=%s/%s active=%s/%s",
+			"%w: declared=%s active=%s",
 			errDynamicFlowRuntimeReadinessSourceStale,
-			declaredHash,
-			declaredSource,
-			activeHash,
-			activeSource,
+			owned.fact.BundleHash(),
+			sourceFact.BundleHash(),
 		)
 	}
 	if strings.TrimSpace(owned.source.WorkflowVersion()) == "" {
@@ -787,31 +781,28 @@ func sameLoadedDynamicFlowSemanticSource(left, right semanticview.Source) bool {
 	return leftOK && rightOK && leftBundle == rightBundle
 }
 
-func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, string, error) {
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, error) {
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
-		return "", "", fmt.Errorf("dynamic flow runtime readiness requires exact bundle source fact")
+		return "", fmt.Errorf("dynamic flow runtime readiness requires exact source artifact fact")
 	}
 	if err := sourceFact.Validate(); err != nil {
-		return "", "", fmt.Errorf("dynamic flow runtime readiness bundle source fact: %w", err)
+		return "", fmt.Errorf("dynamic flow runtime readiness source artifact fact: %w", err)
 	}
-	bundleHash, bundleSource := sourceFact.StorageValues()
-	return bundleHash, bundleSource, nil
+	return sourceFact.BundleHash(), nil
 }
 
 func validateDynamicFlowRuntimeReadinessCallbackSource(
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	source dynamicFlowRuntimeReadinessSource,
 ) error {
-	bundleHash, bundleSource := source.fact.StorageValues()
-	if bundleHash != plan.BundleHash || bundleSource != plan.BundleSource {
+	bundleHash := source.fact.BundleHash()
+	if bundleHash != plan.BundleHash {
 		return fmt.Errorf(
-			"%w: declared=%s/%s active=%s/%s",
+			"%w: declared=%s active=%s",
 			errDynamicFlowRuntimeReadinessSourceStale,
 			plan.BundleHash,
-			plan.BundleSource,
 			bundleHash,
-			bundleSource,
 		)
 	}
 	if source.source == nil {

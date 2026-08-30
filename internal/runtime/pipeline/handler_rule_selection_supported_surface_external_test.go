@@ -22,16 +22,16 @@ import (
 
 func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBothStores(t *testing.T) {
 	tests := []struct {
-		event       string
-		context     handlerselection.Context
-		disposition handlerselection.Disposition
-		elementID   string
-		label       string
+		event        string
+		context      handlerselection.Context
+		disposition  handlerselection.Disposition
+		semanticPath string
+		label        string
 	}{
-		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, elementID: "00000000-0000-4000-8000-000000000421", label: "rules-label"},
+		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.selected"].rules[0]`, label: "rules-label"},
 		{event: "rules.no_match", context: handlerselection.ContextRules, disposition: handlerselection.DispositionNoMatch},
-		{event: "rules.evaluation_failed", context: handlerselection.ContextRules, disposition: handlerselection.DispositionEvaluationFailed, elementID: "00000000-0000-4000-8000-000000000426", label: "failed-rules"},
-		{event: "complete.selected", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionSelected, elementID: "00000000-0000-4000-8000-000000000423", label: "complete-label"},
+		{event: "rules.evaluation_failed", context: handlerselection.ContextRules, disposition: handlerselection.DispositionEvaluationFailed, semanticPath: `nodes["selection-node"].handlers["rules.evaluation_failed"].rules[0]`, label: "failed-rules"},
+		{event: "complete.selected", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["complete.selected"].on_complete[0]`, label: "complete-label"},
 		{event: "complete.no_match", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionNoMatch},
 		{event: "direct", context: handlerselection.ContextNone, disposition: handlerselection.DispositionNotApplicable},
 	}
@@ -48,12 +48,12 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := handlerRuleSelectionSupportedSource(t)
-			node := externalPipelineSourceNode(t, source, "", "selection-node")
+			node := externalPipelineSourceNode(t, source, ".", "selection-node")
 			workflowName := source.WorkflowName()
 			policies := map[string]runtimepipeline.WorkflowEventPolicy{}
 			subscriptions := make([]events.EventType, 0, len(tests))
 			for _, tc := range tests {
-				eventType := workflowName + "/" + tc.event
+				eventType := tc.event
 				subscriptions = append(subscriptions, events.EventType(eventType))
 				policies[eventType] = runtimepipeline.WorkflowEventPolicy{Consume: true}
 			}
@@ -75,7 +75,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 				t.Run(tc.event, func(t *testing.T) {
 					sourceEnvelope := events.EnvelopeForFlowInstance(
 						events.EnvelopeForEntityID(events.EventEnvelope{}, runtimeflowidentity.EntityID(workflowName)),
-						workflowName,
+						runID,
 					)
 					event := eventtest.ExistingRunRootIngress(
 						uuid.NewString(), events.EventType(tc.event), "operator", "", []byte(`{"proof":true}`),
@@ -95,14 +95,14 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 						t.Fatalf("wait handler-rule delivery: %v", err)
 					}
 					cancel()
-					assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), tc.context, tc.disposition, tc.elementID, tc.label)
-					assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), tc.context, tc.disposition, tc.elementID, tc.label)
+					assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), tc.context, tc.disposition, tc.semanticPath, tc.label)
+					assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), tc.context, tc.disposition, tc.semanticPath, tc.label)
 
 					if err := eventBus.PublishAcknowledged(ctx, event); err != nil {
 						t.Fatalf("replay handler-rule event: %v", err)
 					}
 					assertExactJoinDeliveryCount(t, selected, ctx, event.ID(), node.Key(), 1)
-					assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), tc.context, tc.disposition, tc.elementID, tc.label)
+					assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), tc.context, tc.disposition, tc.semanticPath, tc.label)
 				})
 			}
 		})
@@ -120,43 +120,43 @@ func handlerRuleSelectionSupportedSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func assertPersistedHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantElementID, wantLabel string) {
-	assertPersistedHandlerRuleSelectionInPackage(t, selected, ctx, eventID, wantContext, wantDisposition, ".", wantElementID, wantLabel)
+func assertPersistedHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantSemanticPath, wantLabel string) {
+	assertPersistedHandlerRuleSelectionInFlow(t, selected, ctx, eventID, wantContext, wantDisposition, ".", wantSemanticPath, wantLabel)
 }
 
-func assertPersistedHandlerRuleSelectionInPackage(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantPackage, wantElementID, wantLabel string) {
+func assertPersistedHandlerRuleSelectionInFlow(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantFlowPath, wantSemanticPath, wantLabel string) {
 	t.Helper()
-	query := `SELECT s.selection_context, s.disposition, COALESCE(s.package_coordinate, ''), COALESCE(s.element_id, ''), s.display_label
-FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
-WHERE d.event_id = ? AND d.subscriber_type = 'node'`
+	query := `SELECT s.selection_context, s.disposition, COALESCE(s.flow_path, ''), COALESCE(s.declaration_family, ''), COALESCE(s.semantic_path, ''), s.display_label
+	FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
+	WHERE d.event_id = ? AND d.subscriber_type = 'node'`
 	if selected.postgres {
-		query = `SELECT s.selection_context, s.disposition, COALESCE(s.package_coordinate, ''), COALESCE(s.element_id::text, ''), s.display_label
-FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
-WHERE d.event_id = $1::uuid AND d.subscriber_type = 'node'`
+		query = `SELECT s.selection_context, s.disposition, COALESCE(s.flow_path, ''), COALESCE(s.declaration_family, ''), COALESCE(s.semantic_path, ''), s.display_label
+	FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
+	WHERE d.event_id = $1::uuid AND d.subscriber_type = 'node'`
 	}
-	var gotContext, gotDisposition, gotPackage, gotElementID, gotLabel string
-	if err := selected.db.QueryRowContext(ctx, query, eventID).Scan(&gotContext, &gotDisposition, &gotPackage, &gotElementID, &gotLabel); err != nil {
+	var gotContext, gotDisposition, gotFlowPath, gotFamily, gotSemanticPath, gotLabel string
+	if err := selected.db.QueryRowContext(ctx, query, eventID).Scan(&gotContext, &gotDisposition, &gotFlowPath, &gotFamily, &gotSemanticPath, &gotLabel); err != nil {
 		t.Fatalf("load handler-rule selection for %s: %v", eventID, err)
 	}
-	if gotContext != string(wantContext) || gotDisposition != string(wantDisposition) || gotElementID != wantElementID || gotLabel != wantLabel {
-		t.Fatalf("persisted selection = %s/%s/%s/%s/%s, want %s/%s/%s/%s/%s", gotContext, gotDisposition, gotPackage, gotElementID, gotLabel, wantContext, wantDisposition, wantPackage, wantElementID, wantLabel)
+	wantFamily := ""
+	if handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) {
+		wantFamily = "handler_rule"
+	} else {
+		wantFlowPath = ""
 	}
-	if handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) && gotPackage != wantPackage {
-		t.Fatalf("identity-bearing package coordinate = %q, want %q", gotPackage, wantPackage)
-	}
-	if !handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) && gotPackage != "" {
-		t.Fatalf("identity-free package coordinate = %q, want empty", gotPackage)
+	if gotContext != string(wantContext) || gotDisposition != string(wantDisposition) || gotFlowPath != wantFlowPath || gotFamily != wantFamily || gotSemanticPath != wantSemanticPath || gotLabel != wantLabel {
+		t.Fatalf("persisted selection = %s/%s/%s/%s/%s/%s, want %s/%s/%s/%s/%s/%s", gotContext, gotDisposition, gotFlowPath, gotFamily, gotSemanticPath, gotLabel, wantContext, wantDisposition, wantFlowPath, wantFamily, wantSemanticPath, wantLabel)
 	}
 }
 
-func assertTraceHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantElementID, wantLabel string) {
-	assertTraceHandlerRuleSelectionInPackage(t, selected, ctx, runID, eventID, wantContext, wantDisposition, ".", wantElementID, wantLabel)
+func assertTraceHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantSemanticPath, wantLabel string) {
+	assertTraceHandlerRuleSelectionInFlow(t, selected, ctx, runID, eventID, wantContext, wantDisposition, ".", wantSemanticPath, wantLabel)
 }
 
-func assertTraceHandlerRuleSelectionInPackage(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantPackage, wantElementID, wantLabel string) {
+func assertTraceHandlerRuleSelectionInFlow(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantFlowPath, wantSemanticPath, wantLabel string) {
 	t.Helper()
 	if !handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) {
-		wantPackage = ""
+		wantFlowPath = ""
 	}
 	rows, _, err := selected.trace.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 100})
 	if err != nil {
@@ -170,8 +170,12 @@ func assertTraceHandlerRuleSelectionInPackage(t *testing.T, selected gateRecover
 			t.Fatalf("trace row %s has no handler-rule selection", eventID)
 		}
 		got := row.HandlerRuleSelection
-		if got.Context != wantContext || got.Disposition != wantDisposition || got.PackageCoordinate != wantPackage || got.ElementID != wantElementID || got.DisplayLabel != wantLabel {
-			t.Fatalf("trace selection = %#v, want %s/%s/%s/%s/%s", got, wantContext, wantDisposition, wantPackage, wantElementID, wantLabel)
+		wantFamily := ""
+		if handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) {
+			wantFamily = "handler_rule"
+		}
+		if got.Context != wantContext || got.Disposition != wantDisposition || got.FlowPath != wantFlowPath || got.Family != wantFamily || got.SemanticPath != wantSemanticPath || got.DisplayLabel != wantLabel {
+			t.Fatalf("trace selection = %#v, want %s/%s/%s/%s/%s/%s", got, wantContext, wantDisposition, wantFlowPath, wantFamily, wantSemanticPath, wantLabel)
 		}
 		return
 	}

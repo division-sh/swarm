@@ -16,7 +16,7 @@ func TestChannelEffectRebindDispositionMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "bundle:test@sha256:effect-rebind", PackInventoryGeneration: "sha256:effect-rebind-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7,
 		PlanGeneration: generation, TargetGeneration: 11,
@@ -31,7 +31,7 @@ func TestChannelEffectRebindDispositionMatrix(t *testing.T) {
 			AuthorityKind: runtimeeffects.AuthorityServeRegistration, AuthorityID: uuid.NewString(),
 		},
 		OnboardingOperationID: op.OperationID, OnboardingRevision: 4,
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource, BundleIdentity: coordinate.BundleIdentity,
+		BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 		PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 		ContextPublicationGeneration: coordinate.ContextPublicationGeneration,
 		PlanGeneration:               coordinate.PlanGeneration, TargetGeneration: coordinate.TargetGeneration,

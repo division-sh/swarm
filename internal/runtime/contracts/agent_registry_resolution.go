@@ -33,77 +33,16 @@ func bundleAgentRecords(bundle *WorkflowContractBundle) []AgentDeclarationRecord
 	if bundle == nil {
 		return nil
 	}
-	projectOwners := map[string]string{}
-	for _, view := range bundle.ProjectViews() {
-		ownerFlowID := strings.TrimSpace(view.Paths.OwningFlowID)
-		for _, logicalID := range sortedContractKeys(view.Agents) {
-			source := ContractItemSource{PackageKey: strings.TrimSpace(view.Paths.Key), FlowID: ownerFlowID, Layer: "project", File: view.Paths.ProjectAgentsFile}
-			if strings.TrimSpace(source.File) != "" {
-				projectOwners[agentDeclarationRecordKey(source.File, logicalID)] = strings.TrimSpace(view.AgentURIs[logicalID])
-			}
-		}
-	}
-	flowDeclarations := map[string]struct{}{}
-	flowRecords := make([]AgentDeclarationRecord, 0, len(bundle.FlowTree.ByID))
+	records := make([]AgentDeclarationRecord, 0, len(bundle.FlowTree.ByID))
 	for _, view := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.ID)
+		flowPath := strings.TrimSpace(view.Paths.FlowPath)
 		agentIDs := sortedContractKeys(view.Agents)
 		for _, logicalID := range agentIDs {
-			source := ContractItemSource{
-				PackageKey: view.Paths.PackageKey,
-				FlowID:     flowID,
-				Layer:      "flow",
-				File:       view.Paths.AgentsFile,
-			}
-			if strings.TrimSpace(source.File) != "" {
-				flowDeclarations[agentDeclarationRecordKey(source.File, logicalID)] = struct{}{}
-			}
+			source := ContractItemSource{FlowPath: flowPath, Family: "agents", File: view.Paths.AgentsFile}
 			ownerURI := bundle.agentDeclarationOwnerURI(source, logicalID, view.AgentURIs[logicalID])
-			if canonical := projectOwners[agentDeclarationRecordKey(source.File, logicalID)]; canonical != "" {
-				ownerURI = canonical
-			}
-			flowRecords = append(flowRecords, AgentDeclarationRecord{LogicalID: logicalID, OwnerURI: ownerURI, OwnerFlowID: flowID, Entry: view.Agents[logicalID], Source: source})
+			records = append(records, AgentDeclarationRecord{LogicalID: logicalID, OwnerURI: ownerURI, OwnerFlowID: flowPath, Entry: view.Agents[logicalID], Source: source})
 		}
 	}
-	records := make([]AgentDeclarationRecord, 0, len(bundle.ProjectViews())+len(bundle.FlowTree.ByID))
-	for _, view := range bundle.ProjectViews() {
-		key := strings.TrimSpace(view.Paths.Key)
-		ownerFlowID := strings.TrimSpace(view.Paths.OwningFlowID)
-		agentIDs := sortedContractKeys(view.Agents)
-		for _, logicalID := range agentIDs {
-			source := ContractItemSource{PackageKey: key, FlowID: ownerFlowID, Layer: "project", File: view.Paths.ProjectAgentsFile}
-			if strings.TrimSpace(source.File) != "" {
-				if _, representedByFlow := flowDeclarations[agentDeclarationRecordKey(source.File, logicalID)]; representedByFlow {
-					continue
-				}
-			}
-			records = append(records, AgentDeclarationRecord{
-				LogicalID:   logicalID,
-				OwnerURI:    strings.TrimSpace(view.AgentURIs[logicalID]),
-				OwnerFlowID: ownerFlowID,
-				Entry:       view.Agents[logicalID],
-				Source:      source,
-			})
-		}
-	}
-	if len(records) == 0 && len(flowRecords) == 0 && len(bundle.Agents) > 0 {
-		for _, logicalID := range sortedContractKeys(bundle.Agents) {
-			ownerURI := ""
-			if ref, ok := bundle.URIRegistry.Agents[logicalID]; ok {
-				ownerURI = strings.TrimSpace(ref.Full)
-				if ownerURI == "" {
-					ownerURI = strings.TrimSpace(ref.Absolute)
-				}
-			}
-			records = append(records, AgentDeclarationRecord{
-				LogicalID: logicalID,
-				OwnerURI:  ownerURI,
-				Entry:     bundle.Agents[logicalID],
-				Source:    ContractItemSource{PackageKey: ".", Layer: "project", File: bundle.Paths.ProjectAgentsFile},
-			})
-		}
-	}
-	records = append(records, flowRecords...)
 	sort.Slice(records, func(i, j int) bool {
 		left := contractScopeKey(records[i].Source, records[i].LogicalID)
 		right := contractScopeKey(records[j].Source, records[j].LogicalID)
@@ -115,30 +54,16 @@ func bundleAgentRecords(bundle *WorkflowContractBundle) []AgentDeclarationRecord
 	return records
 }
 
-// PackageOwningFlowID returns the immutable ownership fact established while
-// the package tree is discovered. Runtime consumers must not rederive it.
-func (b *WorkflowContractBundle) PackageOwningFlowID(packageKey string) string {
-	packageKey = strings.TrimSpace(packageKey)
-	if b == nil || packageKey == "" {
-		return ""
-	}
-	view, ok := b.ProjectViewByKey(packageKey)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(view.Paths.OwningFlowID)
-}
-
 func (b *WorkflowContractBundle) agentDeclarationOwnerURI(source ContractItemSource, logicalID, preferred string) string {
 	if owner := strings.TrimSpace(preferred); owner != "" {
 		return owner
 	}
-	if b == nil || strings.TrimSpace(source.Layer) != "flow" || strings.TrimSpace(source.FlowID) == "" {
+	if b == nil || strings.TrimSpace(source.FlowPath) == "" {
 		return ""
 	}
 	owner := ""
 	for _, ref := range b.URIRegistry.Agents {
-		if strings.TrimSpace(ref.Kind) != "agent" || strings.TrimSpace(ref.FlowID) != strings.TrimSpace(source.FlowID) || strings.TrimSpace(ref.LocalID) != strings.TrimSpace(logicalID) {
+		if strings.TrimSpace(ref.Kind) != "agent" || strings.TrimSpace(ref.FlowID) != strings.TrimSpace(source.FlowPath) || strings.TrimSpace(ref.LocalID) != strings.TrimSpace(logicalID) {
 			continue
 		}
 		candidate := strings.TrimSpace(ref.Full)

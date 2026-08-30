@@ -28,7 +28,7 @@ func TestNativeWorkspaceCommandRunsInExplicitHostBackendWorkdir(t *testing.T) {
 		Mounts: []workspace.ExecutionMount{
 			{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: workspaceDir, Access: workspace.MountAccessReadWrite},
 			{LogicalPath: workspace.LogicalDataMount, HostPath: dataDir, Access: workspace.MountAccessReadOnly},
-			{LogicalPath: workspace.LogicalContractsMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
+			{LogicalPath: workspace.LogicalSourceMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
 		},
 	}, "native_bash", time.Second, "", "sh", "-lc", "mkdir -p nested && printf host-ok > nested/out.txt && printf done")
 	if err != nil {
@@ -96,8 +96,8 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dataDir, "ref.txt"), []byte("data content"), 0o644); err != nil {
 		t.Fatalf("write data ref: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
-		t.Fatalf("write contracts package: %v", err)
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: source\n"), 0o644); err != nil {
+		t.Fatalf("write flow schema: %v", err)
 	}
 	exec := &Executor{
 		workspaces: relayWorkspaceResolverStub{
@@ -107,7 +107,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 				Mounts: []workspace.ExecutionMount{
 					{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: workspaceDir, Access: workspace.MountAccessReadWrite},
 					{LogicalPath: workspace.LogicalDataMount, HostPath: dataDir, Access: workspace.MountAccessReadOnly},
-					{LogicalPath: workspace.LogicalContractsMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
+					{LogicalPath: workspace.LogicalSourceMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
 				},
 			},
 		},
@@ -136,11 +136,11 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 	if got := readData.(map[string]any)["content"]; got != "data content" {
 		t.Fatalf("data read content = %#v", got)
 	}
-	readContracts, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
+	readContracts, err := exec.execNativeReadFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": "/opt/swarm/source/schema.yaml"})
 	if err != nil {
 		t.Fatalf("execNativeReadFile contracts: %v", err)
 	}
-	if got := readContracts.(map[string]any)["content"]; got != "contracts content" {
+	if got := readContracts.(map[string]any)["content"]; got != "name: source\n" {
 		t.Fatalf("contracts read content = %#v", got)
 	}
 
@@ -155,7 +155,7 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 		t.Fatalf("written workspace file = %q err=%v", data, err)
 	}
 
-	for _, forbidden := range []string{"/data/out.txt", "/opt/swarm/contracts/out.txt", "/tmp/out.txt", workspaceDir} {
+	for _, forbidden := range []string{"/data/out.txt", "/opt/swarm/source/out.txt", "/tmp/out.txt", workspaceDir} {
 		_, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ExecutionMode: "live", ID: "writer"}, map[string]any{"path": forbidden, "content": "nope"})
 		if err == nil {
 			t.Fatalf("execNativeWriteFile(%q) succeeded, want fail closed", forbidden)
@@ -182,15 +182,15 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	if err := os.WriteFile(filepath.Join(escapeDir, "ref.txt"), []byte("outside content"), 0o644); err != nil {
 		t.Fatalf("write escape ref: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
-		t.Fatalf("write contracts package: %v", err)
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: source\n"), 0o644); err != nil {
+		t.Fatalf("write flow schema: %v", err)
 	}
 
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
-		WorkspaceRoot:       workspaceRoot,
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: workspace.LogicalContractsMount,
+		WorkspaceRoot:    workspaceRoot,
+		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceMountPoint: workspace.LogicalSourceMount,
 	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(ctx, source); err != nil {
@@ -234,11 +234,11 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	if got := readWorkspace.(map[string]any)["content"]; got != "workspace content" {
 		t.Fatalf("workspace content = %#v", got)
 	}
-	readContracts, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
+	readContracts, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/opt/swarm/source/schema.yaml"})
 	if err != nil {
 		t.Fatalf("Execute read_file contracts: %v", err)
 	}
-	if got := readContracts.(map[string]any)["content"]; got != "contracts content" {
+	if got := readContracts.(map[string]any)["content"]; got != "name: source\n" {
 		t.Fatalf("contracts content = %#v", got)
 	}
 	written, err := exec.Execute(actorCtx, "write_file", map[string]any{"path": "/workspace/out/result.txt", "content": "hello"})
@@ -254,7 +254,7 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 
 	for _, forbidden := range []string{
 		"/data/out.txt",
-		"/opt/swarm/contracts/out.txt",
+		"/opt/swarm/source/out.txt",
 		"/tmp/out.txt",
 		filepath.Join(target.Workdir, "out", "result.txt"),
 		"../escape.txt",
@@ -281,15 +281,15 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
-		t.Fatalf("write contracts package: %v", err)
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: source\n"), 0o644); err != nil {
+		t.Fatalf("write flow schema: %v", err)
 	}
 
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
-		WorkspaceRoot:       workspaceRoot,
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: workspace.LogicalContractsMount,
+		WorkspaceRoot:    workspaceRoot,
+		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceMountPoint: workspace.LogicalSourceMount,
 	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(ctx, source); err != nil {

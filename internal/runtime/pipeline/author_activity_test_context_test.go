@@ -9,9 +9,10 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-const pipelineTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const pipelineTestBundleHash = sourceartifactfixture.BundleHash
 
 type pipelineTestWorkFixture struct {
 	process *worklifetime.Process
@@ -56,19 +57,19 @@ func pipelineTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineTestWorkOwner(t))
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(pipelineTestBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(pipelineTestBundleHash)
 	if err != nil {
 		t.Fatalf("create pipeline test bundle source fact: %v", err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",
 		pipelineTestBundleHash,
 	))
 }
 
-func mustPipelineTestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+func mustPipelineTestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}

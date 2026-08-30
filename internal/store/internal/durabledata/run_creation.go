@@ -276,9 +276,9 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 	for _, pin := range plan.pins {
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_version_pins
-			(run_id, package_key, event_name, schema_digest, version_id, selection, pinned_at)
+			(run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at)
 			VALUES (%s, %s, %s, %s, %s, %s, %s)
-		`, 7), pin.RunID, pin.Declaration.PackageKey, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now); err != nil {
+		`, 7), pin.RunID, pin.Declaration.FlowPath, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now); err != nil {
 			return runtimedata.RunCreationOperationRecord{}, fmt.Errorf("insert resource version pin: %w", err)
 		}
 	}
@@ -586,14 +586,14 @@ func (o *Owner) requireUnusedFusedChildTx(ctx context.Context, tx *sql.Tx, id st
 
 func (o *Owner) loadBundleDeclarationsTx(ctx context.Context, tx *sql.Tx, bundleHash string) ([]runtimedata.Declaration, error) {
 	var marker int
-	if err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM bundles WHERE bundle_hash = %s`, 1), bundleHash).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM source_artifacts WHERE bundle_hash = %s`, 1), bundleHash).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
 		return nil, runtimedata.NewDomainError(runtimedata.CodeContractNotFound, "bundle %s is not in the exact selected-store catalog", bundleHash)
 	} else if err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT package_key, event_name, display_name, owner_flow_id, COALESCE(business_key_field, ''), schema_digest, canonical_schema_bytes
-		FROM resource_bundle_declarations WHERE bundle_hash = %s ORDER BY package_key, event_name
+		SELECT flow_path, event_name, display_name, owner_flow_id, COALESCE(business_key_field, ''), schema_digest, canonical_schema_bytes
+		FROM resource_bundle_declarations WHERE bundle_hash = %s ORDER BY flow_path, event_name
 	`, 1), bundleHash)
 	if err != nil {
 		return nil, err
@@ -602,7 +602,7 @@ func (o *Owner) loadBundleDeclarationsTx(ctx context.Context, tx *sql.Tx, bundle
 	var declarations []runtimedata.Declaration
 	for rows.Next() {
 		var declaration runtimedata.Declaration
-		if err := rows.Scan(&declaration.Ref.PackageKey, &declaration.Ref.EventName, &declaration.Name, &declaration.OwnerFlowID,
+		if err := rows.Scan(&declaration.Ref.FlowPath, &declaration.Ref.EventName, &declaration.Name, &declaration.OwnerFlowID,
 			&declaration.BusinessKey, &declaration.SchemaDigest, &declaration.CanonicalSchema); err != nil {
 			return nil, err
 		}

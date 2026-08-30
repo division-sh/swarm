@@ -231,7 +231,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		sessionResetter:    opts.SessionResetter,
 		semanticSource:     opts.SemanticSource,
 		semanticReadinessSource: dynamicFlowRuntimeReadinessSource{
-			fact: opts.BundleSourceFact, source: opts.SemanticSource,
+			fact: opts.SourceArtifactFact, source: opts.SemanticSource,
 		},
 		workflowInstances:                 opts.WorkflowInstances,
 		workOwner:                         opts.WorkOwner,
@@ -327,11 +327,11 @@ func (am *AgentManager) bindRuntimeOperationContext(ctx context.Context) (contex
 	} else if ownerScope.RuntimeInstanceID != "" {
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, ownerScope.RuntimeInstanceID)
 	}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(base); ok {
-		if current, currentOK := runtimecorrelation.BundleSourceFactFromContext(ctx); currentOK && !current.Matches(fact) {
+	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(base); ok {
+		if current, currentOK := runtimecorrelation.SourceArtifactFactFromContext(ctx); currentOK && !current.Matches(fact) {
 			return nil, fmt.Errorf("manager bundle source fact conflicts with selected operation scope")
 		}
-		ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	}
 	return ctx, nil
 }

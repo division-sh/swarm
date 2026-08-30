@@ -23,14 +23,14 @@ func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Cont
 	return s.readiness.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
+func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error) {
 	if s == nil || s.readiness == nil {
 		return DynamicFlowRuntimeReadinessProjection{}, fmt.Errorf("dynamic flow runtime readiness persistence is required")
 	}
 	return s.readiness.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
-func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
+func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error) {
 	if s == nil || s.readiness == nil {
 		return nil, fmt.Errorf("dynamic flow runtime readiness persistence is required")
 	}

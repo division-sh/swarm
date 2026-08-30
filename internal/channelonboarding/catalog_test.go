@@ -88,11 +88,10 @@ func TestCandidateCatalogResolvesOnlyExactDurableSuccessor(t *testing.T) {
 		name   string
 		mutate func(*Candidate)
 	}{
-		{name: "bundle source", mutate: func(c *Candidate) { c.Coordinate.BundleSource = "ephemeral" }},
 		{name: "bundle identity", mutate: func(c *Candidate) { c.Coordinate.BundleIdentity = "bundle:changed@sha256:identity" }},
 		{name: "pack inventory", mutate: func(c *Candidate) { c.Coordinate.PackInventoryGeneration = "sha256:changed" }},
 		{name: "plan", mutate: func(c *Candidate) { c.Coordinate.PlanGeneration = testPlanGeneration("changed") }},
-		{name: "target", mutate: func(c *Candidate) { c.Target.Selector = "ingress:workflow:other:telegram" }},
+		{name: "target", mutate: func(c *Candidate) { c.Target.Selector = "ingress:other:telegram" }},
 		{name: "posture", mutate: func(c *Candidate) { c.Posture = ActivationSessionConnection }},
 		{name: "ceremony", mutate: func(c *Candidate) { c.Ceremony = CeremonyProviderPairing }},
 	}
@@ -129,10 +128,10 @@ func testCandidate(hashSuffix, flow string) Candidate {
 		ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan",
 	}.Normalized()
 	coordinate := testCoordinate()
-	coordinate.BundleHash = "bundle-v1:sha256:" + hashSuffix
+	coordinate.BundleHash = "bundle-v2:sha256:" + hashSuffix
 	return Candidate{
 		Provider: "telegram", Interface: identity, Coordinate: coordinate,
-		Target: CandidateTarget{Selector: "ingress:workflow:" + flow + ":telegram", ServiceID: "service-" + flow, PackageKey: "workflow", FlowID: flow, Alias: flow, Provider: "telegram", Generation: coordinate.TargetGeneration,
+		Target: CandidateTarget{Selector: "ingress:" + flow + ":telegram", ServiceID: "service-" + flow, FlowPath: flow, Alias: flow, Provider: "telegram", Generation: coordinate.TargetGeneration,
 			PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog")), SigningCredentialKey: "telegram_signing"},
 		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAuthenticatedTextChallenge,
 		ProviderCredentialRole: "bot_token", SigningCredentialRole: "webhook_signing", ConfirmationOperation: "deliver",

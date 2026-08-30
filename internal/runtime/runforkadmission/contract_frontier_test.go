@@ -21,7 +21,7 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -32,8 +32,8 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	if !admission.NonMutating || admission.HistoricalExecutionSupported {
 		t.Fatalf("admission mutation flags = non_mutating:%v historical_supported:%v", admission.NonMutating, admission.HistoricalExecutionSupported)
 	}
-	if admission.ContractSelection.ContractsRoot != "/tmp/contracts-a" {
-		t.Fatalf("contracts root = %q", admission.ContractSelection.ContractsRoot)
+	if admission.ContractSelection.Mode != "selected_contracts" {
+		t.Fatalf("contract selection = %#v, want selected contracts", admission.ContractSelection)
 	}
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %d/%d, want 1", admission.FrontierEventCount, len(admission.FrontierEvents))
@@ -65,7 +65,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	admissionA, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            sourceA,
-		ContractSelection: SelectedContractSelection(sourceA, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(sourceA),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier A: %v", err)
@@ -73,7 +73,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	admissionB, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            sourceB,
-		ContractSelection: SelectedContractSelection(sourceB, "/tmp/contracts-b"),
+		ContractSelection: SelectedContractSelection(sourceB),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier B: %v", err)
@@ -93,7 +93,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -115,7 +115,7 @@ func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceR
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -137,7 +137,7 @@ func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testin
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -169,7 +169,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              frontierPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 			})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier: %v", err)
@@ -186,7 +186,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              historyPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 			})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier history: %v", err)
@@ -194,7 +194,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 			history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 				Plan:              historyPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 				FrontierAdmission: historyFrontier,
 			})
 			if err != nil {
@@ -219,7 +219,7 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              frontierPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 			})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier: %v", err)
@@ -236,7 +236,7 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              historyPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 			})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier history: %v", err)
@@ -244,7 +244,7 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 			history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 				Plan:              historyPlan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 				FrontierAdmission: historyFrontier,
 			})
 			if err != nil {
@@ -294,7 +294,7 @@ func TestAdmitContractFrontier_DeliveredCompletedHistoryIsNotFrontierWork(t *tes
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -314,7 +314,7 @@ func TestAdmitContractFrontier_CommittedReplayScopeMarkersAreNotFrontierWork(t *
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -336,7 +336,7 @@ func TestAdmitContractFrontier_DiagnosticPlatformOutcomesAreLineageOnly(t *testi
 			admission, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              plan,
 				Source:            source,
-				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+				ContractSelection: SelectedContractSelection(source),
 			})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier: %v", err)
@@ -374,7 +374,7 @@ func TestAdmitContractFrontier_NonDiagnosticPlatformDeadLetterRemainsFailClosed(
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -397,7 +397,7 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -424,7 +424,7 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -464,7 +464,7 @@ func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *tes
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -509,7 +509,7 @@ func testRunForkPlan(eventName, classification, subscriberType, subscriberID str
 
 func testContractFrontierSource(nodeID string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -519,7 +519,7 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
@@ -534,17 +534,28 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	root := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema:   runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
+		Children: []runtimecontracts.FlowContractView{producer, consumer},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "test-workflow", Version: "v-test"},
-		Events:  map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
-			Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
-		}},
+		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "test-workflow", Version: "v-test"},
+		Events:      map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+		RootSchema:  &root.Schema,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":        {FlowPath: ".", Schema: "schema.yaml", Children: []string{"producer", "consumer"}},
+			"producer": {FlowPath: "producer", Schema: "producer/schema.yaml"},
+			"consumer": {FlowPath: "consumer", Schema: "consumer/schema.yaml"},
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				".":        &root,
+				"producer": &root.Children[0],
+				"consumer": &root.Children[1],
+			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"producer": &root.Children[0],
 				"consumer": &root.Children[1],
@@ -556,7 +567,7 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 
 func testContractFrontierTemplateSource() semanticview.Source {
 	review := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 		},
@@ -572,7 +583,7 @@ func testContractFrontierTemplateSource() semanticview.Source {
 			"task.started": {},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{review}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{review}}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test-workflow",
@@ -580,6 +591,10 @@ func testContractFrontierTemplateSource() semanticview.Source {
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				".":      &root,
+				"review": &root.Children[0],
+			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"review": &root.Children[0],
 			},
@@ -606,7 +621,7 @@ func testContractFrontierRootConnectSource(t testing.TB) semanticview.Source {
 
 func testContractFrontierConnectSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{
@@ -619,7 +634,7 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		},
 	}
 	unrelated := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "unrelated", Flow: "unrelated", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "unrelated"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
@@ -632,7 +647,7 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
@@ -647,16 +662,29 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, unrelated, consumer}}
+	root := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema:   runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
+		Children: []runtimecontracts.FlowContractView{producer, unrelated, consumer},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "test-workflow", Version: "v-test"},
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
-			Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
-		}},
+		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "test-workflow", Version: "v-test"},
+		RootSchema:  &root.Schema,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "unrelated": unrelated.Schema, "consumer": consumer.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":         {FlowPath: ".", Schema: "schema.yaml", Children: []string{"producer", "unrelated", "consumer"}},
+			"producer":  {FlowPath: "producer", Schema: "producer/schema.yaml"},
+			"unrelated": {FlowPath: "unrelated", Schema: "unrelated/schema.yaml"},
+			"consumer":  {FlowPath: "consumer", Schema: "consumer/schema.yaml"},
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				".":         &root,
+				"producer":  &root.Children[0],
+				"unrelated": &root.Children[1],
+				"consumer":  &root.Children[2],
+			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"producer":  &root.Children[0],
 				"unrelated": &root.Children[1],

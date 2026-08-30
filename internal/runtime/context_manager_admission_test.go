@@ -167,7 +167,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnloa
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
 	ctx := context.Background()
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
 	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	}, "runtime_test")
@@ -184,9 +184,9 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  fact,
-			ProcessWorkOwner:  runtimeTestProcessWorkOwner(t),
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact: fact,
+			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
 		},
 	})
 	if err != nil {
@@ -214,8 +214,8 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err := plan.Validate(); err != nil {
 		t.Fatalf("source-set plan: %v", err)
 	}
-	bundleHash, bundleSource := fact.StorageValues()
-	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != bundleHash || plan.Sources[0].BundleSource != bundleSource {
+	bundleHash := fact.BundleHash()
+	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != bundleHash {
 		t.Fatalf("source-set coordinates = %#v, want exact runtime coordinate", plan.Sources)
 	}
 
@@ -234,12 +234,12 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		t.Fatalf("compile bundle-owned admission: %v", err)
 	}
 	contextDef := testBundleContext(t, runtimeTestBundleHash, "inbound.telegram")
-	contextDef.BundleSourceFact = fact
+	contextDef.SourceArtifactFact = fact
 	contextDef.Source = module.source
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: runtimeTestBundleHash, ServiceID: "service-primary", FlowID: "telegram-flow", Alias: "primary", Provider: "telegram",
+		BundleHash: runtimeTestBundleHash, ServiceID: "service-primary", FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
 		RunID: "run-primary", Generation: 1, FlowInstance: "telegram-flow/primary", EntityID: "entity-primary",
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
 	}}
@@ -562,7 +562,7 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		t.Fatal(err)
 	}
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: "service-" + alias, FlowID: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
+		BundleHash: hash, ServiceID: "service-" + alias, FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
 		Generation: 1, FlowInstance: "acme-flow/" + alias, EntityID: "entity-" + alias,
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
@@ -640,7 +640,7 @@ func projectTelegramAdmissionContext(t *testing.T, hash, alias, payloadObjectErr
 	contextDef := testBundleContext(t, hash, "inbound.telegram")
 	contextDef.Source = semanticview.Wrap(bundle)
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: "service-" + alias, FlowID: "telegram-flow", Alias: alias, Provider: "telegram",
+		BundleHash: hash, ServiceID: "service-" + alias, FlowPath: "telegram-flow", Alias: alias, Provider: "telegram",
 		RunID: "run-" + alias, Generation: 1, FlowInstance: "telegram-flow/" + alias, EntityID: "entity-" + alias,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}}

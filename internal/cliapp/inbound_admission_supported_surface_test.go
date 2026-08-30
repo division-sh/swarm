@@ -22,7 +22,7 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
 		var out, errOut bytes.Buffer
@@ -41,7 +41,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
@@ -78,7 +78,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = writeInboundAdmissionPolicyMatrixFixture(t)
+	opts.sourceRoot = writeInboundAdmissionPolicyMatrixFixture(t)
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
@@ -152,8 +152,8 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 
 func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicityAndRendering(t *testing.T) {
 	catalog := packfixture.TriggerCatalog(t)
-	contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), contractsRoot, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()))
+	sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), sourceRoot, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 type ServeOptions struct {
 	ConfigPath                       string
 	Backend                          string
-	ContractsPath                    string
+	SourceRoot                       string
 	DataSource                       string
 	WorkspaceBackend                 string
 	WorkspaceBackendSet              bool
@@ -39,8 +39,6 @@ type ServeOptions struct {
 	ShutdownGrace                    time.Duration
 	Dev                              bool
 	SelfCheck                        bool
-	RequireBundleMatch               bool
-	NoRequireBundleMatch             bool
 	AbandonActiveRuns                bool
 	Verbose                          bool
 	NoFeed                           bool
@@ -63,11 +61,10 @@ type ServeOptions struct {
 
 func DefaultServeOptions() ServeOptions {
 	return ServeOptions{
-		StoreMode:          storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:      "127.0.0.1:8081",
-		MCPListenAddr:      "127.0.0.1:8082",
-		ShutdownGrace:      runtime.DefaultShutdownGrace,
-		SelfCheck:          true,
-		RequireBundleMatch: true,
+		StoreMode:     storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr: "127.0.0.1:8081",
+		MCPListenAddr: "127.0.0.1:8082",
+		ShutdownGrace: runtime.DefaultShutdownGrace,
+		SelfCheck:     true,
 	}
 }

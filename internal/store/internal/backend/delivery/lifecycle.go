@@ -95,7 +95,7 @@ func (s *DeliverySQLiteOwner) ActivateDeliveryAuthority(ctx context.Context, aut
 
 func (s *DeliveryPostgresOwner) InspectDeliveryRecovery(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RecoveryInventory{}, err
@@ -105,7 +105,7 @@ func (s *DeliveryPostgresOwner) InspectDeliveryRecovery(
 
 func (s *DeliverySQLiteOwner) InspectDeliveryRecovery(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RecoveryInventory{}, err
@@ -755,8 +755,7 @@ func (s *DeliverySQLiteOwner) TerminalizeRun(ctx context.Context, runID, reason 
 }
 
 func declareAuthorityDeliveryRuns(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, effects *privaterunforkrevision.Effects) error {
-	bundleHash, bundleSource := authority.BundleSource().StorageValues()
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CAST(run_id AS TEXT) FROM event_deliveries WHERE run_id IS NOT NULL AND execution_authority_kind=$1 AND authority_bundle_hash=$2 AND authority_bundle_source=$3 AND execution_authority_id=$4 AND execution_authority_generation=$5`, string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation())
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CAST(run_id AS TEXT) FROM event_deliveries WHERE run_id IS NOT NULL AND execution_authority_kind=$1 AND authority_bundle_hash=$2 AND execution_authority_id=$3 AND execution_authority_generation=$4`, string(authority.Kind()), authority.SourceArtifact().BundleHash(), authority.ExecutionID(), authority.Generation())
 	if err != nil {
 		return fmt.Errorf("resolve delivery authority affected runs: %w", err)
 	}

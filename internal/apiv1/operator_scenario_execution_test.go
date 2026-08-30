@@ -20,7 +20,7 @@ func (r scenarioExecutionProfileReaderStub) LoadScenarioExecutionProfile(context
 }
 
 func TestScenarioExecutionRejectsPersistedRuntimeMismatchBeforePublication(t *testing.T) {
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("1", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("1", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRunCreationSemanticIdentityIncludesScenarioSelector(t *testing.T) {
 		t.Helper()
 		hash, _, _, err := (durabledata.RunCreationCommand{
 			RunID: "11111111-1111-1111-1111-111111111111", Actor: "operator",
-			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64),
+			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			EventID:    "22222222-2222-2222-2222-222222222222", InitialEvent: initial,
 		}).RequestHash()
 		if err != nil {

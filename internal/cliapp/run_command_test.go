@@ -35,7 +35,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 				if got := req.Params["event_name"]; got != "scan.requested" {
 					t.Fatalf("event_name = %#v, want scan.requested", got)
 				}
-				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+				if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
 				return runStartCommandResult("run-local", "running")
@@ -67,7 +67,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "" {
+		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.SourceRoot != filepath.Join(repo, "contracts") || serveOpts.DataSource != "" {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		if serveOpts.Verbose {
@@ -83,7 +83,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 
 	stdout := &notifyingBuffer{needle: "id=evt-local", notify: tracePrinted}
 	var stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts"}, stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "contracts", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli"}, stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -160,7 +160,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -180,13 +180,12 @@ func awaitRunCommandTraceRequest(t *testing.T, requestRead <-chan struct{}) {
 	}
 }
 
-func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
+func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"contracts_path":     configContracts,
 		"platform_spec_path": configPlatform,
 		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
 	}))
@@ -200,7 +199,7 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	})
 	defer server.Close()
 
-	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), apiPort: 19001}
+	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), apiPort: 19001, sourceRoot: configContracts}
 	serveStarted := make(chan ServeOptions, 1)
 	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveStarted <- serveOpts
@@ -214,8 +213,8 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	}
 	stop()
 	serveOpts := <-serveStarted
-	if serveOpts.ContractsPath != configContracts {
-		t.Fatalf("contracts path = %q, want %q", serveOpts.ContractsPath, configContracts)
+	if serveOpts.SourceRoot != configContracts {
+		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, configContracts)
 	}
 	if serveOpts.PlatformSpecPath != configPlatform {
 		t.Fatalf("platform spec path = %q, want %q", serveOpts.PlatformSpecPath, configPlatform)
@@ -243,7 +242,6 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"contracts_path":     configContracts,
 		"platform_spec_path": configPlatform,
 		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
 	}))
@@ -257,7 +255,7 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 	})
 	defer server.Close()
 
-	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), mcpPort: 19002}
+	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), mcpPort: 19002, sourceRoot: configContracts}
 	serveStarted := make(chan ServeOptions, 1)
 	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveStarted <- serveOpts
@@ -309,7 +307,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+				if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
 				return runStartCommandResult("run-no-follow", "running")
@@ -447,7 +445,7 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 		case "health.check":
 			writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
 		case "run.start":
-			if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+			if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 				t.Fatalf("bundle_hash = %#v", got)
 			}
 			writeRunCommandJSONRPCError(t, w, req.ID, "UNSUPPORTED_BUNDLE_HASH")
@@ -458,7 +456,7 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -796,7 +794,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", ".", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -928,13 +926,13 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "detach retired", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run start --connect"},
 		{name: "no follow requires connect", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
-		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>"},
 		{name: "blank bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "--bundle-hash must be non-empty"},
 		{name: "retired bundle flag rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, retiredBundleIdentityFlag(), "sha256:BAD"}, wantCode: 2, wantStderr: "unknown flag"},
-		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
+		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
 		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
 		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
-		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
+		{name: "reattach rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--reattach", "run-1"}, wantCode: 2, wantStderr: "a source directory cannot be used with --reattach"},
 		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
 		{name: "platform spec retired on reattach", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec is retired"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
@@ -945,7 +943,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "api port rejects custom mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "9000", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--api-port 9000 conflicts with MCP listener 127.0.0.1:9000"},
 		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
 		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
-		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
+		{name: "connect rejects local source", token: "test-token", args: []string{"run", "start", "contracts", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "a source directory requires local foreground mode"},
 		{name: "platform spec retired on connect", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec is retired"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects mcp port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port requires local foreground mode"},
@@ -1215,7 +1213,7 @@ func runCommandHealthResult() map[string]any {
 		"bundle": map[string]any{
 			"workflow_name":    "review",
 			"workflow_version": "1.2.3",
-			"bundle_hash":      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"bundle_hash":      "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 }

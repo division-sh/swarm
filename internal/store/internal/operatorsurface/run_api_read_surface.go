@@ -141,7 +141,6 @@ SELECT
 	r.run_id::text,
 	lower(r.status),
 	r.bundle_hash,
-	r.bundle_source,
 	r.origin_kind,
 	COALESCE(r.trigger_event_id::text, ''),
 	COALESCE(r.trigger_event_type, ''),
@@ -187,7 +186,7 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var endedAt sql.NullTime
 	var failureRaw []byte
-	var bundleHash, bundleSource string
+	var bundleHash string
 	var originKind, eventID, eventType, serviceID, sourceRunID, sourceEventID string
 	var generation int64
 	var standingRelationCount, matchingStandingRelationCount int
@@ -195,7 +194,6 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		&header.RunID,
 		&header.Status,
 		&bundleHash,
-		&bundleSource,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -240,13 +238,13 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		header.EndedAt = &value
 	}
 	header.StartedAt = header.StartedAt.UTC()
-	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
+	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
 		return operatorread.RunHeader{}, err
 	}
 	return header, nil
 }
 
-func validateRunHeaderLifecycle(header operatorread.RunHeader, bundleHash, bundleSource string) error {
+func validateRunHeaderLifecycle(header operatorread.RunHeader, bundleHash string) error {
 	state, err := runtimerunlifecycle.ParseState(header.Status)
 	if err != nil {
 		return fmt.Errorf("run %s lifecycle: %w", header.RunID, err)
@@ -254,7 +252,7 @@ func validateRunHeaderLifecycle(header operatorread.RunHeader, bundleHash, bundl
 	snapshot := runtimerunlifecycle.Snapshot{
 		RunID: header.RunID, State: state,
 		Origin:     header.Origin,
-		BundleHash: strings.TrimSpace(bundleHash), BundleSource: strings.TrimSpace(bundleSource),
+		BundleHash: strings.TrimSpace(bundleHash),
 		EventCount: header.EventCount, EntityCount: header.EntityCount,
 		Failure: header.Failure, ContinuedAsRunID: header.ContinuedAsRunID,
 		StartedAt: header.StartedAt, EndedAt: header.EndedAt,

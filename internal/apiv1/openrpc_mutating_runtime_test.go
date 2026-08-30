@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/mailbox"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
@@ -23,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -285,8 +283,6 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"agent.replay",
 		"agent.restart",
 		"agent.send_directive",
-		"bundle.delete",
-		"bundle.register",
 		"conversation.fork",
 		"conversation.fork_chat",
 		"conversation.fork_delete",
@@ -351,12 +347,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			ResultKeys:     []string{"ok", "operation_id", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
 			SuccessEffects: 1,
 		},
-		"bundle.delete": {
-			Params:         map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "dry_run": false},
-			ConflictParams: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "dry_run": true},
-			ResultKeys:     []string{"ok", "status", "operation_name", "bundle_hash", "force", "deleted", "dry_run", "active_runs_stopped", "deliveries_cancelled", "containers_stopped", "plan", "cleanup", "containers", "final_mutation"},
-			SuccessEffects: 1,
-		},
 		"conversation.fork": {
 			Params:         map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}},
 			ConflictParams: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": conflictTurnID}},
@@ -373,12 +363,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"fork_id": forkID},
 			ConflictParams: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000302"},
 			ResultKeys:     []string{"ok", "fork_id", "deleted", "already_deleted", "idempotency_replayed"},
-			SuccessEffects: 1,
-		},
-		"bundle.register": {
-			Params:         map[string]any{"content_yaml": testBundleRegistrationEnvelope()},
-			ConflictParams: map[string]any{"content_yaml": strings.Replace(testBundleRegistrationEnvelope(), "name: registered", "name: registered-conflict", 1)},
-			ResultKeys:     []string{"bundle_hash", "registered", "has_data", "data_size_bytes"},
 			SuccessEffects: 1,
 		},
 		"event.publish": {
@@ -456,7 +440,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"runtime.nuke": {
 			Params:         map[string]any{"dry_run": false},
 			ConflictParams: map[string]any{"dry_run": true},
-			ResultKeys:     []string{"ok", "status", "dry_run", "include_bundles", "operation_name", "plan", "quiescence", "cleanup", "containers"},
+			ResultKeys:     []string{"ok", "status", "dry_run", "include_source_artifacts", "operation_name", "plan", "quiescence", "cleanup", "containers"},
 			SuccessEffects: 4,
 		},
 		"runtime.pause": {
@@ -536,7 +520,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 	t.Helper()
 	runID := "00000000-0000-0000-0000-000000000101"
 	missingRunID := "00000000-0000-0000-0000-000000000999"
-	otherBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	otherBundleHash := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	validEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	invalidBundleHashEvent := mergeProbeParams(validEvent, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 	missingBundleHashEvent := mergeProbeParams(validEvent, nil)
@@ -575,7 +559,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "event.publish", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.events.missingBundleSourceFact = true
+			s.events.missingSourceArtifactFact = true
 		}}},
 		{Method: "event.publish", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
@@ -627,17 +611,13 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.deleteErr = runfork.ErrConversationForkNotFound
 		}}},
-		{Method: "bundle.register", Params: map[string]any{"content_yaml": testBundleRegistrationEnvelope(), "idempotency_key": "idem-error"}, Code: BundleRegisterConflictCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.bundleCatalog.conflict = true
-		}}},
-
 		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runFork.err = errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)
 		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, runbundle.AvailabilitySourceDeleted)
+			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash)
 		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkDataIntegrity(runForkTestSourceRunID, runForkTestBundleHash)
@@ -646,7 +626,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "run.start", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.events.missingBundleSourceFact = true
+			s.events.missingSourceArtifactFact = true
 		}}},
 		{Method: "run.start", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
@@ -734,20 +714,6 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runtimeIngress.errs["runtime.resume"] = runtimeingress.ErrNotPaused
 		}}},
 		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
-		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleNotFoundCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundlecatalog.ErrNotFound }}},
-		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleDeleteInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundledelete.ErrOperationInProgress }}},
-		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "idempotency_key": "idem-error"}, Code: BundleHasActiveRunsCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.bundleDelete.err = &bundledelete.ActiveRunsRemainError{
-				BundleHash: runStartTestBundleHash,
-				ActiveRuns: []bundledelete.RunRef{{
-					RunID:        "00000000-0000-0000-0000-000000000101",
-					Status:       "running",
-					BundleHash:   runStartTestBundleHash,
-					BundleSource: "persisted",
-				}},
-			}
-		}}},
-
 		{Method: "test.setup_entities", Params: invalidBundleHashSetup, Code: UnsupportedBundleHashCode},
 		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleMismatchCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
@@ -920,10 +886,8 @@ type mutatingRuntimeProbeState struct {
 	mailbox             *mutatingProbeMailboxStore
 	decisionCards       *mutatingProbeDecisionCardStore
 	workflowStore       *mutatingProbeDecisionWorkflowStore
-	bundleCatalog       *mutatingProbeBundleCatalog
 	forks               *fakeConversationForkLifecycleStore
 	nuke                *recordingRuntimeNukeOwners
-	bundleDelete        *recordingBundleDeleteExecutor
 	testSetup           *mutatingProbeTestSetupStore
 	effects             int
 }
@@ -952,14 +916,11 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			errs: map[string]error{},
 		},
 		nuke: newRecordingRuntimeNukeOwners(),
-		bundleDelete: &recordingBundleDeleteExecutor{
-			bundleHash: runStartTestBundleHash,
-		},
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent(t, "evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	state.events = &mutatingProbeEventPublisher{
-		state:            state,
-		bundleSourceFact: mustAPITestPersistedBundleSourceFact(runStartTestBundleHash),
+		state:              state,
+		sourceArtifactFact: mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
 	}
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
 	state.testSetup = &mutatingProbeTestSetupStore{state: state}
@@ -977,7 +938,6 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.mailbox = newMutatingProbeMailboxStore(state)
 	state.decisionCards = newMutatingProbeDecisionCardStore(state)
 	state.workflowStore = &mutatingProbeDecisionWorkflowStore{state: state, cards: state.decisionCards, events: state.events}
-	state.bundleCatalog = &mutatingProbeBundleCatalog{state: state, details: map[string]bundlecatalog.Detail{}}
 	state.forks = &fakeConversationForkLifecycleStore{
 		createResult: runfork.OperatorConversationForkSession{
 			ForkID:          "00000000-0000-0000-0000-000000000301",
@@ -1086,8 +1046,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 	source := semanticview.Wrap(bundle)
 	return testOperatorCapabilities{
 		ExecutionPosture:          executionposture.Live,
-		RepoRoot:                  t.TempDir(),
-		PlatformSpecPath:          testBundleRegistrationPlatformSpec(t),
 		Now:                       func() time.Time { return s.now },
 		Ready:                     func() bool { return true },
 		Database:                  fakePinger{},
@@ -1103,7 +1061,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		Mailbox:             s.mailbox,
 		DecisionCards:       s.decisionCards,
 		DecisionAuthority:   s.workflowStore,
-		BundleCatalog:       s.bundleCatalog,
 		Idempotency:         s.idempotency,
 		Events:              s.events,
 		RunBundleContext:    s.runForkAvailability,
@@ -1113,7 +1070,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		StandingServices:    s.standing,
 		RuntimeIngress:      s.runtimeIngress,
 		ResetCoordinator:    s.nuke,
-		BundleDelete:        s.bundleDelete,
 		TestSetup:           s.testSetup,
 		Source:              source,
 		Bundle: runtimecontracts.BundleIdentity{
@@ -1129,7 +1085,7 @@ func (s *mutatingRuntimeProbeState) recordEffect() {
 }
 
 func (s *mutatingRuntimeProbeState) effectCount() int {
-	return s.effects + len(s.nuke.calls) + len(s.bundleDelete.calls)
+	return s.effects + len(s.nuke.calls)
 }
 
 type mutatingProbeStandingController struct {
@@ -1160,68 +1116,6 @@ func (c *mutatingProbeStandingController) apply(action string, operation runtime
 		Generation:     generation,
 		EffectiveState: state,
 		Transition:     transition,
-	}, nil
-}
-
-type recordingBundleDeleteExecutor struct {
-	calls      []bundledelete.Request
-	err        error
-	bundleHash string
-}
-
-func (e *recordingBundleDeleteExecutor) Execute(_ context.Context, req bundledelete.Request) (bundledelete.Result, error) {
-	e.calls = append(e.calls, req)
-	if e.err != nil {
-		return bundledelete.Result{}, e.err
-	}
-	bundleHash := strings.TrimSpace(req.BundleHash)
-	if bundleHash == "" {
-		bundleHash = strings.TrimSpace(e.bundleHash)
-	}
-	status := "completed"
-	if req.DryRun {
-		status = "dry_run"
-	}
-	activeRunsStopped := 0
-	deliveriesCancelled := 0
-	containersStopped := 0
-	var activeRuns []bundledelete.RunRef
-	var nonActiveRuns []bundledelete.RunRef
-	if req.Force {
-		activeRunsStopped = 1
-		deliveriesCancelled = 1
-		containersStopped = 1
-		activeRuns = []bundledelete.RunRef{{
-			RunID:        "00000000-0000-0000-0000-000000000101",
-			Status:       "running",
-			BundleHash:   bundleHash,
-			BundleSource: "persisted",
-		}}
-	} else {
-		nonActiveRuns = []bundledelete.RunRef{{
-			RunID:        "00000000-0000-0000-0000-000000000102",
-			Status:       "completed",
-			BundleHash:   bundleHash,
-			BundleSource: "persisted",
-		}}
-	}
-	return bundledelete.Result{
-		OK:                  true,
-		Status:              status,
-		OperationName:       bundledelete.DefaultOperationName,
-		BundleHash:          bundleHash,
-		Force:               req.Force,
-		Deleted:             !req.DryRun,
-		DryRun:              req.DryRun,
-		ActiveRunsStopped:   activeRunsStopped,
-		DeliveriesCancelled: deliveriesCancelled,
-		ContainersStopped:   containersStopped,
-		Plan: bundledelete.Plan{
-			BundleHash:    bundleHash,
-			ActiveRuns:    activeRuns,
-			NonActiveRuns: nonActiveRuns,
-			AffectedRuns:  append(activeRuns, nonActiveRuns...),
-		},
 	}, nil
 }
 
@@ -1273,64 +1167,15 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 	return completion, false, nil
 }
 
-type mutatingProbeBundleCatalog struct {
-	state    *mutatingRuntimeProbeState
-	details  map[string]bundlecatalog.Detail
-	conflict bool
-}
-
-func (s *mutatingProbeBundleCatalog) ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
-	return bundlecatalog.ListResult{Bundles: []bundlecatalog.Summary{}}, nil
-}
-
-func (s *mutatingProbeBundleCatalog) LoadBundleCatalog(_ context.Context, bundleHash string) (bundlecatalog.Detail, error) {
-	detail, ok := s.details[strings.TrimSpace(bundleHash)]
-	if !ok {
-		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
-	}
-	return detail, nil
-}
-
-func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, string, bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
-	return bundlecatalog.AgentsResult{Agents: []bundlecatalog.AgentDefinition{}}, nil
-}
-
-func (s *mutatingProbeBundleCatalog) UpsertBundleCatalogWithData(_ context.Context, req bundlecatalog.Upsert, _ durabledata.Catalog) (bundlecatalog.UpsertResult, error) {
-	if s.conflict {
-		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
-	}
-	if s.details == nil {
-		s.details = map[string]bundlecatalog.Detail{}
-	}
-	_, exists := s.details[req.BundleHash]
-	if !exists {
-		s.state.recordEffect()
-		s.details[req.BundleHash] = bundlecatalog.Detail{
-			BundleHash:    req.BundleHash,
-			ContentYAML:   req.ContentYAML,
-			ParsedJSON:    req.ParsedJSON,
-			Metadata:      req.Metadata,
-			AgentCount:    1,
-			HasData:       len(req.DataBlob) > 0,
-			DataSizeBytes: int64(len(req.DataBlob)),
-			IngestedAt:    s.state.now,
-		}
-	}
-	return bundlecatalog.UpsertResult{Detail: s.details[req.BundleHash], Registered: !exists}, nil
-}
-
-var _ BundleCatalogReadStore = (*mutatingProbeBundleCatalog)(nil)
-var _ BundleCatalogRegisterStore = (*mutatingProbeBundleCatalog)(nil)
-
 type mutatingProbeEventPublisher struct {
-	state                   *mutatingRuntimeProbeState
-	bundleSourceFact        runtimecorrelation.BundleSourceFact
-	runCreationErr          error
-	publishErr              error
-	directErr               error
-	checkErr                error
-	missingBundleSourceFact bool
-	missingRecipients       []string
+	state                     *mutatingRuntimeProbeState
+	sourceArtifactFact        runtimecorrelation.SourceArtifactFact
+	runCreationErr            error
+	publishErr                error
+	directErr                 error
+	checkErr                  error
+	missingSourceArtifactFact bool
+	missingRecipients         []string
 }
 
 func (p *mutatingProbeEventPublisher) LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error) {
@@ -1389,11 +1234,11 @@ func (p *mutatingProbeEventPublisher) CheckPublishRecipientPlan(context.Context,
 	return runtimebus.PublishRecipientPlan{PersistedRecipients: []string{"probe-recipient"}}, nil
 }
 
-func (p *mutatingProbeEventPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
-	if p.missingBundleSourceFact {
+func (p *mutatingProbeEventPublisher) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	if p.missingSourceArtifactFact {
 		return ctx, nil
 	}
-	return runtimecorrelation.WithBundleSourceFact(ctx, p.bundleSourceFact), nil
+	return runtimecorrelation.WithSourceArtifactFact(ctx, p.sourceArtifactFact), nil
 }
 
 func (p *mutatingProbeEventPublisher) PublishInMutation(ctx context.Context, evt events.Event) error {

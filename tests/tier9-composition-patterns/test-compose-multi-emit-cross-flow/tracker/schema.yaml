@@ -1,0 +1,8 @@
+name: tracker
+initial_state: idle
+terminal_states: [recorded]
+states: [idle, recorded]
+pins:
+  inputs:
+    events: [task.record]
+mode: static

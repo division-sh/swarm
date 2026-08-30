@@ -9,3 +9,7 @@ pins:
       - process.done
   outputs:
     writes: [task_config]
+connect:
+  - event: process.done
+    from: processor
+    to: .

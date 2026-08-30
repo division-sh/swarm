@@ -329,7 +329,7 @@ func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtim
 	if rt == nil || rt.deliveryStore == nil {
 		return runtimedelivery.RecoveryInventory{}, 0, nil
 	}
-	inventory, err := rt.deliveryStore.InspectDeliveryRecovery(ctx, rt.Options.BundleSourceFact)
+	inventory, err := rt.deliveryStore.InspectDeliveryRecovery(ctx, rt.Options.SourceArtifactFact)
 	if err != nil {
 		return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("inspect executable delivery recovery: %w", err)
 	}

@@ -1,0 +1,4 @@
+name: test-child-flow-policy-inherit
+version: 1.0.0
+description: Child inherits parent policy, child overrides specific keys.
+platform_version: ">=0.7.0 <0.8.0"

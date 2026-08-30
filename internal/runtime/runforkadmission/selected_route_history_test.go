@@ -23,7 +23,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -32,7 +32,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -88,7 +88,7 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestW2SelectedForkUsesPersistedCompiledEdgeAfterCurrentGraphChanges(t *test
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -117,7 +117,7 @@ func TestW2SelectedForkUsesPersistedCompiledEdgeAfterCurrentGraphChanges(t *test
 	history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSou
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -189,7 +189,7 @@ func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSou
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              frontierPlan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -224,7 +224,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 	historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              historyPlan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier history: %v", err)
@@ -232,7 +232,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 	history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              historyPlan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: historyFrontier,
 	})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLea
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -259,7 +259,7 @@ func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLea
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -291,7 +291,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -303,7 +303,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -327,7 +327,7 @@ func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *test
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 	})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -336,7 +336,7 @@ func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *test
 	admission, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            source,
-		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		ContractSelection: SelectedContractSelection(source),
 		FrontierAdmission: frontier,
 	})
 	if err != nil {

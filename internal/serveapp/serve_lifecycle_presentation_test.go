@@ -277,7 +277,7 @@ func TestServeLifecyclePresenterUsesAuthorSafeMultiContextWorkspaceProjection(t 
 	if strings.Count(text, "workspace                  docker · agent work runs in a container") != 1 {
 		t.Fatalf("identical workspace decisions were not aggregated:\n%s", text)
 	}
-	for _, forbidden := range []string{"bundle-v1:sha256:", "sha256:", "fingerprint"} {
+	for _, forbidden := range []string{"bundle-v2:sha256:", "sha256:", "fingerprint"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("multi-context projection exposed %q:\n%s", forbidden, text)
 		}
@@ -513,14 +513,13 @@ func TestServeLifecycleOwnerRejectsParallelTerminalWriters(t *testing.T) {
 		t.Fatalf("parse main.go: %v", err)
 	}
 	guarded := map[string]bool{
-		"Run":                                       true,
-		"serveReadyStandingIngress":                 true,
-		"serveLifecycleSourceCounts":                true,
-		"serveLifecycleProjectName":                 true,
-		"enforceServeBundleMatchAdmission":          true,
-		"enforceServeBundleMatchAdmissionForHashes": true,
-		"serveHTTPServer":                           true,
-		"shutdownHTTPServer":                        true,
+		"Run":                                        true,
+		"serveReadyStandingIngress":                  true,
+		"serveLifecycleSourceCounts":                 true,
+		"serveLifecycleProjectName":                  true,
+		"enforceServePinnedBundleAdmissionForHashes": true,
+		"serveHTTPServer":                            true,
+		"shutdownHTTPServer":                         true,
 	}
 	for _, declaration := range parsed.Decls {
 		fn, ok := declaration.(*ast.FuncDecl)

@@ -242,7 +242,7 @@ func TestFanOutBlockedTurnCausePreservesTypedFailuresAndNamesRawFailureStage(t *
 	intent := fanoutobligation.Intent{
 		Request: fanoutobligation.IntentRequest{Key: fanoutobligation.IntentKey{
 			RunID: "run-1", TriggeringDeliveryID: "delivery-1",
-			ElementRef: runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: "fan-out-1"},
+			ElementRef: runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: `nodes["fanout"].handlers["work.requested"].fan_out`},
 		}},
 		Cursor: 4,
 	}
@@ -275,8 +275,9 @@ func TestFanOutBlockedTurnCausePreservesTypedFailuresAndNamesRawFailureStage(t *
 	}
 	want := map[string]any{
 		"run_id": "run-1", "triggering_delivery_id": "delivery-1",
-		"package_key": "root", "element_id": "fan-out-1",
-		"cursor": 4, "ordinal": 7, "cause": raw.Error(),
+		"flow_path": ".", "family": "fan_out",
+		"semantic_path": `nodes["fanout"].handlers["work.requested"].fan_out`,
+		"cursor":        4, "ordinal": 7, "cause": raw.Error(),
 	}
 	if fmt.Sprint(failure.Failure.Detail.Attributes) != fmt.Sprint(want) {
 		t.Fatalf("failure attributes = %#v, want %#v", failure.Failure.Detail.Attributes, want)
@@ -318,7 +319,7 @@ func fanOutFailureTestClaim() fanoutobligation.Claim {
 	return fanoutobligation.Claim{
 		Key: fanoutobligation.IntentKey{
 			RunID: uuid.NewString(), TriggeringDeliveryID: uuid.NewString(),
-			ElementRef: runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: uuid.NewString()},
+			ElementRef: runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: `nodes["fanout"].handlers["work.requested"].fan_out`},
 		},
 		Owner: "failure-test", Generation: 1, LeaseUntil: time.Now().Add(time.Minute),
 	}

@@ -517,7 +517,6 @@ type ActiveFlowInstanceDescriptor struct {
 	FlowInstance    string
 	FlowTemplate    string
 	BundleHash      string
-	BundleSource    string
 	WorkflowVersion string
 	AddressFields   map[string]string
 }
@@ -538,7 +537,6 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 		FlowInstance:    flowInstance,
 		FlowTemplate:    strings.TrimSpace(d.FlowTemplate),
 		BundleHash:      strings.TrimSpace(d.BundleHash),
-		BundleSource:    strings.TrimSpace(d.BundleSource),
 		WorkflowVersion: strings.TrimSpace(d.WorkflowVersion),
 		AddressFields:   normalizeDescriptorAddressFields(d.AddressFields),
 	}
@@ -546,9 +544,7 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 
 func (d ActiveFlowInstanceDescriptor) HasSemanticSource() bool {
 	d = d.Normalized()
-	return d.BundleHash != "" &&
-		(d.BundleSource == "persisted" || d.BundleSource == "ephemeral") &&
-		d.WorkflowVersion != ""
+	return d.BundleHash != "" && d.WorkflowVersion != ""
 }
 
 func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {

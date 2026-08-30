@@ -468,15 +468,15 @@ func canonicalFixtureSettlement(t testing.TB, event events.Event, routes []event
 
 func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *deliveryadapter.Adapter) runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	query := `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
 	if adapter.Dialect() == deliveryadapter.DialectSQLite {
-		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+		query = `SELECT bundle_hash FROM runs WHERE run_id=?`
 	}
-	var bundleHash, bundleSource string
-	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
-		t.Fatalf("load delivery fixture run bundle source: %v", err)
+	var bundleHash string
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
+		t.Fatalf("load delivery fixture run source artifact: %v", err)
 	}
-	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("construct delivery fixture source: %v", err)
 	}

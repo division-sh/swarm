@@ -116,7 +116,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
 				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
-					BundleHash: testAgentTopologyBundleHash, BundleSource: "ephemeral",
+					BundleHash: testAgentTopologyBundleHash,
 				}}, nil)
 				if err != nil {
 					t.Fatalf("construct census-drift source set: %v", err)
@@ -125,7 +125,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("install census-drift source set: %v", err)
 				}
 				grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-					BundleHash: testAgentTopologyBundleHash, BundleSource: "ephemeral",
+					BundleHash:        testAgentTopologyBundleHash,
 					RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 				})
 				if err != nil {
@@ -178,7 +178,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	coordinate := plan.Sources[0]
 	readinessGrant, err := predecessor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: predecessorAuthority.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -205,7 +205,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 			TemplateID: "readiness", ScopeKey: "readiness", InstanceID: "instance-1",
 			InstancePath: "readiness/instance-1", EntityID: uuid.NewString(), HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		RunID: runID, BundleHash: coordinate.BundleHash,
 		WorkflowVersion: "1.0.0", ExecutionMode: runtimeexecutionmode.Live,
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
 			Identity: readinessIdentity, ConfigRevision: readinessRevision,
@@ -280,7 +280,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	t.Cleanup(func() { _ = successor.Release(context.Background()) })
 	grant, err := successor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {

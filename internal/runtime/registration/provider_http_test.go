@@ -44,7 +44,7 @@ func channelConfirmationTestContext(harness *channelConfirmationHarness, operati
 		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 			EffectOperationID: operationID, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 4,
 			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
-			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+			BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "bundle:test@sha256:confirmation", PackInventoryGeneration: "sha256:confirmation-inventory",
 			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 1,
 		},
@@ -137,7 +137,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
 	input := map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"}
 	credentials := map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"}
-	lineage := map[string]string{"binding_id": "hitl", "target": "ingress:support:telegram:telegram", "intent_id": uuid.NewString(), "slot_id": "telegram:bot_webhook:42"}
+	lineage := map[string]string{"binding_id": "hitl", "target": "ingress:support:telegram", "intent_id": uuid.NewString(), "slot_id": "telegram:bot_webhook:42"}
 
 	t.Run("known success", func(t *testing.T) {
 		harness := effecttest.New()

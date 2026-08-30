@@ -61,7 +61,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("published events = %d, want 0 without node delivery authority", got)
 	}
-	node := pipelineNode(t, "delivery-authority", "node-a")
+	node := pipelineNode(t, ".", "node-a")
 	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), node.Key(), 0)
 	assertDeliveryAuthorityDeliveryCount(t, db, evt.ID(), node.Key(), 0)
 }
@@ -74,9 +74,9 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 
 	target := events.RouteIdentity{
-		FlowID: "delivery-authority", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
+		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	}
-	node := pipelineNode(t, "delivery-authority", "node-a")
+	node := pipelineNode(t, ".", "node-a")
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), node, target)
 	targetEvt := eventtest.TargetRouted(evt, target)
@@ -175,7 +175,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 			runCtx := testPipelineCoordinatorRunContext(t, pc)
 			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
 			seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-			node := pipelineNode(t, "delivery-authority", "node-a")
+			node := pipelineNode(t, ".", "node-a")
 			seedDeliveryAuthorityTerminalNodeDelivery(t, db, evt.ID(), node)
 
 			postCommit := make([]OwnerAction, 0, 1)
@@ -203,7 +203,7 @@ func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T)
 	runCtx := testPipelineCoordinatorRunContext(t, pc)
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-	node := pipelineNode(t, "delivery-authority", "node-a")
+	node := pipelineNode(t, ".", "node-a")
 	route := seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), node)
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(runCtx, route), evt)
@@ -264,15 +264,15 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			node := bundle.Nodes["node-a"]
 			node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
 			bundle.Nodes["node-a"] = node
-			module := handlerTestWorkflowModuleWithBundle(bundle, "delivery-retry", "node-a").(*previewWorkflowModule)
+			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflow = NewWorkflowDefinition("delivery-retry", []WorkflowStage{
 				{Name: "queued"},
 				{Name: "done", Terminal: true},
 			}, []WorkflowTransition{{
-				Name: "complete", From: []WorkflowStateID{"queued"}, To: "done", Node: pipelineNode(t, "delivery-retry", "node-a"),
+				Name: "complete", From: []WorkflowStateID{"queued"}, To: "done", Node: pipelineNode(t, ".", "node-a"),
 			}})
 			module.workflowNodes = []WorkflowNode{{
-				Node: pipelineNode(t, "delivery-retry", "node-a"), Subscriptions: []events.EventType{"source.evt"},
+				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
 				Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
 			}}
 			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.testDB(), PipelineCoordinatorOptions{
@@ -287,7 +287,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			evt := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
-				runID, "", handlerTestWorkflowEnvelope("delivery-retry", runID, entityID), time.Now().UTC(),
+				runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if workflowStore.isSQLite() {
@@ -295,7 +295,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			}
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
+				InstanceID: runID, StorageRef: runID, WorkflowName: ".", WorkflowVersion: "v-test", CurrentState: "queued",
 				EntityID:       entityID,
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
 				EntityType: "test_entity",
@@ -303,8 +303,8 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			route := events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, "delivery-retry", "node-a")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-					FlowID: "delivery-retry", FlowInstance: runID, EntityID: entityID,
+				Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "node-a")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: ".", FlowInstance: runID, EntityID: entityID,
 				}),
 			}
 			if err := owner.commitInitial(ctx, evt, route); err != nil {
@@ -419,7 +419,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	node := bundle.Nodes["node-a"]
 	node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
 	bundle.Nodes["node-a"] = node
-	module := handlerTestWorkflowModuleWithBundle(bundle, "delivery-authority", "node-a").(*previewWorkflowModule)
+	module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 	module.workflow = NewWorkflowDefinition("delivery-authority", []WorkflowStage{
 		{Name: "queued"},
 		{Name: "done", Terminal: true},
@@ -427,10 +427,10 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 		Name: "complete",
 		From: []WorkflowStateID{"queued"},
 		To:   "done",
-		Node: pipelineNode(t, "delivery-authority", "node-a"),
+		Node: pipelineNode(t, ".", "node-a"),
 	}})
 	module.workflowNodes = []WorkflowNode{{
-		Node:          pipelineNode(t, "delivery-authority", "node-a"),
+		Node:          pipelineNode(t, ".", "node-a"),
 		Subscriptions: []events.EventType{"source.evt"},
 		Policies: map[string]WorkflowEventPolicy{
 			"source.evt": {Consume: true},
@@ -455,7 +455,7 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 		0,
 		testPipelineRunID,
 		"",
-		handlerTestWorkflowEnvelope("delivery-authority", "delivery-authority", entityID),
+		handlerTestWorkflowEnvelope(".", testPipelineRunID, entityID),
 		time.Now().UTC(),
 	)
 
@@ -469,7 +469,7 @@ func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
-		WorkflowName:    "delivery-authority",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
@@ -486,7 +486,7 @@ func seedDeliveryAuthorityNodeDelivery(t *testing.T, db *sql.DB, eventID string,
 		t.Fatalf("load delivery authority event: %v", err)
 	}
 	return seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, node, events.RouteIdentity{
-		FlowID: "delivery-authority", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
+		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	})
 }
 
@@ -513,7 +513,7 @@ func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID
 		t.Fatalf("load terminal delivery authority event: %v", err)
 	}
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: "delivery-authority", FlowInstance: "delivery-authority", EntityID: evt.EntityID(),
+		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	})}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("commit terminal delivery authority: %v", err)

@@ -11,22 +11,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRunAcceptsTimerOnlyReachableTerminalStage(t *testing.T) {
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: timer-reachability
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 stages:
   active:
@@ -47,16 +40,14 @@ stages:
 
 func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	root := canonicalrouting.CopyNotifyAllChildren(t, canonicalrouting.NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
-	nodesPath := filepath.Join(root, "flows", canonicalrouting.NotifyAllChildrenOwnerFlowID, "nodes.yaml")
-	schemaPath := filepath.Join(root, "flows", canonicalrouting.NotifyAllChildrenOwnerFlowID, "schema.yaml")
+	nodesPath := filepath.Join(root, canonicalrouting.NotifyAllChildrenOwnerFlowID, "nodes.yaml")
+	schemaPath := filepath.Join(root, canonicalrouting.NotifyAllChildrenOwnerFlowID, "schema.yaml")
 	nodesRaw, err := os.ReadFile(nodesPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	nodes := strings.Replace(string(nodesRaw), `        on_complete:
-          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
           emit:`, `        on_complete:
-          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
           advances_to: done
           emit:`, 1)
 	if nodes == string(nodesRaw) {
@@ -115,7 +106,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		{Node: joinNode, EventType: "join.b.requested", Join: &joinB},
 	}
 	stages := []string{"waiting", "awaiting-a", "complete-a", "timeout-a", "awaiting-b", "complete-b", "timeout-b"}
-	topology := runtimecontracts.BuildWorkflowStageTopology("", "waiting", stages, []string{"complete-a", "timeout-a", "complete-b", "timeout-b"}, transitions, nil, nil)
+	topology := runtimecontracts.BuildWorkflowStageTopology(".", "waiting", stages, []string{"complete-a", "timeout-a", "complete-b", "timeout-b"}, transitions, nil, nil)
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -128,7 +119,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 			Stages:       stageContracts(stages),
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"join-node": handlers},
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-				"": topology,
+				".": topology,
 			},
 		},
 	}
@@ -137,7 +128,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		t.Fatal(err)
 	}
 	declared := stringSet(stages)
-	got := timerActivationStates(semanticview.Wrap(bundle), runtimecontracts.WorkflowTimerContract{}, trigger, declared)
+	got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, declared)
 	for _, target := range []string{"complete-a", "timeout-a"} {
 		if _, ok := got[target]; !ok {
 			t.Fatalf("activation states = %#v, missing %s", got, target)
@@ -167,7 +158,7 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 		},
 	}
 	topology := runtimecontracts.BuildWorkflowStageTopology(
-		"", "waiting", stages, []string{"exact-target", "pattern-target"},
+		".", "waiting", stages, []string{"exact-target", "pattern-target"},
 		[]runtimecontracts.HandlerTransitionSemantic{
 			{Node: exactNode, EventType: "work.requested", AdvancesTo: "exact-target"},
 			{Node: patternNode, EventType: "*.requested", AdvancesTo: "pattern-target"},
@@ -183,14 +174,14 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 				"exact-node":   handlers["exact-node"].EventHandlers,
 				"pattern-node": handlers["pattern-node"].EventHandlers,
 			},
-			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}
 	trigger, err := timeridentity.ParseStartTrigger("event:work.requested")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := timerActivationStates(semanticview.Wrap(bundle), runtimecontracts.WorkflowTimerContract{}, trigger, stringSet(stages))
+	got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
 	for _, target := range []string{"exact-target", "pattern-target"} {
 		if _, ok := got[target]; !ok {
 			t.Fatalf("activation states = %#v, missing %s from matching handler union", got, target)
@@ -225,7 +216,7 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 				Loop:       &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "working"},
 			},
 			loops: []runtimecontracts.WorkflowLoopPlan{{
-				ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
+				FlowID: ".", ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
 				Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Node: node, HandlerEvent: "work", Kind: runtimecontracts.LoopOperationRepeat, From: "working"}},
 			}},
 			want: []string{"escaped", "working"},
@@ -242,21 +233,21 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 			transition := tc.transition
 			transition.Node = node
 			transition.EventType = "work"
-			topology := runtimecontracts.BuildWorkflowStageTopology("", "waiting", stages, []string{"done"}, []runtimecontracts.HandlerTransitionSemantic{transition}, nil, tc.loops)
+			topology := runtimecontracts.BuildWorkflowStageTopology(".", "waiting", stages, []string{"done"}, []runtimecontracts.HandlerTransitionSemantic{transition}, nil, tc.loops)
 			handlers := map[string]runtimecontracts.SystemNodeEventHandler{"work": tc.handler}
 			bundle := &runtimecontracts.WorkflowContractBundle{
 				Events: map[string]runtimecontracts.EventCatalogEntry{"work": {}},
 				Nodes:  map[string]runtimecontracts.SystemNodeContract{"node": {EventHandlers: handlers}},
 				Semantics: runtimecontracts.WorkflowSemanticView{
 					NodeHandlers:    map[string]map[string]runtimecontracts.SystemNodeEventHandler{"node": handlers},
-					StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+					StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 				},
 			}
 			trigger, err := timeridentity.ParseStartTrigger("event:work")
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := timerActivationStates(semanticview.Wrap(bundle), runtimecontracts.WorkflowTimerContract{}, trigger, stringSet(stages))
+			got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
 			if len(got) != len(tc.want) {
 				t.Fatalf("activation states = %#v, want %v", got, tc.want)
 			}
@@ -283,14 +274,14 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 	}
 	stages := []string{"waiting", "review", "joining", "joined", "join-timed-out", "expired", "escaped"}
 	topology := runtimecontracts.BuildWorkflowStageTopology(
-		"", "waiting", stages, []string{"joined", "join-timed-out", "expired", "escaped"},
+		".", "waiting", stages, []string{"joined", "join-timed-out", "expired", "escaped"},
 		[]runtimecontracts.HandlerTransitionSemantic{
 			{Node: workNode, EventType: "work.started", AdvancesTo: "review"},
 			{Node: joinNode, EventType: "approval.requested", AdvancesTo: "joining", Join: join},
 		},
 		[]runtimecontracts.WorkflowTimerContract{{ID: "review.expire", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent, AdvancesTo: "expired"}},
 		[]runtimecontracts.WorkflowLoopPlan{{
-			ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
+			FlowID: ".", ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
 			Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Node: reviewNode, HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review"}},
 		}},
 	)
@@ -306,15 +297,15 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 				"work-node": handlers["work-node"].EventHandlers,
 				"join-node": handlers["join-node"].EventHandlers,
 			},
-			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}
-	source := semanticview.Wrap(bundle)
-	reachable := authoredReachableStates(source, "", "waiting")
+	source := semanticviewtest.WrapRootAgents(bundle)
+	reachable := authoredReachableStates(source, ".", "waiting")
 	if _, ok := reachable["escaped"]; !ok {
 		t.Fatalf("reachable = %#v, want loop escape target", reachable)
 	}
-	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{Event: "work.started"})
+	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{FlowID: ".", Event: "work.started"})
 	if _, ok := edges["waiting"]["review"]; ok {
 		t.Fatalf("cancel graph retained firing handler edge: %#v", edges)
 	}

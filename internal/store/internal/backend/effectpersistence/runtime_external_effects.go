@@ -222,7 +222,6 @@ func queryChannelOnboardingEffectOutcomes(ctx context.Context, queryer schemaQue
 		       o.authority_evidence->>'onboarding_operation_id',
 		       COALESCE((o.authority_evidence->>'onboarding_revision')::bigint,0),
 		       COALESCE(o.authority_evidence->>'bundle_hash',''),
-		       COALESCE(o.authority_evidence->>'bundle_source',''),
 		       COALESCE(o.authority_evidence->>'bundle_identity',''),
 		       COALESCE(o.authority_evidence->>'pack_inventory_generation',''),
 		       COALESCE(o.authority_evidence->>'runtime_instance_id',''),
@@ -243,7 +242,6 @@ func queryChannelOnboardingEffectOutcomes(ctx context.Context, queryer schemaQue
 		       json_extract(o.authority_evidence,'$.onboarding_operation_id'),
 		       COALESCE(json_extract(o.authority_evidence,'$.onboarding_revision'),0),
 		       COALESCE(json_extract(o.authority_evidence,'$.bundle_hash'),''),
-		       COALESCE(json_extract(o.authority_evidence,'$.bundle_source'),''),
 		       COALESCE(json_extract(o.authority_evidence,'$.bundle_identity'),''),
 		       COALESCE(json_extract(o.authority_evidence,'$.pack_inventory_generation'),''),
 		       COALESCE(json_extract(o.authority_evidence,'$.runtime_instance_id'),''),
@@ -343,7 +341,7 @@ func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.Chann
 		var kind, authorityKind, state, attemptState, planGeneration, failureRaw string
 		if err := rows.Scan(
 			&item.OperationID, &kind, &authorityKind, &item.AuthorityID, &state, &attemptState,
-			&item.OnboardingOperationID, &item.OnboardingRevision, &item.BundleHash, &item.BundleSource,
+			&item.OnboardingOperationID, &item.OnboardingRevision, &item.BundleHash,
 			&item.BundleIdentity, &item.PackInventoryGeneration, &item.RuntimeInstanceID,
 			&item.ContextPublicationGeneration, &planGeneration, &item.TargetGeneration, &item.Launched, &failureRaw,
 		); err != nil {

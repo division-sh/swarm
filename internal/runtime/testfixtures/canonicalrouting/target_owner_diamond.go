@@ -8,30 +8,7 @@ func CopyTargetOwnerDiamond(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"package.yaml": `name: target-owner-diamond
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: branch
-    flow: branch
-    mode: template
-  - id: decoy
-    flow: decoy
-    mode: static
-  - id: hostile
-    flow: unrelated/worker/result
-    mode: static
-connect:
-  - event: branch.start
-    from: .
-    to: branch
-  - event: branch.done
-    from: branch
-    to: .
-  - event: work.ready
-    from: decoy
-    to: hostile
-`,
+
 		"schema.yaml": `name: target-owner-diamond
 pins:
   inputs:
@@ -40,6 +17,13 @@ pins:
   outputs:
     events:
       - branch.start
+connect:
+  - event: branch.start
+    from: .
+    to: branch
+  - event: branch.done
+    from: branch
+    to: .
 `,
 		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
@@ -51,7 +35,7 @@ pins:
         id: root_owner
         check: '_entity.id != ""'
 `,
-		"flows/branch/schema.yaml": `name: branch
+		"branch/schema.yaml": `name: branch
 mode: template
 instance: branch_id
 pins:
@@ -64,10 +48,17 @@ pins:
     events:
       - work.ready
       - branch.done
+connect:
+  - event: work.ready
+    from: .
+    to: worker/result-static
+  - event: work.ready
+    from: .
+    to: worker/result
 `,
-		"flows/branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
-		"flows/branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
-		"flows/branch/nodes.yaml": `branch-worker:
+		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
+		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"branch/nodes.yaml": `branch-worker:
   id: branch-worker
   execution_type: system_node
   event_handlers:
@@ -76,32 +67,15 @@ pins:
         id: branch_owner
         check: '_entity.id != ""'
 `,
-		"flows/branch/package.yaml": `name: branch-children
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: static-result
-    flow: worker/result-static
-    mode: static
-  - id: singleton-result
-    flow: worker/result
-    mode: singleton
-connect:
-  - event: work.ready
-    from: .
-    to: static-result
-  - event: work.ready
-    from: .
-    to: singleton-result
-`,
-		"flows/branch/flows/worker/result-static/schema.yaml": `name: static-result
+
+		"branch/worker/result-static/schema.yaml": `name: static-result
 mode: static
 pins:
   inputs:
     events:
       - work.ready
 `,
-		"flows/branch/flows/worker/result-static/nodes.yaml": `static-result-node:
+		"branch/worker/result-static/nodes.yaml": `static-result-node:
   id: static-result-node
   execution_type: system_node
   event_handlers:
@@ -110,36 +84,36 @@ pins:
         id: inherited_owner
         check: '_entity.id != ""'
 `,
-		"flows/branch/flows/worker/result/schema.yaml": `name: singleton-result
+		"branch/worker/result/schema.yaml": `name: singleton-result
 mode: singleton
 pins:
   inputs:
     events:
       - work.ready
 `,
-		"flows/branch/flows/worker/result/nodes.yaml": `singleton-result-node:
+		"branch/worker/result/nodes.yaml": `singleton-result-node:
   id: singleton-result-node
   execution_type: system_node
   event_handlers:
     work.ready:
       create_entity: true
 `,
-		"flows/decoy/schema.yaml": `name: decoy
+		"decoy/schema.yaml": `name: decoy
 mode: static
 pins:
   outputs:
     events:
       - work.ready
 `,
-		"flows/decoy/events.yaml": "work.ready:\n  branch_id: string\n",
-		"flows/unrelated/worker/result/schema.yaml": `name: hostile
+		"decoy/events.yaml": "work.ready:\n  branch_id: string\n",
+		"unrelated/worker/result/schema.yaml": `name: hostile
 mode: static
 pins:
   inputs:
     events:
       - work.ready
 `,
-		"flows/unrelated/worker/result/nodes.yaml": `hostile-node:
+		"unrelated/worker/result/nodes.yaml": `hostile-node:
   id: hostile-node
   execution_type: system_node
   event_handlers:

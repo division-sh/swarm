@@ -17,42 +17,37 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 		t.Run(name+"/disk", func(t *testing.T) {
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := writeRetiredSelectedContractFixture(t, name)
-			loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 			_, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-				Mode: runfork.RunForkContractSelectionModeSelectedContracts, ContractsRoot: contractsRoot,
+				Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 			})
 			assertSelectedRetiredToolAdmissionError(t, err, name)
 		})
 
-		t.Run(name+"/catalog", func(t *testing.T) {
+		t.Run(name+"/selected_store", func(t *testing.T) {
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := writeRetiredSelectedContractFixture(t, name)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 			if err != nil {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
-			projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-			if err != nil {
-				t.Fatalf("BuildBundleCatalogProjection: %v", err)
-			}
+			record := persistedSourceArtifactForTest(t, bundle)
 			sourceRunID := uuid.NewString()
-			loader := BundleCatalogSelectedContractSourceLoader{
+			loader := SourceArtifactSelectedContractSourceLoader{
 				RepoRoot: repoRoot,
-				Store: &fakeBundleCatalogSelectedContractSourceStore{
+				Store: &fakeSourceArtifactSelectedContractSourceStore{
 					availability: runbundle.Availability{
-						RunID: sourceRunID, Status: "running", BundleHash: projection.BundleHash,
-						BundleSource: runbundle.AvailabilitySourcePersisted, BundleRowPresent: true,
+						RunID: sourceRunID, Status: "running", BundleHash: record.BundleHash,
+						SourceArtifactPresent: true,
 					},
-					record: runbundle.BundleCatalogRuntimeRecord{
-						BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
-					},
+					record: record,
 				},
 			}
 			_, err = loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{
 				SourceRunID: sourceRunID,
-				BundleHash:  projection.BundleHash,
+				BundleHash:  record.BundleHash,
 				Selection: runfork.RunForkContractSelection{
-					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
 				},
 			})
 			assertSelectedRetiredToolAdmissionError(t, err, name)
@@ -63,11 +58,6 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 func writeRetiredSelectedContractFixture(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "package.yaml"), `name: selected-retired-tool
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-retired-tool\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), `worker:
   id: worker

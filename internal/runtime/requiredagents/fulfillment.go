@@ -42,7 +42,7 @@ func RootScope(source semanticview.Source) (Scope, bool) {
 		ID:       "root",
 		Required: source.RequiredAgents(),
 	}
-	scope.Declarations = semanticview.AgentDeclarationsForOwner(source, "")
+	scope.Declarations = semanticview.AgentDeclarationsForOwner(source, ".")
 	return scope, true
 }
 
@@ -54,7 +54,7 @@ func FlowScopes(source semanticview.Source) []Scope {
 	out := make([]Scope, 0, len(scopes))
 	for _, flowScope := range scopes {
 		flowID := strings.TrimSpace(flowScope.ID)
-		if flowID == "" {
+		if flowID == "" || flowID == "." {
 			continue
 		}
 		out = append(out, Scope{

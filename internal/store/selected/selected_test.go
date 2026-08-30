@@ -150,23 +150,16 @@ func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) 
 		t.Fatalf("OpenRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = owner.CloseUnactivated() })
-	if owner.Schema() == nil || owner.OperatorChannels() == nil || owner.TestSetup() == nil || owner.RunBundleAvailability() == nil || owner.ServeBundleIngestWriter() == nil {
+	if owner.Schema() == nil || owner.OperatorChannels() == nil || owner.TestSetup() == nil || owner.RunBundleAvailability() == nil || owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil {
 		t.Fatal("SQLite required selected-store projections are incomplete")
-	}
-	if _, available := owner.BundleCatalog(); !available {
-		t.Fatal("SQLite bundle catalog read must be available")
 	}
 	if _, available := owner.ConversationFork(); !available {
 		t.Fatal("SQLite conversation fork must be available")
-	}
-	if _, available := owner.BundleRegisterWriter(); !available {
-		t.Fatal("SQLite public bundle-register writer must be available")
 	}
 	if _, available := owner.RunFork(); !available {
 		t.Fatal("SQLite run fork must be available")
 	}
 	for name, available := range map[string]bool{
-		"bundle delete":     func() bool { _, ok := owner.BundleDelete(); return ok }(),
 		"destructive reset": func() bool { _, ok := owner.DestructiveReset(); return ok }(),
 		"startup recovery":  func() bool { _, ok := owner.StartupRecovery(); return ok }(),
 	} {
@@ -186,10 +179,7 @@ func TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce(t *test
 		t.Fatalf("OpenRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = owner.CloseUnactivated() })
-	if owner.ServeBundleIngestWriter() == nil || owner.RunBundleAvailability() == nil {
+	if owner.SourceArtifactWriter() == nil || owner.SourceArtifactStore() == nil || owner.RunBundleAvailability() == nil {
 		t.Fatal("PostgreSQL required selected-store projections are incomplete")
-	}
-	if _, available := owner.BundleRegisterWriter(); !available {
-		t.Fatal("PostgreSQL public bundle-register writer must be available")
 	}
 }

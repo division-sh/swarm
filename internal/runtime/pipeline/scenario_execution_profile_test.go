@@ -34,7 +34,7 @@ func (r scenarioProfileMapReader) LoadScenarioExecutionProfile(_ context.Context
 
 func TestScenarioExecutionProfileResolvesExactPlanAfterCoordinatorRestart(t *testing.T) {
 	source, tool := scenarioExecutionProfileTestSource(t)
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("1", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("1", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestScenarioExecutionProfileResolvesExactPlanAfterCoordinatorRestart(t *tes
 
 func TestScenarioExecutionProfilesRemainIsolatedAcrossConcurrentRuns(t *testing.T) {
 	source, tool := scenarioExecutionProfileTestSource(t)
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("4", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("4", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestScenarioExecutionProfilesRemainIsolatedAcrossConcurrentRuns(t *testing.
 func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
 	ctx := testAuthorActivityContext(t, context.Background())
 	source, tool := scenarioExecutionProfileTestSource(t)
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("6", 64))
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("6", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -24,16 +23,6 @@ func TestPolicySheetValidationValueRowsIgnoreAbsentAndDuplicateDisplayLabels(t *
 		handler := bootverifyValidationHandler(true, "deploy.manifest_invalid")
 		handler.Rules[0].ID = labels[0]
 		handler.Rules[1].ID = labels[1]
-		for index := range handler.Rules {
-			elementID, err := contractelementidentity.ParseContractElementID([]string{
-				"00000000-0000-4000-8000-000000000436",
-				"00000000-0000-4000-8000-000000000437",
-			}[index])
-			if err != nil {
-				t.Fatal(err)
-			}
-			handler.Rules[index].ElementID = elementID
-		}
 		if findings := bootverifyValidationFindings(handler); len(findings) != 0 {
 			t.Fatalf("labels %q produced validation findings: %#v", labels, findings)
 		}

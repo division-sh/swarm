@@ -17,6 +17,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func testFailure(detailCode string) *runtimefailures.Envelope {
@@ -427,7 +428,7 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 		1,
 		forkRunID,
 		"selected-retry-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		sourceartifactfixture.BundleHash,
 		nil,
 	)
 	if err != nil {

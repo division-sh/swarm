@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -77,8 +78,8 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	addCanonicalTelegramApprovalOverlay(t, contractsRoot)
+	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	addCanonicalTelegramApprovalOverlay(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -96,9 +97,9 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	var location string
 	var prepareRestart func()
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	switch backend {
@@ -127,7 +128,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -182,9 +183,9 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	return time.Since(servedPathStarted)
 }
 
-func addCanonicalTelegramApprovalOverlay(t testing.TB, contractsRoot string) {
+func addCanonicalTelegramApprovalOverlay(t testing.TB, sourceRoot string) {
 	t.Helper()
-	path := filepath.Join(contractsRoot, "bot", "flows", "telegram-chat", "nodes.yaml")
+	path := filepath.Join(sourceRoot, "bot", "telegram-chat", "nodes.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read canonical Telegram nodes: %v", err)
@@ -460,7 +461,7 @@ func requireMockSessionShape(t testing.TB, sessions map[string]standingMemorySes
 	for _, session := range sessions {
 		counts[session.FlowTemplate]++
 	}
-	if len(sessions) != 1 || counts["telegram-chat"] != 1 {
+	if len(sessions) != 1 || counts["bot/telegram-chat"] != 1 {
 		t.Fatalf("mock sessions = %#v, want one memory-enabled Telegram chat owner", sessions)
 	}
 }

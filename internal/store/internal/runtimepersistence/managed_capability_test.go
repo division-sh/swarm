@@ -23,6 +23,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -100,9 +101,8 @@ func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.
 		ModelAlias:     "regular",
 		Model:          "store-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral",
-		Surface:      surface,
+		BundleHash: sourceartifactfixture.BundleHash,
+		Surface:    surface,
 	})
 	if err != nil {
 		t.Fatalf("complete managed completion test frame: %v", err)
@@ -152,7 +152,7 @@ func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context
 		1,
 		"",
 		"store-test-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		sourceartifactfixture.BundleHash,
 		nil,
 	)
 	if err != nil {
@@ -209,7 +209,7 @@ func managedSelectedExecutionStoreTestContext(t testing.TB, ctx context.Context,
 		authority.SelectedFork.Generation,
 		authority.SelectedFork.ForkRunID,
 		"store-test-selected-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		sourceartifactfixture.BundleHash,
 		nil,
 	)
 	if err != nil {
@@ -443,7 +443,7 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 		generation,
 		runID,
 		"store-test-completion-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		sourceartifactfixture.BundleHash,
 		nil,
 	)
 	if err != nil {

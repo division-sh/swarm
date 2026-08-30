@@ -249,7 +249,7 @@ func TestCompletionContinuationCannotDispatchOrResettle(t *testing.T) {
 
 func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 	token := effectLifecycleToken(t, 7, "agent-a", 3)
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			probe := &effectStoreProbe{}
-			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 			if err != nil {
 				t.Fatalf("build managed execution admission: %v", err)
 			}
@@ -394,7 +394,7 @@ func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorizati
 		1,
 		"",
 		"test-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -439,7 +439,7 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 	}
 	admission, err := managedexecution.New(
 		managedexecution.KindSelectedContractFork, executionID, 1, forkRunID,
-		"test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
+		"test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
 	)
 	if err != nil {
 		t.Fatalf("build selected managed execution admission: %v", err)
@@ -506,7 +506,7 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 	}
 	admission, err := managedexecution.New(
 		managedexecution.KindSelectedContractFork, executionID, 1, forkRunID,
-		"test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
+		"test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
 	)
 	if err != nil {
 		t.Fatalf("build selected managed execution admission: %v", err)
@@ -562,7 +562,7 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 			ExecutionOwner: "forkchat-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 			ExecutionMode: ExecutionModeLive,
 			ForkChat: ConversationForkChatAuthority{
-				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				ActorTokenID: "actor-token", RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash",
 			},
 			Target: UsageTarget{Kind: UsageTargetConversationForkCompletion, ID: forkTurnID, Ordinal: 1},
@@ -620,43 +620,39 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 
 func TestManagedAgentFramePrelaunchBindingFailsClosedBeforeAuthorization(t *testing.T) {
 	const (
-		bundleE = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-		bundleF = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		bundleE = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		bundleF = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	)
 	tests := []struct {
 		name          string
 		origin        string
 		admissionHash string
-		bundleSource  string
 		frameHash     string
-		frameSource   string
 		missingBundle bool
 		missingEvent  bool
 		mutateCausal  func(Authority, events.Event) events.Event
 	}{
-		{name: "missing bundle coordinate", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, frameSource: "persisted", missingBundle: true},
-		{name: "missing event coordinate", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", missingEvent: true},
-		{name: "normal bundle hash", origin: "delivery", admissionHash: bundleF, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted"},
-		{name: "normal bundle source", origin: "delivery", admissionHash: bundleE, bundleSource: "ephemeral", frameHash: bundleE, frameSource: "persisted"},
-		{name: "selected bundle hash", origin: "selected", admissionHash: bundleF, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted"},
-		{name: "selected bundle source", origin: "selected", admissionHash: bundleE, bundleSource: "ephemeral", frameHash: bundleE, frameSource: "persisted"},
-		{name: "delivery event identity", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+		{name: "missing bundle coordinate", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, missingBundle: true},
+		{name: "missing event coordinate", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, missingEvent: true},
+		{name: "normal bundle hash", origin: "delivery", admissionHash: bundleF, frameHash: bundleE},
+		{name: "selected bundle hash", origin: "selected", admissionHash: bundleF, frameHash: bundleE},
+		{name: "delivery event identity", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, mutateCausal: func(authority Authority, event events.Event) events.Event {
 			return managedFrameBindingEvent(authority, uuid.NewString(), event.Type(), event.Payload())
 		}},
-		{name: "directive event type", origin: "directive", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+		{name: "directive event type", origin: "directive", admissionHash: bundleE, frameHash: bundleE, mutateCausal: func(authority Authority, event events.Event) events.Event {
 			return managedFrameBindingEvent(authority, event.ID(), "effect.directive.changed", event.Payload())
 		}},
-		{name: "selected event run", origin: "selected", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+		{name: "selected event run", origin: "selected", admissionHash: bundleE, frameHash: bundleE, mutateCausal: func(authority Authority, event events.Event) events.Event {
 			authority.Target.RunID = uuid.NewString()
 			return managedFrameBindingEvent(authority, event.ID(), event.Type(), event.Payload())
 		}},
-		{name: "byte-distinct payload", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+		{name: "byte-distinct payload", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, mutateCausal: func(authority Authority, event events.Event) events.Event {
 			return managedFrameBindingEvent(authority, event.ID(), event.Type(), json.RawMessage(`{"request":"effects"}`))
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, frame, probe := managedFrameBindingContext(t, tc.origin, tc.admissionHash, tc.bundleSource, tc.frameHash, tc.frameSource, !tc.missingBundle, !tc.missingEvent)
+			ctx, frame, probe := managedFrameBindingContext(t, tc.origin, tc.admissionHash, tc.frameHash, !tc.missingBundle, !tc.missingEvent)
 			if tc.mutateCausal != nil {
 				authority, ok := AuthorityFromContext(ctx)
 				if !ok {
@@ -687,10 +683,10 @@ func TestManagedAgentFramePrelaunchBindingFailsClosedBeforeAuthorization(t *test
 }
 
 func TestManagedAgentFramePrelaunchBindingAcceptsExactNormalAndSelectedAuthority(t *testing.T) {
-	const bundle = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	const bundle = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	for _, origin := range []string{"delivery", "selected"} {
 		t.Run(origin, func(t *testing.T) {
-			ctx, frame, probe := managedFrameBindingContext(t, origin, bundle, "persisted", bundle, "persisted", true, true)
+			ctx, frame, probe := managedFrameBindingContext(t, origin, bundle, bundle, true, true)
 			handle, err := BeginManagedCompletion(ctx, "anthropic_api", []byte("request"), frame, nil)
 			if err != nil {
 				t.Fatalf("authorize exact %s frame: %v", origin, err)
@@ -705,7 +701,7 @@ func TestManagedAgentFramePrelaunchBindingAcceptsExactNormalAndSelectedAuthority
 	}
 }
 
-func managedFrameBindingContext(t testing.TB, origin, admissionHash, bundleSource, frameHash, frameSource string, includeBundle, includeEvent bool) (context.Context, agentframe.Frame, *completionStoreProbe) {
+func managedFrameBindingContext(t testing.TB, origin, admissionHash, frameHash string, includeBundle, includeEvent bool) (context.Context, agentframe.Frame, *completionStoreProbe) {
 	t.Helper()
 	selected := origin == "selected"
 	runID := uuid.NewString()
@@ -748,7 +744,7 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, bundleSourc
 		surface = normalManagedEffectSurface(t, admission, target, target.AgentID)
 	}
 	event := managedFrameBindingEvent(authority, uuid.NewString(), "effect.binding.requested", json.RawMessage(`{ "request": "effects" }`))
-	frame := managedFrameBindingFrame(t, authority, surface, event, frameHash, frameSource)
+	frame := managedFrameBindingFrame(t, authority, surface, event, frameHash)
 	probe := &completionStoreProbe{}
 	ctx := WithExecutionMode(WithAuthority(context.Background(), authority), ExecutionModeLive)
 	ctx = WithController(ctx, NewCompletionController(probe, probe, probe, completionProjectionProbe{}).WithExecutionPosture(executionposture.Live))
@@ -756,11 +752,11 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, bundleSourc
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = managedcapabilities.WithContext(ctx, surface)
 	if includeBundle {
-		fact, err := correlation.DecodeBundleSourceFact(admissionHash, bundleSource)
+		fact, err := correlation.DecodeSourceArtifactFact(admissionHash)
 		if err != nil {
 			t.Fatalf("build binding bundle source: %v", err)
 		}
-		ctx = correlation.WithBundleSourceFact(ctx, fact)
+		ctx = correlation.WithSourceArtifactFact(ctx, fact)
 	}
 	if includeEvent {
 		ctx = correlation.WithInboundEvent(ctx, event)
@@ -788,7 +784,7 @@ func managedFrameBindingEvent(authority Authority, eventID string, eventType eve
 	)
 }
 
-func managedFrameBindingFrame(t testing.TB, authority Authority, surface managedcapabilities.Surface, event events.Event, bundleHash, bundleSource string) agentframe.Frame {
+func managedFrameBindingFrame(t testing.TB, authority Authority, surface managedcapabilities.Surface, event events.Event, bundleHash string) agentframe.Frame {
 	t.Helper()
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.binding.intent", "Process the admitted binding test.")
 	if err != nil {
@@ -807,7 +803,7 @@ func managedFrameBindingFrame(t testing.TB, authority Authority, surface managed
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "binding-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+		BundleHash: bundleHash, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete binding frame: %v", err)
@@ -928,7 +924,7 @@ func TestMockOnlyPostureRejectsLiveStartupProbeBeforeAuthorization(t *testing.T)
 func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string) context.Context {
 	t.Helper()
 	ctx = WithExecutionMode(ctx, ExecutionModeLive)
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution test admission: %v", err)
 	}

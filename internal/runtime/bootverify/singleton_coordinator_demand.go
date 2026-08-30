@@ -146,7 +146,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 
 	for _, record := range wave1ScopedNodeRecords(source) {
 		node, _ := record.Identity()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		nodeID := node.Key()
 		for eventType, handler := range record.Entry.EventHandlers {
 			for _, expr := range handlerExecutableReaderExpressionsForSource(source, node, eventType, handler) {
@@ -173,7 +173,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 	}
 
 	for _, plan := range source.WorkflowJoins() {
-		flowID := plan.Node.FlowID()
+		flowID := plan.Node.FlowPath()
 		nodeID := plan.Node.Key()
 		sourceRef, _ := source.ExecutableNodeSource(plan.Node)
 		target := strings.TrimSpace(plan.Spec.ID)
@@ -259,7 +259,7 @@ func appendAgentSingletonWriteDemands(add func(SingletonCoordinatorDemand, bool)
 
 func singletonFlowSchemaFile(bundle *runtimecontracts.WorkflowContractBundle, flowID string) string {
 	for _, view := range bundle.FlowViews() {
-		if strings.TrimSpace(view.Paths.ID) == strings.TrimSpace(flowID) {
+		if strings.TrimSpace(view.Paths.FlowPath) == strings.TrimSpace(flowID) {
 			return strings.TrimSpace(view.Paths.SchemaFile)
 		}
 	}

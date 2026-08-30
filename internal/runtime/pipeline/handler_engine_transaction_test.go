@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -28,11 +29,15 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+	if strings.TrimSpace(runID) == "" {
+		runID = testPipelineRunID
+	}
 	candidate := eventtest.RunCreatingRootIngress(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 	admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{Now: time.Now().UTC()})
 	if err != nil {
@@ -56,6 +61,10 @@ func handlerTestWorkflowModule(flowID string, nodeIDs ...string) WorkflowModule 
 }
 
 func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, nodeIDs ...string) WorkflowModule {
+	if bundle != nil && bundle.FlowTree.Root != nil {
+		cloned := *bundle
+		return &previewWorkflowModule{bundle: &cloned}
+	}
 	nodes := make(map[string]runtimecontracts.SystemNodeContract, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
 		node := runtimecontracts.SystemNodeContract{ID: nodeID}
@@ -67,10 +76,10 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 		nodes[nodeID] = node
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: "static"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Name: flowID, Mode: "static"},
 		Nodes:  nodes,
-		Path:   flowID,
+		Path:   ".",
 	}
 	if bundle != nil {
 		flow.Events = bundle.Events
@@ -83,7 +92,10 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 	}
 	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &flow,
-		ByID: map[string]*runtimecontracts.FlowContractView{flowID: &flow},
+		ByID: map[string]*runtimecontracts.FlowContractView{".": &flow},
+	}
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &flow.Schema
 	}
 	if strings.TrimSpace(bundle.Semantics.Name) == "" {
 		bundle.Semantics.Name = flowID
@@ -92,6 +104,23 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 		bundle.Semantics.Version = "1"
 	}
 	return &previewWorkflowModule{bundle: bundle}
+}
+
+func canonicalPreviewWorkflowModuleForTest(module *previewWorkflowModule) *previewWorkflowModule {
+	if module == nil || module.bundle == nil || module.bundle.FlowTree.Root != nil {
+		return module
+	}
+	nodeIDs := make([]string, 0, len(module.bundle.Nodes))
+	for nodeID := range module.bundle.Nodes {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Strings(nodeIDs)
+	rooted := handlerTestWorkflowModuleWithBundle(module.bundle, module.bundle.Semantics.Name, nodeIDs...).(*previewWorkflowModule)
+	rooted.workflow = module.workflow
+	rooted.workflowNodes = module.workflowNodes
+	rooted.guardRegistry = module.guardRegistry
+	rooted.actionRegistry = module.actionRegistry
+	return rooted
 }
 
 type recordingPipelineBus struct {
@@ -113,13 +142,13 @@ type recordingPipelineBus struct {
 }
 
 func handlerEngineProjectNodeModule() *previewWorkflowModule {
-	return &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+	return handlerTestWorkflowModuleWithBundle(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
 		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},
-	}}
+	}, "handler-engine-test", "node-a").(*previewWorkflowModule)
 }
 
 func (b *recordingPipelineBus) configurePipelineTestDeliveryOwner(owner *pipelineTestDeliveryOwner) {
@@ -445,6 +474,13 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\nmode: static\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sum := sha256.Sum256(raw)
 	module := runtimecontracts.PolicyModule{
 		Path:   "modules/structured_renderer.wasm",
@@ -473,9 +509,9 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 		},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "render", Flow: "render", Mode: runtimecontracts.FlowModeStatic},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Name: "render", Mode: runtimecontracts.FlowModeStatic},
-		Path:   "render",
+		Path:   ".",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a"},
 		},
@@ -484,13 +520,13 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths:      runtimecontracts.ContractPaths{ContractsRoot: root},
-		RootSchema: &flow.Schema,
-		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "render"},
+		SourceArtifact: artifact,
+		RootSchema:     &flow.Schema,
+		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "render"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"render": &flow,
+				".": &flow,
 			},
 		},
 	}
@@ -521,7 +557,7 @@ func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.
 	}
 	ctx := testAuthorActivityContext(t, context.Background())
 
-	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
@@ -619,27 +655,19 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 
 func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/scoring/schema.yaml": `
+		"scoring/schema.yaml": `
 name: scoring
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/scoring/entities.yaml": `
+		"scoring/entities.yaml": `
 subject:
   name: text
 `,
-		"flows/scoring/nodes.yaml": `
+		"scoring/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -654,9 +682,9 @@ node-a:
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
+		module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{
 			bundle: bundle,
-		},
+		}),
 	}
 
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
@@ -696,7 +724,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		InstanceID:      runID,
 		StorageRef:      runID,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Fields:          map[string]any{},
@@ -710,7 +738,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)
 	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -762,7 +790,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		InstanceID:      runID,
 		StorageRef:      runID,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Fields:          map[string]any{},
@@ -855,7 +883,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{"revision_count": 0},
@@ -867,7 +895,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
@@ -933,7 +961,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
@@ -945,7 +973,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
@@ -1006,7 +1034,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
@@ -1018,7 +1046,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
@@ -1121,7 +1149,7 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
+		module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{
 			bundle: bundle,
 			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
 				{Name: "researching"},
@@ -1133,7 +1161,7 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 					To:   "mvp_speccing",
 				},
 			}),
-		},
+		}),
 	}
 	return pc, bus
 }
@@ -1305,23 +1333,15 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 
 func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefaults(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/scoring/schema.yaml": `
+		"scoring/schema.yaml": `
 name: scoring
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/scoring/entities.yaml": `
+		"scoring/entities.yaml": `
 vertical:
   revision_count:
     type: integer
@@ -1462,30 +1482,22 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 
 	bus := &recordingPipelineBus{}
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/validation/schema.yaml": `
+		"validation/schema.yaml": `
 name: validation
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/validation/entities.yaml": `
+		"validation/entities.yaml": `
 validation_entity:
   revision_count:
     type: integer
     initial: 0
   kill_reason: text
 `,
-		"flows/validation/nodes.yaml": `
+		"validation/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -1595,27 +1607,19 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 
 	bus := &recordingPipelineBus{}
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/validation/schema.yaml": `
+		"validation/schema.yaml": `
 name: validation
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/validation/entities.yaml": `
+		"validation/entities.yaml": `
 validation_request:
   request_id: text
 `,
-		"flows/validation/nodes.yaml": `
+		"validation/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -1698,7 +1702,7 @@ func seedQueryEntitiesGuardInstance(t *testing.T, store *workflowInstanceStore, 
 		InstanceID:      runtimeflowidentity.LogicalInstanceID(storageRef),
 		StorageRef:      storageRef,
 		EntityID:        entityID,
-		WorkflowName:    "validation",
+		WorkflowName:    ".",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
 		Fields:          map[string]any{"request_id": requestID},
@@ -1714,29 +1718,21 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 
 	bus := &recordingPipelineBus{}
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: review
-    flow: review
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/review/schema.yaml": `
+		"review/schema.yaml": `
 name: review
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/review/entities.yaml": `
+		"review/entities.yaml": `
 review_entity:
   status:
     type: text
     initial: pending
 `,
-		"flows/review/nodes.yaml": `
+		"review/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -1841,29 +1837,21 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 
 	bus := &recordingPipelineBus{}
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/validation/schema.yaml": `
+		"validation/schema.yaml": `
 name: validation
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/validation/entities.yaml": `
+		"validation/entities.yaml": `
 validation_entity:
   revision_count:
     type: integer
     initial: 0
 `,
-		"flows/validation/nodes.yaml": `
+		"validation/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -1954,23 +1942,15 @@ node-a:
 
 func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
-`,
+
 		"schema.yaml": "name: runtime-test\n",
-		"flows/validation/schema.yaml": `
+		"validation/schema.yaml": `
 name: validation
 mode: static
 initial_state: queued
 states: [queued]
 `,
-		"flows/validation/entities.yaml": `
+		"validation/entities.yaml": `
 validation_entity:
   revision_count:
     type: integer
@@ -1979,7 +1959,7 @@ validation_entity:
     type: boolean
     initial: false
 `,
-		"flows/validation/nodes.yaml": `
+		"validation/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -2053,7 +2033,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 		},
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
 	}, false)
@@ -2188,27 +2168,19 @@ func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t 
 		module: &previewWorkflowModule{
 			bundle: func() *runtimecontracts.WorkflowContractBundle {
 				source := loadWorkflowTempSource(t, map[string]string{
-					"package.yaml": `
-name: runtime-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`,
+
 					"schema.yaml": "name: runtime-test\n",
-					"flows/scoring/schema.yaml": `
+					"scoring/schema.yaml": `
 name: scoring
 mode: static
 initial_state: queued
 states: [queued]
 `,
-					"flows/scoring/entities.yaml": `
+					"scoring/entities.yaml": `
 subject:
   kill_reason: text
 `,
-					"flows/scoring/nodes.yaml": `
+					"scoring/nodes.yaml": `
 node-a:
   id: node-a
   execution_type: system_node
@@ -2299,7 +2271,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		StorageRef:      "child/grandchild/inst-1",
 		EntityID:        grandchildEntityID,
 		ParentEntityID:  childEntityID,
-		WorkflowName:    "grandchild",
+		WorkflowName:    "child/grandchild",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "finished",
 		Fields:          map[string]any{},
@@ -2337,9 +2309,9 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, "", "root-collector")),
+		Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: source.WorkflowName(), FlowInstance: source.WorkflowName(), EntityID: rootEntityID,
+			FlowID: ".", FlowInstance: testPipelineRunID, EntityID: rootEntityID,
 		}),
 	})
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(testWorkflowStoreRunContext(t, store), route), evt)
@@ -2373,7 +2345,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 		module:         handlerEngineProjectNodeModule(),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
@@ -2411,7 +2383,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 		module:         handlerEngineProjectNodeModule(),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
@@ -2449,7 +2421,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		module:         handlerEngineProjectNodeModule(),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "branch_target", Value: runtimecontracts.LiteralExpression("handler")},
@@ -2478,7 +2450,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
@@ -2498,11 +2470,11 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
+		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: additiveOnSuccessContractBundle()}),
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
@@ -2528,11 +2500,11 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()},
+		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()}),
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "account.bucketed",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2694,20 +2666,19 @@ func newDeclarativeEmitContractCoordinator(eventType string) (*PipelineCoordinat
 
 func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.WorkflowContractBundle) (*PipelineCoordinator, *recordingPipelineBus) {
 	bus := &recordingPipelineBus{}
+	module := handlerTestWorkflowModuleWithBundle(bundle, bundle.Semantics.Name, "node-a")
 	return &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
-			bundle: bundle,
-		},
+		module:         module,
 	}, bus
 }
 
 func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t *testing.T) {
 	pc, bus := newDeclarativeEmitContractCoordinator("custom.emitted")
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2771,7 +2742,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 		Payload: runtimecontracts.EventPayloadSpec{},
 	}))
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check:  "payload.score >= 70",
 			OnFail: "escalate:guard.failed",
@@ -2836,7 +2807,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 		},
 	}))
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check: "payload.score >= 70",
 			OnFailSpec: runtimecontracts.GuardFailureSpec{
@@ -2954,7 +2925,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmedi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pc, bus := newDeclarativeEmitContractCoordinator("custom.emitted")
-			_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, "", "node-a"), tc.handler, workflowTriggerContext{
+			_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
 				Event: tc.event,
 				State: tc.state,
 			}, false)

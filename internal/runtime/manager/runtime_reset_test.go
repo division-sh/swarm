@@ -22,7 +22,7 @@ type resetTestBus struct {
 	resetErr   error
 }
 
-func (*resetTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*resetTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 

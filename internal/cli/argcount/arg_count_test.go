@@ -8,17 +8,17 @@ import (
 )
 
 func TestCLIArgCountDiagnosticExactMissingWithHint(t *testing.T) {
-	cmd := cliArgCountTestCommand("bundle", "show <bundle-hash>", ExactArgs(1))
-	SetDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
+	cmd := cliArgCountTestCommand("packs", "show <pack-id>", ExactArgs(1))
+	SetDiscoveryHint(cmd, "List pack IDs with `swarm packs list`.")
 
 	err := cmd.Args(cmd, nil)
 	if err == nil {
 		t.Fatal("Args returned nil, want diagnostic")
 	}
 	want := strings.Join([]string{
-		"ERROR: 'swarm bundle show' requires <bundle-hash>.",
-		"Usage: swarm bundle show <bundle-hash>",
-		"  List bundle hashes with `swarm bundle list`.",
+		"ERROR: 'swarm packs show' requires <pack-id>.",
+		"Usage: swarm packs show <pack-id>",
+		"  List pack IDs with `swarm packs list`.",
 	}, "\n")
 	if got := err.Error(); got != want {
 		t.Fatalf("diagnostic = %q, want %q", got, want)
@@ -26,12 +26,12 @@ func TestCLIArgCountDiagnosticExactMissingWithHint(t *testing.T) {
 }
 
 func TestCLIArgCountDiagnosticExactExtraQuotesReceivedTokens(t *testing.T) {
-	cmd := cliArgCountTestCommand("bundle", "show <bundle-hash>", ExactArgs(1))
+	cmd := cliArgCountTestCommand("packs", "show <pack-id>", ExactArgs(1))
 	err := cmd.Args(cmd, []string{"ab", "cd", "ef"})
 	if err == nil {
 		t.Fatal("Args returned nil, want diagnostic")
 	}
-	want := "ERROR: 'swarm bundle show' accepts one argument (<bundle-hash>); got 3: \"ab\" \"cd\" \"ef\"."
+	want := "ERROR: 'swarm packs show' accepts one argument (<pack-id>); got 3: \"ab\" \"cd\" \"ef\"."
 	if got := strings.Split(err.Error(), "\n")[0]; got != want {
 		t.Fatalf("problem line = %q, want %q", got, want)
 	}
@@ -61,6 +61,22 @@ func TestCLIArgCountDiagnosticMaximumArgs(t *testing.T) {
 	}
 }
 
+func TestCLIArgCountDiagnosticRangeArgs(t *testing.T) {
+	cmd := cliArgCountTestCommand("packs", "show <pack-id> [directory]", RangeArgs(1, 2))
+	if err := cmd.Args(cmd, []string{"pack-id"}); err != nil {
+		t.Fatalf("one argument: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"pack-id", "root"}); err != nil {
+		t.Fatalf("two arguments: %v", err)
+	}
+	if err := cmd.Args(cmd, nil); err == nil || !strings.Contains(err.Error(), "requires <pack-id>") {
+		t.Fatalf("missing diagnostic = %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"pack-id", "root", "extra"}); err == nil || !strings.Contains(err.Error(), "accepts at most two arguments") {
+		t.Fatalf("extra diagnostic = %v", err)
+	}
+}
+
 func TestCLIArgCountDiagnosticUsePipeInsidePlaceholder(t *testing.T) {
 	cmd := cliArgCountTestCommand("", "completion <bash|zsh|fish|powershell>", ExactArgs(1))
 	err := cmd.Args(cmd, nil)
@@ -72,18 +88,18 @@ func TestCLIArgCountDiagnosticUsePipeInsidePlaceholder(t *testing.T) {
 	}
 }
 
-func TestCLIArgCountDiagnosticRegisterContractsAcceptsNoPositionals(t *testing.T) {
+func TestCLIArgCountDiagnosticAcceptsNoPositionals(t *testing.T) {
 	err := NewDiagnosticFromUse(
-		"swarm bundle register",
-		"register",
-		"register <registration-envelope-yaml> | --contracts <contracts-directory>",
-		[]string{"envelope.yaml"},
+		"swarm health",
+		"health",
+		"health",
+		[]string{"extra"},
 		Rule{Max: 0},
 		"",
 	)
 	want := strings.Join([]string{
-		"ERROR: 'swarm bundle register' accepts no positional arguments; got 1: \"envelope.yaml\".",
-		"Usage: swarm bundle register <registration-envelope-yaml> | --contracts <contracts-directory>",
+		"ERROR: 'swarm health' accepts no positional arguments; got 1: \"extra\".",
+		"Usage: swarm health",
 	}, "\n")
 	if got := err.Error(); got != want {
 		t.Fatalf("diagnostic = %q, want %q", got, want)

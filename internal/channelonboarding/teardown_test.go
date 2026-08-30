@@ -180,11 +180,11 @@ func TestChannelActivationRetiresAuthorityBeforeRuntimeContextUnload(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err := service.RetireContext(context.Background(), "bundle-v1:sha256:"+strings.Repeat("a", 64), "persisted", 7, "context-key", "context-hash", "runtime_context_retired")
+	op, err := service.RetireContext(context.Background(), "bundle-v2:sha256:"+strings.Repeat("a", 64), 7, "context-key", "context-hash", "runtime_context_retired")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op.Phase != TeardownSucceeded || op.Scope.ContextPublicationGeneration != 7 || op.Scope.BundleSource != "persisted" {
+	if op.Phase != TeardownSucceeded || op.Scope.ContextPublicationGeneration != 7 {
 		t.Fatalf("context teardown = %#v", op)
 	}
 	want := []string{"principal", "reserve", "retire", "refresh", "get", "complete"}

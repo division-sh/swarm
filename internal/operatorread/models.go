@@ -987,11 +987,12 @@ type RunDebugTraceRow struct {
 }
 
 type HandlerRuleSelectionProjection struct {
-	Context           handlerselection.Context     `json:"context"`
-	Disposition       handlerselection.Disposition `json:"disposition"`
-	PackageCoordinate string                       `json:"package_coordinate,omitempty"`
-	ElementID         string                       `json:"element_id,omitempty"`
-	DisplayLabel      string                       `json:"display_label,omitempty"`
+	Context      handlerselection.Context     `json:"context"`
+	Disposition  handlerselection.Disposition `json:"disposition"`
+	FlowPath     string                       `json:"flow_path,omitempty"`
+	Family       string                       `json:"family,omitempty"`
+	SemanticPath string                       `json:"semantic_path,omitempty"`
+	DisplayLabel string                       `json:"display_label,omitempty"`
 }
 
 func ProjectHandlerRuleSelection(fact handlerselection.HandlerRuleSelectionFact) (HandlerRuleSelectionProjection, error) {
@@ -1002,8 +1003,9 @@ func ProjectHandlerRuleSelection(fact handlerselection.HandlerRuleSelectionFact)
 		Context: fact.Context(), Disposition: fact.Disposition(), DisplayLabel: fact.DisplayLabel(),
 	}
 	if ref := fact.Ref(); ref.Valid() {
-		projection.PackageCoordinate = ref.PackageKey().String()
-		projection.ElementID = ref.ElementID().String()
+		projection.FlowPath = ref.Flow().String()
+		projection.Family = ref.Family()
+		projection.SemanticPath = ref.SemanticPath()
 	}
 	return projection, nil
 }

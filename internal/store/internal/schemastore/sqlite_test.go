@@ -20,8 +20,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 96 {
-		t.Fatalf("platform table plan count = %d, want 96", len(platformPlans))
+	if len(platformPlans) != 95 {
+		t.Fatalf("platform table plan count = %d, want 95", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
@@ -34,7 +34,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 				},
 			},
 		},
-		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+		Source: runtimecontracts.ContractItemSource{FlowPath: ".", Family: "node", File: "nodes.yaml"},
 	}})
 	if err != nil {
 		t.Fatalf("GenerateNodeStateTableDDLs: %v", err)
@@ -92,7 +92,7 @@ func TestSQLiteStatementsForPlanTranslatesDeliveryAuthorityBundleHashExactly(t *
 		TableName:  "delivery_authority",
 		SchemaKind: "test",
 		Statements: []string{
-			"CREATE TABLE IF NOT EXISTS delivery_authority (\n    authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$')\n)",
+			"CREATE TABLE IF NOT EXISTS delivery_authority (\n    authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$')\n)",
 		},
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func TestSQLiteStatementsForPlanTranslatesLifecycleBundleHashExactly(t *testing.
 		TableName:  "agents",
 		SchemaKind: "platform_spec",
 		Statements: []string{
-			"CREATE TABLE IF NOT EXISTS agents (\n    lifecycle_bundle_hash TEXT NOT NULL CHECK (lifecycle_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$')\n)",
+			"CREATE TABLE IF NOT EXISTS agents (\n    lifecycle_bundle_hash TEXT NOT NULL CHECK (lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$')\n)",
 		},
 	})
 	if err != nil {
@@ -319,7 +319,7 @@ func loadPlatformSpecForSQLiteSchemaTest(t *testing.T) runtimecontracts.Platform
 
 func platformTableNamesForSQLiteSchemaTest() []string {
 	return []string{
-		"bundles",
+		"source_artifacts",
 		"events",
 		"activity_attempts",
 		"run_fork_selected_contract_bindings",

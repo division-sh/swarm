@@ -204,7 +204,7 @@ func (*managedNativeRecoveryDeliveryStore) ActivateDeliveryAuthority(
 
 func (*managedNativeRecoveryDeliveryStore) InspectDeliveryRecovery(
 	context.Context,
-	runtimecorrelation.BundleSourceFact,
+	runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	return runtimedelivery.RecoveryInventory{}, nil
 }

@@ -19,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -362,7 +363,11 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 
 	accountAEntityID := runtimeflowidentity.EntityID("account/acct-a")
 	accountBEntityID := runtimeflowidentity.EntityID("account/acct-b")
+	sourceFact := conformanceSourceArtifactFact(t, source)
+	busCtx := testAuthorActivityContextForBundle(context.Background(), sourceFact)
 	store := &fanOutPinRouteMemoryStore{
+		sourceArtifactFact: sourceFact,
+		workflowVersion:    source.WorkflowVersion(),
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
 			{InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			{InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
@@ -373,7 +378,8 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		},
 	}
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: sourceFact,
 		Durable: runtimebus.DurableDependencies{
 			ActiveAgents:      store,
 			ActiveFlows:       store,
@@ -447,7 +453,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			accountID,
 			"account/"+accountID,
 		)
-		preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
+		preflight, err := eb.CheckPublishRecipientPlan(busCtx, evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", accountID, err)
 		}
@@ -455,7 +461,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected, expectedAgent) {
 			t.Fatalf("preflight for %s = failure:%q routes:%#v, want node and exact agent at %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
 		}
-		if err := eb.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+		if err := eb.Publish(busCtx, evt); err != nil {
 			t.Fatalf("Publish fan_out event for %s: %v", accountID, err)
 		}
 		select {
@@ -499,9 +505,15 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &fanOutPinRouteMemoryStore{flowInstances: tc.flowInstances}
+			sourceFact := conformanceSourceArtifactFact(t, source)
+			store := &fanOutPinRouteMemoryStore{
+				sourceArtifactFact: sourceFact,
+				workflowVersion:    source.WorkflowVersion(),
+				flowInstances:      tc.flowInstances,
+			}
 			eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				ContractBundle:     source,
+				SourceArtifactFact: sourceFact,
 				Durable: runtimebus.DurableDependencies{
 					ActiveAgents: store,
 					ActiveFlows:  store,
@@ -530,7 +542,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				}),
 				time.Now().UTC(),
 			)
-			preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
+			preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContextForBundle(context.Background(), sourceFact), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
@@ -588,9 +600,11 @@ func (fanOutPinRouteDispatcher) DispatchPostCommit(context.Context, []runtimeeng
 
 type fanOutPinRouteMemoryStore struct {
 	runtimebus.InMemoryEventStore
-	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
-	activeAgents   []runtimebus.ActiveAgentDescriptor
-	deliveryRoutes map[string][]events.DeliveryRoute
+	sourceArtifactFact runtimecorrelation.SourceArtifactFact
+	workflowVersion    string
+	flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
+	activeAgents       []runtimebus.ActiveAgentDescriptor
+	deliveryRoutes     map[string][]events.DeliveryRoute
 }
 
 func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) error {
@@ -603,17 +617,18 @@ func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.C
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	sourceFact := s.sourceArtifactFact
+	if strings.TrimSpace(sourceFact.BundleHash()) == "" {
+		sourceFact = authorActivityTestSourceArtifactFact
+	}
+	bundleHash := sourceFact.BundleHash()
 	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 	for i := range descriptors {
 		if descriptors[i].BundleHash == "" {
 			descriptors[i].BundleHash = bundleHash
 		}
-		if descriptors[i].BundleSource == "" {
-			descriptors[i].BundleSource = bundleSource
-		}
 		if descriptors[i].WorkflowVersion == "" {
-			descriptors[i].WorkflowVersion = "1.0.0"
+			descriptors[i].WorkflowVersion = strings.TrimSpace(s.workflowVersion)
 		}
 	}
 	return descriptors, nil
@@ -635,7 +650,7 @@ func (s *fanOutPinRouteMemoryStore) CommitPublication(ctx context.Context, comma
 
 func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity, agentIdentity agentidentity.Identity) bool {
 	target = target.Normalized()
-	accountNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "account", "account-node")
+	accountNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("account", "account-node")
 	if err != nil {
 		return false
 	}

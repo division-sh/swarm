@@ -131,23 +131,12 @@ func collectCrossSurfaceShapeCandidates(source semanticview.Source) []crossSurfa
 		add("event "+eventType+" payload", "event "+eventType, crossSurfaceEventPayloadFields(entry))
 	}
 
-	collectRootPolicy := true
-	for _, scope := range sortedProjectScopes(source.ProjectScopes()) {
-		collectRootPolicy = false
-		scopeLabel := strings.TrimSpace(scope.Key)
-		if scopeLabel == "" {
-			scopeLabel = "root"
-		}
-		collectCrossSurfacePolicyShapes(add, "policy project "+scopeLabel, scope.Policy)
-	}
-	if collectRootPolicy && bundle != nil {
-		collectCrossSurfacePolicyShapes(add, "policy root", bundle.Policy)
-	}
 	for _, scope := range sortedFlowScopes(source.FlowScopes()) {
-		if strings.TrimSpace(scope.ID) == "" {
-			continue
+		label := strings.TrimSpace(scope.Path)
+		if label == "" {
+			label = strings.TrimSpace(scope.ID)
 		}
-		collectCrossSurfacePolicyShapes(add, "policy flow "+strings.TrimSpace(scope.ID), scope.Policy)
+		collectCrossSurfacePolicyShapes(add, "policy flow "+label, scope.Policy)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -518,14 +507,6 @@ func sortedEntityContracts(entities runtimecontracts.EntityContractsDocument) []
 			Contract   runtimecontracts.EntityContract
 		}{EntityType: entityType, Contract: entities[entityType]})
 	}
-	return out
-}
-
-func sortedProjectScopes(scopes []semanticview.ProjectScope) []semanticview.ProjectScope {
-	out := append([]semanticview.ProjectScope{}, scopes...)
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Key < out[j].Key
-	})
 	return out
 }
 

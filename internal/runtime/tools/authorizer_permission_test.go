@@ -7,7 +7,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -178,24 +177,6 @@ func TestValidateAgentPermissions_AcceptsToolDefinedExtensionPermission(t *testi
 	}
 	if len(errs) != 0 {
 		t.Fatalf("expected no validation errors, got %v", errs)
-	}
-}
-
-func TestValidateAgentPermissions_DefaultWorkflowBundleDoesNotReportUnknownBundles(t *testing.T) {
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	contractsRoot := runtimecontracts.DefaultWorkflowContractsDir(repoRoot)
-	if strings.TrimSpace(contractsRoot) == "" {
-		t.Skip("no default workflow contracts dir")
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	_, errs := ValidateAgentPermissions(semanticview.Wrap(bundle))
-	for _, err := range errs {
-		if strings.Contains(err.Error(), "unknown permissions_bundle") {
-			t.Fatalf("unexpected bundle resolution error: %v", err)
-		}
 	}
 }
 

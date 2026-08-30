@@ -1,0 +1,6 @@
+name: test-boot-prompt-ref-stub
+version: 1.0.0
+description: >
+  Contract loading must teaching-reject retired prompt_ref before intent lint.
+
+platform_version: ">=0.7.0 <0.8.0"

@@ -18,8 +18,8 @@ func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *t
 		t.Fatal("canonical root node did not have contract source")
 	}
 	source := record.Source
-	if source.Layer != "project" || source.FlowID != "" {
-		t.Fatalf("root node source = %#v, want project-owned", source)
+	if source.FlowPath != "." || source.Family != "nodes" {
+		t.Fatalf("root node source = %#v, want root flow nodes owner", source)
 	}
 }
 
@@ -35,16 +35,18 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 		}}
 	}
 	root := FlowContractView{
-		Paths: FlowContractPaths{PackageKey: "root", NodesFile: "root/nodes.yaml"},
+		Paths: FlowContractPaths{FlowPath: ".", NodesFile: "nodes.yaml"},
+		Path:  ".",
 		Nodes: map[string]SystemNodeContract{
-			"package-node": {
+			"root-node": {
 				EventHandlers: map[string]SystemNodeEventHandler{"root.received": joinHandler("root-active")},
 				Timers:        []WorkflowTimerContract{{ID: "root-timer", Event: "root.tick"}},
 			},
 		},
 		Children: []FlowContractView{
 			{
-				Paths: FlowContractPaths{ID: "b", PackageKey: "root", NodesFile: "flows/b/nodes.yaml"},
+				Paths: FlowContractPaths{FlowPath: "b", NodesFile: "b/nodes.yaml"},
+				Path:  "b",
 				Nodes: map[string]SystemNodeContract{
 					"shared": {
 						EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-active")},
@@ -53,16 +55,8 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 				},
 				Children: []FlowContractView{
 					{
-						Paths: FlowContractPaths{PackageKey: "root/flows/b", NodesFile: "flows/b/nodes.yaml"},
-						Nodes: map[string]SystemNodeContract{
-							"shared": {
-								EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-active")},
-								Timers:        []WorkflowTimerContract{{ID: "b-timer", Event: "b.tick"}},
-							},
-						},
-					},
-					{
-						Paths: FlowContractPaths{PackageKey: "root/flows/b/child", NodesFile: "flows/b/child/nodes.yaml"},
+						Paths: FlowContractPaths{FlowPath: "b/child", NodesFile: "b/child/nodes.yaml"},
+						Path:  "b/child",
 						Nodes: map[string]SystemNodeContract{
 							"shared": {
 								EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-child-active")},
@@ -73,7 +67,8 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 				},
 			},
 			{
-				Paths: FlowContractPaths{ID: "a", PackageKey: "root", NodesFile: "flows/a/nodes.yaml"},
+				Paths: FlowContractPaths{FlowPath: "a", NodesFile: "a/nodes.yaml"},
+				Path:  "a",
 				Nodes: map[string]SystemNodeContract{
 					"shared": {
 						EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("a-active")},
@@ -83,40 +78,28 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 			},
 		},
 	}
-	rootSource := ContractItemSource{PackageKey: "root", Layer: "project", File: "root/nodes.yaml"}
 	bundle := &WorkflowContractBundle{
 		FlowTree: FlowTree{Root: &root},
-		scopedNodes: map[string]SystemNodeContract{
-			contractScopeKey(rootSource, "package-node"): root.Nodes["package-node"],
-		},
-		scopedNodeSources: map[string]ContractItemSource{
-			contractScopeKey(rootSource, "package-node"): rootSource,
-		},
 	}
 
 	records := bundle.ScopedNodeRecords()
 	if len(records) != 4 {
-		t.Fatalf("ScopedNodeRecords() = %#v, want package root, two scoped flows, and nested package record", records)
+		t.Fatalf("ScopedNodeRecords() = %#v, want root and three child flow records", records)
 	}
 	want := []struct {
 		logicalID string
-		flowID    string
-		layer     string
+		flowPath  string
 		file      string
 	}{
-		{logicalID: "package-node", layer: "project", file: "root/nodes.yaml"},
-		{logicalID: "shared", flowID: "a", layer: "flow", file: "flows/a/nodes.yaml"},
-		{logicalID: "shared", flowID: "b", layer: "flow", file: "flows/b/nodes.yaml"},
-		{logicalID: "shared", flowID: "b", layer: "project", file: "flows/b/child/nodes.yaml"},
+		{logicalID: "root-node", flowPath: ".", file: "nodes.yaml"},
+		{logicalID: "shared", flowPath: "a", file: "a/nodes.yaml"},
+		{logicalID: "shared", flowPath: "b", file: "b/nodes.yaml"},
+		{logicalID: "shared", flowPath: "b/child", file: "b/child/nodes.yaml"},
 	}
 	for index, expected := range want {
 		got := records[index]
-		wantPackage := "root"
-		if expected.file == "flows/b/child/nodes.yaml" {
-			wantPackage = "root/flows/b/child"
-		}
-		if got.LogicalID != expected.logicalID || got.Source.PackageKey != wantPackage || got.Source.FlowID != expected.flowID || got.Source.Layer != expected.layer || got.Source.File != expected.file {
-			t.Fatalf("ScopedNodeRecords()[%d] = %#v, want logical=%q package=%q flow=%q layer=%q file=%q", index, got, expected.logicalID, wantPackage, expected.flowID, expected.layer, expected.file)
+		if got.LogicalID != expected.logicalID || got.Source.FlowPath != expected.flowPath || got.Source.Family != "nodes" || got.Source.File != expected.file {
+			t.Fatalf("ScopedNodeRecords()[%d] = %#v, want logical=%q flow_path=%q file=%q", index, got, expected.logicalID, expected.flowPath, expected.file)
 		}
 	}
 
@@ -129,11 +112,11 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 	}
 	seenFlow := map[string]bool{}
 	for _, join := range bundle.Semantics.Joins {
-		seenFlow[join.Node.FlowID()] = true
+		seenFlow[join.Node.FlowPath()] = true
 	}
-	for _, flowID := range []string{"", "a", "b"} {
-		if !seenFlow[flowID] {
-			t.Fatalf("exported-tree joins = %#v, missing flow %q", bundle.Semantics.Joins, flowID)
+	for _, flowPath := range []string{".", "a", "b", "b/child"} {
+		if !seenFlow[flowPath] {
+			t.Fatalf("exported-tree joins = %#v, missing flow %q", bundle.Semantics.Joins, flowPath)
 		}
 	}
 	wantNodes := map[string]bool{}
@@ -170,33 +153,8 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 	}
 }
 
-func TestWorkflowContractBundleScopedNodeRecordsIncludeNestedRootOnlyProjects(t *testing.T) {
-	root := ProjectContractView{
-		Paths: ProjectPackagePaths{Key: "root", ProjectNodesFile: "root/nodes.yaml"},
-		Nodes: map[string]SystemNodeContract{"root-node": {ID: "root-node"}},
-	}
-	child := ProjectContractView{
-		Paths: ProjectPackagePaths{Key: "root/child", ProjectNodesFile: "child/nodes.yaml"},
-		Nodes: map[string]SystemNodeContract{"child-node": {ID: "child-node"}},
-	}
-	bundle := &WorkflowContractBundle{
-		projectContracts: map[string]ProjectContractView{"root": root, "root/child": child},
-		scopedNodes: map[string]SystemNodeContract{
-			"root::root-node": root.Nodes["root-node"],
-		},
-	}
-
-	records := bundle.ScopedNodeRecords()
-	if len(records) != 2 || records[0].LogicalID != "root-node" || records[1].LogicalID != "child-node" {
-		t.Fatalf("ScopedNodeRecords() = %#v, want complete root-only project census", records)
-	}
-	if records[1].Source.PackageKey != "root/child" || records[1].Source.FlowID != "" || records[1].Source.Layer != "project" || records[1].Source.File != "child/nodes.yaml" {
-		t.Fatalf("nested root-only project source = %#v", records[1].Source)
-	}
-}
-
 func TestWorkflowContractBundleScopedNodeRecordsUseLoadedDeclarationMapKey(t *testing.T) {
-	source := ContractItemSource{PackageKey: "root", FlowID: "flow", Layer: "flow", File: "flows/flow/nodes.yaml"}
+	source := ContractItemSource{FlowPath: "flow", Family: "nodes", File: "flow/nodes.yaml"}
 	bundle := &WorkflowContractBundle{
 		scopedNodes: map[string]SystemNodeContract{
 			contractScopeKey(source, "declared-node"): {ID: "non-authoritative-embedded-id"},
@@ -216,15 +174,6 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: wave1-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
 	writeFixtureFile(t, root+"/schema.yaml", "name: wave1-bundle\n")
 	writeFixtureFile(t, root+"/types.yaml", `
 scalars:
@@ -238,8 +187,9 @@ root.ready:
   _note: root event
   entity_id: uuid
 `)
-	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `
 name: scoring
+mode: static
 initial_state: discovered
 states: [discovered, shortlisted]
 terminal_states: [shortlisted]
@@ -249,12 +199,12 @@ pins:
   outputs:
     events: [vertical.shortlisted]
 `)
-	writeFixtureFile(t, root+"/flows/scoring/types.yaml", `
+	writeFixtureFile(t, root+"/scoring/types.yaml", `
 types:
   ScoreBreakdown:
     total: numeric
 `)
-	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
   _description: scoring vertical
   name: text
@@ -263,7 +213,7 @@ vertical:
     indexed: true
     initial: 0
 `)
-	writeFixtureFile(t, root+"/flows/scoring/events.yaml", `
+	writeFixtureFile(t, root+"/scoring/events.yaml", `
 vertical.shortlisted:
   _note: shortlist event
   vertical_name: text
@@ -319,8 +269,8 @@ func TestMergeAgentContractsRejectsDuplicateScopedAgentID(t *testing.T) {
 		scopedAgentSources:    map[string]ContractItemSource{},
 		ambiguousAgentAliases: map[string]struct{}{},
 	}
-	sourceA := ContractItemSource{FlowID: "review", Layer: "flow", File: "flows/review/agents.yaml"}
-	sourceB := ContractItemSource{FlowID: "review", Layer: "flow", File: "flows/review/agents-extra.yaml"}
+	sourceA := ContractItemSource{FlowPath: "review", Family: "agents", File: "review/agents.yaml"}
+	sourceB := ContractItemSource{FlowPath: "review", Family: "agents", File: "review/agents-extra.yaml"}
 	if err := mergeAgentContracts(bundle, map[string]AgentRegistryEntry{
 		"worker": {ID: "worker", Role: "reviewer"},
 	}, sourceA); err != nil {
@@ -332,7 +282,7 @@ func TestMergeAgentContractsRejectsDuplicateScopedAgentID(t *testing.T) {
 	if err == nil {
 		t.Fatal("mergeAgentContracts duplicate scoped agent error = nil")
 	}
-	for _, want := range []string{`duplicate scoped agent id "review::worker"`, sourceA.File, sourceB.File} {
+	for _, want := range []string{`duplicate scoped agent id "` + contractScopeKey(sourceA, "worker") + `"`, sourceA.File, sourceB.File} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("duplicate scoped agent error missing %q:\n%s", want, err.Error())
 		}
@@ -498,62 +448,6 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 	}
 }
 
-func TestResolveEffectiveFlowMode(t *testing.T) {
-	modes := []string{FlowModeStatic, FlowModeTemplate, FlowModeSingleton}
-	for _, mode := range modes {
-		for _, tc := range []struct {
-			name        string
-			packageMode string
-			schemaMode  string
-		}{
-			{name: "equal", packageMode: mode, schemaMode: mode},
-			{name: "package only", packageMode: mode},
-			{name: "schema only", schemaMode: mode},
-		} {
-			t.Run(mode+"/"+tc.name, func(t *testing.T) {
-				got, err := ResolveEffectiveFlowMode("orders", tc.packageMode, tc.schemaMode)
-				if err != nil {
-					t.Fatalf("ResolveEffectiveFlowMode: %v", err)
-				}
-				if got != mode {
-					t.Fatalf("mode = %q, want %q", got, mode)
-				}
-			})
-		}
-	}
-	for _, packageMode := range modes {
-		for _, schemaMode := range modes {
-			if packageMode == schemaMode {
-				continue
-			}
-			t.Run(packageMode+"_contradicts_"+schemaMode, func(t *testing.T) {
-				_, err := ResolveEffectiveFlowMode("orders", packageMode, schemaMode)
-				if err == nil || !strings.Contains(err.Error(), "package.yaml mode") || !strings.Contains(err.Error(), "schema.yaml mode") {
-					t.Fatalf("ResolveEffectiveFlowMode error = %v, want exact package/schema contradiction", err)
-				}
-			})
-		}
-	}
-}
-
-func TestLoadWorkflowContractBundleRejectsModeContradictionBeforePublication(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-	writeFixtureFile(t, root+"/package.yaml", `
-name: contradictory-mode
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: service, flow: service, mode: singleton}
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: contradictory-mode\n")
-	writeFixtureFile(t, root+"/flows/service/schema.yaml", "name: service\nmode: template\n")
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), `package.yaml mode "singleton" contradicts schema.yaml mode "template"`) {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want pre-publication mode contradiction", err)
-	}
-}
-
 func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrimaryEntity(t *testing.T) {
 	for _, fields := range []map[string]EntityFieldDecl{
 		{},
@@ -678,149 +572,6 @@ func mustTemplateInstanceField(t testing.TB, raw string) TemplateInstanceField {
 	return field
 }
 
-func TestLoadWorkflowContractBundle_RejectsLegacyPackageEntitySchema(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: compat-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-entity_schema:
-  item:
-    item_id: text
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: compat-bundle\n")
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsMixedLegacyEntitySchemaAndWave1Entities(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: mixed-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-entity_schema:
-  item:
-    item_id: text
-flows: []
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: mixed-bundle\n")
-	writeFixtureFile(t, root+"/entities.yaml", `
-bundle_item:
-  _owner: scoring
-  name: text
-`)
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsLegacySubpackageEntitySchemaAlongsideWave1Entities(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: mixed-subpackage-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/legacy-child
-flows: []
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: mixed-subpackage-bundle\n")
-	writeFixtureFile(t, root+"/entities.yaml", `
-root_entity:
-  _owner: scoring
-  name: text
-`)
-	writeFixtureFile(t, root+"/packages/legacy-child/package.yaml", `
-name: legacy-child
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-entity_schema:
-  child:
-    legacy_id: text
-`)
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsPackageScopedTypeCatalog(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: invalid-package-types
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/child
-flows: []
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-package-types\n")
-	writeFixtureFile(t, root+"/packages/child/package.yaml", `
-name: child
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeFixtureFile(t, root+"/packages/child/types.yaml", "types:\n  Thing:\n    name: text\n")
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped types.yaml") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped types.yaml rejection", err)
-	}
-	if strings.Contains(err.Error(), "Wave 1") {
-		t.Fatalf("package-scoped types error leaks internal rollout vocabulary: %v", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsPackageScopedEntityContracts(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: invalid-package-entities
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/child
-flows: []
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-package-entities\n")
-	writeFixtureFile(t, root+"/packages/child/package.yaml", `
-name: child
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-	writeFixtureFile(t, root+"/packages/child/entities.yaml", "child:\n  name: text\n")
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped entities.yaml") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped entities.yaml rejection", err)
-	}
-	if strings.Contains(err.Error(), "Wave 1") {
-		t.Fatalf("package-scoped entities error leaks internal rollout vocabulary: %v", err)
-	}
-}
-
 func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	t.Run("scalar alias", func(t *testing.T) {
 		var scalar ScalarTypeDecl
@@ -848,23 +599,14 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: invalid-flow-entities
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
 	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-flow-entities\n")
-	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `
 name: scoring
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
 `)
-	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
   name: text
 campaign:
@@ -881,12 +623,6 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: invalid-root-entities
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeFixtureFile(t, root+"/schema.yaml", `
 name: invalid-root-entities
 initial_state: pending
@@ -910,24 +646,15 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: schema-entity-selector
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
 	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector\n")
-	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `
 name: scoring
 entity: vertical
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
 `)
-	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
   name: text
 `)
@@ -942,12 +669,6 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: root-schema-entity-selector
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeFixtureFile(t, root+"/schema.yaml", `
 name: root-schema-entity-selector
 entity: vertical
@@ -970,24 +691,15 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/package.yaml", `
-name: schema-entity-selector-missing
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
 	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector-missing\n")
-	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `
 name: scoring
 entity: missing
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
 `)
-	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
   name: text
 `)
@@ -995,51 +707,6 @@ vertical:
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want schema.yaml entity selector rejection", err)
-	}
-}
-
-func TestProjectPackageDocumentDecode_RejectsLegacyEntitySchema(t *testing.T) {
-	var doc ProjectPackageDocument
-	err := yaml.Unmarshal([]byte(`
-name: test-accumulate-all
-version: 1.0.0
-description: Accumulate 3 items, fire on_complete when all arrive.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-entity_schema:
-  core:
-    expected_count: integer
-    received_items: [text]
-`), &doc)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
-		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED entity_schema rejection", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_InvalidLegacyPackageFieldReturnsParseError(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/package.yaml", `
-name: invalid-legacy-bundle
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-entity_schema:
-  core:
-    metadata: jsonb
-flows: []
-`)
-	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-legacy-bundle\n")
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil {
-		t.Fatal("expected parse error")
-	}
-	if !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
-	}
-	if strings.Contains(err.Error(), "workflow.name missing") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want parse error instead of downstream semantics failure", err)
 	}
 }
 

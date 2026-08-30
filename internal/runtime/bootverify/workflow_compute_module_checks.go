@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
@@ -52,14 +51,14 @@ type computeModuleRef struct {
 	EventType string
 	RuleIndex int
 	RuleID    string
-	RuleRef   contractelementidentity.ContractElementRef
+	RuleRef   runtimeidentity.DeclarationIdentity
 }
 
 func computeModuleFinding(ref computeModuleRef, detail string) Finding {
 	return Finding{
 		CheckID:  computeModuleCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.Node.FlowID()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
 		Location: ref.Node.Key(),
 	}
 }

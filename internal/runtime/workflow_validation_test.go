@@ -816,36 +816,6 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 	}
 }
 
-func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle()
-	bundle.Platform.Platform.Version = "0.7.0"
-	bundle.PackageTree = []runtimecontracts.LoadedProjectPackage{{
-		Key: ".",
-		Manifest: runtimecontracts.ProjectPackageDocument{
-			Name:            "runtime-incompatible-platform",
-			PlatformVersion: ">=0.8.0",
-		},
-	}}
-
-	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
-		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
-	}, workflowValidationTestProfile(t), executionposture.Live)
-	if err == nil {
-		t.Fatal("ensureWorkflowBootWiring error = nil, want platform_version compatibility failure")
-	}
-	for _, want := range []string{
-		"platform_version_compatibility",
-		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
-		"remediation: update package.yaml platform_version after re-verifying",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ensureWorkflowBootWiring error = %v, want substring %q", err, want)
-		}
-	}
-}
-
 func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
 	t.Helper()
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
@@ -874,7 +844,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			name: "missing workflow module",
 			deps: RuntimeDeps{
 				Config:  &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
-				Options: RuntimeOptions{BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA)},
+				Options: RuntimeOptions{SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
 			},
 			errContains: "workflow contract validation failed: workflow module is required",
 		},
@@ -886,8 +856,8 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 					LLM:     config.LLMConfig{RuntimeMode: "cli_test"},
 				},
 				Options: RuntimeOptions{
-					WorkflowModule:   validModule,
-					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+					WorkflowModule:     validModule,
+					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
 			},
 			errContains: "llm.runtime_mode is retired",
@@ -897,8 +867,8 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			deps: RuntimeDeps{
 				Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 				Options: RuntimeOptions{
-					WorkflowModule:   validModule,
-					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+					WorkflowModule:     validModule,
+					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
 			},
 		},
@@ -908,8 +878,8 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Config:       &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 				InboundStore: &recordingInboundStore{},
 				Options: RuntimeOptions{
-					WorkflowModule:   validModule,
-					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+					WorkflowModule:     validModule,
+					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
 			},
 			errContains: "provider trigger catalog snapshot is required when inbound store is configured",
@@ -940,8 +910,8 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	boot, err := (RuntimeDeps{
 		Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 		Options: RuntimeOptions{
-			WorkflowModule:   module,
-			BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+			WorkflowModule:     module,
+			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 		},
 	}).validated()
 	if err != nil {
@@ -959,8 +929,8 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	if boot.EmitRegistry == nil {
 		t.Fatal("validated RuntimeDeps EmitRegistry = nil")
 	}
-	if boot.BundleSourceFact.BundleHash() != runtimeContextTestHashA {
-		t.Fatalf("BundleSourceFact bundle_hash = %q, want %q", boot.BundleSourceFact.BundleHash(), runtimeContextTestHashA)
+	if boot.SourceArtifactFact.BundleHash() != runtimeContextTestHashA {
+		t.Fatalf("SourceArtifactFact bundle_hash = %q, want %q", boot.SourceArtifactFact.BundleHash(), runtimeContextTestHashA)
 	}
 }
 

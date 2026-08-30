@@ -23,7 +23,7 @@ func TestAgentFrameCLIUsesExactAPISelectorsOnly(t *testing.T) {
 		wantParams map[string]any
 		scope      agentframe.InspectionScope
 	}{
-		{name: "static", args: []string{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--json"}, wantParams: map[string]any{"scope": "static", "agent_id": "reviewer", "bundle_hash": "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "flow": "review"}, scope: agentframe.InspectionStatic},
+		{name: "static", args: []string{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--json"}, wantParams: map[string]any{"scope": "static", "agent_id": "reviewer", "bundle_hash": "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "flow": "review"}, scope: agentframe.InspectionStatic},
 		{name: "effective", args: []string{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "review/one", "--json"}, wantParams: map[string]any{"scope": "effective", "agent_id": "reviewer", "flow_instance": "review/one"}, scope: agentframe.InspectionEffective},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,16 +60,16 @@ func TestAgentFrameCLIRejectsSelectorConflictsBeforeAPIRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, args := range [][]string{
-		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--root"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--root"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--flow-instance", "review/one"},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},
-		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "/review/"},
-		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", " review "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "/review/"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", " review "},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "/review/one/"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "review/one/"},
-		{"agent", "frame", " reviewer ", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
-		{"agent", "frame", "reviewer", "--scope", " static ", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
-		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", " bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
+		{"agent", "frame", " reviewer ", "--scope", "static", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
+		{"agent", "frame", "reviewer", "--scope", " static ", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", " bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--bundle-hash", " "},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--flow", " "},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", " review/one "},
@@ -89,8 +89,8 @@ func agentFrameCLIInspection(scope agentframe.InspectionScope) agentframe.Inspec
 		Version: agentframe.Version, Scope: scope,
 		Selector: agentframe.InspectionSelector{AgentID: "reviewer"},
 		Session: agentframe.InspectionSession{
-			BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			BundleSource: agentframe.Presence[string]{Status: "unresolved"}, AgentID: "reviewer", AuthoredFlow: "review",
+			BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			AgentID:    "reviewer", AuthoredFlow: "review",
 			AgentIdentity: agentframe.Presence[agentidentity.Identity]{Status: "unresolved"},
 			Provider:      agentframe.Presence[agentframe.Provider]{Status: "unresolved"},
 		},

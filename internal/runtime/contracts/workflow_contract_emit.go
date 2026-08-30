@@ -5,14 +5,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type HandlerDeclarativeEmitSite struct {
 	Source    string
 	SiteKey   string
 	RuleID    string
-	RuleRef   contractelementidentity.ContractElementRef
+	RuleRef   runtimeidentity.DeclarationIdentity
 	RuleIndex int
 	Spec      EmitSpec
 	ItemAlias string
@@ -65,7 +65,7 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 
 func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
 	out := make([]HandlerDeclarativeEmitSite, 0, 8)
-	add := func(source, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, ruleIndex int, spec EmitSpec, itemAlias ...string) {
+	add := func(source, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, ruleIndex int, spec EmitSpec, itemAlias ...string) {
 		if spec.Empty() {
 			return
 		}
@@ -83,19 +83,19 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			ItemAlias: alias,
 		})
 	}
-	addAction := func(source, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, ruleIndex int, action ActionSpec) {
+	addAction := func(source, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, ruleIndex int, action ActionSpec) {
 		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
 			return
 		}
 		add(source+".success", siteKey+".success", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.SuccessEvent, Fields: action.ArtifactRepo.SuccessPayload})
 		add(source+".failure", siteKey+".failure", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.FailureEvent, Fields: action.ArtifactRepo.FailurePayload})
 	}
-	addAction("handler.action", "handler.action", "", contractelementidentity.ContractElementRef{}, -1, handler.Action)
+	addAction("handler.action", "handler.action", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Action)
 	templateSites := HandlerRuleEmitTemplateSites(handler)
 	if len(templateSites) == 0 {
-		add("handler.emit", "handler.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.Emit)
+		add("handler.emit", "handler.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Emit)
 		for idx, rule := range handler.Rules {
-			ruleRef, _ := rule.ContractElementRef()
+			ruleRef, _ := rule.DeclarationIdentity()
 			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
 			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
 			if rule.FanOut != nil {
@@ -105,26 +105,26 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 	} else {
 		out = append(out, templateSites...)
 		for idx, rule := range handler.Rules {
-			ruleRef, _ := rule.ContractElementRef()
+			ruleRef, _ := rule.DeclarationIdentity()
 			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
 		}
 	}
-	add("handler.on_success.emit", "handler.on_success.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.OnSuccess.Emit)
+	add("handler.on_success.emit", "handler.on_success.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
-		ruleRef, _ := rule.ContractElementRef()
+		ruleRef, _ := rule.DeclarationIdentity()
 		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
 		if rule.FanOut != nil {
 			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, ruleRef, idx, rule.FanOut.Emit, rule.FanOut.As)
 		}
 	}
 	if handler.Join != nil {
-		completeRef, _ := handler.Join.OnComplete.ContractElementRef()
-		timeoutRef, _ := handler.Join.Timeout.Outcome.ContractElementRef()
+		completeRef, _ := handler.Join.OnComplete.DeclarationIdentity()
+		timeoutRef, _ := handler.Join.Timeout.Outcome.DeclarationIdentity()
 		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), completeRef, 0, handler.Join.OnComplete.Emit)
 		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), timeoutRef, 0, handler.Join.Timeout.Outcome.Emit)
 	}
 	if handler.FanOut != nil {
-		add("handler.fan_out.emit", "handler.fan_out.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.FanOut.Emit, handler.FanOut.As)
+		add("handler.fan_out.emit", "handler.fan_out.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.FanOut.Emit, handler.FanOut.As)
 	}
 	return out
 }
@@ -139,7 +139,7 @@ func HandlerRuleEmitTemplateSites(handler SystemNodeEventHandler) []HandlerDecla
 		if !ok {
 			return nil
 		}
-		ruleRef, _ := rule.ContractElementRef()
+		ruleRef, _ := rule.DeclarationIdentity()
 		out = append(out, HandlerDeclarativeEmitSite{
 			Source:    "handler.rules.emit_template",
 			SiteKey:   indexedHandlerEmitSiteKey("handler.rules", idx, "emit_template"),

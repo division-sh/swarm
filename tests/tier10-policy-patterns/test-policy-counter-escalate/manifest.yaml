@@ -1,0 +1,6 @@
+name: test-policy-counter-escalate
+version: 1.0.0
+description: 'Policy: guard checks entity counter against policy limit. Counter at limit triggers escalation event.
+
+'
+platform_version: ">=0.7.0 <0.8.0"

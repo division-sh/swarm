@@ -168,9 +168,9 @@ func (r Registration) Validate() error {
 		return fmt.Errorf("fan-out barrier registration requires a typed delivery completion handle")
 	}
 	fanOut, ok := joinRef.FanOutDelivery()
+	intentDeclaration, declarationErr := r.IntentKey.ElementRef.DeclarationIdentity()
 	if !ok || fanOut.TriggeringDeliveryID() != strings.TrimSpace(r.IntentKey.TriggeringDeliveryID) ||
-		fanOut.PackageKey() != strings.TrimSpace(r.IntentKey.ElementRef.PackageKey) ||
-		fanOut.ElementID() != strings.TrimSpace(r.IntentKey.ElementRef.ElementID) ||
+		declarationErr != nil || !fanOut.DeclarationIdentity().Equal(intentDeclaration) ||
 		fanOut.BundleHash() != strings.TrimSpace(r.PlanRef.BundleHash) ||
 		fanOut.SemanticDigest() != strings.TrimSpace(r.PlanRef.SemanticDigest) {
 		return fmt.Errorf("fan-out barrier handle disagrees with exact intent identity")
@@ -179,12 +179,12 @@ func (r Registration) Validate() error {
 		return fmt.Errorf("fan-out barrier registration requires exact route, entity, execution mode, and creation time")
 	}
 	route := r.RoutingSource.Route().Normalized()
-	if joinRef.FlowID() == "" {
+	if joinRef.FlowPath() == "." {
 		if r.RoutingSource.Kind() != events.RoutingSourceRoot || route.EntityID != strings.TrimSpace(r.EntityID) || route.FlowID != "" || route.FlowInstance != "" {
 			return fmt.Errorf("root fan-out barrier routing source contradicts its declaration")
 		}
 	} else if r.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl ||
-		route.EntityID != strings.TrimSpace(r.EntityID) || route.FlowID != joinRef.FlowID() || route.FlowInstance != strings.Trim(strings.TrimSpace(r.Route.InstancePath), "/") {
+		route.EntityID != strings.TrimSpace(r.EntityID) || route.FlowID != joinRef.FlowPath() || route.FlowInstance != strings.Trim(strings.TrimSpace(r.Route.InstancePath), "/") {
 		return fmt.Errorf("flow fan-out barrier routing source contradicts its declaration and route")
 	}
 	return nil
@@ -225,8 +225,7 @@ func (c Completion) IntentKey(runID string) (fanoutobligation.IntentKey, error) 
 		RunID:                strings.TrimSpace(runID),
 		TriggeringDeliveryID: fanOut.TriggeringDeliveryID(),
 	}
-	key.ElementRef.PackageKey = fanOut.PackageKey()
-	key.ElementRef.ElementID = fanOut.ElementID()
+	key.ElementRef = runtimecontracts.FanOutElementRefFrom(fanOut.DeclarationIdentity())
 	return key, key.Validate()
 }
 

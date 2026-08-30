@@ -59,7 +59,7 @@ func (h DeliveryTargetHandler) FlowID() string {
 	if !h.present {
 		return ""
 	}
-	return h.node.FlowID()
+	return h.node.FlowPath()
 }
 
 func (h DeliveryTargetHandler) NodeID() string {
@@ -83,7 +83,7 @@ func (h DeliveryTargetHandler) ExecutionFlowID(source semanticview.Source) strin
 	if !h.present {
 		return ""
 	}
-	if flowID := h.node.FlowID(); flowID != "" {
+	if flowID := h.node.FlowPath(); flowID != "" {
 		return flowID
 	}
 	return semanticview.RootExecutionFlowID(source)
@@ -861,7 +861,6 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 type handlerRuleEntityFieldClassifier func(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency
 
 var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassifier{
-	"ElementID":   noHandlerRuleEntityRequirement,
 	"ID":          noHandlerRuleEntityRequirement,
 	"Description": noHandlerRuleEntityRequirement,
 	"Condition": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
@@ -892,9 +891,9 @@ var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassif
 		}
 		return existingWhen(computeReferencesEntity(rule.Compute))
 	},
-	"FanOut":     noHandlerRuleEntityRequirement,
-	"elementRef": noHandlerRuleEntityRequirement,
-	"authored":   noHandlerRuleEntityRequirement,
+	"FanOut":              noHandlerRuleEntityRequirement,
+	"declarationIdentity": noHandlerRuleEntityRequirement,
+	"authored":            noHandlerRuleEntityRequirement,
 }
 
 func handlerExecutionEntityRequirement(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {

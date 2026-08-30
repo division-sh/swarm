@@ -16,25 +16,24 @@ const (
 )
 
 type ChannelRegistrationTarget struct {
-	PackageKey string
-	FlowID     string
-	Provider   string
+	FlowPath string
+	Provider string
 }
 
 func ParseChannelRegistrationTarget(raw string) (ChannelRegistrationTarget, error) {
 	parts := strings.Split(strings.TrimSpace(raw), ":")
-	if len(parts) != 4 || parts[0] != "ingress" {
-		return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<package>:<flow>:<provider>")
+	if len(parts) != 3 || parts[0] != "ingress" {
+		return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<flow-path>:<provider>")
 	}
-	target := ChannelRegistrationTarget{PackageKey: parts[1], FlowID: parts[2], Provider: parts[3]}
-	packageKey, err := runtimeidentity.ParsePackageKey(target.PackageKey)
+	target := ChannelRegistrationTarget{FlowPath: parts[1], Provider: parts[2]}
+	flow, err := runtimeidentity.AdmitFlowIdentity(target.FlowPath)
 	if err != nil {
-		return ChannelRegistrationTarget{}, fmt.Errorf("registration target has invalid canonical package key %q: %w", target.PackageKey, err)
+		return ChannelRegistrationTarget{}, fmt.Errorf("registration target has invalid canonical flow path %q: %w", target.FlowPath, err)
 	}
-	target.PackageKey = packageKey.String()
-	for _, value := range []string{target.FlowID, target.Provider} {
+	target.FlowPath = flow.String()
+	for _, value := range []string{target.Provider} {
 		if value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/%?# \t\r\n") {
-			return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<package>:<flow>:<provider> with valid identity segments")
+			return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<flow-path>:<provider> with a valid provider segment")
 		}
 	}
 	return target, nil

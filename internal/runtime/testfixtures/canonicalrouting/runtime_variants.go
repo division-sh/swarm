@@ -9,12 +9,12 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	flowRoot := ""
 	if nested {
 		removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
-		writeClosedVariantFile(t, root, "package.yaml", "name: nested-generated-activity-topology\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: child\n    flow: child\n    mode: static\n")
+
 		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\n")
-		flowRoot = "flows/child/"
+		flowRoot = "child/"
 		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nmode: static\nstages: []\n")
 	} else {
-		writeClosedVariantFile(t, root, "package.yaml", "name: generated-activity-topology\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+
 		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\n")
 	}
 	writeClosedVariantFile(t, root, flowRoot+"events.yaml", "request:\n  message: text\n  swarm:\n    source: external\n")
@@ -43,11 +43,11 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	if subscribeResults {
 		prefix := ""
 		resultSubscriptions = ", " + prefix + "send.succeeded, " + prefix + "send.failed"
-		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000019\n          id: observe_success\n          condition: payload.result != null\n    " + prefix + "send.failed:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000020\n          id: observe_failure\n          condition: payload.failure != null\n"
+		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result != null\n    " + prefix + "send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
 	}
 	nodes := "activity-node:\n  id: activity-node\n  execution_type: system_node\n  subscribes_to: [request" + resultSubscriptions + "]\n  event_handlers:\n    request:\n      activity:\n        id: send\n        tool: send\n        input:\n          message:\n            ref: payload.message\n" + resultHandlers
 	if nested {
-		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000021\n          id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000022\n          id: observe_failure\n          condition: payload.failure != null\n"
+		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
 	}
 	writeClosedVariantFile(t, root, flowRoot+"nodes.yaml", nodes)
 	return root
@@ -56,7 +56,7 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 func CopyPayloadNamedField(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	writeClosedVariantFile(t, root, "package.yaml", "name: payload-normalizer\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n  swarm:\n    source: external\n")
@@ -67,7 +67,7 @@ func CopyPayloadNamedField(t testing.TB) string {
 func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateCreateMintedKey)
-	writeClosedVariantFile(t, root, "package.yaml", "name: exact-once-test\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: validation\n    flow: validation\n    mode: static\n")
+
 	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\n")
 	inputs := "thing.created"
 	produces := "thing.emitted"

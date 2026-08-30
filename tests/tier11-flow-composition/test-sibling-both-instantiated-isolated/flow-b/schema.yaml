@@ -1,0 +1,8 @@
+name: flow-b
+initial_state: new
+terminal_states: [finished]
+states: [new, active, finished]
+pins:
+  inputs:
+    events: [work.begin]
+mode: static

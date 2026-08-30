@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -87,7 +88,6 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			delivery_payload_projection TEXT NOT NULL,
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
-			authority_bundle_source TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,
 			execution_authority_generation INTEGER NOT NULL,
 			selected_execution_id TEXT,
@@ -113,10 +113,11 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
 			selection_context TEXT NOT NULL CHECK (selection_context IN ('none', 'handler_rules', 'handler_on_complete', 'join_on_complete', 'join_timeout')),
 			disposition TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'evaluation_failed', 'not_applicable')),
-			package_coordinate TEXT,
-			element_id TEXT,
+			flow_path TEXT,
+			declaration_family TEXT,
+			semantic_path TEXT,
 			display_label TEXT NOT NULL DEFAULT '',
-			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
+			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(flow_path, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(declaration_family, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(semantic_path, '')), '') IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(flow_path, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(declaration_family, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(semantic_path, '')), '') IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL AND display_label = ''))
 		)`,
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL,
@@ -190,10 +191,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 	if err != nil {
 		t.Fatalf("create manager delivery adapter: %v", err)
 	}
-	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("create manager delivery source: %v", err)
-	}
+	source := sourceartifactfixture.Fact()
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
 	if err != nil {
 		t.Fatalf("create manager delivery authority: %v", err)
@@ -324,7 +322,7 @@ func (s *managerDeliveryTestStore) ActivateDeliveryAuthority(ctx context.Context
 
 func (s *managerDeliveryTestStore) InspectDeliveryRecovery(
 	ctx context.Context,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (runtimedelivery.RecoveryInventory, error) {
 	return s.adapter.InspectRecovery(ctx, s.db, source)
 }
@@ -464,7 +462,7 @@ func managerClaimedDeliveryContext(
 	authority := store.managerTestDeliveryAuthority()
 	if admission, admitted := managedexecution.FromContext(ctx); admitted {
 		var err error
-		authority, err = runtimedelivery.NewExecutionAuthority(authority.BundleSource(), admission)
+		authority, err = runtimedelivery.NewExecutionAuthority(authority.SourceArtifact(), admission)
 		if err != nil {
 			t.Fatalf("construct managed delivery authority: %v", err)
 		}

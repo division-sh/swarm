@@ -337,7 +337,7 @@
           "name": "bundle_hash",
           "required": false,
           "schema": {
-            "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
+            "pattern": "^bundle-v2:sha256:[a-f0-9]{64}$",
             "type": "string"
           }
         },
@@ -412,7 +412,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32009,
           "message": "Application error: BUNDLE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -601,7 +601,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -639,7 +639,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32038,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -677,7 +677,7 @@
           }
         },
         {
-          "code": -32043,
+          "code": -32039,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -732,7 +732,7 @@
           }
         },
         {
-          "code": -32044,
+          "code": -32040,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -792,7 +792,7 @@
           }
         },
         {
-          "code": -32041,
+          "code": -32037,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -846,7 +846,7 @@
           }
         },
         {
-          "code": -32056,
+          "code": -32052,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -904,7 +904,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1038,7 +1038,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1270,7 +1270,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1308,7 +1308,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32057,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1411,7 +1411,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1776,597 +1776,6 @@
       ]
     },
     {
-      "name": "bundle.agents",
-      "description": "Return one definition-only agent catalog page projected from the persisted bundle row identified by bundle_hash. Canonical order and opaque continuation use the loader-owned agent_name_owner. The exact marshalled result, including next_cursor, is at most 768 KiB. This method must not read runtime agents, sessions, queues, diagnoses, active tasks, or status fields, and does not close strict duplicate-slug runtime identity work.\n",
-      "params": [
-        {
-          "name": "bundle_hash",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/BundleHash"
-          }
-        },
-        {
-          "name": "limit",
-          "required": false,
-          "schema": {
-            "default": 50,
-            "maximum": 500,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "cursor",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/Cursor"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BundleAgentsResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32012,
-          "message": "Application error: BUNDLE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  }
-                },
-                "required": [
-                  "bundle_hash"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32007,
-          "message": "Application error: BUNDLE_AGENT_DEFINITION_TOO_LARGE",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_AGENT_DEFINITION_TOO_LARGE",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "agent_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  },
-                  "agent_name_owner": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  },
-                  "encoded_row_bytes": {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "result_byte_ceiling": {
-                    "const": 786432,
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "bundle_hash",
-                  "agent_name_owner",
-                  "agent_id",
-                  "encoded_row_bytes",
-                  "result_byte_ceiling"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "bundle.delete",
-      "description": "Destructive bundle delete wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the bundle-delete owner chain for execution. Omitted or false force performs the #1018 non-force path: plan persisted run users, fail closed with BUNDLE_HAS_ACTIVE_RUNS when running or paused persisted users exist, and otherwise consume the #1009 source-first final store transaction to mark eligible persisted runs deleted before deleting the bundle row. force=true performs the #1019 force path: shared destructive-operation mutex, bundle plan, preservation cleanup for active affected runs, managed entity-container selection/stop by run identity, and the same final store transaction after cleanup succeeds. This method MUST NOT implement CLI behavior, runtime.nuke include_bundles, or broad multi-bundle lifecycle cleanup.\n",
-      "params": [
-        {
-          "name": "bundle_hash",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/BundleHash"
-          }
-        },
-        {
-          "name": "force",
-          "required": false,
-          "schema": {
-            "default": false,
-            "type": "boolean"
-          }
-        },
-        {
-          "name": "dry_run",
-          "required": false,
-          "schema": {
-            "default": false,
-            "type": "boolean"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BundleDeleteResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32012,
-          "message": "Application error: BUNDLE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  }
-                },
-                "required": [
-                  "bundle_hash"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32010,
-          "message": "Application error: BUNDLE_HAS_ACTIVE_RUNS",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_HAS_ACTIVE_RUNS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "active_run_ids": {
-                    "items": {
-                      "$ref": "#/components/schemas/OpaqueId"
-                    },
-                    "type": "array"
-                  },
-                  "active_runs": {
-                    "items": {
-                      "additionalProperties": true,
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  }
-                },
-                "required": [
-                  "bundle_hash",
-                  "active_run_ids"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32009,
-          "message": "Application error: BUNDLE_DELETE_IN_PROGRESS",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_DELETE_IN_PROGRESS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "operation_name": {
-                    "const": "bundle.delete",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation_name"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "bundle.get",
-      "description": "Read one persisted bundle catalog row by canonical bundle_hash. The result returns stored config, parsed projection, metadata, and data presence facts only; it does not expose runtime state or server-local filesystem paths.\n",
-      "params": [
-        {
-          "name": "bundle_hash",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/BundleHash"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BundleDetail"
-        }
-      },
-      "errors": [
-        {
-          "code": -32012,
-          "message": "Application error: BUNDLE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  }
-                },
-                "required": [
-                  "bundle_hash"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "bundle.list",
-      "description": "List persisted bundle catalog rows. This is a definition/catalog read over the bundles store owner, not runtime state. Results are ordered by newest ingested_at then bundle_hash and may be cursor-paginated.\n",
-      "params": [
-        {
-          "name": "limit",
-          "required": false,
-          "schema": {
-            "default": 50,
-            "maximum": 500,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "cursor",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/Cursor"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BundleListResult"
-        }
-      }
-    },
-    {
-      "name": "bundle.register",
-      "description": "Register a bundle into the persisted bundle catalog without starting a runtime. The request submits a BundleRegistrationEnvelopeV1 YAML document plus optional BundleRegisterDataBlobV1 entries. The server materializes those files into a temporary contract root, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, stores canonical bundle catalog projection bytes through the shared store UPSERT owner, and returns the canonical bundle_hash. This method never mutates runs and never restores rows whose bundle_source was previously marked deleted.\n",
-      "params": [
-        {
-          "name": "content_yaml",
-          "required": true,
-          "description": "YAML-encoded BundleRegistrationEnvelopeV1. This is an upload envelope, not server-local filesystem authority.",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "data_blob",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/BundleRegisterDataBlobV1"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BundleRegistrationResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32013,
-          "message": "Application error: BUNDLE_REGISTER_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "BUNDLE_REGISTER_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
-                  }
-                },
-                "required": [
-                  "bundle_hash"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
       "name": "channel.confirm",
       "description": "Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.",
       "params": [
@@ -2409,7 +1818,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32016,
           "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2447,7 +1856,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32017,
           "message": "Application error: CHANNEL_OPERATION_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2485,7 +1894,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2523,7 +1932,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2561,7 +1970,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -2599,7 +2008,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2704,7 +2113,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2742,7 +2151,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -2780,7 +2189,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2818,7 +2227,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2856,7 +2265,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -2894,7 +2303,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2967,7 +2376,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -3027,7 +2436,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32016,
           "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3103,7 +2512,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32016,
           "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3141,7 +2550,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3179,7 +2588,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3217,7 +2626,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -3255,7 +2664,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32013,
           "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -3343,7 +2752,7 @@
           "name": "bundle",
           "required": false,
           "schema": {
-            "pattern": "^bundle-v1:sha256:[0-9a-f]{64}$",
+            "pattern": "^bundle-v2:sha256:[0-9a-f]{64}$",
             "type": "string"
           }
         },
@@ -3397,7 +2806,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3435,7 +2844,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -3473,7 +2882,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3511,7 +2920,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3549,7 +2958,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -3587,7 +2996,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32013,
           "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -3646,7 +3055,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3743,7 +3152,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3781,7 +3190,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -3819,7 +3228,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3857,7 +3266,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -3895,7 +3304,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4000,7 +3409,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4038,7 +3447,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -4076,7 +3485,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4114,7 +3523,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4152,7 +3561,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -4190,7 +3599,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4295,7 +3704,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4333,7 +3742,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -4371,7 +3780,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4409,7 +3818,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4447,7 +3856,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32018,
           "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -4485,7 +3894,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4582,7 +3991,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32015,
           "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4620,7 +4029,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32014,
           "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
           "data": {
             "additionalProperties": false,
@@ -4658,7 +4067,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32012,
           "message": "Application error: CHANNEL_BINDING_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4696,7 +4105,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32019,
           "message": "Application error: CHANNEL_REVISION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4734,7 +4143,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4829,7 +4238,7 @@
       },
       "errors": [
         {
-          "code": -32067,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4867,7 +4276,7 @@
           }
         },
         {
-          "code": -32069,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4909,7 +4318,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4947,7 +4356,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5043,7 +4452,7 @@
       },
       "errors": [
         {
-          "code": -32045,
+          "code": -32041,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5081,7 +4490,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5169,7 +4578,7 @@
       },
       "errors": [
         {
-          "code": -32045,
+          "code": -32041,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5207,7 +4616,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5340,7 +4749,7 @@
       },
       "errors": [
         {
-          "code": -32045,
+          "code": -32041,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5407,7 +4816,7 @@
       },
       "errors": [
         {
-          "code": -32067,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5445,7 +4854,7 @@
           }
         },
         {
-          "code": -32069,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5593,7 +5002,7 @@
       },
       "errors": [
         {
-          "code": -32067,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5682,7 +5091,7 @@
       },
       "errors": [
         {
-          "code": -32054,
+          "code": -32050,
           "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
           "data": {
             "additionalProperties": false,
@@ -5746,7 +5155,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32026,
           "message": "Application error: DATA_INVOCATION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5777,7 +5186,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32021,
           "message": "Application error: DATA_CONTRACT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5824,7 +5233,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -5906,7 +5315,7 @@
       },
       "errors": [
         {
-          "code": -32054,
+          "code": -32050,
           "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
           "data": {
             "additionalProperties": false,
@@ -5970,7 +5379,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32026,
           "message": "Application error: DATA_INVOCATION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6001,7 +5410,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32021,
           "message": "Application error: DATA_CONTRACT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6048,7 +5457,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -6123,7 +5532,7 @@
       },
       "errors": [
         {
-          "code": -32030,
+          "code": -32026,
           "message": "Application error: DATA_INVOCATION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6154,7 +5563,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -6279,7 +5688,7 @@
       },
       "errors": [
         {
-          "code": -32054,
+          "code": -32050,
           "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
           "data": {
             "additionalProperties": false,
@@ -6343,7 +5752,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32023,
           "message": "Application error: DATA_DECLARATION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6381,7 +5790,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32031,
           "message": "Application error: DATA_VERSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6412,7 +5821,7 @@
           }
         },
         {
-          "code": -32032,
+          "code": -32028,
           "message": "Application error: DATA_PAYLOAD_PRUNED",
           "data": {
             "additionalProperties": false,
@@ -6450,7 +5859,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32027,
           "message": "Application error: DATA_OPERATION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6481,7 +5890,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32022,
           "message": "Application error: DATA_CURSOR_INVALID",
           "data": {
             "additionalProperties": false,
@@ -6519,7 +5928,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -6616,7 +6025,7 @@
       },
       "errors": [
         {
-          "code": -32036,
+          "code": -32032,
           "message": "Application error: ENTITY_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6749,7 +6158,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6855,7 +6264,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32035,
           "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -6908,7 +6317,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical bundle identity scope. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -6995,7 +6404,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32008,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -7010,9 +6419,6 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
@@ -7039,7 +6445,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32010,
           "message": "Application error: BUNDLE_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -7084,7 +6490,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32011,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -7105,9 +6511,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -7134,7 +6537,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -7152,9 +6555,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -7181,7 +6581,7 @@
           }
         },
         {
-          "code": -32070,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -7216,7 +6616,7 @@
           }
         },
         {
-          "code": -32037,
+          "code": -32033,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -7273,7 +6673,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32036,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -7330,7 +6730,7 @@
           }
         },
         {
-          "code": -32056,
+          "code": -32052,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -7388,7 +6788,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7426,7 +6826,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7464,7 +6864,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32057,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -7506,7 +6906,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7565,7 +6965,7 @@
           }
         },
         {
-          "code": -32054,
+          "code": -32050,
           "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
           "data": {
             "additionalProperties": false,
@@ -7629,7 +7029,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32026,
           "message": "Application error: DATA_INVOCATION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7660,7 +7060,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32021,
           "message": "Application error: DATA_CONTRACT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7707,7 +7107,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32024,
           "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
           "data": {
             "additionalProperties": false,
@@ -7738,7 +7138,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32029,
           "message": "Application error: DATA_PIN_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7769,7 +7169,7 @@
           }
         },
         {
-          "code": -32034,
+          "code": -32030,
           "message": "Application error: DATA_SCHEMA_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -7800,7 +7200,7 @@
           }
         },
         {
-          "code": -32063,
+          "code": -32059,
           "message": "Application error: RUN_DATA_IMMUTABLE",
           "data": {
             "additionalProperties": false,
@@ -7839,7 +7239,7 @@
           }
         },
         {
-          "code": -32064,
+          "code": -32060,
           "message": "Application error: RUN_DATA_REJECTED",
           "data": {
             "additionalProperties": false,
@@ -7883,7 +7283,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32058,
           "message": "Application error: RUN_DATA_HEAD_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7927,7 +7327,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -7998,7 +7398,7 @@
       },
       "errors": [
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8036,7 +7436,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32038,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -8074,7 +7474,7 @@
           }
         },
         {
-          "code": -32043,
+          "code": -32039,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -8129,7 +7529,7 @@
           }
         },
         {
-          "code": -32044,
+          "code": -32040,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -8189,7 +7589,7 @@
           }
         },
         {
-          "code": -32041,
+          "code": -32037,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -8243,7 +7643,7 @@
           }
         },
         {
-          "code": -32056,
+          "code": -32052,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -8301,7 +7701,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8393,7 +7793,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32035,
           "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -8522,7 +7922,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8560,7 +7960,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8672,7 +8072,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8710,7 +8110,7 @@
           }
         },
         {
-          "code": -32053,
+          "code": -32049,
           "message": "Application error: MAILBOX_STALE_CARD",
           "data": {
             "additionalProperties": false,
@@ -8752,7 +8152,7 @@
           }
         },
         {
-          "code": -32051,
+          "code": -32047,
           "message": "Application error: MAILBOX_INVALID_VERDICT",
           "data": {
             "additionalProperties": false,
@@ -8794,7 +8194,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32044,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -8832,7 +8232,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8928,7 +8328,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8966,7 +8366,7 @@
           }
         },
         {
-          "code": -32050,
+          "code": -32046,
           "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
           "data": {
             "additionalProperties": false,
@@ -9004,7 +8404,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9138,7 +8538,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9176,7 +8576,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32044,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -9214,7 +8614,7 @@
           }
         },
         {
-          "code": -32053,
+          "code": -32049,
           "message": "Application error: MAILBOX_STALE_CARD",
           "data": {
             "additionalProperties": false,
@@ -9256,7 +8656,7 @@
           }
         },
         {
-          "code": -32051,
+          "code": -32047,
           "message": "Application error: MAILBOX_INVALID_VERDICT",
           "data": {
             "additionalProperties": false,
@@ -9298,7 +8698,7 @@
           }
         },
         {
-          "code": -32050,
+          "code": -32046,
           "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
           "data": {
             "additionalProperties": false,
@@ -9336,7 +8736,7 @@
           }
         },
         {
-          "code": -32049,
+          "code": -32045,
           "message": "Application error: MAILBOX_CARD_SUPERSEDED",
           "data": {
             "additionalProperties": false,
@@ -9374,7 +8774,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9470,7 +8870,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9508,7 +8908,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32044,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -9546,7 +8946,7 @@
           }
         },
         {
-          "code": -32047,
+          "code": -32043,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -9592,7 +8992,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9673,7 +9073,7 @@
       },
       "errors": [
         {
-          "code": -32052,
+          "code": -32048,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9877,7 +9277,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9915,7 +9315,7 @@
           }
         },
         {
-          "code": -32066,
+          "code": -32062,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -9957,7 +9357,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10038,7 +9438,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10079,7 +9479,7 @@
     },
     {
       "name": "run.fork",
-      "description": "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n",
+      "description": "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. Before mutation, the method resolves the source run's canonical `runs.bundle_hash`, loads the immutable `source_artifacts` row for that hash, and verifies its exact logical blob against the hash. A missing artifact fails closed with BUNDLE_UNAVAILABLE; malformed bytes or a hash mismatch fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-artifact selected_contracts fork may proceed. The runtime projection is reconstructed only from the admitted immutable source artifact and must verify the resulting canonical bundle_hash before execution. Fork-created runs are stamped with that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A and the exact immutable source artifact for that hash. The method persists selected-contract ownership as mode=bundle_hash with the target hash, recovers routes against that same identity, executes against the target BundleContext runtime projection, and stamps fork-created runs with the target canonical bundle_hash. A target hash that is not loaded by this process or lacks its immutable source artifact fails closed with BUNDLE_UNAVAILABLE; malformed or hash-mismatched target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, ambient CLI bundle selection, or ambient filesystem source discovery. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n",
       "params": [
         {
           "name": "source_run_id",
@@ -10143,7 +9543,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32011,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -10164,9 +9564,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -10193,7 +9590,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -10211,9 +9608,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -10240,7 +9634,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10278,7 +9672,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32034,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10316,7 +9710,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10375,7 +9769,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32024,
           "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
           "data": {
             "additionalProperties": false,
@@ -10406,7 +9800,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32029,
           "message": "Application error: DATA_PIN_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10437,7 +9831,7 @@
           }
         },
         {
-          "code": -32034,
+          "code": -32030,
           "message": "Application error: DATA_SCHEMA_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -10468,7 +9862,7 @@
           }
         },
         {
-          "code": -32032,
+          "code": -32028,
           "message": "Application error: DATA_PAYLOAD_PRUNED",
           "data": {
             "additionalProperties": false,
@@ -10506,7 +9900,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32031,
           "message": "Application error: DATA_VERSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10537,7 +9931,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -10599,7 +9993,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10645,7 +10039,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -10740,7 +10134,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10778,7 +10172,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32057,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -10820,7 +10214,7 @@
           }
         },
         {
-          "code": -32060,
+          "code": -32056,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -10858,7 +10252,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10926,7 +10320,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical bundle identity scope. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -10996,7 +10390,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32008,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -11011,9 +10405,6 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
@@ -11040,7 +10431,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32010,
           "message": "Application error: BUNDLE_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -11085,7 +10476,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32011,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -11106,9 +10497,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -11135,7 +10523,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -11153,9 +10541,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -11182,7 +10567,7 @@
           }
         },
         {
-          "code": -32070,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -11217,7 +10602,7 @@
           }
         },
         {
-          "code": -32037,
+          "code": -32033,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -11274,7 +10659,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32036,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -11331,7 +10716,7 @@
           }
         },
         {
-          "code": -32056,
+          "code": -32052,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -11389,7 +10774,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -11448,7 +10833,7 @@
           }
         },
         {
-          "code": -32054,
+          "code": -32050,
           "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
           "data": {
             "additionalProperties": false,
@@ -11512,7 +10897,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32026,
           "message": "Application error: DATA_INVOCATION_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -11543,7 +10928,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32021,
           "message": "Application error: DATA_CONTRACT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -11590,7 +10975,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32024,
           "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
           "data": {
             "additionalProperties": false,
@@ -11621,7 +11006,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32029,
           "message": "Application error: DATA_PIN_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -11652,7 +11037,7 @@
           }
         },
         {
-          "code": -32034,
+          "code": -32030,
           "message": "Application error: DATA_SCHEMA_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -11683,7 +11068,7 @@
           }
         },
         {
-          "code": -32064,
+          "code": -32060,
           "message": "Application error: RUN_DATA_REJECTED",
           "data": {
             "additionalProperties": false,
@@ -11727,7 +11112,7 @@
           }
         },
         {
-          "code": -32062,
+          "code": -32058,
           "message": "Application error: RUN_DATA_HEAD_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -11771,7 +11156,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32025,
           "message": "Application error: DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -11831,7 +11216,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -11869,7 +11254,7 @@
           }
         },
         {
-          "code": -32061,
+          "code": -32057,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -11911,7 +11296,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -12020,7 +11405,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12130,7 +11515,7 @@
       },
       "errors": [
         {
-          "code": -32065,
+          "code": -32061,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12188,7 +11573,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -12272,7 +11657,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -12395,7 +11780,7 @@
     },
     {
       "name": "runtime.nuke",
-      "description": "Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -\u003e quiescence -\u003e cleanup -\u003e managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_bundles` defaults true and is the only runtime.nuke control for whether server-wide bundle catalog state is deleted with the cleanup owner; false preserves bundle catalog rows. In DB-loaded RuntimeContextManager mode, successful or partial apply-mode runtime.nuke requests with `include_bundles=true` also mark loaded BundleContext entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_bundles=false` must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.\n",
+      "description": "Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -\u003e quiescence -\u003e cleanup -\u003e managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner; false preserves source artifact rows. In DB-loaded RuntimeContextManager mode, successful or partial apply-mode runtime.nuke requests with `include_source_artifacts=true` also mark loaded BundleContext entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_source_artifacts=false` must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.\n",
       "params": [
         {
           "name": "dry_run",
@@ -12406,7 +11791,7 @@
           }
         },
         {
-          "name": "include_bundles",
+          "name": "include_source_artifacts",
           "required": false,
           "schema": {
             "default": true,
@@ -12430,7 +11815,7 @@
       },
       "errors": [
         {
-          "code": -32059,
+          "code": -32055,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -12468,7 +11853,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -12549,7 +11934,7 @@
       },
       "errors": [
         {
-          "code": -32057,
+          "code": -32053,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -12580,7 +11965,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -12661,7 +12046,7 @@
       },
       "errors": [
         {
-          "code": -32058,
+          "code": -32054,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -12692,7 +12077,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -12759,7 +12144,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v2:sha256:\u003c64 lowercase hex\u003e.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -12868,7 +12253,7 @@
       },
       "errors": [
         {
-          "code": -32068,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12906,7 +12291,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -13001,7 +12386,7 @@
       },
       "errors": [
         {
-          "code": -32068,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13039,7 +12424,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -13134,7 +12519,7 @@
       },
       "errors": [
         {
-          "code": -32068,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -13172,7 +12557,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -13327,7 +12712,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32008,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -13342,9 +12727,6 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
@@ -13371,7 +12753,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32011,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -13392,9 +12774,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -13421,7 +12800,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -13439,9 +12818,6 @@
                   "bundle_hash": {
                     "$ref": "#/components/schemas/BundleHash"
                   },
-                  "bundle_source": {
-                    "type": "string"
-                  },
                   "cause": {
                     "type": "string"
                   },
@@ -13468,7 +12844,7 @@
           }
         },
         {
-          "code": -32070,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -13503,7 +12879,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32042,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -14159,11 +13535,8 @@
                 "type": "string"
               },
               "bundle_hash": {
-                "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
+                "pattern": "^bundle-v2:sha256:[a-f0-9]{64}$",
                 "type": "string"
-              },
-              "bundle_source": {
-                "$ref": "#/components/schemas/AgentFramePresenceString"
               },
               "criteria": {
                 "additionalProperties": false,
@@ -14243,7 +13616,6 @@
             },
             "required": [
               "bundle_hash",
-              "bundle_source",
               "agent_id",
               "authored_flow",
               "agent_identity",
@@ -15222,269 +14594,9 @@
         ],
         "type": "object"
       },
-      "BundleAgentDefinition": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "agent_name_owner": {
-            "description": "Canonical loader-owned scoped declaration URI; the stable identity and pagination coordinate.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "flow_instance": {
-            "description": "Persisted flow instance/catalog path when the definition is nested under a flow.",
-            "type": "string"
-          },
-          "intent_content": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "intent_content_hash": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "intent_identity": {
-            "pattern": "^agent-intent:v1:sha256:[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "intent_kind": {
-            "enum": [
-              "local",
-              "inline"
-            ],
-            "type": "string"
-          },
-          "intent_provenance": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "intent_source": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "llm_backend": {
-            "type": "string"
-          },
-          "memory": {
-            "type": "boolean"
-          },
-          "memory_source": {
-            "enum": [
-              "authored",
-              "platform_default"
-            ],
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "subscriptions": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "tools": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "agent_id",
-          "agent_name_owner",
-          "memory",
-          "memory_source",
-          "intent_kind",
-          "intent_source",
-          "intent_provenance",
-          "intent_content_hash",
-          "intent_identity",
-          "intent_content"
-        ],
-        "type": "object"
-      },
-      "BundleAgentsResult": {
-        "additionalProperties": false,
-        "properties": {
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/BundleAgentDefinition"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "$ref": "#/components/schemas/Cursor"
-          }
-        },
-        "required": [
-          "agents"
-        ],
-        "type": "object"
-      },
-      "BundleDeleteResult": {
-        "additionalProperties": false,
-        "properties": {
-          "active_runs_stopped": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "cleanup": {
-            "additionalProperties": true,
-            "description": "Exact result from the preservation cleanup owner.",
-            "type": "object"
-          },
-          "containers": {
-            "additionalProperties": true,
-            "description": "Exact result from the managed container identity filter/stop owner.",
-            "type": "object"
-          },
-          "containers_stopped": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "deleted": {
-            "type": "boolean"
-          },
-          "deliveries_cancelled": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "dry_run": {
-            "type": "boolean"
-          },
-          "errors": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "message": {
-                  "type": "string"
-                },
-                "scope": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "scope",
-                "message"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "final_mutation": {
-            "additionalProperties": true,
-            "description": "Exact result from the",
-            "type": "object"
-          },
-          "force": {
-            "type": "boolean"
-          },
-          "ok": {
-            "description": "True for dry-run or fully completed apply; false when the operation completed with explicit partial failures.",
-            "type": "boolean"
-          },
-          "operation_name": {
-            "const": "bundle.delete",
-            "type": "string"
-          },
-          "partial_failure": {
-            "type": "boolean"
-          },
-          "plan": {
-            "additionalProperties": true,
-            "description": "Exact result from the bundle-delete plan owner.",
-            "type": "object"
-          },
-          "status": {
-            "enum": [
-              "dry_run",
-              "completed",
-              "partial_failure"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "ok",
-          "status",
-          "operation_name",
-          "bundle_hash",
-          "force",
-          "deleted",
-          "dry_run",
-          "active_runs_stopped",
-          "deliveries_cancelled",
-          "containers_stopped",
-          "partial_failure",
-          "plan",
-          "cleanup",
-          "containers",
-          "final_mutation"
-        ],
-        "type": "object"
-      },
-      "BundleDetail": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_count": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "content_yaml": {
-            "description": "Persisted bundle config bytes for this catalog row.",
-            "type": "string"
-          },
-          "data_size_bytes": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "has_data": {
-            "type": "boolean"
-          },
-          "ingested_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "parsed_json": {
-            "additionalProperties": true,
-            "description": "Persisted parsed projection for the bundle row.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "bundle_hash",
-          "content_yaml",
-          "parsed_json",
-          "metadata",
-          "agent_count",
-          "has_data",
-          "data_size_bytes",
-          "ingested_at"
-        ],
-        "type": "object"
-      },
       "BundleHash": {
         "description": "Canonical v1 bundle identity used by every public, runtime, and persisted bundle-identity surface.",
-        "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
+        "pattern": "^bundle-v2:sha256:[a-f0-9]{64}$",
         "type": "string"
       },
       "BundleIdentity": {
@@ -15505,170 +14617,6 @@
           "bundle_hash",
           "workflow_name",
           "workflow_version"
-        ],
-        "type": "object"
-      },
-      "BundleListResult": {
-        "additionalProperties": false,
-        "properties": {
-          "bundles": {
-            "items": {
-              "$ref": "#/components/schemas/BundleSummary"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "$ref": "#/components/schemas/Cursor"
-          }
-        },
-        "required": [
-          "bundles"
-        ],
-        "type": "object"
-      },
-      "BundleRegisterDataBlobV1": {
-        "additionalProperties": false,
-        "description": "Optional structured raw data files for bundle.register; the server persists canonical projection bytes.",
-        "properties": {
-          "api_version": {
-            "const": "swarm.bundle.data.v1",
-            "type": "string"
-          },
-          "entries": {
-            "description": "Ordered data entries sorted strictly by normalized path.",
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "data_base64": {
-                  "contentEncoding": "base64",
-                  "type": "string"
-                },
-                "path": {
-                  "description": "Strictly sorted slash-separated path under a discovered flow data directory, such as flows/\u003cflow\u003e/data/..., packages/\u003cpackage\u003e/flows/\u003cflow\u003e/data/..., or a nested flow package path, with the same normalization and collision rules as BundleRegistrationFile.path.",
-                  "minLength": 1,
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "data_base64"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "api_version",
-          "entries"
-        ],
-        "type": "object"
-      },
-      "BundleRegistrationEnvelopeV1": {
-        "additionalProperties": false,
-        "properties": {
-          "api_version": {
-            "const": "swarm.bundle.register.v1",
-            "description": "Envelope version for non-destructive bundle.register materialization.",
-            "type": "string"
-          },
-          "files": {
-            "description": "Text contract files to materialize under the temporary bundle root. package.yaml is required.",
-            "items": {
-              "$ref": "#/components/schemas/BundleRegistrationFile"
-            },
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "api_version",
-          "files"
-        ],
-        "type": "object"
-      },
-      "BundleRegistrationFile": {
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "description": "Slash-separated path relative to the bundle root. Empty, dot, dot-dot, absolute, backslash, NUL, non-NFC, duplicate, and ASCII case-colliding paths are invalid.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "text": {
-            "description": "UTF-8 text content for YAML, agent intent, policy, and other non-data bundle files.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "text"
-        ],
-        "type": "object"
-      },
-      "BundleRegistrationResult": {
-        "additionalProperties": false,
-        "properties": {
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "data_size_bytes": {
-            "description": "Size of persisted data_blob bytes, or 0 when has_data is false.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "has_data": {
-            "description": "True when the persisted bundle row carries an auxiliary data_blob.",
-            "type": "boolean"
-          },
-          "registered": {
-            "description": "True only when this call inserted a new bundle catalog row; false for duplicate same-content registration.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "bundle_hash",
-          "registered",
-          "has_data",
-          "data_size_bytes"
-        ],
-        "type": "object"
-      },
-      "BundleSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_count": {
-            "description": "Number of definition-only agents projected from the persisted bundle row.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "data_size_bytes": {
-            "description": "Size of data_blob in bytes, or 0 when has_data is false.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "has_data": {
-            "description": "True when the persisted bundle row carries an auxiliary data_blob.",
-            "type": "boolean"
-          },
-          "ingested_at": {
-            "$ref": "#/components/schemas/Timestamp"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object"
-          }
-        },
-        "required": [
-          "bundle_hash",
-          "agent_count",
-          "has_data",
-          "data_size_bytes",
-          "metadata",
-          "ingested_at"
         ],
         "type": "object"
       },
@@ -15862,13 +14810,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "flow_path": {
+            "minLength": 1,
+            "type": "string"
+          },
           "generation": {
             "minimum": 1,
             "type": "integer"
-          },
-          "package_key": {
-            "minLength": 1,
-            "type": "string"
           },
           "provider": {
             "minLength": 1,
@@ -15892,7 +14840,7 @@
         "required": [
           "selector",
           "service_id",
-          "package_key",
+          "flow_path",
           "flow_id",
           "alias",
           "provider",
@@ -16063,18 +15011,11 @@
         "additionalProperties": false,
         "properties": {
           "bundle_hash": {
-            "pattern": "^bundle-v1:sha256:[0-9a-f]{64}$",
+            "pattern": "^bundle-v2:sha256:[0-9a-f]{64}$",
             "type": "string"
           },
           "bundle_identity": {
             "minLength": 1,
-            "type": "string"
-          },
-          "bundle_source": {
-            "enum": [
-              "persisted",
-              "ephemeral"
-            ],
             "type": "string"
           },
           "context_publication_generation": {
@@ -16099,7 +15040,6 @@
         },
         "required": [
           "bundle_hash",
-          "bundle_source",
           "bundle_identity",
           "pack_inventory_generation",
           "runtime_instance_id",
@@ -17041,13 +15981,13 @@
             "minLength": 1,
             "type": "string"
           },
-          "package_key": {
+          "flow_path": {
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "package_key",
+          "flow_path",
           "event"
         ],
         "type": "object"
@@ -19831,18 +18771,18 @@
             "minimum": 0,
             "type": "integer"
           },
-          "element_id": {
+          "declaration_path": {
             "type": "string"
           },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
+          "flow_path": {
+            "type": "string"
+          },
           "owed": {
             "minimum": 1,
             "type": "integer"
-          },
-          "package_key": {
-            "type": "string"
           },
           "triggering_delivery_id": {
             "type": "string"
@@ -19850,8 +18790,8 @@
         },
         "required": [
           "triggering_delivery_id",
-          "package_key",
-          "element_id",
+          "flow_path",
+          "declaration_path",
           "cursor",
           "owed",
           "failure"
@@ -21848,43 +20788,22 @@
         ],
         "type": "object"
       },
-      "RuntimeBundleSourceIdentity": {
-        "additionalProperties": false,
-        "description": "Exact effective-source posture for one bundle served by the live runtime process.",
-        "properties": {
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "bundle_source": {
-            "enum": [
-              "persisted",
-              "ephemeral"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "bundle_hash",
-          "bundle_source"
-        ],
-        "type": "object"
-      },
       "RuntimeIdentityResult": {
         "additionalProperties": false,
-        "description": "Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity: clients compare runtime_instance_id against local context descriptors after authenticating to the operator API. bundle_sources reports the exact bundle-keyed effective-source posture admitted by this live runtime. It is not a persisted bundle catalog, PID, port, URL, or unauthenticated process probe.\n",
+        "description": "Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity: clients compare runtime_instance_id against local context descriptors after authenticating to the operator API. source_artifacts reports the exact immutable source artifacts admitted by this live runtime. It is not a persisted bundle catalog, PID, port, URL, or unauthenticated process probe.\n",
         "properties": {
           "api_version": {
             "const": "v1",
             "type": "string"
           },
-          "bundle_sources": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeBundleSourceIdentity"
-            },
-            "type": "array"
-          },
           "runtime_instance_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeSourceArtifactIdentity"
+            },
+            "type": "array"
           },
           "started_at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -21905,7 +20824,7 @@
           "started_at",
           "api_version",
           "supported_transports",
-          "bundle_sources"
+          "source_artifacts"
         ],
         "type": "object"
       },
@@ -21944,8 +20863,8 @@
             },
             "type": "array"
           },
-          "include_bundles": {
-            "description": "Echoes whether this runtime.nuke request includes server-wide bundle catalog deletion; defaults true.",
+          "include_source_artifacts": {
+            "description": "Echoes whether this runtime.nuke request includes server-wide admitted source artifact deletion; defaults true.",
             "type": "boolean"
           },
           "ok": {
@@ -21981,13 +20900,26 @@
           "ok",
           "status",
           "dry_run",
-          "include_bundles",
+          "include_source_artifacts",
           "operation_name",
           "plan",
           "quiescence",
           "cleanup",
           "containers",
           "partial_failure"
+        ],
+        "type": "object"
+      },
+      "RuntimeSourceArtifactIdentity": {
+        "additionalProperties": false,
+        "description": "Exact immutable source artifact served by the live runtime process.",
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
+        "required": [
+          "bundle_hash"
         ],
         "type": "object"
       },
@@ -22885,65 +21817,8 @@
           "type": "object"
         }
       },
-      "BUNDLE_AGENT_DEFINITION_TOO_LARGE": {
-        "code": -32007,
-        "message": "Application error: BUNDLE_AGENT_DEFINITION_TOO_LARGE",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "BUNDLE_AGENT_DEFINITION_TOO_LARGE",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "properties": {
-                "agent_id": {
-                  "$ref": "#/components/schemas/OpaqueId"
-                },
-                "agent_name_owner": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "bundle_hash": {
-                  "$ref": "#/components/schemas/BundleHash"
-                },
-                "encoded_row_bytes": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "result_byte_ceiling": {
-                  "const": 786432,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "bundle_hash",
-                "agent_name_owner",
-                "agent_id",
-                "encoded_row_bytes",
-                "result_byte_ceiling"
-              ],
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
       "BUNDLE_DATA_INTEGRITY_ERROR": {
-        "code": -32008,
+        "code": -32007,
         "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
         "data": {
           "additionalProperties": false,
@@ -22960,9 +21835,6 @@
               "properties": {
                 "bundle_hash": {
                   "$ref": "#/components/schemas/BundleHash"
-                },
-                "bundle_source": {
-                  "type": "string"
                 },
                 "cause": {
                   "type": "string"
@@ -22989,99 +21861,8 @@
           "type": "object"
         }
       },
-      "BUNDLE_DELETE_IN_PROGRESS": {
-        "code": -32009,
-        "message": "Application error: BUNDLE_DELETE_IN_PROGRESS",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "BUNDLE_DELETE_IN_PROGRESS",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "properties": {
-                "operation_name": {
-                  "const": "bundle.delete",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "operation_name"
-              ],
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
-      "BUNDLE_HAS_ACTIVE_RUNS": {
-        "code": -32010,
-        "message": "Application error: BUNDLE_HAS_ACTIVE_RUNS",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "BUNDLE_HAS_ACTIVE_RUNS",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "properties": {
-                "active_run_ids": {
-                  "items": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  },
-                  "type": "array"
-                },
-                "active_runs": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "bundle_hash": {
-                  "$ref": "#/components/schemas/BundleHash"
-                }
-              },
-              "required": [
-                "bundle_hash",
-                "active_run_ids"
-              ],
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
       "BUNDLE_MISMATCH": {
-        "code": -32011,
+        "code": -32008,
         "message": "Application error: BUNDLE_MISMATCH",
         "data": {
           "additionalProperties": false,
@@ -23096,9 +21877,6 @@
             "details": {
               "additionalProperties": false,
               "properties": {
-                "bundle_source": {
-                  "type": "string"
-                },
                 "requested_hash": {
                   "$ref": "#/components/schemas/BundleHash"
                 },
@@ -23125,7 +21903,7 @@
         }
       },
       "BUNDLE_NOT_FOUND": {
-        "code": -32012,
+        "code": -32009,
         "message": "Application error: BUNDLE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23162,46 +21940,8 @@
           "type": "object"
         }
       },
-      "BUNDLE_REGISTER_CONFLICT": {
-        "code": -32013,
-        "message": "Application error: BUNDLE_REGISTER_CONFLICT",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "BUNDLE_REGISTER_CONFLICT",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "properties": {
-                "bundle_hash": {
-                  "$ref": "#/components/schemas/BundleHash"
-                }
-              },
-              "required": [
-                "bundle_hash"
-              ],
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
       "BUNDLE_SCOPE_REQUIRED": {
-        "code": -32014,
+        "code": -32010,
         "message": "Application error: BUNDLE_SCOPE_REQUIRED",
         "data": {
           "additionalProperties": false,
@@ -23246,7 +21986,7 @@
         }
       },
       "BUNDLE_UNAVAILABLE": {
-        "code": -32015,
+        "code": -32011,
         "message": "Application error: BUNDLE_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -23266,9 +22006,6 @@
                 },
                 "bundle_hash": {
                   "$ref": "#/components/schemas/BundleHash"
-                },
-                "bundle_source": {
-                  "type": "string"
                 },
                 "cause": {
                   "type": "string"
@@ -23296,7 +22033,7 @@
         }
       },
       "CHANNEL_BINDING_CONFLICT": {
-        "code": -32016,
+        "code": -32012,
         "message": "Application error: CHANNEL_BINDING_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -23334,7 +22071,7 @@
         }
       },
       "CHANNEL_CREDENTIAL_REQUIRED": {
-        "code": -32017,
+        "code": -32013,
         "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
         "data": {
           "additionalProperties": false,
@@ -23393,7 +22130,7 @@
         }
       },
       "CHANNEL_INTERFACE_AMBIGUOUS": {
-        "code": -32018,
+        "code": -32014,
         "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
         "data": {
           "additionalProperties": false,
@@ -23431,7 +22168,7 @@
         }
       },
       "CHANNEL_INTERFACE_NOT_FOUND": {
-        "code": -32019,
+        "code": -32015,
         "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23469,7 +22206,7 @@
         }
       },
       "CHANNEL_OPERATION_NOT_FOUND": {
-        "code": -32020,
+        "code": -32016,
         "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23507,7 +22244,7 @@
         }
       },
       "CHANNEL_OPERATION_TERMINAL": {
-        "code": -32021,
+        "code": -32017,
         "message": "Application error: CHANNEL_OPERATION_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -23545,7 +22282,7 @@
         }
       },
       "CHANNEL_PROOF_UNAVAILABLE": {
-        "code": -32022,
+        "code": -32018,
         "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -23583,7 +22320,7 @@
         }
       },
       "CHANNEL_REVISION_CONFLICT": {
-        "code": -32023,
+        "code": -32019,
         "message": "Application error: CHANNEL_REVISION_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -23621,7 +22358,7 @@
         }
       },
       "DATA_ACCESS_DENIED": {
-        "code": -32024,
+        "code": -32020,
         "message": "Application error: DATA_ACCESS_DENIED",
         "data": {
           "additionalProperties": false,
@@ -23652,7 +22389,7 @@
         }
       },
       "DATA_CONTRACT_NOT_FOUND": {
-        "code": -32025,
+        "code": -32021,
         "message": "Application error: DATA_CONTRACT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23699,7 +22436,7 @@
         }
       },
       "DATA_CURSOR_INVALID": {
-        "code": -32026,
+        "code": -32022,
         "message": "Application error: DATA_CURSOR_INVALID",
         "data": {
           "additionalProperties": false,
@@ -23737,7 +22474,7 @@
         }
       },
       "DATA_DECLARATION_NOT_FOUND": {
-        "code": -32027,
+        "code": -32023,
         "message": "Application error: DATA_DECLARATION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23775,7 +22512,7 @@
         }
       },
       "DATA_DEPENDENCY_INCOMPLETE": {
-        "code": -32028,
+        "code": -32024,
         "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
         "data": {
           "additionalProperties": false,
@@ -23806,7 +22543,7 @@
         }
       },
       "DATA_INTEGRITY_ERROR": {
-        "code": -32029,
+        "code": -32025,
         "message": "Application error: DATA_INTEGRITY_ERROR",
         "data": {
           "additionalProperties": false,
@@ -23837,7 +22574,7 @@
         }
       },
       "DATA_INVOCATION_CONFLICT": {
-        "code": -32030,
+        "code": -32026,
         "message": "Application error: DATA_INVOCATION_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -23868,7 +22605,7 @@
         }
       },
       "DATA_OPERATION_NOT_FOUND": {
-        "code": -32031,
+        "code": -32027,
         "message": "Application error: DATA_OPERATION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -23899,7 +22636,7 @@
         }
       },
       "DATA_PAYLOAD_PRUNED": {
-        "code": -32032,
+        "code": -32028,
         "message": "Application error: DATA_PAYLOAD_PRUNED",
         "data": {
           "additionalProperties": false,
@@ -23937,7 +22674,7 @@
         }
       },
       "DATA_PIN_CONFLICT": {
-        "code": -32033,
+        "code": -32029,
         "message": "Application error: DATA_PIN_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -23968,7 +22705,7 @@
         }
       },
       "DATA_SCHEMA_MISMATCH": {
-        "code": -32034,
+        "code": -32030,
         "message": "Application error: DATA_SCHEMA_MISMATCH",
         "data": {
           "additionalProperties": false,
@@ -23999,7 +22736,7 @@
         }
       },
       "DATA_VERSION_NOT_FOUND": {
-        "code": -32035,
+        "code": -32031,
         "message": "Application error: DATA_VERSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24030,7 +22767,7 @@
         }
       },
       "ENTITY_NOT_FOUND": {
-        "code": -32036,
+        "code": -32032,
         "message": "Application error: ENTITY_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24068,7 +22805,7 @@
         }
       },
       "EVENT_NOT_DECLARED": {
-        "code": -32037,
+        "code": -32033,
         "message": "Application error: EVENT_NOT_DECLARED",
         "data": {
           "additionalProperties": false,
@@ -24125,7 +22862,7 @@
         }
       },
       "EVENT_NOT_FOUND": {
-        "code": -32038,
+        "code": -32034,
         "message": "Application error: EVENT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24163,7 +22900,7 @@
         }
       },
       "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED": {
-        "code": -32039,
+        "code": -32035,
         "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
         "data": {
           "additionalProperties": false,
@@ -24208,7 +22945,7 @@
         }
       },
       "EVENT_PUBLISH_FAILED": {
-        "code": -32040,
+        "code": -32036,
         "message": "Application error: EVENT_PUBLISH_FAILED",
         "data": {
           "additionalProperties": false,
@@ -24265,7 +23002,7 @@
         }
       },
       "EVENT_REPLAY_NOT_ELIGIBLE": {
-        "code": -32041,
+        "code": -32037,
         "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
         "data": {
           "additionalProperties": false,
@@ -24319,7 +23056,7 @@
         }
       },
       "EVENT_REPLAY_NO_DELIVERY_HISTORY": {
-        "code": -32042,
+        "code": -32038,
         "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
         "data": {
           "additionalProperties": false,
@@ -24357,7 +23094,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL": {
-        "code": -32043,
+        "code": -32039,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
         "data": {
           "additionalProperties": false,
@@ -24412,7 +23149,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE": {
-        "code": -32044,
+        "code": -32040,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -24472,7 +23209,7 @@
         }
       },
       "FORK_NOT_FOUND": {
-        "code": -32045,
+        "code": -32041,
         "message": "Application error: FORK_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24510,7 +23247,7 @@
         }
       },
       "IDEMPOTENCY_CONFLICT": {
-        "code": -32046,
+        "code": -32042,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -24569,7 +23306,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32047,
+        "code": -32043,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -24615,7 +23352,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32048,
+        "code": -32044,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -24653,7 +23390,7 @@
         }
       },
       "MAILBOX_CARD_SUPERSEDED": {
-        "code": -32049,
+        "code": -32045,
         "message": "Application error: MAILBOX_CARD_SUPERSEDED",
         "data": {
           "additionalProperties": false,
@@ -24691,7 +23428,7 @@
         }
       },
       "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY": {
-        "code": -32050,
+        "code": -32046,
         "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
         "data": {
           "additionalProperties": false,
@@ -24729,7 +23466,7 @@
         }
       },
       "MAILBOX_INVALID_VERDICT": {
-        "code": -32051,
+        "code": -32047,
         "message": "Application error: MAILBOX_INVALID_VERDICT",
         "data": {
           "additionalProperties": false,
@@ -24771,7 +23508,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32052,
+        "code": -32048,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24809,7 +23546,7 @@
         }
       },
       "MAILBOX_STALE_CARD": {
-        "code": -32053,
+        "code": -32049,
         "message": "Application error: MAILBOX_STALE_CARD",
         "data": {
           "additionalProperties": false,
@@ -24851,7 +23588,7 @@
         }
       },
       "MESSAGE_BUDGET_EXCEEDED": {
-        "code": -32054,
+        "code": -32050,
         "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
         "data": {
           "additionalProperties": false,
@@ -24915,7 +23652,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32055,
+        "code": -32051,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -24953,7 +23690,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32056,
+        "code": -32052,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -25011,7 +23748,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32057,
+        "code": -32053,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -25042,7 +23779,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32058,
+        "code": -32054,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -25073,7 +23810,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32059,
+        "code": -32055,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -25111,7 +23848,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32060,
+        "code": -32056,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -25149,7 +23886,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32061,
+        "code": -32057,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -25191,7 +23928,7 @@
         }
       },
       "RUN_DATA_HEAD_CONFLICT": {
-        "code": -32062,
+        "code": -32058,
         "message": "Application error: RUN_DATA_HEAD_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -25235,7 +23972,7 @@
         }
       },
       "RUN_DATA_IMMUTABLE": {
-        "code": -32063,
+        "code": -32059,
         "message": "Application error: RUN_DATA_IMMUTABLE",
         "data": {
           "additionalProperties": false,
@@ -25274,7 +24011,7 @@
         }
       },
       "RUN_DATA_REJECTED": {
-        "code": -32064,
+        "code": -32060,
         "message": "Application error: RUN_DATA_REJECTED",
         "data": {
           "additionalProperties": false,
@@ -25318,7 +24055,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32065,
+        "code": -32061,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -25356,7 +24093,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32066,
+        "code": -32062,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -25398,7 +24135,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32067,
+        "code": -32063,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -25436,7 +24173,7 @@
         }
       },
       "STANDING_SERVICE_NOT_FOUND": {
-        "code": -32068,
+        "code": -32064,
         "message": "Application error: STANDING_SERVICE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -25474,7 +24211,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32069,
+        "code": -32065,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -25516,7 +24253,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32070,
+        "code": -32066,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -25551,7 +24288,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32071,
+        "code": -32067,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,

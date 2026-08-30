@@ -25,7 +25,7 @@ var retiredDynamicAgentToolTestNames = []string{"agent_hire", "agent_fire", "age
 
 func TestValidateRetiredDynamicAgentToolReferencesRejectsEveryAuthoredSurface(t *testing.T) {
 	for _, name := range retiredDynamicAgentToolTestNames {
-		for _, scope := range []string{"root", "project", "flow"} {
+		for _, scope := range []string{"root", "flow"} {
 			t.Run(name+"/"+scope+"/agent_tools", func(t *testing.T) {
 				assertRetiredDynamicAgentToolRejected(t, name, retiredToolSourceForScope(scope,
 					map[string]runtimecontracts.AgentRegistryEntry{"worker": {ID: "worker", Tools: []string{name}}},
@@ -55,7 +55,7 @@ func TestValidateRetiredDynamicAgentToolReferencesRejectsEveryAuthoredSurface(t 
 
 func TestValidateRetiredDynamicAgentToolReferencesRejectsEveryToolHandlerDisposition(t *testing.T) {
 	for _, name := range retiredDynamicAgentToolTestNames {
-		for _, scope := range []string{"root", "project", "flow"} {
+		for _, scope := range []string{"root", "flow"} {
 			for _, test := range []struct {
 				name  string
 				entry runtimecontracts.ToolSchemaEntry
@@ -90,7 +90,6 @@ type retiredDynamicAgentToolSource struct {
 	semanticview.Source
 	rootTools  map[string]runtimecontracts.ToolSchemaEntry
 	rootPolicy runtimecontracts.PolicyDocument
-	projects   []semanticview.ProjectScope
 	flows      []semanticview.FlowScope
 }
 
@@ -102,8 +101,7 @@ func (s retiredDynamicAgentToolSource) ResolvedPolicyForFlow(string) runtimecont
 	return s.rootPolicy
 }
 
-func (s retiredDynamicAgentToolSource) ProjectScopes() []semanticview.ProjectScope { return s.projects }
-func (s retiredDynamicAgentToolSource) FlowScopes() []semanticview.FlowScope       { return s.flows }
+func (s retiredDynamicAgentToolSource) FlowScopes() []semanticview.FlowScope { return s.flows }
 
 func retiredToolSourceForScope(
 	scope string,
@@ -115,7 +113,13 @@ func retiredToolSourceForScope(
 	source := retiredDynamicAgentToolSource{}
 	ownerURI := "test://retired-tool-scope/worker"
 	registerRootAgent := func() {
-		bundle.Paths.ProjectAgentsFile = "/contracts/agents.yaml"
+		root := &runtimecontracts.FlowContractView{
+			Paths:     runtimecontracts.FlowContractPaths{FlowPath: ".", AgentsFile: "agents.yaml"},
+			Agents:    agents,
+			AgentURIs: map[string]string{"worker": ownerURI},
+		}
+		bundle.FlowTree.Root = root
+		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{".": root}
 		bundle.URIRegistry = runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{"worker": {Kind: "agent", LocalID: "worker", Full: ownerURI}},
 			ByURI:  map[string]runtimecontracts.ContractURIRef{ownerURI: {Kind: "agent", LocalID: "worker", Full: ownerURI}},
@@ -125,15 +129,10 @@ func retiredToolSourceForScope(
 	case "root":
 		bundle.Agents = agents
 		registerRootAgent()
-		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents, AgentURIs: map[string]string{"worker": ownerURI}}}
 		source.rootTools, source.rootPolicy = tools, policy
-	case "project":
-		bundle.Agents = agents
-		registerRootAgent()
-		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents, AgentURIs: map[string]string{"worker": ownerURI}, Tools: tools, Policy: policy}}
 	case "flow":
 		flow := &runtimecontracts.FlowContractView{
-			Paths:     runtimecontracts.FlowContractPaths{ID: "flow-fixture", Flow: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml", PackageKey: "."},
+			Paths:     runtimecontracts.FlowContractPaths{FlowPath: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml"},
 			Path:      "flow-fixture",
 			Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 			Agents:    agents,

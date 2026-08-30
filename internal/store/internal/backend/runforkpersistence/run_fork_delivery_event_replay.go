@@ -81,7 +81,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		return result, err
 	}
 	sourceEvents := map[string]events.Event{}
-	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact(lineage.ForkBundleHash)
+	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(lineage.ForkBundleHash)
 	if err != nil {
 		return result, fmt.Errorf("construct fork replay bundle source: %w", err)
 	}

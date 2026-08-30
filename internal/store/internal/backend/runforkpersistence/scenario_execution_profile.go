@@ -15,7 +15,7 @@ func admitRunForkScenarioProfile(
 	tx *sql.Tx,
 	sourceRunID string,
 	target scenarioexecution.EffectiveSourceIdentity,
-	targetBundle runtimecorrelation.BundleSourceFact,
+	targetBundle runtimecorrelation.SourceArtifactFact,
 ) (scenarioexecution.Profile, bool, error) {
 	return admitRunForkScenarioProfileWithLoader(ctx, tx, sourceRunID, target, targetBundle, scenarioexecutionpersistence.LoadPostgresTx)
 }
@@ -25,7 +25,7 @@ func admitSQLiteRunForkScenarioProfile(
 	tx *sql.Tx,
 	sourceRunID string,
 	target scenarioexecution.EffectiveSourceIdentity,
-	targetBundle runtimecorrelation.BundleSourceFact,
+	targetBundle runtimecorrelation.SourceArtifactFact,
 ) (scenarioexecution.Profile, bool, error) {
 	return admitRunForkScenarioProfileWithLoader(ctx, tx, sourceRunID, target, targetBundle, scenarioexecutionpersistence.LoadSQLiteTx)
 }
@@ -37,7 +37,7 @@ func admitRunForkScenarioProfileWithLoader(
 	tx *sql.Tx,
 	sourceRunID string,
 	target scenarioexecution.EffectiveSourceIdentity,
-	targetBundle runtimecorrelation.BundleSourceFact,
+	targetBundle runtimecorrelation.SourceArtifactFact,
 	load runForkScenarioProfileLoader,
 ) (scenarioexecution.Profile, bool, error) {
 	if load == nil {
@@ -53,7 +53,7 @@ func admitRunForkScenarioProfileWithLoader(
 	if err := target.Validate(); err != nil {
 		return scenarioexecution.Profile{}, false, fmt.Errorf("profiled run fork requires exact target effective source identity: %w", err)
 	}
-	if !target.BundleSourceFact().Matches(targetBundle) {
+	if !target.SourceArtifactFact().Matches(targetBundle) {
 		return scenarioexecution.Profile{}, false, fmt.Errorf("profiled run fork target bundle source does not match fork materialization source")
 	}
 	if !profile.EffectiveSourceIdentity().Equal(target) {

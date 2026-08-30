@@ -7,3 +7,7 @@ pins:
     events: [spawn.requested, assign.requested]
   outputs:
     events: [work.assign]
+connect:
+  - event: work.assign
+    from: .
+    to: worker

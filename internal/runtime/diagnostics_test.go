@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -395,59 +398,56 @@ func TestRuntimeLogger_Log_PassesRunScopeToPersistenceOwner(t *testing.T) {
 	}
 }
 
-func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
+func TestRuntimeLogger_Log_StampsSourceArtifactFactOnRunRow(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
-	sourceFact := testPersistedBundleSourceFact(t, "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
-	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash())
+	sourceFact := testPersistedSourceArtifactFact(t, seedRuntimeLogSourceArtifact(t, db))
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "info",
 		Message:   "runtime log",
 		Component: "workflow-runtime",
-		Action:    "bundle_source_fact",
+		Action:    "source_artifact_fact",
 	}); err != nil {
 		t.Fatalf("logger.Log: %v", err)
 	}
-	var gotHash, gotSource string
+	var gotHash string
 	if err := db.QueryRow(`
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource); err != nil {
-		t.Fatalf("load run bundle source: %v", err)
+	`, runID).Scan(&gotHash); err != nil {
+		t.Fatalf("load run source artifact: %v", err)
 	}
-	wantHash, wantSource := sourceFact.StorageValues()
-	if gotHash != wantHash || gotSource != wantSource {
-		t.Fatalf("run bundle source = hash:%q source:%q, want %#v", gotHash, gotSource, sourceFact)
+	if gotHash != sourceFact.BundleHash() {
+		t.Fatalf("run source artifact hash = %q, want %q", gotHash, sourceFact.BundleHash())
 	}
 }
 
-func TestRuntimeLogger_LogRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
+func TestRuntimeLogger_LogRejectsDeletedPersistedSourceArtifactFact(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
-	sourceFact := testPersistedBundleSourceFact(t, "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
-	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash())
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
-		t.Fatalf("delete bundle row: %v", err)
+	sourceFact := testPersistedSourceArtifactFact(t, seedRuntimeLogSourceArtifact(t, db))
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DELETE FROM source_artifacts WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
+		t.Fatalf("delete source artifact row: %v", err)
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
 	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "info",
 		Message:   "runtime log",
 		Component: "workflow-runtime",
-		Action:    "bundle_source_deleted",
+		Action:    "source_artifact_missing",
 	})
-	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
-		t.Fatalf("logger.Log error = %v, want ErrPersistedBundleUnavailable", err)
+	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {
+		t.Fatalf("logger.Log error = %v, want ErrSourceArtifactUnavailable", err)
 	}
 	assertRunRowExists(t, db, runID, false)
 	if count := countRuntimeLogRowsForRun(t, db, runID); count != 0 {
@@ -687,9 +687,9 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t
 }
 
 func TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
+	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
 	spoofedRunID := uuid.NewString()
@@ -756,9 +756,9 @@ func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.
 }
 
 func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
+	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
@@ -801,9 +801,9 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 }
 
 func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
+	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -833,9 +833,9 @@ func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *te
 }
 
 func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
+	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
@@ -940,14 +940,27 @@ func assertRunRowExists(t *testing.T, db *sql.DB, runID string, want bool) {
 	}
 }
 
-func seedRuntimeLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
+func seedRuntimeLogSourceArtifact(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: test', '{}'::jsonb)
-	`, bundleHash); err != nil {
-		t.Fatalf("seed bundle row: %v", err)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: runtime-log-test\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatalf("admit runtime log source artifact: %v", err)
+	}
+	persisted, err := sourceartifact.PersistedFromArtifact(artifact, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("construct persisted runtime log source artifact: %v", err)
+	}
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
+		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`, persisted.BundleHash, persisted.SourceBlob, persisted.MemberCount, persisted.TotalBytes, persisted.CreatedAt); err != nil {
+		t.Fatalf("persist runtime log source artifact: %v", err)
+	}
+	return artifact.BundleHash()
 }
 
 func countRuntimeLogRowsForRun(t *testing.T, db *sql.DB, runID string) int {
@@ -987,7 +1000,7 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, rawTx any, runID 
 	if _, err := uuid.Parse(runID); err != nil {
 		return err
 	}
-	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return errors.New("runtime log run fixture requires bundle source fact")
 	}

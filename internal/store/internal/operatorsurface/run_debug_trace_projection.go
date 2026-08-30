@@ -317,31 +317,31 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 
 func loadPostgresRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
 	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
-		var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+		var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
 		err := db.QueryRowContext(ctx, `
-			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
-			       COALESCE(element_id::text, ''), display_label
+			SELECT selection_context, disposition, COALESCE(flow_path, ''),
+			       COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
 			FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid
-		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw)
+		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw)
 		if err != nil {
 			return handlerselection.HandlerRuleSelectionFact{}, err
 		}
-		return handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+		return handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
 	})
 }
 
 func loadSQLiteRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
 	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
-		var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+		var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
 		err := db.QueryRowContext(ctx, `
-			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
-			       COALESCE(element_id, ''), display_label
+			SELECT selection_context, disposition, COALESCE(flow_path, ''),
+			       COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
 			FROM event_delivery_handler_rule_selections WHERE delivery_id=?
-		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw)
+		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw)
 		if err != nil {
 			return handlerselection.HandlerRuleSelectionFact{}, err
 		}
-		return handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+		return handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
 	})
 }
 

@@ -116,37 +116,24 @@ func TestDerivePromptEntityWriteEvidence_IncludesScopedDuplicateAgentIDs(t *test
 	repo := repoRoot(t)
 	root := t.TempDir()
 
-	writePromptWriterFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: prompt-entity-writes-duplicate
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: static
-  - id: beta
-    flow: beta
-    mode: static
-`)
 	writePromptWriterFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-entity-writes-duplicate\n")
 
-	for _, flowID := range []string{"alpha", "beta"} {
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), `
+	for _, flowPath := range []string{"alpha", "beta"} {
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "schema.yaml"), "name: "+flowPath+"\n")
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "entities.yaml"), `
 case:
   business_brief:
     type: text
     _unused_reason: scoped duplicate prompt proof
 `)
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), `
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "agents.yaml"), `
 writer:
-  id: writer
   role: writer
   intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
 `)
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "prompts", "writer.md"), "Use save_entity_field for `business_brief` in "+flowID+".\n")
+		writePromptWriterFixtureFile(t, filepath.Join(root, flowPath, "prompts", "writer.md"), "Use save_entity_field for `business_brief` in "+flowPath+".\n")
 	}
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -161,8 +148,8 @@ writer:
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2", len(got))
 	}
-	if got[0].Source.FlowID == got[1].Source.FlowID {
-		t.Fatalf("scoped evidence flow ids = %#v, want distinct flows", []string{got[0].Source.FlowID, got[1].Source.FlowID})
+	if got[0].Source.FlowPath == got[1].Source.FlowPath {
+		t.Fatalf("scoped evidence flow paths = %#v, want distinct flows", []string{got[0].Source.FlowPath, got[1].Source.FlowPath})
 	}
 	if strings.TrimSpace(got[0].AgentID) != "writer" || strings.TrimSpace(got[1].AgentID) != "writer" {
 		t.Fatalf("AgentIDs = %#v, want duplicate logical ids", []string{got[0].AgentID, got[1].AgentID})

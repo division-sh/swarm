@@ -67,7 +67,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			selected, lifecycleStore, db := tc.setup(t)
 			runtime, processCapability := newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
-			_, activations, err := runtime.EnsureStandingTargets(testAuthorActivityContext(context.Background()))
+			runtimeCtx := testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
+			_, activations, err := runtime.EnsureStandingTargets(runtimeCtx)
 			if err != nil {
 				t.Fatalf("materialize authored standing singleton: %v", err)
 			}
@@ -85,7 +86,7 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 				t.Fatalf("standing entity_id %q is not canonical: %v", activation.EntityID, err)
 			}
 
-			runCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), activation.RunID)
+			runCtx := runtimecorrelation.WithRunID(runtimeCtx, activation.RunID)
 			route := runtimeflowidentity.RouteForInstancePath(activation.FlowInstance)
 			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, route, activation.EntityID, "collecting", "active")
 
@@ -108,7 +109,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			}
 			runtime, _ = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
-			_, restored, err := runtime.EnsureStandingTargets(testAuthorActivityContext(context.Background()))
+			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
+			_, restored, err := runtime.EnsureStandingTargets(runtimeCtx)
 			if err != nil {
 				t.Fatalf("restore authored standing singleton: %v", err)
 			}
@@ -185,6 +187,17 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 
 func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) (*runtimepkg.Runtime, runtimestartupownership.ProcessCapability) {
 	t.Helper()
+	bundle, ok := semanticview.Bundle(module.source)
+	if !ok || bundle == nil {
+		t.Fatal("stage lifecycle runtime requires a bundle-backed source")
+	}
+	sourceArtifactFact := conformanceSourceArtifactFact(t, module.source)
+	catalogStore, ok := selected.(storetest.DurableDataCatalogStore)
+	if !ok {
+		t.Fatalf("stage lifecycle store %T does not persist source artifacts", selected)
+	}
+	runtimeCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	storetest.RequireBundleDataCatalog(t, runtimeCtx, catalogStore, bundle)
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 		Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
@@ -193,7 +206,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		Config: cfg,
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: conformanceNoopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: authorActivityTestBundleSourceFact,
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: sourceArtifactFact,
 		}),
 	}
 	switch store := selected.(type) {
@@ -204,20 +217,21 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	default:
 		t.Fatalf("unsupported lifecycle identity store %T", selected)
 	}
-	runtime, err := runtimepkg.NewRuntime(testAuthorActivityContext(context.Background()), base)
+	runtime, err := runtimepkg.NewRuntime(runtimeCtx, base)
 	if err != nil {
 		t.Fatalf("build stage lifecycle runtime: %v", err)
 	}
 	if err := runtime.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("prepare stage lifecycle author activity catalog: %v", err)
 	}
-	processCapability := installConformanceRuntimeStartupGrant(t, testAuthorActivityContext(context.Background()), selected, runtime)
+	processCapability := installConformanceRuntimeStartupGrant(t, runtimeCtx, selected, runtime)
 	return runtime, processCapability
 }
 
 func startStageLifecycleIdentityRuntime(t *testing.T, runtime *runtimepkg.Runtime) {
 	t.Helper()
-	if err := runtime.Start(testAuthorActivityContext(context.Background())); err != nil {
+	ctx := testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
+	if err := runtime.Start(ctx); err != nil {
 		t.Fatalf("start stage lifecycle runtime: %v", err)
 	}
 }
@@ -514,7 +528,7 @@ func findStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInsta
 		return joinruntime.Activation{}, false
 	}
 	key := joinruntime.ActivationKey("awaiting", "awaiting", batchID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformancePackageNode(t, "flows/scout", "scout", "scout-coordinator"), key)
+	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceFlowPathNode(t, "scout", "scout-coordinator"), key)
 	if err != nil || !ok {
 		return joinruntime.Activation{}, false
 	}

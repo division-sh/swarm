@@ -434,7 +434,6 @@ type ChannelOnboardingEffectOutcome struct {
 	OnboardingOperationID        string
 	OnboardingRevision           int64
 	BundleHash                   string
-	BundleSource                 string
 	BundleIdentity               string
 	PackInventoryGeneration      string
 	RuntimeInstanceID            string

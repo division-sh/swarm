@@ -121,18 +121,11 @@ func loadPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities strin
 	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: primary-entity-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-`)
+
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: primary-entity-fixture\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	if strings.TrimSpace(flowEntities) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

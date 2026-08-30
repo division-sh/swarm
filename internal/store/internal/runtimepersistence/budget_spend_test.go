@@ -126,9 +126,12 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
 		WithArgs(runID).
-		WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "bundle_source"}).AddRow("running", authorActivityTestBundleHash, "ephemeral"))
+		WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", authorActivityTestBundleHash))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)")).
+		WithArgs(authorActivityTestBundleHash).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM entity_state").
 		WithArgs(runID, entityID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))

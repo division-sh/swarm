@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
-const testBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const testBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestToolContinuationIsCanonicalAndValidByConstruction(t *testing.T) {
 	parent := "agent-frame:v1:00000000-0000-4000-8000-000000000099"
@@ -60,7 +60,7 @@ func TestToolContinuationDecodeRejectsNonCanonicalEnvelope(t *testing.T) {
 func TestExecutionFrameCapabilityProjectionUsesPlanNotObservedEvidence(t *testing.T) {
 	seed, event, surface := testExecutionFrameInputs(t)
 	frame, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface,
+		BundleHash: testBundleHash, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
@@ -88,7 +88,7 @@ func TestExecutionFrameCapabilityProjectionUsesPlanNotObservedEvidence(t *testin
 		t.Fatalf("Observe: %v", err)
 	}
 	observedFrame, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "persisted", Surface: observed,
+		BundleHash: testBundleHash, Surface: observed,
 	})
 	if err != nil {
 		t.Fatalf("Complete observed: %v", err)
@@ -216,7 +216,7 @@ func TestExecutionFrameRequiresPairedExactProviderModelSelection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			candidate := seed
 			mutate(&candidate)
-			if _, err := Complete(candidate, TurnDraft{Kind: TurnInitial, Event: event}, Completion{BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface}); err == nil {
+			if _, err := Complete(candidate, TurnDraft{Kind: TurnInitial, Event: event}, Completion{BundleHash: testBundleHash, Surface: surface}); err == nil {
 				t.Fatal("execution frame accepted an incomplete or non-exact provider model selection")
 			}
 		})
@@ -297,7 +297,7 @@ func TestExecutionFrameUsesOnlyAdmittedLifecycleFacts(t *testing.T) {
 func TestExecutionFrameContinuationBindsParentAndCanonicalToolResult(t *testing.T) {
 	seed, event, firstSurface := testExecutionFrameInputs(t)
 	first, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "ephemeral", Surface: firstSurface,
+		BundleHash: testBundleHash, Surface: firstSurface,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestExecutionFrameContinuationBindsParentAndCanonicalToolResult(t *testing.
 	continuation, err := Complete(seed, TurnDraft{
 		Kind: TurnToolContinuation, Event: event, ParentFrameID: first.FrameID,
 		InputRole: "tool", InputContent: `[{"result":{"b":2,"a":1},"ok":true}]`,
-	}, Completion{BundleHash: testBundleHash, BundleSource: "ephemeral", Surface: secondSurface})
+	}, Completion{BundleHash: testBundleHash, Surface: secondSurface})
 	if err != nil {
 		t.Fatalf("Complete continuation: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestExecutionFrameRejectsRunAndAuthorityDrift(t *testing.T) {
 	wrongRun := surface.Clone()
 	wrongRun.Authority.RunID = "00000000-0000-4000-8000-000000000099"
 	if _, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "persisted", Surface: wrongRun,
+		BundleHash: testBundleHash, Surface: wrongRun,
 	}); err == nil {
 		t.Fatal("frame accepted capability authority from another run")
 	}
@@ -343,7 +343,7 @@ func TestExecutionFrameRejectsRunAndAuthorityDrift(t *testing.T) {
 	other := seed
 	other.Provider = "other-provider"
 	if _, err := Complete(other, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface,
+		BundleHash: testBundleHash, Surface: surface,
 	}); err == nil {
 		t.Fatal("frame accepted a mismatched provider contract")
 	}
@@ -364,7 +364,7 @@ func TestExecutionFrameRejectsProviderPromptFromAnotherSessionContract(t *testin
 		t.Fatal(err)
 	}
 	if _, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{
-		BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface,
+		BundleHash: testBundleHash, Surface: surface,
 	}); err == nil {
 		t.Fatal("frame accepted provider prompt from another resolved intent")
 	}
@@ -372,7 +372,7 @@ func TestExecutionFrameRejectsProviderPromptFromAnotherSessionContract(t *testin
 
 func completeTestFrame(t testing.TB, seed SessionSeed, draft TurnDraft, surface managedcapabilities.Surface) Frame {
 	t.Helper()
-	frame, err := Complete(seed, draft, Completion{BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface})
+	frame, err := Complete(seed, draft, Completion{BundleHash: testBundleHash, Surface: surface})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}

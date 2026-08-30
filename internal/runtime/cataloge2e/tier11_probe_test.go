@@ -31,7 +31,7 @@ func TestTier11Probe(t *testing.T) {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", fixtureName)
 		t.Run(fixtureName, func(t *testing.T) {
 			var expected catalogExpectedDocument
-			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
+			loadYAML(t, catalogExpectedPath(fixtureRoot), &expected)
 			if expected.Trigger.Boot {
 				bundle, err := loadFixtureBundleMaybe(fixtureRoot)
 				if err != nil {
@@ -68,7 +68,7 @@ func TestTier11Probe(t *testing.T) {
 					t.Logf("owners(%s)=%v", trigger, source.RuntimeEventOwners(trigger))
 					for _, node := range h.rt.Pipeline.WorkflowNodes() {
 						if src, ok := source.ExecutableNodeSource(node.Node); ok {
-							t.Logf("nodeSource(%s)=%#v flowPath=%q", node.Node.Key(), src, source.FlowPath(src.FlowID))
+							t.Logf("nodeSource(%s)=%#v flowPath=%q", node.Node.Key(), src, source.FlowPath(src.FlowPath))
 						}
 					}
 					for _, owner := range source.RuntimeEventOwners(trigger) {
