@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/google/uuid"
 )
 
 // RunBundleAvailabilityReader resolves persisted run identity before a request
@@ -132,19 +133,104 @@ type PreparedRuntimeContextReplacement struct {
 type runtimeSourceSetTransitionEntry struct {
 	bundleHash string
 	entry      *runtimeContextEntry
-	prepared   *PreparedStaticSourceSetGenerationRefresh
+	prepared   *PreparedSourceSetGenerationRefresh
 	fresh      bool
+}
+
+type runtimeSourceSetTransitionAdmission struct {
+	mu               sync.RWMutex
+	id               string
+	revision         string
+	retainedRevision string
+	done             chan struct{}
+	once             sync.Once
+}
+
+func newRuntimeSourceSetTransitionAdmission(revision string) (*runtimeSourceSetTransitionAdmission, error) {
+	revision = strings.TrimSpace(revision)
+	if revision == "" {
+		return nil, errors.New("runtime source-set transition revision is required")
+	}
+	return &runtimeSourceSetTransitionAdmission{id: uuid.NewString(), revision: revision, done: make(chan struct{})}, nil
+}
+
+func (a *runtimeSourceSetTransitionAdmission) TransitionID() string {
+	if a == nil {
+		return ""
+	}
+	return a.id
+}
+
+func (a *runtimeSourceSetTransitionAdmission) SourceSetRevision() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.revision
+}
+
+func (a *runtimeSourceSetTransitionAdmission) retainedSourceSetRevision() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.retainedRevision
+}
+
+func (a *runtimeSourceSetTransitionAdmission) Done() <-chan struct{} {
+	if a == nil {
+		return nil
+	}
+	return a.done
+}
+
+func (a *runtimeSourceSetTransitionAdmission) release() {
+	if a == nil {
+		return
+	}
+	a.once.Do(func() { close(a.done) })
+}
+
+func (a *runtimeSourceSetTransitionAdmission) retargetRollback(expectedRevision, predecessorRevision string) error {
+	if a == nil {
+		return errors.New("runtime source-set rollback requires a pending transition admission")
+	}
+	expectedRevision = strings.TrimSpace(expectedRevision)
+	predecessorRevision = strings.TrimSpace(predecessorRevision)
+	if expectedRevision == "" || predecessorRevision == "" || expectedRevision == predecessorRevision {
+		return errors.New("runtime source-set rollback requires distinct candidate and predecessor revisions")
+	}
+	select {
+	case <-a.done:
+		return errors.New("runtime source-set rollback cannot retarget a completed transition admission")
+	default:
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.revision == predecessorRevision && a.retainedRevision == expectedRevision {
+		return nil
+	}
+	if a.revision != expectedRevision || a.retainedRevision != "" {
+		return fmt.Errorf("pending runtime source-set transition cannot retarget %s to predecessor %s", a.revision, predecessorRevision)
+	}
+	a.revision = predecessorRevision
+	a.retainedRevision = expectedRevision
+	return nil
 }
 
 // PreparedRuntimeSourceSetTransition owns the temporary admission fence for
 // every surviving loaded runtime while process composition changes the global
 // complete source set.
 type PreparedRuntimeSourceSetTransition struct {
-	mu      sync.Mutex
-	manager *RuntimeContextManager
-	entries []runtimeSourceSetTransitionEntry
-	done    bool
-	locked  bool
+	mu               sync.Mutex
+	manager          *RuntimeContextManager
+	entries          []runtimeSourceSetTransitionEntry
+	admission        *runtimeSourceSetTransitionAdmission
+	createdAdmission bool
+	done             bool
+	locked           bool
 }
 
 // PreparedStandingServicePublication owns one fresh, unselectable standing
@@ -441,6 +527,7 @@ type RuntimeContextManager struct {
 	capabilityRevision         uint64
 	nextPublicationGeneration  uint64
 	suppressedStandingServices map[string]struct{}
+	pendingSourceSetTransition *runtimeSourceSetTransitionAdmission
 }
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
@@ -2549,25 +2636,44 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 // selected-store source-set head changes. A prior failed post-commit refresh
 // is adopted so replay can complete it without reopening stale authority.
 func (m *RuntimeContextManager) PrepareSourceSetTransition(
-	_ context.Context,
+	ctx context.Context,
 	plan runtimeagenttopology.SourceSetPlan,
 ) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
-	return m.prepareSourceSetTransition(plan, false)
+	return m.prepareSourceSetTransition(ctx, plan, false, "")
+}
+
+// PrepareSourceSetRollbackTransition keeps an existing candidate fence closed,
+// or creates a fresh fence after candidate publication, while restoring the
+// exact predecessor plan.
+func (m *RuntimeContextManager) PrepareSourceSetRollbackTransition(
+	ctx context.Context,
+	candidate runtimeagenttopology.SourceSetPlan,
+	predecessor runtimeagenttopology.SourceSetPlan,
+) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
+	if err := candidate.Validate(); err != nil {
+		return nil, fmt.Errorf("runtime source-set rollback candidate plan: %w", err)
+	}
+	if candidate.Revision == predecessor.Revision {
+		return nil, errors.New("runtime source-set rollback requires distinct candidate and predecessor plans")
+	}
+	return m.prepareSourceSetTransition(ctx, predecessor, false, candidate.Revision)
 }
 
 // PreparePendingSourceSetTransition adopts only survivors left fenced by an
 // earlier committed source-set mutation. An ordinary duplicate with no
 // pending transition is a no-op and does not rotate loaded generations.
 func (m *RuntimeContextManager) PreparePendingSourceSetTransition(
-	_ context.Context,
+	ctx context.Context,
 	plan runtimeagenttopology.SourceSetPlan,
 ) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
-	return m.prepareSourceSetTransition(plan, true)
+	return m.prepareSourceSetTransition(ctx, plan, true, "")
 }
 
 func (m *RuntimeContextManager) prepareSourceSetTransition(
+	ctx context.Context,
 	plan runtimeagenttopology.SourceSetPlan,
 	pendingOnly bool,
+	rollbackFromRevision string,
 ) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
 	if m == nil {
 		return nil, errors.New("runtime context manager is required")
@@ -2614,6 +2720,9 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 	}
 	if len(transition.entries) == 0 {
 		m.mu.Unlock()
+		if m.pendingSourceSetTransition != nil {
+			return nil, errors.New("runtime source-set transition admission has no fenced survivor contexts")
+		}
 		return nil, nil
 	}
 	visibilityUpdates := make([]runtimeContextVisibilityUpdate, 0, len(transition.entries))
@@ -2633,22 +2742,87 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		}
 	}
 	m.mu.Unlock()
+	admission := m.pendingSourceSetTransition
+	if rollbackFromRevision != "" {
+		if admission == nil {
+			var err error
+			admission, err = newRuntimeSourceSetTransitionAdmission(plan.Revision)
+			if err != nil {
+				return nil, errors.Join(err, transition.abortFresh())
+			}
+			admission.retainedRevision = rollbackFromRevision
+			m.pendingSourceSetTransition = admission
+			transition.createdAdmission = true
+		} else if err := admission.retargetRollback(rollbackFromRevision, plan.Revision); err != nil {
+			return nil, errors.Join(err, transition.abortFresh())
+		}
+	} else if admission != nil {
+		if admission.SourceSetRevision() != plan.Revision {
+			return nil, errors.Join(
+				fmt.Errorf("pending runtime source-set transition targets revision %s, not %s", admission.SourceSetRevision(), plan.Revision),
+				transition.abortFresh(),
+			)
+		}
+	} else {
+		for _, item := range transition.entries {
+			if !item.fresh {
+				return nil, errors.Join(
+					errors.New("fenced runtime source-set survivor is missing its aggregate transition admission"),
+					transition.abortFresh(),
+				)
+			}
+		}
+		var err error
+		admission, err = newRuntimeSourceSetTransitionAdmission(plan.Revision)
+		if err != nil {
+			return nil, errors.Join(err, transition.abortFresh())
+		}
+		m.pendingSourceSetTransition = admission
+		transition.createdAdmission = true
+	}
+	transition.admission = admission
+	resuming := !transition.createdAdmission
 	for i := range transition.entries {
 		item := &transition.entries[i]
-		prepared, err := item.entry.runtime.PrepareStaticSourceSetGenerationRefresh(plan, item.entry.context.Source)
+		prepared, err := item.entry.runtime.PrepareSourceSetGenerationRefresh(
+			ctx, plan, item.entry.context.Source, admission, resuming, admission.retainedSourceSetRevision(),
+		)
 		if err != nil {
 			for j := i - 1; j >= 0; j-- {
 				transition.entries[j].prepared.Abort()
 			}
-			return nil, errors.Join(
-				fmt.Errorf("prepare surviving runtime context %s: %w", item.bundleHash, err),
-				transition.abortFresh(),
-			)
+			prepareErr := fmt.Errorf("prepare surviving runtime context %s: %w", item.bundleHash, err)
+			if transition.createdAdmission {
+				prepareErr = errors.Join(prepareErr, transition.abortFresh())
+				admission.release()
+				m.pendingSourceSetTransition = nil
+			}
+			return nil, prepareErr
 		}
 		item.prepared = prepared
 	}
 	keepLock = true
 	return transition, nil
+}
+
+// RetainForRetry releases local preparation locks while preserving aggregate
+// invisibility and the transition admission after the source-set head commits.
+func (p *PreparedRuntimeSourceSetTransition) RetainForRetry() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return
+	}
+	p.done = true
+	for i := len(p.entries) - 1; i >= 0; i-- {
+		if p.entries[i].prepared != nil {
+			p.entries[i].prepared.RetainForRetry()
+		}
+	}
+	p.release()
 }
 
 func (p *PreparedRuntimeSourceSetTransition) abortFresh() error {
@@ -2696,6 +2870,10 @@ func (p *PreparedRuntimeSourceSetTransition) Abort() error {
 		}
 	}
 	err := p.abortFresh()
+	if p.createdAdmission {
+		p.admission.release()
+		p.manager.pendingSourceSetTransition = nil
+	}
 	p.release()
 	return err
 }
@@ -2718,7 +2896,7 @@ func (p *PreparedRuntimeSourceSetTransition) Commit(
 		p.done = true
 		for i := len(p.entries) - 1; i >= 0; i-- {
 			if p.entries[i].prepared != nil {
-				p.entries[i].prepared.Abort()
+				p.entries[i].prepared.RetainForRetry()
 			}
 		}
 		p.release()
@@ -2730,12 +2908,17 @@ func (p *PreparedRuntimeSourceSetTransition) Commit(
 		item := &p.entries[i]
 		if err := item.prepared.Commit(ctx, capability); err != nil {
 			for j := len(p.entries) - 1; j > i; j-- {
-				p.entries[j].prepared.Abort()
+				p.entries[j].prepared.RetainForRetry()
 			}
 			return fmt.Errorf("refresh surviving runtime context %s: %w", item.bundleHash, err)
 		}
 	}
-	return p.publishCommittedVisibility()
+	if err := p.publishCommittedVisibility(); err != nil {
+		return err
+	}
+	p.admission.release()
+	p.manager.pendingSourceSetTransition = nil
+	return nil
 }
 
 func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error {

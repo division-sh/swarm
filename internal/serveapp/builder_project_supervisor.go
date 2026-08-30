@@ -988,7 +988,10 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSetAndSurvivors(
 	previous runtimeagenttopology.SourceSetPlan,
 	attempt sourceSetReplacementAttempt,
 ) error {
-	transition, err := manager.PrepareSourceSetTransition(ctx, previous)
+	if expected.Revision == previous.Revision {
+		return nil
+	}
+	transition, err := manager.PrepareSourceSetRollbackTransition(ctx, expected, previous)
 	if err != nil {
 		return fmt.Errorf("prepare predecessor source-set survivor restoration: %w", err)
 	}
@@ -1504,20 +1507,19 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndPacks(
 			}
 			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
-		retainAndRestorePredecessor := func(cause error, abortPreparedTransition bool) error {
+		retainAndRestorePredecessor := func(cause error, retainPreparedTransition bool) error {
 			retainErr := s.retainPendingSourceSetRollback(
 				manager, oldContextDef, oldRT, candidatePlan, previousPlan, topologyAttempt, false, freeze,
 			)
-			var abortErr error
-			if abortPreparedTransition && survivorTransition != nil {
+			if retainPreparedTransition && survivorTransition != nil {
 				survivorTransitionSettled = true
-				abortErr = survivorTransition.Abort()
+				survivorTransition.RetainForRetry()
 			}
 			if retainErr != nil {
-				return errors.Join(cause, retainErr, abortErr)
+				return errors.Join(cause, retainErr)
 			}
 			recoveryErr := s.completePendingSourceSetRollback(context.Background())
-			return errors.Join(cause, abortErr, recoveryErr)
+			return errors.Join(cause, recoveryErr)
 		}
 		restorePredecessor := func(cause error) error {
 			return retainAndRestorePredecessor(cause, true)

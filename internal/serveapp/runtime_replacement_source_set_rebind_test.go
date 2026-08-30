@@ -12,12 +12,18 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -42,6 +48,44 @@ type failEarlyTopologyRollbackCapability struct {
 	restoreFailuresRemaining atomic.Int32
 }
 
+type failNthLifecycleCommitCapability struct {
+	runtimestartupownership.ProcessCapability
+	bundleHash string
+	failAt     int32
+	onFailure  func()
+	commits    atomic.Int32
+	failures   atomic.Int32
+}
+
+type failNthLifecycleCommitGrant struct {
+	runtimestartupownership.GenerationGrant
+	owner *failNthLifecycleCommitCapability
+}
+
+func (c *failNthLifecycleCommitCapability) IssueGenerationGrant(
+	ctx context.Context,
+	req runtimestartupownership.GrantRequest,
+) (runtimestartupownership.GenerationGrant, error) {
+	grant, err := c.ProcessCapability.IssueGenerationGrant(ctx, req)
+	if err != nil || req.BundleHash != c.bundleHash {
+		return grant, err
+	}
+	return &failNthLifecycleCommitGrant{GenerationGrant: grant, owner: c}, nil
+}
+
+func (g *failNthLifecycleCommitGrant) CommitAgentLifecycleTransition(
+	ctx context.Context,
+	req runtimemanager.AgentLifecycleTransition,
+) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	if g.owner.commits.Add(1) == g.owner.failAt && g.owner.failures.CompareAndSwap(0, 1) {
+		if g.owner.onFailure != nil {
+			g.owner.onFailure()
+		}
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("injected later survivor lifecycle commit failure")
+	}
+	return g.GenerationGrant.CommitAgentLifecycleTransition(ctx, req)
+}
+
 type failOnceRuntimeReplacementPublication struct {
 	delegate         runtimeReplacementPublication
 	attempts         atomic.Int32
@@ -52,6 +96,55 @@ type failOnceRuntimeReplacementPublication struct {
 type failOnceRuntimeReplacementRollback struct {
 	delegate         runtimeReplacementPublication
 	withdrawAttempts atomic.Int32
+}
+
+func writeMixedSourceSetSurvivorFixture(t *testing.T) string {
+	t.Helper()
+	return canonicalrouting.CopyStaticAndTemplateAgentRoute(t)
+}
+
+func activateMixedSourceSetFlowSurvivor(
+	t *testing.T,
+	backend string,
+	stores *selectedStoreOwner,
+	runtimeInstanceID string,
+	rt *runtimepkg.Runtime,
+	source semanticview.Source,
+) string {
+	t.Helper()
+	runID := uuid.NewString()
+	db := selectedStoreDatabaseForTest(t, stores)
+	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
+	runFixture := storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(),
+		BundleHash: bundleHash, BundleSource: bundleSource,
+	}
+	switch backend {
+	case "sqlite":
+		storetest.RequireSQLiteRun(t, context.Background(), db, runFixture)
+	case "postgres":
+		storetest.RequirePostgresRun(t, context.Background(), db, runFixture)
+	default:
+		t.Fatalf("unsupported mixed source-set test backend %q", backend)
+	}
+	const instancePath = "consumer/vertical-1"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash))
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	request := runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance: runtimeflowidentity.Stored(
+			source, "consumer", instancePath, "vertical-1", runtimepipeline.FlowInstanceEntityID(instancePath), "",
+		),
+		InitialState: "pending",
+		Config:       map[string]any{"vertical_id": "vertical-1"},
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := rt.Manager.ActivateFlowInstance(ctx, request); err != nil {
+		t.Fatalf("activate mixed source-set flow survivor: %v", err)
+	}
+	return instancePath
 }
 
 func (p *failOnceRuntimeReplacementRollback) Publish() error {
@@ -366,9 +459,12 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 
 			predecessor := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-predecessor", "alpha-worker"), runtimeContextTestHash("a"))
-			survivor := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-survivor", "beta-worker"), runtimeContextTestHash("b"))
+			survivor := newRuntime(writeMixedSourceSetSurvivorFixture(t), runtimeContextTestHash("b"))
+			secondSurvivor := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-second-survivor", "tau-worker"), runtimeContextTestHash("6"))
 			candidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-candidate", "gamma-worker"), runtimeContextTestHash("c"))
 			restoredCandidate := newRuntime(candidate.root, candidate.hash)
+			rowFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-row-failure-candidate", "epsilon-worker"), runtimeContextTestHash("e"))
+			rowFailureRestored := newRuntime(candidate.root, candidate.hash)
 			failedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-failed-candidate", "delta-worker"), runtimeContextTestHash("d"))
 			commitFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-commit-failure-candidate", "zeta-worker"), runtimeContextTestHash("f"))
 			commitFailureRestored := newRuntime(candidate.root, candidate.hash)
@@ -386,9 +482,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
 				{BundleHash: survivor.hash, BundleSource: "ephemeral"},
+				{BundleHash: secondSurvivor.hash, BundleSource: "ephemeral"},
 			}
 			var desired []runtimeagenttopology.DesiredAgent
-			for i, fixture := range []runtimeFixture{predecessor, survivor} {
+			for i, fixture := range []runtimeFixture{predecessor, survivor, secondSurvivor} {
 				compiled, err := fixture.rt.Manager.CompileStaticTopologyDesiredAgents(fixture.source, coordinates[i])
 				if err != nil {
 					t.Fatalf("compile initial desired agents for %s: %v", fixture.hash, err)
@@ -410,12 +507,17 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 			installSelectedStoreTestGeneration(t, capability, predecessor.rt, initialPlan, 1)
 			installSelectedStoreTestGeneration(t, capability, survivor.rt, initialPlan, 1)
+			installSelectedStoreTestGeneration(t, capability, secondSurvivor.rt, initialPlan, 1)
 			if err := predecessor.rt.Start(ctx); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}
 			if err := survivor.rt.Start(ctx); err != nil {
 				t.Fatalf("start survivor: %v", err)
 			}
+			if err := secondSurvivor.rt.Start(ctx); err != nil {
+				t.Fatalf("start second survivor: %v", err)
+			}
+			flowSurvivorPath := activateMixedSourceSetFlowSurvivor(t, backend.name, stores, runtimeInstanceID, survivor.rt, survivor.source)
 
 			contexts, err = runtimepkg.NewRuntimeContextManager(nil,
 				completeServeTestPackContext(t, runtimepkg.BundleContext{
@@ -425,6 +527,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				completeServeTestPackContext(t, runtimepkg.BundleContext{
 					BundleSourceFact: survivor.rt.Options.BundleSourceFact, Source: survivor.source,
 					Runtime: survivor.rt, WorkOwner: survivor.rt.WorkOccurrence(),
+				}),
+				completeServeTestPackContext(t, runtimepkg.BundleContext{
+					BundleSourceFact: secondSurvivor.rt.Options.BundleSourceFact, Source: secondSurvivor.source,
+					Runtime: secondSurvivor.rt, WorkOwner: secondSurvivor.rt.WorkOccurrence(),
 				}),
 			)
 			if err != nil {
@@ -473,20 +579,94 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil {
 				t.Fatalf("read persisted replacement topology: %v", err)
 			}
-			var persistedSurvivor bool
+			var persistedStaticSurvivor, persistedFlowSurvivor bool
 			for _, agent := range agents {
-				if agent.Config.ID != "beta-worker" {
-					continue
-				}
-				persistedSurvivor = true
-				if agent.LifecyclePhase != "running" || agent.LifecycleGeneration != 2 ||
-					agent.Topology.Authority.Static == nil || agent.Topology.Authority.Static.SourceSetRevision != currentPlan.Revision {
-					t.Fatalf("persisted survivor lifecycle = %#v, want running generation 2 at source set %s", agent, currentPlan.Revision)
+				switch {
+				case agent.Config.ID == "beta-worker":
+					persistedStaticSurvivor = true
+					if agent.LifecyclePhase != "running" || agent.LifecycleGeneration != 2 ||
+						agent.Topology.Authority.Static == nil || agent.Topology.Authority.Static.SourceSetRevision != currentPlan.Revision {
+						t.Fatalf("persisted static survivor lifecycle = %#v, want running generation 2 at source set %s", agent, currentPlan.Revision)
+					}
+				case agent.Config.Identity.FlowInstance() == flowSurvivorPath:
+					persistedFlowSurvivor = true
+					if agent.LifecyclePhase != "running" || agent.LifecycleGeneration != 2 ||
+						agent.Topology.Authority.Readiness == nil || agent.ProcessBinding.RuntimeGeneration != 2 {
+						t.Fatalf("persisted flow survivor lifecycle = %#v, want preserved readiness at runtime generation 2", agent)
+					}
 				}
 			}
-			if !persistedSurvivor {
-				t.Fatal("persisted survivor lifecycle row was not found")
+			if !persistedStaticSurvivor || !persistedFlowSurvivor {
+				t.Fatalf("persisted mixed survivor rows = static:%v flow:%v, want both", persistedStaticSurvivor, persistedFlowSurvivor)
 			}
+
+			rowFailureCapability := &failNthLifecycleCommitCapability{
+				ProcessCapability: capability, bundleHash: survivor.hash, failAt: 2,
+			}
+			rowFailureCapability.onFailure = func() {
+				if ready.Load() {
+					t.Fatal("supervisor remained ready during partial survivor persistence")
+				}
+				for _, hash := range []string{survivor.hash, secondSurvivor.hash} {
+					lookup := contexts.LookupBundleHashStatus(hash)
+					if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+						t.Fatalf("survivor %s during later-row failure = %#v, want aggregate source-set fence", hash, lookup)
+					}
+				}
+			}
+			supervisor.SetProcessCapability(rowFailureCapability)
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				return rowFailureRestored.rt, rowFailureRestored.rt.WorkOccurrence(), nil
+			}
+			_, rowFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
+				ctx, rowFailureCandidate.root, rowFailureCandidate.source, rowFailureCandidate.bundle, rowFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: rowFailureCandidate.hash}, rowFailureCandidate.rt, rowFailureCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, rowFailureCandidate.bundle),
+			)
+			if rowFailureErr == nil || !strings.Contains(rowFailureErr.Error(), "injected later survivor lifecycle commit failure") {
+				t.Fatalf("later survivor row failure = %v, want injected selected-store failure", rowFailureErr)
+			}
+			if rowFailureCapability.failures.Load() != 1 || rowFailureCapability.commits.Load() < 4 {
+				t.Fatalf("later survivor row attempts = commits:%d failures:%d, want failed second write plus complete rollback", rowFailureCapability.commits.Load(), rowFailureCapability.failures.Load())
+			}
+			if !ready.Load() || supervisor.CurrentRuntime() != rowFailureRestored.rt {
+				t.Fatalf("later-row rollback publication = ready:%v runtime:%p, want restored %p", ready.Load(), supervisor.CurrentRuntime(), rowFailureRestored.rt)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("mixed survivor after later-row rollback = %#v, want loaded only after complete rollback", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(secondSurvivor.hash); !lookup.Loaded() {
+				t.Fatalf("second survivor after later-row rollback = %#v, want loaded only after aggregate rollback", lookup)
+			}
+			rowFailurePlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || rowFailurePlan.Revision != currentPlan.Revision {
+				t.Fatalf("source set after later-row rollback = exists:%v revision:%s want:%s err:%v", exists, rowFailurePlan.Revision, currentPlan.Revision, err)
+			}
+			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || evidence.SourceSetRevision != currentPlan.Revision || evidence.RuntimeGeneration != 4 {
+				t.Fatalf("mixed survivor authority after later-row rollback = %#v err:%v, want generation 4 at %s", evidence, err, currentPlan.Revision)
+			}
+			secondEvidence, err := secondSurvivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || secondEvidence.SourceSetRevision != currentPlan.Revision || secondEvidence.RuntimeGeneration != 4 {
+				t.Fatalf("second survivor authority after later-row rollback = %#v err:%v, want converged generation 4 at %s", secondEvidence, err, currentPlan.Revision)
+			}
+			agents, err = stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
+			if err != nil {
+				t.Fatalf("read mixed topology after later-row rollback: %v", err)
+			}
+			var rowFailureStatic, rowFailureFlow bool
+			for _, agent := range agents {
+				switch {
+				case agent.Config.ID == "beta-worker":
+					rowFailureStatic = agent.Topology.Authority.Static != nil && agent.Topology.Authority.Static.SourceSetRevision == currentPlan.Revision && agent.ProcessBinding.RuntimeGeneration == 4
+				case agent.Config.Identity.FlowInstance() == flowSurvivorPath:
+					rowFailureFlow = agent.Topology.Authority.Readiness != nil && agent.ProcessBinding.RuntimeGeneration == 4
+				}
+			}
+			if !rowFailureStatic || !rowFailureFlow {
+				t.Fatalf("later-row rollback mixed topology = static:%v flow:%v, want exact predecessor convergence", rowFailureStatic, rowFailureFlow)
+			}
+			supervisor.SetProcessCapability(capability)
 
 			var publicationHooks atomic.Int32
 			var rollbackPublication *failOnceRuntimeReplacementRollback
@@ -573,8 +753,12 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil {
 				t.Fatalf("read topology after post-publication rollback: %v", err)
 			}
-			var restoredGamma, restoredBeta bool
+			var restoredGamma, restoredBeta, restoredFlow bool
 			for _, agent := range agents {
+				if agent.Config.Identity.FlowInstance() == flowSurvivorPath {
+					restoredFlow = agent.LifecyclePhase == "running" && agent.Topology.Authority.Readiness != nil && agent.ProcessBinding.RuntimeGeneration == 6
+					continue
+				}
 				switch agent.Config.ID {
 				case "gamma-worker":
 					restoredGamma = agent.LifecyclePhase == "running"
@@ -584,13 +768,14 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 					t.Fatalf("failed candidate topology survived rollback: %#v", agent)
 				}
 			}
-			if !restoredGamma || !restoredBeta {
-				t.Fatalf("restored topology = gamma:%v beta:%v", restoredGamma, restoredBeta)
+			if !restoredGamma || !restoredBeta || !restoredFlow {
+				t.Fatalf("restored topology = gamma:%v beta:%v flow:%v", restoredGamma, restoredBeta, restoredFlow)
 			}
 
 			failingCapability := &failSourceSetGrantCapability{
 				ProcessCapability: capability,
 				revision:          currentPlan.Revision,
+				bundleHash:        survivor.hash,
 			}
 			failingCapability.failuresRemaining.Store(1)
 			supervisor.SetProcessCapability(failingCapability)
@@ -636,6 +821,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			retainedCapability := &failSourceSetGrantCapability{
 				ProcessCapability: capability,
 				revision:          currentPlan.Revision,
+				bundleHash:        survivor.hash,
 			}
 			retainedCapability.failuresRemaining.Store(2)
 			supervisor.SetProcessCapability(retainedCapability)
@@ -1006,8 +1192,8 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil || !exists || earlyPlan.Revision == finalPlan.Revision {
 				t.Fatalf("source set during early topology rollback = exists:%v revision:%s previous:%s err:%v", exists, earlyPlan.Revision, finalPlan.Revision, err)
 			}
-			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
-				t.Fatalf("survivor under retained early candidate head = %#v, want loaded candidate authority", lookup)
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+				t.Fatalf("survivor under retained early candidate head = %#v, want retained source-set fence", lookup)
 			}
 
 			supervisor.SetProcessCapability(capability)

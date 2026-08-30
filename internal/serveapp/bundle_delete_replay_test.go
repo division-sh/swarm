@@ -372,6 +372,271 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	}
 }
 
+func TestBundleDeleteRebindsMixedSurvivorsAndReplaysOnPostgres(t *testing.T) {
+	backends := []struct {
+		name string
+		open func(*testing.T) *selectedStoreOwner
+	}{
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			selected, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			db := storetest.DatabaseForTest(selected)
+			t.Cleanup(func() { _ = db.Close() })
+			return openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+		}},
+	}
+
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			ctx := context.Background()
+			stores := backend.open(t)
+			cfg := &config.Config{}
+			processWorkOwner := newSupervisorTestProcessOwner(t)
+			runtimeInstanceID := uuid.NewString()
+			providerCatalog := testProviderTriggerCatalog(t)
+			var capability runtimestartupownership.ProcessCapability
+			var contexts *runtimepkg.RuntimeContextManager
+			var runtimes []*runtimepkg.Runtime
+			t.Cleanup(func() {
+				shutdownFailed := false
+				if contexts != nil {
+					for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
+						if result.ShutdownErr != nil {
+							t.Errorf("deactivate bundle-delete context %s: %v", result.BundleHash, result.ShutdownErr)
+							shutdownFailed = true
+						}
+					}
+				}
+				for i := len(runtimes) - 1; i >= 0; i-- {
+					if err := runtimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+						t.Errorf("shutdown mixed bundle-delete runtime: %v", err)
+						shutdownFailed = true
+					}
+				}
+				if !shutdownFailed {
+					if err := closeSelectedStoreTestProcess(processWorkOwner, capability); err != nil {
+						t.Errorf("close mixed bundle-delete process: %v", err)
+					}
+				}
+			})
+
+			type runtimeFixture struct {
+				hash   string
+				source semanticview.Source
+				rt     *runtimepkg.Runtime
+			}
+			newRuntime := func(root string) runtimeFixture {
+				bundle := loadWorkflowValidationBundleAt(t, root)
+				if _, err := initializeStateStores(ctx, stores.Schema(), bundle); err != nil {
+					t.Fatalf("initialize bundle-delete state stores: %v", err)
+				}
+				fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle)
+				if err != nil {
+					t.Fatalf("persist bundle-delete source: %v", err)
+				}
+				source := semanticview.Wrap(bundle)
+				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(t, stores, cfg, runtimepkg.RuntimeOptions{
+					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
+					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
+					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
+					BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
+				}))
+				if err != nil {
+					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash(), err)
+				}
+				runtimes = append(runtimes, rt)
+				return runtimeFixture{hash: fact.BundleHash(), source: source, rt: rt}
+			}
+
+			removed := newRuntime(writeServeRuntimeAgentSlugFixture(t, "delete-mixed-removed", "alpha-worker"))
+			survivor := newRuntime(writeMixedSourceSetSurvivorFixture(t))
+			coordinates := []runtimeagenttopology.SourceCoordinate{
+				{BundleHash: removed.hash, BundleSource: "persisted"},
+				{BundleHash: survivor.hash, BundleSource: "persisted"},
+			}
+			var desired []runtimeagenttopology.DesiredAgent
+			for i, fixture := range []runtimeFixture{removed, survivor} {
+				compiled, err := fixture.rt.Manager.CompileStaticTopologyDesiredAgents(fixture.source, coordinates[i])
+				if err != nil {
+					t.Fatalf("compile bundle-delete topology %d: %v", i, err)
+				}
+				desired = append(desired, compiled...)
+			}
+			initialPlan, err := runtimeagenttopology.NewSourceSetPlan(coordinates, desired)
+			if err != nil {
+				t.Fatalf("construct bundle-delete source set: %v", err)
+			}
+			capability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+				OwnerID: "bundle-delete-mixed-survivor", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+			})
+			if err != nil {
+				t.Fatalf("acquire bundle-delete process capability: %v", err)
+			}
+			if err := installServeSourceSet(ctx, capability, initialPlan); err != nil {
+				t.Fatalf("install bundle-delete source set: %v", err)
+			}
+			installSelectedStoreTestGeneration(t, capability, removed.rt, initialPlan, 1)
+			installSelectedStoreTestGeneration(t, capability, survivor.rt, initialPlan, 1)
+			if err := removed.rt.Start(ctx); err != nil {
+				t.Fatalf("start removed runtime: %v", err)
+			}
+			if err := survivor.rt.Start(ctx); err != nil {
+				t.Fatalf("start survivor runtime: %v", err)
+			}
+			flowPath := activateMixedSourceSetFlowSurvivor(t, backend.name, stores, runtimeInstanceID, survivor.rt, survivor.source)
+			initialAgents, err := stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
+			if err != nil {
+				t.Fatalf("load initial mixed survivor rows: %v", err)
+			}
+			var initialFlowTopology runtimeagenttopology.Admission
+			for _, agent := range initialAgents {
+				if agent.Config.Identity.FlowInstance() == flowPath {
+					initialFlowTopology = agent.Topology
+				}
+			}
+			if initialFlowTopology.Authority.Readiness == nil {
+				t.Fatal("mixed bundle-delete fixture omitted durable flow-readiness survivor")
+			}
+
+			contexts, err = runtimepkg.NewRuntimeContextManager(nil,
+				completeServeTestPackContext(t, runtimepkg.BundleContext{
+					BundleSourceFact: removed.rt.Options.BundleSourceFact, Source: removed.source,
+					Runtime: removed.rt, WorkOwner: removed.rt.WorkOccurrence(),
+				}),
+				completeServeTestPackContext(t, runtimepkg.BundleContext{
+					BundleSourceFact: survivor.rt.Options.BundleSourceFact, Source: survivor.source,
+					Runtime: survivor.rt, WorkOwner: survivor.rt.WorkOccurrence(),
+				}),
+			)
+			if err != nil {
+				t.Fatalf("construct bundle-delete context manager: %v", err)
+			}
+			failingCapability := &failNthLifecycleCommitCapability{
+				ProcessCapability: capability, bundleHash: survivor.hash, failAt: 2,
+			}
+			failingCapability.onFailure = func() {
+				lookup := contexts.LookupBundleHashStatus(survivor.hash)
+				if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+					t.Fatalf("mixed survivor during partial bundle-delete persistence = %#v, want fenced", lookup)
+				}
+			}
+			supervisor := &runtimeProjectSupervisor{
+				currentRT: removed.rt, runtimeContexts: contexts, processCapability: failingCapability,
+				replacementShutdown: runtimepkg.DefaultShutdownOptions(),
+			}
+			deletePlanner, ok := stores.RuntimeDeps().EventStore.(runtimebundledelete.Planner)
+			if !ok {
+				t.Fatalf("selected event store %T lacks bundle-delete planning", stores.RuntimeDeps().EventStore)
+			}
+			deleteLocks, ok := stores.RuntimeDeps().EventStore.(runtimebundledelete.LockManager)
+			if !ok {
+				t.Fatalf("selected event store %T lacks bundle-delete locking", stores.RuntimeDeps().EventStore)
+			}
+			coordinator := &runtimebundledelete.Coordinator{
+				Planner: deletePlanner, Locks: deleteLocks,
+				Finalizer:       processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
+				RuntimeQuiescer: bundleDeleteRuntimeQuiescer{contexts: contexts, supervisor: supervisor},
+			}
+			request := runtimebundledelete.Request{
+				OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "mixed-survivor-delete",
+				ReplayKeyHash: strings.Repeat("d", 64), BundleHash: removed.hash, RequestedAt: time.Now().UTC(),
+			}
+			if _, err := coordinator.Execute(ctx, request); err == nil || !strings.Contains(err.Error(), "injected later survivor lifecycle commit failure") {
+				t.Fatalf("partial mixed-survivor delete error = %v, want injected later-row failure", err)
+			}
+			if failingCapability.failures.Load() != 1 || failingCapability.commits.Load() != 2 {
+				t.Fatalf("partial mixed-survivor commits = %d failures=%d, want 2/1", failingCapability.commits.Load(), failingCapability.failures.Load())
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+				t.Fatalf("mixed survivor after partial bundle delete = %#v, want retained fence", lookup)
+			}
+			if evidence, err := survivor.rt.CurrentStartupGrantEvidence(); err != nil || evidence.RuntimeGeneration != 2 {
+				t.Fatalf("retained successor grant after partial bundle delete = %#v err=%v, want generation 2", evidence, err)
+			}
+			partialAgents, err := stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
+			if err != nil {
+				t.Fatalf("load partial mixed survivor rows: %v", err)
+			}
+			var predecessorRows, successorRows int
+			for _, agent := range partialAgents {
+				if agent.Config.ID != "beta-worker" && agent.Config.Identity.FlowInstance() != flowPath {
+					continue
+				}
+				switch agent.ProcessBinding.RuntimeGeneration {
+				case 1:
+					predecessorRows++
+				case 2:
+					successorRows++
+				default:
+					t.Fatalf("partial survivor process generation = %d, want 1 or 2", agent.ProcessBinding.RuntimeGeneration)
+				}
+			}
+			if predecessorRows != 1 || successorRows != 1 {
+				t.Fatalf("partial mixed survivor rows = predecessor:%d successor:%d, want 1/1", predecessorRows, successorRows)
+			}
+
+			replay := request
+			replay.OperationID = uuid.NewString()
+			replay.RequestedAt = request.RequestedAt.Add(time.Minute)
+			replayed, err := coordinator.Execute(ctx, replay)
+			if err != nil {
+				t.Fatalf("replay mixed-survivor delete: %v", err)
+			}
+			if !replayed.OK || !replayed.Deleted {
+				t.Fatalf("replayed mixed-survivor delete = %#v", replayed)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("mixed survivor after delete replay = %#v, want loaded", lookup)
+			}
+			if evidence, err := survivor.rt.CurrentStartupGrantEvidence(); err != nil || evidence.RuntimeGeneration != 2 {
+				t.Fatalf("process projection after delete replay = %#v err=%v, want generation 2", evidence, err)
+			}
+			currentPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || len(currentPlan.Sources) != 1 || currentPlan.Sources[0].BundleHash != survivor.hash {
+				t.Fatalf("source set after delete replay = exists:%v plan:%#v err:%v", exists, currentPlan, err)
+			}
+			convergedAgents, err := stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
+			if err != nil {
+				t.Fatalf("load converged mixed survivor rows: %v", err)
+			}
+			var staticConverged, flowConverged bool
+			for _, agent := range convergedAgents {
+				switch {
+				case agent.Config.ID == "beta-worker":
+					staticConverged = agent.LifecycleGeneration == 2 && agent.ProcessBinding.RuntimeGeneration == 2 &&
+						agent.Topology.Authority.Static != nil && agent.Topology.Authority.Static.SourceSetRevision == currentPlan.Revision
+				case agent.Config.Identity.FlowInstance() == flowPath:
+					flowConverged = agent.LifecycleGeneration == 2 && agent.ProcessBinding.RuntimeGeneration == 2 &&
+						reflect.DeepEqual(agent.Topology, initialFlowTopology)
+				}
+			}
+			if !staticConverged || !flowConverged {
+				t.Fatalf("converged mixed survivors = static:%v flow:%v", staticConverged, flowConverged)
+			}
+
+			commitsAfterReplay := failingCapability.commits.Load()
+			duplicate := replay
+			duplicate.OperationID = uuid.NewString()
+			duplicate.RequestedAt = replay.RequestedAt.Add(time.Minute)
+			duplicateResult, err := coordinator.Execute(ctx, duplicate)
+			if err != nil {
+				t.Fatalf("duplicate mixed-survivor delete replay: %v", err)
+			}
+			if !reflect.DeepEqual(duplicateResult, replayed) {
+				t.Fatalf("duplicate mixed-survivor result = %#v, want %#v", duplicateResult, replayed)
+			}
+			if got := failingCapability.commits.Load(); got != commitsAfterReplay {
+				t.Fatalf("duplicate replay lifecycle commits = %d, want unchanged %d", got, commitsAfterReplay)
+			}
+		})
+	}
+}
+
 func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperation(t *testing.T) {
 	ctx := context.Background()
 	dsn, _, cleanup := testutil.StartPostgres(t)

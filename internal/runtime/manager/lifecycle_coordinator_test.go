@@ -10,11 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -652,6 +656,176 @@ func TestLifecycleCoordinatorDeliveryAdmissionFenceWins(t *testing.T) {
 	}
 	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
 		t.Fatalf("release fenced loop: %v", err)
+	}
+}
+
+func TestLifecycleCoordinatorSourceSetTransitionBlocksDirectAndWaitsDelivery(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	rec := lifecycleTestPersistedAgent(t)
+	if err := coordinator.registerExecution(
+		testAuthorActivityContext(context.Background()), rec, true,
+		reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config),
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := replaceCoordinatorLoop(
+		coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil,
+		runtimesessions.LifecycleMutationPlan{},
+	)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.cells[token.Identity.Normalize()].execution.routeToken = token
+	coordinator.mu.Unlock()
+
+	admission := newSourceSetTransitionAdmissionProbe("source-set-successor")
+	if err := coordinator.installSourceSetTransitionAdmission(admission, false); err != nil {
+		t.Fatalf("install source-set transition admission: %v", err)
+	}
+	if lease, err := coordinator.acquireExecutionIdentity(loopCtx, token.Identity, "execute_directive", true); err == nil {
+		lease.Release()
+		t.Fatal("pending source-set transition admitted direct execution")
+	} else if !strings.Contains(err.Error(), "source_set_transition_pending") {
+		t.Fatalf("direct execution error=%v, want typed source-set transition conflict", err)
+	}
+	if _, _, _, err := replaceCoordinatorLoop(
+		coordinator, testAuthorActivityContext(context.Background()), rec, "restart", uuid.NewString(), nil,
+		runtimesessions.LifecycleMutationPlan{},
+	); err == nil || !strings.Contains(err.Error(), "source_set_transition_pending") {
+		admission.release()
+		t.Fatalf("restart during source-set transition error=%v, want typed conflict", err)
+	}
+	if _, err := coordinator.terminateIdentityWithTopologyExpected(
+		testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown",
+		AgentLifecycleTerminated, nil, nil, true,
+	); err == nil || !strings.Contains(err.Error(), "source_set_transition_pending") {
+		admission.release()
+		t.Fatalf("teardown during source-set transition error=%v, want typed conflict", err)
+	}
+
+	type deliveryResult struct {
+		lease *agentExecutionLease
+		err   error
+	}
+	result := make(chan deliveryResult, 1)
+	go func() {
+		lease, acquireErr := coordinator.acquireDeliveryExecution(loopCtx, token)
+		result <- deliveryResult{lease: lease, err: acquireErr}
+	}()
+	select {
+	case got := <-result:
+		if got.lease != nil {
+			got.lease.Release()
+		}
+		t.Fatalf("delivery admission returned while transition pending: %v", got.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	admission.release()
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("delivery admission after aggregate release: %v", got.err)
+		}
+		got.lease.Release()
+	case <-time.After(time.Second):
+		t.Fatal("delivery admission did not resume after aggregate release")
+	}
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
+		t.Fatalf("release loop: %v", err)
+	}
+}
+
+func TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease(t *testing.T) {
+	runtimebus.ResumeRuntimeIngress()
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	deliveryStore := newManagerDeliveryTestStore(t)
+	persistence := &startupReplayTestStore{
+		recoveryTestStore: recoveryTestStore{}, managerDeliveryTestStore: deliveryStore,
+	}
+	probe := lifecycletest.New(t)
+	eventBus, err := newTestManagerEventBus(t)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	called := make(chan struct{}, 1)
+	agent := shutdownTestAgent{
+		id:            "source-set-waiting-agent",
+		subscriptions: []events.EventType{"test.source_set_wait"},
+		onEvent: func(context.Context, events.Event) ([]events.Event, error) {
+			called <- struct{}{}
+			return nil, nil
+		},
+	}
+	manager := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) {
+		return agent, nil
+	}, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
+	record := PersistedAgent{
+		Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(),
+		Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()),
+			Subscriptions: []string{"test.source_set_wait"},
+		}),
+	}
+	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, false); err != nil {
+		t.Fatalf("spawn waiting agent: %v", err)
+	}
+	if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("run waiting manager: %v", err)
+	}
+	t.Cleanup(func() {
+		if shutdownErr := manager.Shutdown(); shutdownErr != nil {
+			t.Errorf("shutdown waiting manager: %v", shutdownErr)
+		}
+	})
+
+	admission := newSourceSetTransitionAdmissionProbe("source-set-successor")
+	if err := manager.lifecycle.installSourceSetTransitionAdmission(admission, false); err != nil {
+		t.Fatalf("install source-set transition admission: %v", err)
+	}
+	if err := manager.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err == nil || !strings.Contains(err.Error(), "source_set_transition_pending") {
+		admission.release()
+		t.Fatalf("shutdown during source-set transition error=%v, want typed conflict", err)
+	}
+	if err := manager.ResetRuntimeState(); err == nil || !strings.Contains(err.Error(), "source_set_transition_pending") {
+		admission.release()
+		t.Fatalf("reset during source-set transition error=%v, want typed conflict", err)
+	}
+	evt := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("source-set-waiting-event"), events.EventType("test.source_set_wait"), "test", "", nil, 0,
+		eventtest.UUID("source-set-waiting-run"), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+		t.Fatalf("publish waiting event: %v", err)
+	}
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		admission.release()
+		t.Fatal(err)
+	}
+	select {
+	case <-called:
+		admission.release()
+		t.Fatal("pending aggregate transition invoked the agent")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if snapshot, snapshotErr := deliveryStore.Snapshot(context.Background(), deliveryID); !errors.Is(snapshotErr, runtimedelivery.ErrNotFound) {
+		admission.release()
+		t.Fatalf("waiting delivery = %#v err=%v, want no accepted obligation", snapshot, snapshotErr)
+	}
+
+	admission.release()
+	probe.RequireAgentDelivered(evt.ID(), agent.ID())
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("released aggregate transition did not invoke the agent")
+	}
+	snapshot, err := deliveryStore.Snapshot(context.Background(), deliveryID)
+	if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+		t.Fatalf("released delivery = %#v err=%v, want delivered", snapshot, err)
 	}
 }
 

@@ -2,8 +2,8 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2378
 audit_base: 1c20c23a4bdeb8eec98e0d4953d223792d4fa36e
-phase: pre_implementation_gate_cycle_1
-implementation_frozen: true
+phase: implementation_gate_approved_backend_specific_proof
+implementation_frozen: false
 
 binding_context:
   issue: https://github.com/division-sh/swarm/issues/2378
@@ -16,6 +16,10 @@ binding_context:
   architecture_parent: 2250
   architecture_parent_update: https://github.com/division-sh/swarm/issues/2250#issuecomment-5459800084
   watchlist_commit: 1aef708844180ee6cf397b9b2ceece4a51a9a519
+  independent_gate: https://github.com/division-sh/swarm/issues/2378#issuecomment-5466090487
+  proof_boundary_correction: https://github.com/division-sh/swarm/issues/2378#issuecomment-5466405223
+  corrected_gate: https://github.com/division-sh/swarm/issues/2378#issuecomment-5466489950
+  backend_feature_parity_child: 2387
   exact_spec_refs:
     - platform-spec.yaml#agent_topology_authority.source_set
     - platform-spec.yaml#agent_topology_authority.admission
@@ -23,6 +27,7 @@ binding_context:
     - platform-spec.yaml#agent_lifecycle_authority.durable_cell
     - platform-spec.yaml#agent_lifecycle_authority.process_execution_projection
     - platform-spec.yaml#agent_lifecycle_authority.transitions
+    - platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete
   guidelines:
     - /Users/youmew/dev/swarm-docs/docs/IMPLEMENTER_GUIDELINES.md
     - /Users/youmew/dev/swarm-docs/docs/SEMANTIC_DRIFT.md
@@ -90,7 +95,7 @@ governing_contract:
       - flow_readiness_survivor_preserves_exact_FlowReadinessPlan
       - both_variants_receive_successor_process_binding
       - aggregate_execution_admission_reopens_only_after_every_runtime_converges_and_publication_succeeds
-    decision_status: proposed_here_and_requires_independent_gate_before_implementation
+    decision_status: approved_by_independent_gate
 
 binding_design:
   canonical_census:
@@ -415,7 +420,7 @@ manifestations_and_proof_plan:
     proof: reload_or_replacement_boundary_resumes_exact_pending_transition_before_new_work
   - manifestation: bundle_delete_with_mixed_surviving_context
     disposition: in_scope
-    proof: SQLite_and_host_PostgreSQL_delete_replay_matrix_with_static_and_flow_survivors
+    proof: host_PostgreSQL_delete_replay_with_static_and_flow_survivors_plus_SQLite_fail_closed_capability_and_dual_store_live_transition_proof
   - manifestation: cold_restart_after_committed_partial_progress
     disposition: in_scope_interaction_with_existing_startup_owner
     proof: both_stores_readback_then_existing_process_takeover_and_dynamic_topology_reconstruction_converge_once
@@ -431,11 +436,13 @@ manifestations_and_proof_plan:
 
 required_supported_surface_proof:
   parity_issue: true
+  bundle_delete_feature_parity_claim: false
+  separate_backend_feature_parity_tail: 2387
   surfaces:
     - real_runtime_project_supervisor_replacement_on_default_SQLite
     - real_runtime_project_supervisor_replacement_on_host_PostgreSQL
-    - process_owned_bundle_delete_survivor_and_replay_on_SQLite
     - process_owned_bundle_delete_survivor_and_replay_on_host_PostgreSQL
+    - SQLite_bundle_delete_capability_absence_and_fail_closed_public_method
     - multi_context_aggregate_visibility_and_execution_fence
     - cold_restart_readback_after_partial_progress_on_both_stores
   focused_commands:
@@ -460,6 +467,7 @@ parent_and_sibling_probe:
     destructive_reset_empty_plan: different_no_survivor_operation
     live_replacement_and_restore: same_chosen_class
     bundle_delete_survivor_refresh_and_replay: same_chosen_class
+    SQLite_bundle_delete_feature_support_2387: different_product_capability_class_blocked_by_this_issue
   remaining_parent_tail_after_this_pr:
     - broader_runtime_phase_decomposition_under_2250
   tail_estimate: multi_pr_high_effort_architecture_decomposition_not_required_for_this_bounded_fix
@@ -468,7 +476,8 @@ parent_and_sibling_probe:
 tracker_state:
   decision: current_issue_updated_before_coding
   issue_body_repair: complete
-  new_child_required: false
+  new_child_required_for_chosen_class: false
+  separate_backend_feature_parity_child: 2387
   parent_update: update_2250_with_bounded_manifestation_without_reopening_2125
   older_stream_superseded: false
   watchlist_mapping: declaration_owned_agent_topology_ownership
@@ -499,7 +508,7 @@ architecture_feedback:
   roi: high_but_non_closure_bearing_for_2378
 
 blocking_ambiguity_and_split_conditions:
-  current_blocker: independent_pre_implementation_gate_not_yet_recorded
+  current_blocker: none_corrected_independent_gate_approved
   resolved_design_decisions:
     - missing_process_cell_fails_before_source_set_mutation
     - no_live_reconstruction
@@ -507,6 +516,7 @@ blocking_ambiguity_and_split_conditions:
     - no_cross_row_transaction
     - aggregate_execution_fence_survives_partial_progress
     - no_route_replacement_or_delivery_settlement_shortcut
+    - PostgreSQL_proves_supported_bundle_delete_replay_while_SQLite_proves_declared_capability_absence_and_fail_closed_behavior
   stop_and_repair_if_implementation_discovers:
     - another_complete_source_set_writer_outside_the_closed_operation_family
     - another_durable_lifecycle_creator_outside_the_census_and_coordinator

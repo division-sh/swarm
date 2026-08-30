@@ -18739,8 +18739,10 @@ multi_bundle_persistence:
           so concurrent reload/replacement cannot recreate a withdrawn or fenced context between recovery and lookup;
           only then may the selected-store finalizer atomically remove the source and bundle. Before that deletion can
           report completion, process composition MUST rotate every surviving loaded runtime to an admitted successor
-          generation grant and rebind every surviving static lifecycle cell to the committed complete source-set
-          revision without changing its execution generation, phase, run mode, or config revision. Survivors remain
+          generation grant and rebind every nonterminated durable static or flow-readiness lifecycle cell to that
+          successor process binding without changing its execution generation, phase, run mode, or config revision.
+          Static cells receive the committed complete source-set admission; flow-readiness cells preserve their exact
+          sealed readiness admission. Survivors remain
           unselectable until the complete set converges; partial rebind failure MUST NOT publish stale runtime authority
           or report completed deletion. A committed deletion with an incomplete survivor refresh leaves those contexts fenced
           under RuntimeContextManager ownership. Reload, replacement, later bundle deletion, and process close MUST adopt and
@@ -38068,12 +38070,16 @@ agent_topology_authority:
       lifecycle cells, and verifies convergence before any agent hydration, route publication,
       readiness publication, provider call, or managed execution. Bundle-source removal first
       quiesces and joins the matching runtime generation while its agents retain the predecessor
-      source-set revision, then reserves every surviving runtime generation and static lifecycle
-      cell before committing the source-set removal with the named destructive mutation. After
-      commit, one source_set_rebind transition preserves each survivor's execution generation,
-      phase, run mode, and config revision while replacing its admission and lifecycle persistence
-      grant with the admitted successor. All surviving contexts publish together only after complete
-      convergence; stale or partially rebound survivors remain unselectable and deletion cannot
+      source-set revision, then closes one aggregate execution-admission gate and reserves every surviving runtime
+      generation plus every nonterminated durable static or flow-readiness lifecycle cell before committing the
+      source-set removal with the named destructive mutation. Durable creation consumes the same publication
+      serialization, so no cell can appear between the canonical census and head mutation. After commit, one
+      source_set_rebind transition preserves each survivor's execution generation, phase, run mode, and config
+      revision while rebinding it to the admitted successor process grant. Static cells receive the successor
+      StaticDeclarationPlan admission; flow-readiness cells preserve their exact sealed FlowReadinessPlan admission.
+      Process-local topology and process binding publish together only after every cell in that runtime commits, and
+      no runtime execution gate or context visibility reopens until every surviving runtime converges and the complete
+      context set publishes. Stale or partially rebound survivors remain unselectable and deletion cannot
       report completion. The same retained transaction records the exact bundle-delete final
       mutation, exact API request hash, opaque keyed replay-authority digest, and original request
       time in the independent bundle-delete final-mutation replay owner. This evidence is mandatory
@@ -38095,9 +38101,12 @@ agent_topology_authority:
       private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
       each survivor to the committed plan, and republishes the complete survivor set only after convergence.
       Rollback restores the predecessor source-set head and survivor generations before predecessor publication. After the
-      candidate head commits, its typed finalizer is retained for every later candidate failure before predecessor survivor
+      candidate head commits, its typed finalizer and the same closed aggregate execution gate are retained for every later candidate failure before predecessor survivor
       preparation or durable restoration and carries both exact plans plus the idempotent restore
       operation, so preparation or source-set restoration failure remains resumable at every later serialized operation boundary.
+      Pre-head abort alone reopens the exact predecessor. Post-head failure never opens an intermediate candidate or
+      predecessor window; rollback retargets the retained gate to the exact predecessor plan and accepts only the
+      recorded predecessor, candidate, or partially restored adjacent generation coordinates.
       If survivor generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
       retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before
       any later reload/replacement compiles from loaded contexts and before close may release the selected store; it cannot discard
@@ -38170,11 +38179,17 @@ agent_topology_authority:
       execution-hydration projections and status filters cannot define that census, so terminated cells remain in
       scope while ephemeral cells remain excluded. The census enumerates canonical persisted lifecycle rows rather
       than filtering duplicated admission JSON, reads both topology_authority_kind and execution_lifetime, and fails
-      closed unless each exactly equals the decoded topology admission. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
+      closed unless each exactly equals the decoded topology admission. Source-set replacement consumes that complete
+      census, cross-checks each exact-source nonterminal durable row against one process-local cell and each relevant
+      process-local cell against one durable row, and fails before head mutation instead of reconstructing missing
+      evidence. It uses source_set_rebind for survivors and one atomic source_set_retire for a
       removed source cell whose execution grant changes at terminalization. A complete source-set rebind publishes
-      each survivor's topology and process binding together under the lifecycle coordinator only after every durable
-      rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
-      is deterministic, idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
+      each runtime's survivor topology and process binding together under the lifecycle coordinator only after every
+      durable rebind in that runtime commits. Durable row progress may be partial, deterministic, and resumable, but
+      process-local publication is all-or-none per runtime and execution reopening is all-or-none across the complete
+      runtime-context set. Exact replay accepts only the retained adjacent predecessor/successor lineage and rejects
+      changed lifecycle, topology, config, owner, boot, source, runtime, operation, or request evidence. No
+      predecessor-bound or partially rebound cell may be hydrated or selected.
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
@@ -38239,6 +38254,13 @@ agent_lifecycle_authority:
     acquire:
       rule: Directive and backlog execution acquire one exact generation lease containing Agent, config, subscriptions, token, and generation-cancelled context, then release that lease after execution and settlement. A fenced generation admits no new lease. Refreshing only the token after selecting predecessor code is forbidden.
       registered_backlog: Startup backlog may lease a registered generation, but its exact token remains present and managed effects still fail closed unless the selected durable lifecycle cell is running.
+      source_set_transition: >-
+        One typed aggregate source-set transition admission closes before the durable survivor census and remains
+        closed through head mutation, every per-cell durable commit, every per-runtime process publication, and
+        aggregate context visibility publication. New direct execution and lifecycle mutation fail with a typed
+        transition conflict. A dequeued EventBus delivery waits without agent invocation, success/failure settlement,
+        or dead-lettering until exact abort or convergence; already accepted leases may settle. The exact lifecycle
+        route and loop remain owned by their current generation and are not removed or recreated as a fencing shortcut.
     receiver_execution_variant:
       variants: [normal, selected_contract_fork]
       rule: AgentManager receives one explicit closed variant at construction. Normal turns install the acting lifecycle token and receiver-owned normal admission/controller state. Selected-contract turns install the exact selected authority, admission, controller, and lineage supplied by the selected runtime owner. No variant is inferred from delivery-context values.
@@ -38264,7 +38286,7 @@ agent_lifecycle_authority:
           rejection: Arbitrary values and publisher Authority, Admission, Controller, execution mode, runtime lineage, or equivalent execution identity never cross the handoff. Missing or conflicting receiver-owned state fails closed; key blacklists, context-value delegation, authority shadowing, and compatibility fallbacks are forbidden.
   transitions:
     operations: [spawn, hydrate, materialize, start, restart, reconfigure, source_set_rebind, source_set_retire, process_takeover, teardown, self_release, shutdown, reset]
-    serialization: All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision point.
+    serialization: All creators, replacers, destroyers, self-release paths, and complete source-set survivor census/rebind operations serialize through the lifecycle coordinator's existing publication and per-agent decision points.
     ordering:
       - Under the per-agent operation lock, read the authoritative current projection, merge and validate any patch, and return same-current before Agent factory invocation.
       - Materialize any changed candidate only inside that locked replacement decision.

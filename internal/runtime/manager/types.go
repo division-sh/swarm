@@ -264,6 +264,14 @@ type AgentLifecycleCellCensus interface {
 	ListDurableAgentLifecycleStates(context.Context) ([]AgentLifecycleState, error)
 }
 
+// SourceSetTransitionAdmission is the aggregate execution gate shared by
+// every surviving runtime while one complete source-set transition converges.
+type SourceSetTransitionAdmission interface {
+	TransitionID() string
+	SourceSetRevision() string
+	Done() <-chan struct{}
+}
+
 type AgentLifecycleDiagnostic struct {
 	OutboxID    string
 	OperationID string

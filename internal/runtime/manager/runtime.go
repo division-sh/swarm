@@ -141,6 +141,9 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := am.lifecycle.sourceSetTransitionConflict("shutdown_manager"); err != nil {
+		return err
+	}
 	transition := am.lifecycle.requestShutdownTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -1262,6 +1265,9 @@ func platformResetSourceAuthorized(source string) bool {
 }
 
 func (am *AgentManager) resetRuntimeState(source string) error {
+	if err := am.lifecycle.sourceSetTransitionConflict("reset_manager"); err != nil {
+		return err
+	}
 	shutdown, reset := am.lifecycle.requestResetTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(shutdown, runtimeLifecycleTransitionShutdown)
 	if err != nil {
