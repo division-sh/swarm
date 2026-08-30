@@ -307,8 +307,9 @@ terminal_status_invariants:
     policy: destructive_complete_quiescence
     rule: >-
       The canonical failure envelope and destructive child quiescence commit in
-      the same selected-store transaction. Builder and direct store terminal
-      writers may not write failed while any run-owned execution remains.
+      the same selected-store transaction. The historical retired Builder
+      transport and direct store terminal writers may not write failed while
+      any run-owned execution remains.
     issue_2007_action: absorb
   forked:
     owner: terminal_forked_source_freeze_owner
@@ -2453,9 +2454,9 @@ terminal_run_decision_card_supersession_reaudit:
       proof: >-
         ConvergeNormalRunCompletion is the only successful-completion writer;
         it checks open and decision_committed gates in the selected-store
-        transaction. Generic MarkRunTerminal rejects completed, and the builder
-        observes canonical run state without deriving completion from local
-        quiescence.
+        transaction. Generic MarkRunTerminal rejects completed, and the
+        historical retired Builder observer consumed canonical run state
+        without deriving completion from local quiescence.
     active_stage_or_flow_supersession:
       classification: different_semantic_concept_with_proof
       proof: SupersedeDecisionCardsForStage_and_workflow_gate_owner_keep_normal_routable_event_semantics
