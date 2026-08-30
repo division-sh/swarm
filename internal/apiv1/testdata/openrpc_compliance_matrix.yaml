@@ -16,7 +16,7 @@ policy:
   notification_schema_runtime_validation_policy: "#898 adds generated notification-schema publication and supported-surface runtime validation for all four subscription methods; examples and rpc.discover are covered by later closed policy child slices."
   examples_policy: "#904 adds merge-bearing catalog-wide OpenRPC examples deferral policy; method examples are intentionally omitted until a future approved source model exists."
   service_discovery_policy: "#915 adds merge-bearing catalog-wide rpc.discover non-publication policy; method publication remains the generated OpenRPC artifact."
-  entity_accumulated_schema_hardening_policy: "#930 aligns EntityFull.accumulated schema ownership to the runtime accumulator-state owner across /v1/rpc entity.get, builder state.get_entity, dashboard /api/instances/{id}, CLI, store, generated OpenRPC proof, and matrix accounting."
+  entity_accumulated_schema_hardening_policy: "#930 aligned EntityFull.accumulated schema ownership to the runtime accumulator-state owner across /v1/rpc entity.get, the historical retired Builder state.get_entity consumer, dashboard /api/instances/{id}, CLI, store, generated OpenRPC proof, and matrix accounting."
 methods:
   - method: agent.diagnose
     transport: http

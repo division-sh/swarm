@@ -33,30 +33,26 @@ type failOncePostCommitBundleDeleteCapability struct {
 	refreshAttempts        atomic.Int32
 }
 
-type failSourceSetGrantCapability struct {
+type blockingBundleDeleteReplayCapability struct {
 	runtimestartupownership.ProcessCapability
-	revision          string
-	attempts          atomic.Int32
-	failuresRemaining atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+	blocked atomic.Bool
 }
 
-func (c *failSourceSetGrantCapability) IssueGenerationGrant(
+func (c *blockingBundleDeleteReplayCapability) ReplayBundleDeleteResult(
 	ctx context.Context,
-	req runtimestartupownership.GrantRequest,
-) (runtimestartupownership.GenerationGrant, error) {
-	if c.revision == "" || req.SourceSetRevision == c.revision {
-		c.attempts.Add(1)
-		for {
-			remaining := c.failuresRemaining.Load()
-			if remaining <= 0 {
-				break
-			}
-			if c.failuresRemaining.CompareAndSwap(remaining, remaining-1) {
-				return nil, errors.New("injected predecessor survivor grant failure")
-			}
+	req runtimebundledelete.FinalMutationRequest,
+) (runtimebundledelete.Result, error) {
+	if c.blocked.CompareAndSwap(false, true) {
+		close(c.entered)
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return runtimebundledelete.Result{}, ctx.Err()
 		}
 	}
-	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
+	return c.ProcessCapability.ReplayBundleDeleteResult(ctx, req)
 }
 
 func (c *failOncePostCommitBundleDeleteCapability) ApplyBundleDeleteFinalMutation(
@@ -81,7 +77,7 @@ func (c *failOncePostCommitBundleDeleteCapability) IssueGenerationGrant(
 	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
 }
 
-func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *testing.T) {
+func TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication(t *testing.T) {
 	ctx := context.Background()
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -201,13 +197,15 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
-	supervisor := newProcessLifecycleSupervisor(projectServeRuntimePersistence(stores), nil, first.runtime)
+	var ready atomic.Bool
+	ready.Store(true)
+	supervisor := newProcessLifecycleSupervisor(projectServeRuntimePersistence(stores), &ready, first.runtime)
 	supervisor.SetRuntimeContextManager(contexts, first.runtime.Options.BundleSourceFact)
 	supervisor.SetProcessCapability(failingCapability)
 	supervisor.shutdownOptions = runtimepkg.DefaultShutdownOptions()
 	coordinator := &runtimebundledelete.Coordinator{
 		Planner:   selected,
-		Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
+		Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, supervisor: supervisor},
 		Locks:     selected,
 		RuntimeQuiescer: bundleDeleteRuntimeQuiescer{
 			contexts: contexts, supervisor: supervisor,
@@ -263,50 +261,11 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if !replayRecorded {
 		t.Fatal("committed source-set operation omitted final mutation replay record")
 	}
-	currentPlan, exists, err := failingCapability.CurrentSourceSet(ctx)
-	if err != nil || !exists {
-		t.Fatalf("load committed source set before close recovery: exists=%v err=%v", exists, err)
-	}
-	closeFailureCapability := &failSourceSetGrantCapability{
-		ProcessCapability: failingCapability,
-		revision:          currentPlan.Revision,
-	}
-	closeFailureCapability.failuresRemaining.Store(1)
-	supervisor.SetProcessCapability(closeFailureCapability)
-	if err := supervisor.settlePendingSourceSetTransition(ctx); err == nil || !strings.Contains(err.Error(), "injected predecessor survivor grant failure") {
-		t.Fatalf("close with pending survivor recovery failure = %v, want fail-closed grant error", err)
-	}
 	if supervisor.CurrentRuntime() != nil {
-		t.Fatal("pending survivor recovery exposed a process runtime before topology converged")
+		t.Fatal("post-commit survivor failure retained a process runtime before topology converged")
 	}
-	for _, bundleHash := range []string{secondHash, thirdHash} {
-		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
-			t.Fatalf("survivor %s after failed close recovery = %#v, want pending source-set transition", bundleHash, lookup)
-		}
-	}
-	supervisor.SetProcessCapability(failingCapability)
-	if err := supervisor.settlePendingSourceSetTransition(ctx); err != nil {
-		t.Fatalf("close did not complete pending survivor recovery: %v", err)
-	}
-	if supervisor.CurrentRuntime() == nil || supervisor.CurrentRuntime() == first.runtime {
-		t.Fatalf("pending survivor recovery did not attach a surviving primary runtime: %p", supervisor.CurrentRuntime())
-	}
-	for _, bundleHash := range []string{secondHash, thirdHash} {
-		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
-			t.Fatalf("survivor %s after close recovery = %#v, want loaded", bundleHash, lookup)
-		}
-	}
-	changedRequest := req
-	changedRequest.OperationID = uuid.NewString()
-	changedRequest.RequestHash = "changed-bundle-delete-request"
-	changedRequest.RequestedAt = req.RequestedAt.Add(time.Minute)
-	if _, err := coordinator.Execute(ctx, changedRequest); err == nil || !strings.Contains(err.Error(), "stored request hash") {
-		t.Fatalf("changed-request replay error = %v, want stored request hash conflict", err)
-	}
-	for _, bundleHash := range []string{secondHash, thirdHash} {
-		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
-			t.Fatalf("survivor %s after changed-request replay = %#v, want recovered loaded context", bundleHash, lookup)
-		}
+	if ready.Load() {
+		t.Fatal("post-commit survivor failure retained process readiness")
 	}
 	type survivorProgress struct {
 		bundleHash string
@@ -331,13 +290,13 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 			t.Fatalf("survivor progress before replay = %#v, want either committed or untouched", *survivor)
 		}
 	}
-	if progressedBeforeFailure != 2 {
-		t.Fatalf("survivors recovered by close before replay = %d, want 2", progressedBeforeFailure)
+	if progressedBeforeFailure != 1 {
+		t.Fatalf("survivors durably progressed before direct replay = %d, want 1", progressedBeforeFailure)
 	}
 
 	replayRequest := req
 	replayRequest.OperationID = uuid.NewString()
-	replayRequest.RequestedAt = req.RequestedAt.Add(2 * time.Minute)
+	replayRequest.RequestedAt = req.RequestedAt.Add(time.Minute)
 	replayed, err := coordinator.Execute(ctx, replayRequest)
 	if err != nil {
 		t.Fatalf("replay committed delete: %v", err)
@@ -352,6 +311,24 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
 			t.Fatalf("survivor %s after replay = %#v, want loaded", bundleHash, lookup)
 		}
+	}
+	currentRuntime := supervisor.CurrentRuntime()
+	if currentRuntime == nil || currentRuntime == first.runtime || !ready.Load() {
+		t.Fatalf("direct replay process publication = runtime:%p ready:%v, want surviving runtime ready", currentRuntime, ready.Load())
+	}
+	publicRuntime, publicContexts := supervisor.PublicIngressState()
+	if publicRuntime != currentRuntime || publicContexts != contexts {
+		t.Fatalf("direct replay public ingress state = runtime:%p contexts:%p, want %p/%p", publicRuntime, publicContexts, currentRuntime, contexts)
+	}
+	use, err := supervisor.acquireCurrentRuntime(ctx)
+	if err != nil {
+		t.Fatalf("direct replay agent-control acquisition: %v", err)
+	}
+	if use.Runtime() != currentRuntime || use.Runtime().Manager == nil || len(use.Runtime().Manager.ListAgentConfigs()) == 0 {
+		t.Fatalf("direct replay agent-control runtime = %#v, want executable surviving agent runtime", use.Runtime())
+	}
+	if err := use.Done(); err != nil {
+		t.Fatalf("release direct replay agent-control acquisition: %v", err)
 	}
 	for i := range survivorsBeforeReplay {
 		survivor := &survivorsBeforeReplay[i]
@@ -368,16 +345,33 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		survivor.grants = afterGrants
 		survivor.rebinds = afterRebinds
 	}
+	changedRequest := req
+	changedRequest.OperationID = uuid.NewString()
+	changedRequest.RequestHash = "changed-bundle-delete-request"
+	changedRequest.RequestedAt = req.RequestedAt.Add(2 * time.Minute)
+	if _, err := coordinator.Execute(ctx, changedRequest); err == nil || !strings.Contains(err.Error(), "stored request hash") {
+		t.Fatalf("changed-request replay error = %v, want stored request hash conflict", err)
+	}
+	if supervisor.CurrentRuntime() != currentRuntime || !ready.Load() {
+		t.Fatalf("changed-request replay altered process publication = runtime:%p ready:%v", supervisor.CurrentRuntime(), ready.Load())
+	}
 
 	duplicateRequest := replayRequest
 	duplicateRequest.OperationID = uuid.NewString()
 	duplicateRequest.RequestedAt = req.RequestedAt.Add(3 * time.Minute)
+	supervisor.mu.Lock()
+	supervisor.currentRT = nil
+	ready.Store(false)
+	supervisor.mu.Unlock()
 	duplicate, err := coordinator.Execute(ctx, duplicateRequest)
 	if err != nil {
 		t.Fatalf("duplicate committed delete: %v", err)
 	}
 	if !reflect.DeepEqual(duplicate, replayed) {
 		t.Fatalf("duplicate coordinator result = %#v, want stored %#v", duplicate, replayed)
+	}
+	if supervisor.CurrentRuntime() != currentRuntime || !ready.Load() {
+		t.Fatalf("duplicate replay did not repair process publication = runtime:%p ready:%v", supervisor.CurrentRuntime(), ready.Load())
 	}
 	for _, survivor := range survivorsBeforeReplay {
 		afterGrants := countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
@@ -398,6 +392,60 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	expiredRequest.RequestedAt = req.RequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)
 	if _, err := coordinator.Execute(ctx, expiredRequest); !errors.Is(err, runtimebundledelete.ErrBundleNotFound) {
 		t.Fatalf("expired replay error = %v, want ErrBundleNotFound", err)
+	}
+
+	blockingCapability := &blockingBundleDeleteReplayCapability{
+		ProcessCapability: failingCapability,
+		entered:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	supervisor.SetProcessCapability(blockingCapability)
+	serializedCoordinator := &runtimebundledelete.Coordinator{
+		Planner: selected,
+		Finalizer: processOwnedBundleDeleteFinalizer{
+			capability: blockingCapability,
+			supervisor: supervisor,
+		},
+		Locks: selected,
+	}
+	serializedRequest := duplicateRequest
+	serializedRequest.OperationID = uuid.NewString()
+	serializedRequest.RequestedAt = req.RequestedAt.Add(5 * time.Minute)
+	replayDone := make(chan error, 1)
+	go func() {
+		_, replayErr := serializedCoordinator.Execute(ctx, serializedRequest)
+		replayDone <- replayErr
+	}()
+	select {
+	case <-blockingCapability.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serialized replay did not reach the process operation boundary")
+	}
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- supervisor.ShutdownProcessWithOptions(ctx, runtimepkg.DefaultShutdownOptions())
+	}()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("process shutdown bypassed an active bundle-delete replay: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(blockingCapability.release)
+	if err := <-replayDone; err != nil {
+		t.Fatalf("serialized duplicate replay: %v", err)
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("shutdown after serialized duplicate replay: %v", err)
+	}
+	if supervisor.CurrentRuntime() != nil || ready.Load() {
+		t.Fatalf("serialized shutdown publication = runtime:%p ready:%v, want detached", supervisor.CurrentRuntime(), ready.Load())
+	}
+	for _, survivor := range survivorsBeforeReplay {
+		afterGrants := countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
+		afterRebinds := countBundleDeleteReplayRows(t, db, `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE operation_kind = 'source_set_rebind' AND agent_id = $1`, survivor.agentID)
+		if afterGrants != survivor.grants || afterRebinds != survivor.rebinds {
+			t.Fatalf("serialized replay mutated survivor %s: grants %d->%d rebinds %d->%d", survivor.bundleHash, survivor.grants, afterGrants, survivor.rebinds, afterRebinds)
+		}
 	}
 }
 
@@ -425,6 +473,13 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
 	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	emptyPlan, err := runtimeagenttopology.NewSourceSetPlan(nil, nil)
+	if err != nil {
+		t.Fatalf("construct empty source set: %v", err)
+	}
+	if err := installServeSourceSet(ctx, capability, emptyPlan); err != nil {
+		t.Fatalf("install empty source set: %v", err)
+	}
 
 	requestedAt := time.Now().UTC()
 	request := runtimebundledelete.FinalMutationRequest{
@@ -472,9 +527,18 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 	if !reflect.DeepEqual(replayed, committed) {
 		t.Fatalf("replayed unloaded deletion = %#v, want %#v", replayed, committed)
 	}
-	replayedCompletion, err := capability.ReplayBundleDeleteResult(ctx, replay)
+	var ready atomic.Bool
+	supervisor := newProcessLifecycleSupervisor(serveRuntimePersistence{}, &ready, nil)
+	supervisor.SetProcessCapability(capability)
+	replayedCompletion, err := (processOwnedBundleDeleteFinalizer{
+		capability: capability,
+		supervisor: supervisor,
+	}).ReplayBundleDeleteFinalMutation(ctx, replay)
 	if err != nil {
 		t.Fatalf("replay complete unloaded deletion result: %v", err)
+	}
+	if supervisor.CurrentRuntime() != nil || ready.Load() {
+		t.Fatalf("empty source-set replay publication = runtime:%p ready:%v, want detached", supervisor.CurrentRuntime(), ready.Load())
 	}
 	wantCompletion, err := runtimebundledelete.CompleteFinalMutation(request, committed)
 	if err != nil {

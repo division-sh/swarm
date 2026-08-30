@@ -18674,10 +18674,14 @@ multi_bundle_persistence:
           source-set operation ledger together with the exact API request hash. The same final selected-store transaction
           MUST store the complete pre-final coordinator result together with the exact committed final mutation. A retry
           after that commit keeps the same keyed operation identity even when the bundle
-          is absent from planning, verifies the stored request and complete result, and completes only pending survivor
-          refreshes against the current plan before returning success. An ordinary duplicate with no pending refresh
-          MUST return the exact stored plan, cleanup, container, count, and final-mutation facts without synthesis and
-          MUST NOT rotate generations or repeat lifecycle transitions. A later startup MUST terminalize any nonterminal
+          is absent from planning, verifies the stored request and complete result, and acquires the same serialized
+          process-lifecycle operation used by shutdown before observing or preparing survivor topology. The replay
+          completes any pending survivor refresh against the current plan, then attaches the surviving primary runtime
+          and publishes process readiness before returning success. Exact duplicate replay MUST perform this process
+          publication even when no survivor refresh remains, so interruption after durable/context convergence is
+          repairable without another generation grant or lifecycle transition. An empty source set remains detached and
+          unready. An ordinary duplicate MUST return the exact stored plan, cleanup, container, count, and final-mutation
+          facts without synthesis and MUST NOT rotate generations or repeat lifecycle transitions. A later startup MUST terminalize any nonterminal
           persisted identity omitted from the current complete source-set plan through the current admitted generation
           grant; it MUST NOT reconstruct the
           removed source coordinate as mutation authority, and an already terminated identity is an inert historical row.
@@ -18703,6 +18707,8 @@ multi_bundle_persistence:
         - restoring a deleted context after the final mutation reports durable commit evidence
         - reconstructing a replayed coordinator result from only the final mutation or current topology
         - classifying a bundle runtime as unloaded before retained survivor-transition finalization
+        - returning replay success before surviving-primary attachment and readiness publication
+        - preparing replay topology before acquiring the process-lifecycle operation shared with shutdown
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash
@@ -38036,9 +38042,12 @@ agent_topology_authority:
       is mandatory even when an unloaded catalog bundle requires no source-set change. If final API
       completion fails after commit, a keyed retry may recover exactly one matching committed record
       only within the API's 24-hour idempotency window; unkeyed, expired, conflicting, or ambiguous
-      replay fails closed. If planning observes the bundle already absent, replay adopts only an exact
-      retained survivor transition. With no pending survivor transition it is a no-op and cannot rotate
-      a generation or repeat persistence.
+      replay fails closed. If planning observes the bundle already absent, replay acquires the process-lifecycle
+      operation before source-transition preparation, adopts only an exact retained survivor transition, and
+      serializes against process shutdown. After convergence it attaches the surviving primary and publishes
+      readiness before success. With no pending survivor transition, durable topology is a no-op, but exact replay
+      still repairs or preserves process attachment without rotating a generation or repeating persistence. An empty
+      source set remains detached and unready.
 
       On later startup, a persisted static lifecycle identity absent from the complete current plan is
       terminalized only through its exact current runtime-generation grant and matching admission; a

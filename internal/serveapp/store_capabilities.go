@@ -83,7 +83,7 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 	if family, available := owner.BundleDelete(); available {
 		caps.BundleDelete = &runtimebundledelete.Coordinator{
 			Planner: family.Planner(), Cleaner: family.Cleaner(),
-			Finalizer: processOwnedBundleDeleteFinalizer{capability: req.ProcessCapability, runtimeContexts: req.RuntimeContextManager},
+			Finalizer: processOwnedBundleDeleteFinalizer{capability: req.ProcessCapability, supervisor: req.RuntimeSupervisor},
 			Locks:     family.Locks(), ContainerInventory: req.Workspaces,
 			Containers:      runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
 			RuntimeQuiescer: bundleDeleteRuntimeQuiescer{contexts: req.RuntimeContextManager, supervisor: req.RuntimeSupervisor},

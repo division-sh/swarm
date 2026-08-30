@@ -285,6 +285,22 @@ spec_occurrence_manifest:
     disposition: preserve_different_live_agent_route_generation_transition
     owner: EventBus_ReplaceAgentRoute
 
+retired_builder_repository_record_manifest:
+  records:
+    - path: .github/test-timing-weights.json
+      occurrence: phantom_internal_builder_package_timing_weight
+      disposition: remove_deleted_package_inventory_entry
+    - path: .github/ISSUE_TEMPLATE/runtime-bug.yml
+      occurrence: current_builder_RPC_example
+      disposition: rewrite_to_supported_v1_RPC_and_run_control_path
+    - path: internal/apiv1/testdata/openrpc_compliance_matrix.yaml
+      occurrence: unqualified_builder_state_get_entity_consumer
+      disposition: qualify_as_historical_retired_Builder_consumer
+    - path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+      occurrence: unqualified_builder_run_summary_consumer
+      disposition: qualify_as_historical_retired_Builder_consumer
+  enforcement: exact_git_tracked_file_semantic_token_count_and_classification_guard
+
 ratified_product_boundary:
   remove:
     - complete_internal_builder_package_all_production_and_test_files
@@ -356,6 +372,8 @@ user_visible_execution_paths:
       - step: publish_aggregate_survivor_visibility_and_commit_quiescence
         gate: same_chosen_class
       - step: replay_exact_committed_result_when_planner_observes_bundle_absent
+        gate: same_chosen_class
+      - step: publish_surviving_primary_and_process_readiness_before_replay_success
         gate: same_chosen_class
     reachability_prerequisites:
       - process_capability_and_complete_source_set_installed
@@ -429,6 +447,14 @@ canonical_owners_after_change:
       - processOwnedBundleDeleteFinalizer_apply
       - processOwnedBundleDeleteFinalizer_replay
       - every_surviving_loaded_Runtime
+  - concept: bundle_delete_replay_process_publication
+    owner: processLifecycleSupervisor_operation_and_attachPrimaryRuntime
+    real_semantic_owner: true
+    touched_consumers:
+      - exact_keyed_replay_after_partial_survivor_progress
+      - exact_duplicate_after_context_convergence
+      - process_shutdown_serialization
+      - agent_control_and_public_ingress_readiness
   - concept: exact_generation_route_and_execution_handoff
     owner: EventBus_exact_lifecycle_route_plus_lifecycle_execution_lease
     real_semantic_owner: true
@@ -506,7 +532,10 @@ systematic_consumption_audit:
     loaded_removed_bundle_no_survivors: quiesce_delete_commit_no_survivor_transition
     loaded_removed_bundle_with_survivors: quiesce_prepare_delete_rebind_publish
     unloaded_bundle: no_runtime_quiescence_but_same_atomic_finalizer
-    planner_absent_exact_retry: replay_committed_result_and_pending_survivor_transition
+    planner_absent_exact_retry: replay_committed_result_pending_survivor_transition_and_process_publication
+    exact_duplicate_after_context_convergence: repair_process_publication_without_new_grant_or_rebind
+    empty_source_set_replay: preserve_detached_unready_process_state
+    concurrent_process_shutdown: serialize_after_replay_under_process_lifecycle_operation
     precommit_failure: exact_same_predecessor_restore
     postcommit_survivor_failure: no_predecessor_restore_source_remains_removed_and_survivors_stay_fenced_for_replay
     SQLite_public_method: capability_absent_and_fail_closed
@@ -608,7 +637,16 @@ manifestations_and_exact_proof_plan:
     proof: multi_context_dual_store_fault_injection_proves_no_context_reopens_before_aggregate_success
   - manifestation: exact_replay_after_committed_delete_and_partial_survivor_progress
     disposition: in_scope
-    proof: PostgreSQL_real_delete_retry_and_dual_store_transition_replay_complete_once
+    proof: PostgreSQL_immediate_same_process_retry_without_shutdown_help_converges_contexts_attaches_primary_and_opens_agent_public_ingress
+  - manifestation: exact_duplicate_after_durable_and_context_convergence_but_missing_process_publication
+    disposition: in_scope
+    proof: PostgreSQL_duplicate_repairs_attachment_and_readiness_without_extra_generation_grants_or_lifecycle_rebinds
+  - manifestation: bundle_delete_replay_concurrent_with_process_shutdown
+    disposition: in_scope
+    proof: deterministic_barrier_proves_shutdown_waits_for_replay_operation_then_detaches_once
+  - manifestation: stale_or_unqualified_retired_Builder_repository_records
+    disposition: in_scope
+    proof: exact_tracked_file_semantic_reference_count_and_classification_guard
   - manifestation: unrecorded_adjacent_generation_grant_evidence
     disposition: in_scope_if_supported_delete_path_reaches_binding_rank
     proof: mutate_process_and_durable_evidence_independently_and_require_exact_retained_predecessor_or_successor_grant
@@ -733,6 +771,9 @@ required_supported_surface_proof:
     - precommit_restore
     - mixed_static_and_flow_survivors
     - exact_idempotent_replay_after_partial_survivor_progress
+    - same_process_replay_process_attachment_readiness_and_agent_public_ingress
+    - exact_duplicate_publication_repair_without_extra_grants_or_rebinds
+    - replay_serialized_against_process_shutdown
     - restart_readback
   SQLite:
     - public_bundle_delete_capability_absent_and_fail_closed
@@ -744,6 +785,7 @@ required_supported_surface_proof:
     - unchanged_run_fork_same_and_cross_bundle_behavior
     - manager_race_and_real_EventBus_gate_proofs
     - API_spec_OpenRPC_and_persistence_authority_guards
+    - exact_tracked_file_retired_Builder_reference_census
   focused_test_policy:
     targeted: regular_go_test
     whole_suite: go_run_./cmd/swarm-test
@@ -844,6 +886,19 @@ implementation_result:
         generic replacement owner. Terminal process-ownership loss still forces
         runtime shutdown even when pending-transition settlement can no longer use
         the terminal capability.
+    bundle_delete_replay_process_publication:
+      owner: processLifecycleSupervisor_operationMu_and_attachPrimaryRuntime
+      consumers:
+        - exact_keyed_replay_after_partial_survivor_progress
+        - exact_duplicate_after_context_convergence
+        - process_shutdown
+        - agent_control_and_public_ingress
+      systematic_consumption: >-
+        Replay acquires the process lifecycle operation before topology observation,
+        completes only an exact retained survivor transition, and always attaches the
+        surviving primary plus readiness before success. Exact duplicate replay repairs
+        publication without another grant or lifecycle transition; an empty source set
+        remains detached and unready; shutdown cannot interleave.
     durable_survivor_rebind:
       owner: manager.PreparedDurableTopologySourceSetRebind_and_AgentLifecyclePersistence
       consumers:
@@ -898,7 +953,7 @@ implementation_result:
 
   watchlist:
     mapping: declaration_owned_agent_topology_ownership
-    artifact: swarm-docs@02bf5538ce4443c42c30b51d4fed7e7cfebecc87
+    artifact: swarm-docs@34376cf
     decision: existing_node_sufficient_no_further_refinement
 
   architecture_feedback:
@@ -960,6 +1015,18 @@ implementation_result:
     - manifestation: exact_retry_rollback_and_cold_restart_readback
       status: reproduced_and_fixed
       proof: dual_store_transition_replay_bundle_delete_replay_and_startup_takeover_tests
+    - manifestation: same_process_bundle_delete_replay_process_publication
+      status: reproduced_and_fixed
+      proof: TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication
+    - manifestation: exact_duplicate_repairs_missing_process_publication_without_store_mutation
+      status: reproduced_and_fixed
+      proof: TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication_grant_and_rebind_counts
+    - manifestation: bundle_delete_replay_serializes_with_process_shutdown
+      status: reproduced_and_fixed
+      proof: TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication_operation_barrier
+    - manifestation: stale_retired_Builder_repository_records
+      status: reproduced_and_fixed
+      proof: TestRetiredBuilderSemanticReferencesStayExplicit
     - manifestation: ordinary_restart_waits_for_predecessor_loop_release
       status: reproduced_and_fixed
       proof: TestExecutionProjectionReconfigureSerializesRestartSelection_repeated_and_served_parity_restart
@@ -980,7 +1047,9 @@ implementation_result:
       - served_SQLite_PostgreSQL_agent_restart_lifecycle
       - real_PostgreSQL_idle_session_ownership_loss
       - real_PostgreSQL_bundle_delete_force_nonforce_loaded_unloaded_apply_replay
+      - real_PostgreSQL_same_process_replay_publication_duplicate_repair_and_shutdown_serialization
       - SQLite_public_optional_mutator_refusal
       - same_and_cross_bundle_run_fork
       - API_spec_OpenRPC_persistence_authority_selected_store_and_work_lifetime_guards
+      - exact_tracked_file_retired_Builder_semantic_reference_guard
     result: all_green

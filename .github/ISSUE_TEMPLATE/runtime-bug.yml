@@ -54,7 +54,7 @@ body:
       description: Name the exact path, helper, endpoint, runtime surface, or operator flow where the symptom was observed. If unknown, write `unknown yet`.
       placeholder: |
         Example:
-        supported helper run.start path -> builder RPC -> run control -> persisted runs row
+        supported /v1/rpc run.start path -> run-control owner -> persisted runs row
     validations:
       required: true
 
