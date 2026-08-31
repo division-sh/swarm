@@ -9,4 +9,4 @@ test-node:
       emit:
         event: item.scored
         fields:
-          score: "payload.raw_score * 2"
+          score: "payload.raw_score * 2.0"

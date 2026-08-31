@@ -2,10 +2,61 @@ package eventschema
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestValidatePayloadAgainstSchemaReturnsStructuredViolation(t *testing.T) {
+	tests := []struct {
+		name       string
+		schema     map[string]any
+		payload    map[string]any
+		path       string
+		constraint string
+		expected   string
+		actual     string
+	}{
+		{
+			name: "required", schema: map[string]any{"type": "object", "required": []any{"score"}}, payload: map[string]any{},
+			path: "$.score", constraint: "required", expected: "present", actual: "missing",
+		},
+		{
+			name: "additional property", schema: map[string]any{"type": "object", "additionalProperties": false}, payload: map[string]any{"extra": true},
+			path: "$.extra", constraint: "additionalProperties", expected: "declared property", actual: "undeclared property",
+		},
+		{
+			name: "nested type", schema: map[string]any{"type": "object", "properties": map[string]any{"row": map[string]any{"type": "object", "properties": map[string]any{"score": map[string]any{"type": "number"}}}}}, payload: map[string]any{"row": map[string]any{"score": "7.2"}},
+			path: "$.row.score", constraint: "type", expected: "number", actual: "string",
+		},
+		{
+			name: "array item", schema: map[string]any{"type": "object", "properties": map[string]any{"rows": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}}}, payload: map[string]any{"rows": []any{1, "two"}},
+			path: "$.rows[1]", constraint: "type", expected: "integer", actual: "string",
+		},
+		{
+			name: "minimum", schema: map[string]any{"type": "object", "properties": map[string]any{"score": map[string]any{"type": "number", "minimum": 8}}}, payload: map[string]any{"score": 7.25},
+			path: "$.score", constraint: "minimum", expected: ">= 8", actual: "7.25",
+		},
+		{
+			name: "format", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": "bad"},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "bad",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePayloadAgainstSchema(test.schema, test.payload)
+			var violation *Violation
+			if !errors.As(err, &violation) {
+				t.Fatalf("validation error = %#v, want *Violation", err)
+			}
+			if violation.Path != test.path || violation.Constraint != test.constraint || violation.Expected != test.expected || violation.Actual != test.actual || strings.TrimSpace(violation.Detail) == "" {
+				t.Fatalf("violation = %#v, want path=%q constraint=%q expected=%q actual=%q", violation, test.path, test.constraint, test.expected, test.actual)
+			}
+		})
+	}
+}
 
 func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testing.T) {
 	t.Parallel()

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 )
 
@@ -122,6 +123,7 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 }
 
 func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -131,9 +133,9 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	}{
 		{
 			name:       "diagnose default",
-			args:       []string{"run", "status", "run-1"},
+			args:       []string{"run", "status", runID},
 			wantMethod: "run.diagnose",
-			wantOutput: []string{"Run run-1  stalled", "run status  running", "blocker     delivery lifecycle, no active deliveries", "dead letters exist"},
+			wantOutput: []string{"Run " + runID + "  stalled", "run status  running", "blocker     delivery lifecycle, no active deliveries", "dead letters exist"},
 		},
 		{
 			name:       "header only",
@@ -149,13 +151,17 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 				if req.Method != tc.wantMethod {
 					t.Fatalf("method = %q, want %s", req.Method, tc.wantMethod)
 				}
-				if got := req.Params["run_id"]; got != "run-1" {
-					t.Fatalf("run_id param = %#v, want run-1", got)
+				wantRunID := runID
+				if tc.wantMethod == "run.get" {
+					wantRunID = "run-1"
+				}
+				if got := req.Params["run_id"]; got != wantRunID {
+					t.Fatalf("run_id param = %#v, want %s", got, wantRunID)
 				}
 				if tc.wantMethod == "run.get" {
 					return map[string]any{"run": validDiagnosticRunHeader("run-1")}
 				}
-				return validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
+				return validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
 			})
 			defer server.Close()
 
@@ -233,17 +239,18 @@ func TestStatusHumanOutputPreservesCanonicalTerminalEvidence(t *testing.T) {
 }
 
 func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
 	setCLIAPITestToken(t, "test-token")
 	server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.diagnose" {
 			t.Fatalf("method = %q, want run.diagnose", req.Method)
 		}
-		return validDiagnosticRunDiagnosis("run-1", "stalled", "scoring_terminal_outcome", "terminal_scoring_outcome_missing", []any{})
+		return validDiagnosticRunDiagnosis(runID, "stalled", "scoring_terminal_outcome", "terminal_scoring_outcome_missing", []any{})
 	})
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "status", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "status", runID}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -254,6 +261,57 @@ func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
 		if strings.Contains(stdout.String(), machineLabel) {
 			t.Fatalf("stdout leaks machine label %q:\n%s", machineLabel, stdout.String())
 		}
+	}
+}
+
+func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
+	deliveryID := "22222222-2222-4222-8222-222222222222"
+	elementID := "33333333-3333-4333-8333-333333333333"
+	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
+		runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "runtime.engine", "fan_out.emit",
+		map[string]any{"event": "company.registered", "path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+	))
+	if !ok {
+		t.Fatal("construct typed semantic rejection")
+	}
+	result := validDiagnosticRunDiagnosis(runID, "stalled", "", "", []any{})
+	result["fan_out"] = map[string]any{
+		"run_id": runID, "intents": 1, "open": 0, "blocked": 0, "blocked_intents": []any{},
+		"cardinality": 1, "cursor": 1, "owed": 0, "committed": 0, "semantic_rejected": 1,
+		"semantic_rejection_sample": map[string]any{
+			"triggering_delivery_id": deliveryID, "package_key": "root", "element_id": elementID, "ordinal": 0, "failure": failure,
+		},
+		"canceled": 0, "settled": 0, "unsettled": 0,
+		"barrier_armed": 0, "barrier_closed_pending": 0, "barrier_terminal": 0,
+		"min_next_chunk": 4, "max_next_chunk": 4, "last_chunk_max_ms": 0, "oldest_age_ms": 0,
+	}
+
+	for _, test := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "human", args: []string{"run", "status", runID}, want: []string{"1 semantic rejection", deliveryID, elementID, "emit_payload_contract_violation", "$.gem_score"}},
+		{name: "json", args: []string{"run", "status", runID, "--json"}, want: []string{`"semantic_rejected":1`, `"semantic_rejection_sample"`, `"path":"$.gem_score"`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any { return result })
+			defer server.Close()
+			var stdout, stderr bytes.Buffer
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), test.args, &stdout, &stderr, testRootCommandOptions(server)); code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, stderr.String())
+			}
+			for _, want := range test.want {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+			if strings.Contains(stdout.String(), `"rejected":`) {
+				t.Fatalf("stdout contains retired rejected key:\n%s", stdout.String())
+			}
+		})
 	}
 }
 
@@ -269,10 +327,10 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 		{
 			name:       "status prefers running",
 			args:       []string{"run", "status"},
-			lists:      [][]any{{validDiagnosticRunHeaderWithStatus("running-run", "running")}},
+			lists:      [][]any{{validDiagnosticRunHeaderWithStatus("22222222-2222-4222-8222-222222222222", "running")}},
 			owner:      "run.diagnose",
-			selected:   "running-run",
-			wantOutput: "Run running-run  running",
+			selected:   "22222222-2222-4222-8222-222222222222",
+			wantOutput: "Run 22222222-2222-4222-8222-222222222222  running",
 		},
 		{
 			name:       "status falls back to paused",
@@ -1837,6 +1895,7 @@ func validDiagnosticRunDiagnosis(runID, state, layer, reason string, heuristics 
 		"blocking_reason":   reason,
 		"heuristics":        heuristics,
 		"failed_deliveries": []any{},
+		"fan_out":           validDiagnosticFanOutSummary(runID),
 		"test_quiescence": map[string]any{
 			"ready":                     true,
 			"active_deliveries":         0,
@@ -1844,6 +1903,16 @@ func validDiagnosticRunDiagnosis(runID, state, layer, reason string, heuristics 
 			"due_timers":                0,
 			"active_session_leases":     0,
 		},
+	}
+}
+
+func validDiagnosticFanOutSummary(runID string) map[string]any {
+	return map[string]any{
+		"run_id": runID, "intents": 0, "open": 0, "blocked": 0, "blocked_intents": []any{},
+		"cardinality": 0, "cursor": 0, "owed": 0, "committed": 0, "semantic_rejected": 0,
+		"semantic_rejection_sample": nil, "canceled": 0, "settled": 0, "unsettled": 0,
+		"barrier_armed": 0, "barrier_closed_pending": 0, "barrier_terminal": 0,
+		"min_next_chunk": 0, "max_next_chunk": 0, "last_chunk_max_ms": 0, "oldest_age_ms": 0,
 	}
 }
 

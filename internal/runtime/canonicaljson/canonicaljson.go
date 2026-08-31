@@ -40,6 +40,10 @@ func admissionErrorf(format string, args ...any) error {
 	return &AdmissionError{err: fmt.Errorf(format, args...)}
 }
 
+func admissionError(err error) error {
+	return &AdmissionError{err: err}
+}
+
 // Decode admits exactly one JSON value into the closed semantic value model.
 func Decode(raw []byte) (semanticvalue.Value, error) {
 	if !utf8.Valid(raw) {
@@ -328,7 +332,7 @@ func decodeNumber(raw string) (semanticvalue.Value, error) {
 	}
 	value, valueErr := semanticvalue.Number(parsed)
 	if valueErr != nil {
-		return semanticvalue.Value{}, admissionErrorf("unsupported JSON number %q: %v", raw, valueErr)
+		return semanticvalue.Value{}, admissionError(fmt.Errorf("unsupported JSON number %q: %w", raw, valueErr))
 	}
 	return value, nil
 }
@@ -352,8 +356,8 @@ func lexicallyZero(raw string) bool {
 	return true
 }
 
-// NormalizeNumber is a compatibility adapter for typed validation code in the
-// approved child. It returns the closed model's binary64 representation.
+// NormalizeNumber admits a typed numeric carrier through the closed semantic
+// value model and returns its binary64 representation.
 func NormalizeNumber(value any) (float64, error) {
 	var raw string
 	switch typed := value.(type) {

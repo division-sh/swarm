@@ -2,6 +2,7 @@ package semanticvalue
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -10,6 +11,39 @@ import (
 )
 
 const MaxSafeInteger = 9007199254740991
+
+type NumberErrorKind string
+
+const (
+	NumberNotFinite        NumberErrorKind = "not_finite"
+	NumberNegativeZero     NumberErrorKind = "negative_zero"
+	NumberOutsideSafeRange NumberErrorKind = "outside_safe_integer_range"
+)
+
+type NumberError struct {
+	Kind NumberErrorKind
+}
+
+func (e *NumberError) Error() string {
+	if e == nil {
+		return "semantic number is invalid"
+	}
+	switch e.Kind {
+	case NumberNotFinite:
+		return "semantic number must be finite"
+	case NumberNegativeZero:
+		return "semantic number cannot be negative zero"
+	case NumberOutsideSafeRange:
+		return "integer-valued semantic number is outside the I-JSON safe range"
+	default:
+		return "semantic number is invalid"
+	}
+}
+
+func IsNumberError(err error, kind NumberErrorKind) bool {
+	var target *NumberError
+	return errors.As(err, &target) && target != nil && target.Kind == kind
+}
 
 type Kind uint8
 
@@ -49,13 +83,13 @@ func Bool(value bool) Value {
 
 func Number(value float64) (Value, error) {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return Value{}, fmt.Errorf("semantic number must be finite")
+		return Value{}, &NumberError{Kind: NumberNotFinite}
 	}
 	if value == 0 && math.Signbit(value) {
-		return Value{}, fmt.Errorf("semantic number cannot be negative zero")
+		return Value{}, &NumberError{Kind: NumberNegativeZero}
 	}
 	if math.Trunc(value) == value && math.Abs(value) > MaxSafeInteger {
-		return Value{}, fmt.Errorf("integer-valued semantic number is outside the I-JSON safe range")
+		return Value{}, &NumberError{Kind: NumberOutsideSafeRange}
 	}
 	return Value{kind: KindNumber, number: value}, nil
 }
