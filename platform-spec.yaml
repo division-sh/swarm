@@ -21989,8 +21989,8 @@ test_specification:
         M8: One decision card is listed, read, approved, and read back as decided through public RPC.
         M9: One mocked connector activity settles once without live transport.
         M10: Public run/event/mailbox/health reads reach quiescence; SQL and logs remain failure diagnostics only.
-        M11: Graceful SQLite restart retains standing service, run, generation, and bundle identity.
-        M12: Graceful PostgreSQL restart retains the same identity set.
+        M11: Graceful SQLite restart retains standing service, run, generation, bundle, and exact standing receipt entity identity across pre/post-restart ingress.
+        M12: Graceful PostgreSQL restart retains the same identity set and exact standing receipt entity comparison.
         M13: The forced-death checkpoint contains exactly the receipt's normalized event, one pending normal-authority delivery, and one active diagnosis obligation.
         M14: Omitted-recovery restart refuses before readiness on SQLite and PostgreSQL.
         M15: The refusing process is observed exiting nonzero, rather than timing out, and releases selected-store possession before config changes.
@@ -21998,7 +21998,7 @@ test_specification:
         M17: Active standing reconciliation exposes running plus standing_reconcile and automatically converges the interrupted delivery exactly once on both stores.
         M18: A new transport and idempotency identity with the same conversation selects the same downstream entity, flow instance, subscriber, and existing-entity route.
         M19: Every old public event and delivery fact remains byte-for-byte unchanged after exactly one fresh post-recovery chain.
-        M20: Both recovery journeys retain exact service, run, generation, standing ingress entity, bundle, downstream target, and delivery authority.
+        M20: Both recovery journeys compare baseline, checkpoint, and post-recovery standing receipt entity identity while separately retaining exact service, run, generation, bundle, downstream target, and delivery authority.
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The lifecycle executable/support registry and canonical-routing overlay registry remain distinct total owners.
