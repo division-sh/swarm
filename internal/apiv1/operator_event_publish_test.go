@@ -574,22 +574,22 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "workflow.completed", `{"topic":"medicine"}`, "", "idem-root-collision"))
+	published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "item.received", `{"item_id":"medicine","topic":"medicine"}`, "", "idem-root-collision"))
 	if published.Error != nil {
 		t.Fatalf("event.publish root collision error = %#v", published.Error)
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	if got := countEventsByName(t, db, "workflow.completed"); got != 1 {
-		t.Fatalf("workflow.completed event count = %d, want 1", got)
+	if got := countEventsByName(t, db, "item.received"); got != 1 {
+		t.Fatalf("item.received event count = %d, want 1", got)
 	}
-	for _, flowEventName := range []string{"alpha-flow/workflow.completed", "beta-flow/workflow.completed"} {
+	for _, flowEventName := range []string{"alpha-flow/item.received", "beta-flow/item.received"} {
 		if got := countEventsByName(t, db, flowEventName); got != 0 {
 			t.Fatalf("%s event count = %d, want 0", flowEventName, got)
 		}
 	}
-	assertEventPublishPersistence(t, db, runID, eventID, "workflow.completed", "cli-publish:"+actorTokenID(testToken))
+	assertEventPublishPersistence(t, db, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken))
 }
 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
@@ -2412,42 +2412,32 @@ func ambiguousFlowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContr
 
 func rootAndAmbiguousFlowScopedEventPublishTestBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	files := map[string]string{
-		"package.yaml": `name: review
+		"package.yaml": `name: routing-root-ingress
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 flows:
   - {id: alpha-flow, flow: alpha-flow, mode: static}
   - {id: beta-flow, flow: beta-flow, mode: static}
 `,
-		"schema.yaml": `name: review
-pins:
-  inputs:
-    events:
-      - {event: workflow.completed, source: external}
-`,
-		"events.yaml": `workflow.completed:
+		"events.yaml": `item.received:
+  item_id: text
   topic: text
-`,
-		"nodes.yaml": `root-observer:
-  id: root-observer
-  execution_type: system_node
-  subscribes_to: [workflow.completed]
-  event_handlers:
-    workflow.completed: {}
+item.processed:
+  item_id: text?
 `,
 		"flows/alpha-flow/schema.yaml": `name: alpha-flow
 mode: static
 `,
-		"flows/alpha-flow/events.yaml": `workflow.completed:
-  topic: text
+		"flows/alpha-flow/events.yaml": `item.received:
+  item_id: text
 `,
 		"flows/beta-flow/schema.yaml": `name: beta-flow
 mode: static
 `,
-		"flows/beta-flow/events.yaml": `workflow.completed:
-  topic: text
+		"flows/beta-flow/events.yaml": `item.received:
+  item_id: text
 `,
 	}
 	for relative, contents := range files {
@@ -2464,13 +2454,13 @@ mode: static
 	if err != nil {
 		t.Fatalf("load root/flow event-name collision fixture: %v", err)
 	}
-	entry, ok := bundle.AuthoredResolvedEventCatalog()["workflow.completed"]
+	entry, ok := bundle.AuthoredResolvedEventCatalog()["item.received"]
 	if !ok {
-		t.Fatal("loaded collision fixture omitted root workflow.completed declaration")
+		t.Fatal("loaded collision fixture omitted root item.received declaration")
 	}
 	// Preserve the API's exact root-name lookup while compiled schema evidence
 	// remains owned by the loader-admitted project declaration.
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"workflow.completed": entry}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"item.received": entry}
 	return bundle
 }
 

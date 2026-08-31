@@ -56,7 +56,7 @@ states: [new, waiting, done]
       rules:
         complete:
           element_id: 00000000-0000-4000-8000-000000000007
-          condition: "payload.item_id == 'review'"
+          condition: "has(payload.item_id) && payload.item_id == 'review'"
           advances_to: done
 `)
 	return root
