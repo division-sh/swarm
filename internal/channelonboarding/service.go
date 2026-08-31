@@ -483,14 +483,6 @@ func (s *Service) ConfirmIdentity(ctx context.Context, operationID string, expec
 	if err != nil {
 		return operatorchannel.Operation{}, operatorchannel.Binding{}, err
 	}
-	if !identityBefore.State.Terminal() {
-		if parent.Phase.Terminal() {
-			return identityBefore, operatorchannel.Binding{}, fmt.Errorf("%w: onboarding parent is already %s", ErrConflict, parent.Phase)
-		}
-		if parent.IdentityOperationID != identityBefore.OperationID {
-			return identityBefore, operatorchannel.Binding{}, fmt.Errorf("%w: onboarding parent no longer owns identity operation", ErrRevisionConflict)
-		}
-	}
 	identity, binding, confirmErr := s.identities.Confirm(ctx, identityBefore.OperationID, expectedRevision, approve, now)
 	if !errors.Is(confirmErr, operatorchannel.ErrCredentialStale) || identity.State != operatorchannel.StateCredentialStale {
 		return identity, binding, confirmErr
