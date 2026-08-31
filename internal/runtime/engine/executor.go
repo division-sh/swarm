@@ -2769,7 +2769,7 @@ func encodePayload(payload map[string]any) (json.RawMessage, error) {
 	if len(payload) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return nil, err
 	}

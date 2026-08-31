@@ -24,6 +24,85 @@ func TestDecodePreservingNumberLexemesRetainsTransportKinds(t *testing.T) {
 	}
 }
 
+func TestMarshalPreservingNumberKindsRetainsRuntimeCarrierKinds(t *testing.T) {
+	semanticNumber, err := semanticvalue.Number(75)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := map[string]any{
+		"array": []any{int64(75), float64(75), json.Number("75e0")},
+		"float": float64(75),
+		"int":   int64(75),
+		"nested": map[string]any{
+			"decimal":  json.Number("75.0"),
+			"fraction": float32(1.25),
+			"semantic": semanticNumber,
+		},
+	}
+	raw, err := MarshalPreservingNumberKinds(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"array":[75,75.0,75.0],"float":75.0,"int":75,"nested":{"decimal":75.0,"fraction":1.25,"semantic":75.0}}`
+	if string(raw) != want {
+		t.Fatalf("kind-preserving JSON = %s, want %s", raw, want)
+	}
+	var decoded map[string]any
+	if err := DecodePreservingNumberLexemes(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for path, got := range map[string]any{
+		"int":      decoded["int"],
+		"float":    decoded["float"],
+		"semantic": decoded["nested"].(map[string]any)["semantic"],
+	} {
+		number, ok := got.(json.Number)
+		if !ok {
+			t.Fatalf("decoded %s = %#v, want json.Number", path, got)
+		}
+		if path == "int" && number.String() != "75" || path != "int" && number.String() != "75.0" {
+			t.Fatalf("decoded %s = %q", path, number)
+		}
+	}
+}
+
+func TestKindPreservingTransportDoesNotRedefineSemanticCanonicalization(t *testing.T) {
+	value := map[string]any{"value": float64(75)}
+	transport, err := MarshalPreservingNumberKinds(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic, err := Bytes(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(transport) != `{"value":75.0}` || string(semantic) != `{"value":75}` {
+		t.Fatalf("transport = %s semantic = %s, want distinct kind-preserving and semantic encodings", transport, semantic)
+	}
+}
+
+func TestMarshalPreservingNumberKindsFailsClosed(t *testing.T) {
+	cycle := map[string]any{}
+	cycle["cycle"] = cycle
+	for _, test := range []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "unsafe integer", value: map[string]any{"value": int64(MaxSafeInteger + 1)}, want: "safe range"},
+		{name: "negative zero", value: map[string]any{"value": math.Copysign(0, -1)}, want: "negative zero"},
+		{name: "nonfinite", value: map[string]any{"value": math.Inf(1)}, want: "finite"},
+		{name: "malformed lexical number", value: map[string]any{"value": json.Number("not-number")}, want: "unsupported JSON number"},
+		{name: "cycle", value: cycle, want: "cycle"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := MarshalPreservingNumberKinds(test.value); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("MarshalPreservingNumberKinds error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestDecodeNormalizesIJSONSafeNumbers(t *testing.T) {
 	raw := []byte(`{"safe_integer":9007199254740991,"fraction":1.25,"equivalent_integer":1e0}`)
 	decoded, err := Decode(raw)

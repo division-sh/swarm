@@ -63,6 +63,40 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 	}
 }
 
+func TestWorkflowStateWriterPreservesNativeWholeDoubleForCELArithmetic(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		StorageRef: "review/inst-1", EntityType: "review_subject",
+		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active",
+		Fields: map[string]any{
+			"integer": int64(75),
+			"double":  float64(75),
+			"nested":  []any{json.Number("75.0"), json.Number("75e0")},
+		},
+	})
+	record, err := workflowEngineStateRecord(
+		uuid.NewString(), testWorkflowInstanceRoute(instance.StorageRef), instance,
+		"", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(record.Fields) != `{"double":75.0,"integer":75,"nested":[75.0,75.0]}` {
+		t.Fatalf("persisted workflow fields = %s", record.Fields)
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", record.Fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := newWorkflowExpressionEvaluator().EvalBool(
+		"entity.integer + 1 == 76 && entity.double + 1.0 == 76.0 && entity.nested[0] + 1.0 == 76.0 && entity.nested[1] + 1.0 == 76.0",
+		workflowExpressionContext{Entity: fields},
+	)
+	if err != nil || !matched {
+		t.Fatalf("persisted workflow writer arithmetic = %v err=%v fields=%#v", matched, err, fields)
+	}
+}
+
 func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
 	_, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
@@ -339,8 +373,8 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("Fields business_brief = %#v, want first", got)
 	}
 	gotScore, ok := workflowStateBucketObject(loaded, "score")
-	if !ok || gotScore["value"] != int64(1) {
-		t.Fatalf("StateBuckets score = %#v ok=%v, want 1", gotScore, ok)
+	if !ok || gotScore["value"] != float64(1) {
+		t.Fatalf("StateBuckets score = %#v ok=%v, want double 1", gotScore, ok)
 	}
 
 	var (

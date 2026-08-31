@@ -153,23 +153,23 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	fields, err := canonicaljson.Bytes(projection.Fields)
+	fields, err := canonicaljson.MarshalPreservingNumberKinds(projection.Fields)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	bookkeeping, err := canonicaljson.Bytes(projection.Bookkeeping)
+	bookkeeping, err := canonicaljson.MarshalPreservingNumberKinds(projection.Bookkeeping)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	gates, err := canonicaljson.Bytes(projection.GatesAny())
+	gates, err := canonicaljson.MarshalPreservingNumberKinds(projection.GatesAny())
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	accumulator, err := canonicaljson.Bytes(projection.Accumulator)
+	accumulator, err := canonicaljson.MarshalPreservingNumberKinds(projection.Accumulator)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	config, err := canonicaljson.Bytes(projection.ConfigPayload(instance.WorkflowVersion))
+	config, err := canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(instance.WorkflowVersion))
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -184,11 +184,11 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		OccurredAt:      canonicalWorkflowInstancePersistedTime(normalized.OccurredAt),
 		Persisted:       projection,
 	}
-	initialJSON, err := canonicaljson.Bytes(initial)
+	initialJSON, err := canonicaljson.MarshalPreservingNumberKinds(initial)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	readinessJSON, err := canonicaljson.Bytes(normalized.Readiness)
+	readinessJSON, err := canonicaljson.MarshalPreservingNumberKinds(normalized.Readiness)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}

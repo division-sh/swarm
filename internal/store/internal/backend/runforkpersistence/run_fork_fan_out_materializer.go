@@ -219,7 +219,7 @@ func materializeRunForkFanOutObligations(
 		if err := intent.Validate(); err != nil {
 			return 0, fmt.Errorf("validate materialized fork fan-out %s: %w", intent.Request.Key.String(), err)
 		}
-		capsule, err := json.Marshal(intent.Request.Capsule)
+		capsule, err := fanoutobligation.MarshalCapsule(intent.Request.Capsule)
 		if err != nil {
 			return 0, fmt.Errorf("encode materialized fork fan-out capsule: %w", err)
 		}

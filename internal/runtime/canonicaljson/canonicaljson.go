@@ -3,6 +3,7 @@ package canonicaljson
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -85,6 +88,269 @@ func DecodePreservingNumberLexemes(raw []byte, destination any) error {
 		return fmt.Errorf("trailing JSON content: %w", err)
 	}
 	return nil
+}
+
+// MarshalPreservingNumberKinds encodes a runtime transport value without
+// collapsing an integral floating-point carrier into a JSON integer token.
+// Semantic canonicalization and hashing remain owned by Bytes and Encode.
+func MarshalPreservingNumberKinds(value any) ([]byte, error) {
+	return appendTransportValue(nil, reflect.ValueOf(value), map[visit]struct{}{})
+}
+
+func appendTransportValue(dst []byte, value reflect.Value, seen map[visit]struct{}) ([]byte, error) {
+	if !value.IsValid() {
+		return append(dst, "null"...), nil
+	}
+	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return append(dst, "null"...), nil
+		}
+		if value.Kind() == reflect.Pointer {
+			key := visit{typeID: value.Type(), ptr: value.Pointer()}
+			if _, exists := seen[key]; exists {
+				return nil, fmt.Errorf("runtime transport value contains a cycle")
+			}
+			seen[key] = struct{}{}
+			defer delete(seen, key)
+		}
+		value = value.Elem()
+	}
+	if value.CanInterface() {
+		switch typed := value.Interface().(type) {
+		case json.Number:
+			number, err := NormalizeNumber(typed)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := typed.Int64(); err == nil {
+				return append(dst, typed.String()...), nil
+			}
+			return appendTransportFloat(dst, number, 64)
+		case json.RawMessage:
+			var decoded any
+			if err := DecodePreservingNumberLexemes(typed, &decoded); err != nil {
+				return nil, err
+			}
+			return appendTransportValue(dst, reflect.ValueOf(decoded), seen)
+		case semanticvalue.Value:
+			return appendTransportSemanticValue(dst, typed, seen)
+		}
+	}
+
+	switch value.Kind() {
+	case reflect.Bool:
+		return strconv.AppendBool(dst, value.Bool()), nil
+	case reflect.String:
+		if !utf8.ValidString(value.String()) {
+			return nil, fmt.Errorf("runtime transport string is not valid UTF-8")
+		}
+		raw, err := json.Marshal(value.String())
+		return append(dst, raw...), err
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if _, err := NormalizeNumber(value.Int()); err != nil {
+			return nil, err
+		}
+		return strconv.AppendInt(dst, value.Int(), 10), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if _, err := NormalizeNumber(value.Uint()); err != nil {
+			return nil, err
+		}
+		return strconv.AppendUint(dst, value.Uint(), 10), nil
+	case reflect.Float32, reflect.Float64:
+		return appendTransportFloat(dst, value.Float(), value.Type().Bits())
+	case reflect.Slice:
+		if value.IsNil() {
+			return append(dst, "null"...), nil
+		}
+		key := visit{typeID: value.Type(), ptr: value.Pointer()}
+		if value.Pointer() != 0 {
+			if _, exists := seen[key]; exists {
+				return nil, fmt.Errorf("runtime transport value contains a cycle")
+			}
+			seen[key] = struct{}{}
+			defer delete(seen, key)
+		}
+		return appendTransportArray(dst, value, seen)
+	case reflect.Array:
+		return appendTransportArray(dst, value, seen)
+	case reflect.Map:
+		if value.IsNil() {
+			return append(dst, "null"...), nil
+		}
+		if value.Type().Key().Kind() != reflect.String {
+			return nil, fmt.Errorf("runtime transport object keys must be strings")
+		}
+		key := visit{typeID: value.Type(), ptr: value.Pointer()}
+		if _, exists := seen[key]; exists {
+			return nil, fmt.Errorf("runtime transport value contains a cycle")
+		}
+		seen[key] = struct{}{}
+		defer delete(seen, key)
+		return appendTransportMap(dst, value, seen)
+	case reflect.Struct:
+		if value.CanInterface() {
+			if marshaler, ok := value.Interface().(json.Marshaler); ok {
+				raw, err := marshaler.MarshalJSON()
+				if err != nil {
+					return nil, err
+				}
+				var decoded any
+				if err := DecodePreservingNumberLexemes(raw, &decoded); err != nil {
+					return nil, err
+				}
+				return appendTransportValue(dst, reflect.ValueOf(decoded), seen)
+			}
+			if text, ok := value.Interface().(encoding.TextMarshaler); ok {
+				raw, err := text.MarshalText()
+				if err != nil {
+					return nil, err
+				}
+				return appendTransportValue(dst, reflect.ValueOf(string(raw)), seen)
+			}
+		}
+		return appendTransportStruct(dst, value, seen)
+	default:
+		return nil, fmt.Errorf("unsupported runtime transport value %s", value.Type())
+	}
+}
+
+func appendTransportFloat(dst []byte, value float64, bits int) ([]byte, error) {
+	if _, err := NormalizeNumber(value); err != nil {
+		return nil, err
+	}
+	raw := strconv.FormatFloat(value, 'g', -1, bits)
+	if !strings.ContainsAny(raw, ".eE") {
+		raw += ".0"
+	}
+	return append(dst, raw...), nil
+}
+
+func appendTransportSemanticValue(dst []byte, value semanticvalue.Value, seen map[visit]struct{}) ([]byte, error) {
+	if value.Kind() == semanticvalue.KindNumber {
+		number, _ := value.Number()
+		return appendTransportFloat(dst, number, 64)
+	}
+	return appendTransportValue(dst, reflect.ValueOf(value.Interface()), seen)
+}
+
+func appendTransportArray(dst []byte, value reflect.Value, seen map[visit]struct{}) ([]byte, error) {
+	dst = append(dst, '[')
+	for index := 0; index < value.Len(); index++ {
+		if index > 0 {
+			dst = append(dst, ',')
+		}
+		var err error
+		dst, err = appendTransportValue(dst, value.Index(index), seen)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, ']'), nil
+}
+
+func appendTransportMap(dst []byte, value reflect.Value, seen map[visit]struct{}) ([]byte, error) {
+	keys := value.MapKeys()
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+	dst = append(dst, '{')
+	for index, key := range keys {
+		if !utf8.ValidString(key.String()) {
+			return nil, fmt.Errorf("runtime transport object key is not valid UTF-8")
+		}
+		if index > 0 {
+			dst = append(dst, ',')
+		}
+		raw, err := json.Marshal(key.String())
+		if err != nil {
+			return nil, err
+		}
+		dst = append(dst, raw...)
+		dst = append(dst, ':')
+		dst, err = appendTransportValue(dst, value.MapIndex(key), seen)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, '}'), nil
+}
+
+type transportStructField struct {
+	name  string
+	value reflect.Value
+}
+
+func appendTransportStruct(dst []byte, value reflect.Value, seen map[visit]struct{}) ([]byte, error) {
+	typeOf := value.Type()
+	fields := make([]transportStructField, 0, value.NumField())
+	for index := 0; index < value.NumField(); index++ {
+		field := typeOf.Field(index)
+		if field.PkgPath != "" {
+			continue
+		}
+		tag := field.Tag.Get("json")
+		parts := strings.Split(tag, ",")
+		if parts[0] == "-" {
+			continue
+		}
+		name := parts[0]
+		if name == "" {
+			name = field.Name
+		}
+		fieldValue := value.Field(index)
+		if len(parts) > 1 && slicesContain(parts[1:], "omitempty") && emptyJSONValue(fieldValue) {
+			continue
+		}
+		fields = append(fields, transportStructField{name: name, value: fieldValue})
+	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
+	for index := 1; index < len(fields); index++ {
+		if fields[index-1].name == fields[index].name {
+			return nil, fmt.Errorf("runtime transport struct repeats JSON field %q", fields[index].name)
+		}
+	}
+	dst = append(dst, '{')
+	for index, field := range fields {
+		if !utf8.ValidString(field.name) {
+			return nil, fmt.Errorf("runtime transport struct field is not valid UTF-8")
+		}
+		if index > 0 {
+			dst = append(dst, ',')
+		}
+		raw, err := json.Marshal(field.name)
+		if err != nil {
+			return nil, err
+		}
+		dst = append(dst, raw...)
+		dst = append(dst, ':')
+		dst, err = appendTransportValue(dst, field.value, seen)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, '}'), nil
+}
+
+func emptyJSONValue(value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return value.Len() == 0
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.Interface, reflect.Pointer:
+		return value.IsZero()
+	default:
+		return false
+	}
+}
+
+func slicesContain(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // DecodeInto is a centralized typed adapter. The admitted Value remains the
