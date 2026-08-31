@@ -11871,7 +11871,11 @@ flow_model:
         The standing service identity is the deterministic service_id derived from package_key plus flow_id. A destructive
         project-local dev scratch epoch may therefore recreate the same authored service_id and generation-one run_id after
         deleting every predecessor durable fact; recurrence of those semantic IDs does not adopt the predecessor occurrence.
-        Bundle hash and bundle source are revision metadata, never lifecycle identity or admission gates. Before readiness, one
+        Bundle hash and bundle source are revision metadata, never lifecycle identity or admission gates.
+        standing_services.current_bundle_hash/current_bundle_source own the latest admitted declaration source, while the
+        referenced runs row owns the source actually used by current generation N. Those facts match while N is executable,
+        but a terminal or still-invalid N retains its run provenance when a later declaration selects a new source;
+        reconciliation durably records that latest declaration source without rewriting N. Before readiness, one
         selected-store transaction validates the complete declaration set, creates or revises every declared service, and
         orphans every previously declared service omitted from that complete set. A retained declaration keeps its current
         nonterminal run and generation while its source revision and journal advance. A removed, renamed, or non-standing
@@ -11892,8 +11896,13 @@ flow_model:
         publication, ingress, timers, manager work, activity/effect recovery, or standing leases. An unprovable pointer,
         identity, lifecycle, or selected-store relation fails boot closed. An ordinary result is possible only when the run is
         not the exact current pointer, including historical standing lineage. Explicit standing reset is the sole operation
-        that retires N and creates N+1; startup reconciliation never repairs or advances a terminal generation. Restoring a
-        terminal orphan retains terminal N as terminal_declared and teaches reset. A terminal or invalid member is a typed
+        that retires N and creates N+1; startup reconciliation never repairs or advances a terminal generation. Reset
+        quiesces N under N's run-owned source, creates N+1 under the latest declaration-owned source, retires N exactly once,
+        installs the N+1 generation relation and current pointer, and only then applies a retained suspended override. The
+        selected-store transaction rolls every step back on failure. Restoring a terminal orphan retains terminal N as
+        terminal_declared, records the latest declaration source, and teaches reset. Re-declaring an invalid orphan is the
+        explicit restore transition: an active N consumes the ordinary source-revision owner before becoming active_intrinsic,
+        after which explicit reset is reachable; no operator override is inferred. A terminal or invalid member is a typed
         per-service result and cannot abort healthy or renamed-new siblings in complete-set reconciliation.
         Reconciliation normalizes an active_intrinsic declaration to running while retaining exact N. A generic public
         run.pause changes only run-scoped control and does not create the durable standing suspension override, so restart
@@ -14147,8 +14156,11 @@ platform_tables:
       description: >-
         Durable declaration-owned standing-service identity and desired-state owner.
         package_key plus flow_id is stable across bundle revisions. current_run_id and
-        current_generation select one generation; operator override and publication
-        sequence are explicit persisted facts rather than source-hash inference.
+        current_generation select one generation. current_bundle_hash/current_bundle_source
+        record the latest admitted declaration source, which can differ from a terminal or
+        invalid current run's immutable source until explicit reset creates its successor.
+        Operator override and publication sequence are explicit persisted facts rather than
+        source-hash inference.
       ddl: |
         CREATE TABLE standing_services (
             service_id             UUID PRIMARY KEY,

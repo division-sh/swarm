@@ -209,7 +209,7 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService(terminal): %v", err)
 	}
-	if stopped.Transition != "stopped" || stopped.Generation != created.Generation || stopped.RunID != created.RunID ||
+	if stopped.Transition != "revised" || stopped.Generation != created.Generation || stopped.RunID != created.RunID || stopped.BundleHash != secondHash ||
 		stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared ||
 		stopped.RestartDisposition.Remediation != runtimepipeline.StandingRestartReset {
 		t.Fatalf("terminal reconciliation = %#v", stopped)

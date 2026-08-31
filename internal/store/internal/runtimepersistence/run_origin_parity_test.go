@@ -303,7 +303,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if err != nil {
 				t.Fatalf("reconcile terminal standing generation: %v", err)
 			}
-			if stopped.Transition != "stopped" || stopped.RunID != fresh.RunID || stopped.Generation != fresh.Generation ||
+			if stopped.Transition != "revised" || stopped.RunID != fresh.RunID || stopped.Generation != fresh.Generation || stopped.BundleHash != secondHash ||
 				stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
 				t.Fatalf("terminal standing result = %#v", stopped)
 			}
@@ -353,7 +353,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if err != nil {
 				t.Fatalf("reconcile terminal suspended standing generation: %v", err)
 			}
-			if suspendedStopped.Transition != "stopped" || suspendedStopped.EffectiveState != "suspended" ||
+			if suspendedStopped.Transition != "revised" || suspendedStopped.EffectiveState != "suspended" || suspendedStopped.BundleHash != secondHash ||
 				suspendedStopped.RunID != suspendedFresh.RunID || suspendedStopped.Generation != suspendedFresh.Generation ||
 				suspendedStopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
 				t.Fatalf("terminal suspended result = %#v", suspendedStopped)
