@@ -482,24 +482,11 @@ func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[strin
 	if raw == "" {
 		return map[string]any{}, ""
 	}
-	nullable := eventFieldTypeAllowsNull(raw)
 	if normalized, typeDescription := normalizeEventFieldType(raw); normalized != "" && normalized != raw {
 		prop := eventSchemaForResolvedType(normalized, types, seen)
-		if nullable {
-			prop["nullable"] = true
-		}
 		return prop, typeDescription
 	}
-	prop := eventSchemaForResolvedType(raw, types, seen)
-	if nullable {
-		prop["nullable"] = true
-	}
-	return prop, ""
-}
-
-func eventFieldTypeAllowsNull(raw string) bool {
-	lower := strings.ToLower(strings.TrimSpace(raw))
-	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until")
+	return eventSchemaForResolvedType(raw, types, seen), ""
 }
 
 func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {

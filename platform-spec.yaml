@@ -19142,6 +19142,12 @@ platform_events:
     examples:
       dotted_event_key: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
       simple_owner: platform-spec.yaml#engine.error_model.dead_letter_schema
+  payload_presence:
+    rule: Platform catalog payload fields use the same required-by-default structural grammar as product events and named records.
+      Exactly one trailing `?` on the complete field type marks that field optional; the marker is removed from the effective type.
+    nested_records: Nested platform payload mappings apply the same rule recursively.
+    retired: Parallel `required:` lists and prose-derived optional/nullable meaning are invalid. Runtime null from an external
+      optional field lowers to omission during canonical event admission; platform producers emit omission directly.
   catalog:
     event.replayed:
       description: Durable operator audit evidence that an existing event delivery was replayed. This audit event is diagnostic evidence and is not an author-story occurrence.
@@ -19158,20 +19164,11 @@ platform_events:
         replay_event_id: uuid
         audit_event_id: uuid
         run_id: uuid
-        entity_id: uuid (optional)
+        entity_id: uuid?
         subscribers: array of string
         triggered_by: string
-        actor_token_id: string (optional)
+        actor_token_id: string?
         original_deliveries: array of object
-      required:
-      - original_event_id
-      - original_event_name
-      - replay_event_id
-      - audit_event_id
-      - run_id
-      - subscribers
-      - triggered_by
-      - original_deliveries
       produced_by_type: platform
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
@@ -19206,21 +19203,31 @@ platform_events:
       payload:
         activity_id: string
         tool: string
-        bundle_hash: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
-        workflow_version: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
+        bundle_hash:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
+        workflow_version:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
         input: object
         effect_class: string
         success_event: string
         failure_event: string
-        revision_event: string (optional; generated typed feedback event for an approved activity)
-        rejected_event: string (optional; generated typed rejection event for an approved activity)
+        revision_event:
+          type: string?
+          description: Generated typed feedback event for an approved activity.
+        rejected_event:
+          type: string?
+          description: Generated typed rejection event for an approved activity.
         retry_max_attempts: integer
         retry_backoff: string
         fork_policy: string
         entity_id: string
         node_id: string
         flow_id: string
-        flow_instance: string (optional; exact producing flow instance)
+        flow_instance:
+          type: string?
+          description: Exact producing flow instance.
         handler_event_key: string
         source_event_id: string
         source_run_id: string
@@ -19228,8 +19235,12 @@ platform_events:
         parent_event_id: string
         chain_depth: integer
         attempt: integer
-        loop_generation: object (optional; durable bounded-loop attempt identity)
-        loop_stage: string (optional; source stage claimed with the attempt)
+        loop_generation:
+          type: object?
+          description: Durable bounded-loop attempt identity.
+        loop_stage:
+          type: string?
+          description: Source stage claimed with the attempt.
       produced_by_type: platform
     platform.agent_failed:
       description: Agent session failed after retry.
@@ -19243,7 +19254,7 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         retry_count: integer
         last_event_type: string
@@ -19261,10 +19272,10 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         stack_trace: string
-        conversation_id: string (nullable)
+        conversation_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.event_quarantined:
@@ -19294,7 +19305,7 @@ platform_events:
       routing_class: event_loop_routable
       scope: global
       payload:
-        flow_instance: string
+        flow_instance: string?
         dead_letter_count: integer
         window_minutes: integer
         sample_events: array
@@ -19320,15 +19331,6 @@ platform_events:
         threshold_seconds: integer
         stalled_for_seconds: integer
         emitted_at: string (ISO 8601)
-      required:
-      - run_id
-      - operational_state
-      - blocking_layer
-      - blocking_reason
-      - last_progress_at
-      - threshold_seconds
-      - stalled_for_seconds
-      - emitted_at
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
@@ -19364,18 +19366,10 @@ platform_events:
         agent_id: string
         entity_id: string
         flow_instance: string
-        tool_name: string (nullable)
+        tool_name: string?
         action: string
         failure: platform.failure/v1 envelope
         timestamp: string (ISO 8601)
-      required:
-      - agent_id
-      - entity_id
-      - flow_instance
-      - tool_name
-      - action
-      - failure
-      - timestamp
       produced_by_type: platform
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
@@ -19418,7 +19412,9 @@ platform_events:
       payload:
         reason: string
         paused_by: string
-        last_failure: platform.failure/v1 envelope (nullable; present for safety-triggered pauses and absent for operator control pauses)
+        last_failure:
+          type: platform.failure/v1 envelope?
+          description: Present for safety-triggered pauses and absent for operator control pauses.
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.resumed:
@@ -19460,17 +19456,8 @@ platform_events:
         run_id: string
         run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
         source: string
-        operator_id: string (nullable)
+        operator_id: string?
         timestamp: string (ISO 8601)
-      required:
-      - operation_id
-      - agent_id
-      - directive_text
-      - mode
-      - run_id
-      - run_id_resolution
-      - source
-      - timestamp
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
@@ -19483,7 +19470,7 @@ platform_events:
       scope: flow
       payload:
         agent_id: string
-        flow_instance: string (nullable)
+        flow_instance: string?
         memory_enabled: boolean
         memory_source: string (authored | platform_default)
         model: string
@@ -19518,22 +19505,32 @@ platform_events:
           reason_code: string
           recovery_on_startup: boolean
           recovery_inspection_complete: boolean
-          startup_blocking_timer_count: integer (optional; present when recovery inspection completed)
-          standing_timer_obligation_count: integer (optional; present when recovery inspection completed)
-          timer_obligations: TimerObligationSnapshot (optional; present when recovery inspection completed)
-          delivery_recovery_inventory: object (optional; present when recovery inspection completed)
+          startup_blocking_timer_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          standing_timer_obligation_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          timer_obligations:
+            type: TimerObligationSnapshot?
+            description: Present when recovery inspection completed.
+          delivery_recovery_inventory:
+            type: object?
+            description: Present when recovery inspection completed.
           schedule_replay_count: integer
           schedule_skip_count: integer
           schedule_drop_count: integer
           manager_replay_count: integer
           manager_skip_count: integer
           manager_drop_count: integer
-          failure: optional platform.failure/v1 envelope
+          failure: platform.failure/v1 envelope?
         static_agents_started: array<string>
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
         self_check_required: boolean
-        self_check_passed: boolean (optional; omitted until the post-publish self-check completes)
+        self_check_passed:
+          type: boolean?
+          description: Omitted until the post-publish self-check completes.
       notes:
       - 'self_check_passed is omitted because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
       produced_by_type: platform
@@ -19557,14 +19554,6 @@ platform_events:
         event_ids: array<string>
         event_names: array<string>
         output_count: integer
-      required:
-      - publication_id
-      - provider
-      - provider_event_id
-      - entity_id
-      - event_ids
-      - event_names
-      - output_count
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.
@@ -19577,7 +19566,7 @@ platform_events:
       scope: global
       payload:
         failure: platform.failure/v1 envelope
-        failed_event_id: string (nullable)
+        failed_event_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     mailbox.card_decided:
@@ -19599,16 +19588,6 @@ platform_events:
         card_content_hash: text
         decision_schema_hash: text
         bundle_hash: text
-      required:
-      - card_id
-      - anchor_kind
-      - anchor
-      - decision_id
-      - verdict
-      - fields
-      - card_content_hash
-      - decision_schema_hash
-      - bundle_hash
       produced_by_type: platform
     mailbox.card_deferred:
       description: Platform evidence event emitted when an operator defers a pending typed decision card without deciding it.
@@ -19622,9 +19601,6 @@ platform_events:
       payload:
         card_id: uuid
         until: timestamp
-      required:
-      - card_id
-      - until
       produced_by_type: platform
     mailbox.card_superseded:
       description: >-
@@ -19641,12 +19617,8 @@ platform_events:
       payload:
         card_id: uuid
         anchor_kind: text
-        stage_activation_id: uuid
+        stage_activation_id: uuid?
         reason: text
-      required:
-      - card_id
-      - anchor_kind
-      - reason
       produced_by_type: platform
     mailbox.card_expired:
       description: >-
@@ -19666,11 +19638,6 @@ platform_events:
         anchor_kind: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - anchor_kind
-      - cause
-      - deadline_at
       produced_by_type: platform
     human_task.approved:
       description: Product-facing platform event emitted after an operator approves a persisted human task.
@@ -19688,13 +19655,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.rejected:
       description: Product-facing platform event emitted after an operator rejects a persisted human task.
@@ -19712,13 +19672,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.deferred:
       description: Product-facing platform event emitted when a persisted human task is deferred without terminally deciding it.
@@ -19734,11 +19687,6 @@ platform_events:
         status: text
         cause: text
         resume_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - resume_at
       produced_by_type: platform
     human_task.expired:
       description: Product-facing platform event emitted when a persisted human task reaches its terminal timeout decision.
@@ -19754,11 +19702,6 @@ platform_events:
         status: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - deadline_at
       produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
