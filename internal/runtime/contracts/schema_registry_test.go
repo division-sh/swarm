@@ -20,6 +20,7 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypesWithoutInfe
 				Properties: map[string]EventFieldSpec{
 					"corpus_path":   {Type: "string (required for corpus mode — path to signals file in /data)"},
 					"finished_at":   {Type: "timestamp (nullable)"},
+					"provider_data": {Type: "json"},
 					"score":         {Type: "float"},
 					"subcategories": {Type: "array (required for saas_gap, local_services modes)"},
 				},
@@ -45,6 +46,10 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypesWithoutInfe
 	}
 	if _, inferred := finishedAt["nullable"]; inferred {
 		t.Fatalf("finished_at schema = %#v, prose must not infer field presence", finishedAt)
+	}
+	providerData, _ := props["provider_data"].(map[string]any)
+	if _, constrained := providerData["type"]; constrained {
+		t.Fatalf("provider_data schema = %#v, generic JSON must remain unconstrained", providerData)
 	}
 	score, _ := props["score"].(map[string]any)
 	if score["type"] != "number" {
