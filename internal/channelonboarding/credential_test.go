@@ -44,6 +44,42 @@ func TestOnboardingCredentialWriterRejectsEnvOnlyBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestOnboardingCredentialWriterRejectsUnusableValuesAcrossAdmissionAndRecovery(t *testing.T) {
+	for _, value := range []string{"", " \t\n "} {
+		for _, path := range []string{"admit", "observe", "observe_written"} {
+			t.Run(fmt.Sprintf("%s/%q", path, value), func(t *testing.T) {
+				ctx := context.Background()
+				store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writer, err := NewCredentialWriter(store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				const key = "channel.telegram.provider"
+				const receipt = "operation/provider"
+				switch path {
+				case "admit":
+					_, err = writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: value, Receipt: receipt})
+				case "observe":
+					if err = store.Set(ctx, key, value); err == nil {
+						_, err = writer.Observe(ctx, key)
+					}
+				case "observe_written":
+					if _, writeErr := store.AdmitWithReceipt(ctx, key, value, receipt); writeErr != nil {
+						t.Fatal(writeErr)
+					}
+					_, _, err = writer.ObserveWritten(ctx, key, receipt)
+				}
+				if !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
+					t.Fatalf("%s unusable value error = %v", path, err)
+				}
+			})
+		}
+	}
+}
+
 func TestOnboardingCredentialWriterCrashConvergence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	store, err := runtimecredentials.NewFileStore(path)
