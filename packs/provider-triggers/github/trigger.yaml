@@ -18,7 +18,55 @@ event_type:
   required: true
   missing_error: github event type is required
 event_name:
-  template: inbound.github.{event_type}
+  template: inbound.github.raw.{event_type}
+normalized_events:
+  - event: inbound.github.issue_comment_created
+    fields:
+      installation_id:
+        from: installation.id
+        schema: {type: integer, minimum: 1}
+      repository_owner:
+        from: repository.owner.login
+        schema: {type: string, minLength: 1}
+      repository_name:
+        from: repository.name
+        schema: {type: string, minLength: 1}
+      issue_number:
+        from: issue.number
+        schema: {type: integer, minimum: 1}
+      body:
+        from: comment.body
+        schema: {type: string}
+      comment_author_type:
+        from: comment.user.type
+        schema: {type: string, minLength: 1}
+      sender_type:
+        from: sender.type
+        schema: {type: string, minLength: 1}
+    when:
+      one_of:
+        action: [created]
+  - event: inbound.github.issue_opened
+    fields:
+      installation_id:
+        from: installation.id
+        schema: {type: integer, minimum: 1}
+      repository_owner:
+        from: repository.owner.login
+        schema: {type: string, minLength: 1}
+      repository_name:
+        from: repository.name
+        schema: {type: string, minLength: 1}
+      issue_number:
+        from: issue.number
+        schema: {type: integer, minimum: 1}
+      title:
+        from: issue.title
+        schema: {type: string, minLength: 1}
+    when:
+      absent: [comment]
+      one_of:
+        action: [opened]
 ack:
   mode: after_publish
 metadata:
