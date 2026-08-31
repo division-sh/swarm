@@ -34,6 +34,24 @@ type directOperatorChannelDestructiveTestAdapter struct {
 	now     time.Time
 }
 
+type directOperatorChannelConfirmationTestAdapter struct {
+	service *operatorchannel.Service
+}
+
+type credentialRequiredOperatorChannelConfirmation struct {
+	operationID string
+}
+
+func (c credentialRequiredOperatorChannelConfirmation) ConfirmIdentity(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return operatorchannel.Operation{OperationID: uuid.NewString(), State: operatorchannel.StateCredentialStale}, operatorchannel.Binding{}, &channelonboarding.CredentialRequiredError{
+		OperationID: c.operationID, Role: "bot_token", StoreKey: "channel.telegram.provider",
+	}
+}
+
+func (a directOperatorChannelConfirmationTestAdapter) ConfirmIdentity(ctx context.Context, operationID string, revision int64, approve bool, now time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return a.service.Confirm(ctx, operationID, revision, approve, now)
+}
+
 type operatorChannelIdentityReadbackAdapter struct {
 	service *operatorchannel.Service
 }
@@ -85,7 +103,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	}
 	idempotency := &recordingOperatorChannelIdempotency{delegate: selected}
 	handlers := OperatorChannelHandlers(OperatorChannelHandlerOptions{
-		Channels: service, Destructive: directOperatorChannelDestructiveTestAdapter{service: service, now: now},
+		Channels: service, Confirmation: directOperatorChannelConfirmationTestAdapter{service: service}, Destructive: directOperatorChannelDestructiveTestAdapter{service: service, now: now},
 		Readback: operatorChannelIdentityReadbackAdapter{service: service}, Idempotency: idempotency, Now: func() time.Time { return now },
 	})
 	for _, method := range []string{"channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.list"} {
@@ -124,6 +142,36 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	}
 	if len(idempotency.actors) != 2 || idempotency.actors[0] != actorTokenID(testToken) || idempotency.actors[1] != actorTokenID(rotatedToken) || idempotency.actors[0] == idempotency.actors[1] {
 		t.Fatalf("operator channel idempotency actors = %#v, want distinct bearer-token occurrences", idempotency.actors)
+	}
+}
+
+func TestOperatorChannelConfirmationCredentialRotationReturnsParentResumeContract(t *testing.T) {
+	selected := storetest.StartSQLiteRuntimeStore(t)
+	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := operatorchannel.NewService(selected, proofs, operatorChannelAPICredentialCurrentness{}, nil, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 31, 18, 0, 0, 0, time.UTC)
+	principal, _, err := service.Bootstrap(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := uuid.NewString()
+	handlers := OperatorChannelHandlers(OperatorChannelHandlerOptions{
+		Channels: service, Confirmation: credentialRequiredOperatorChannelConfirmation{operationID: parentID},
+		Idempotency: selected, Now: func() time.Time { return now },
+	})
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: handlers})
+	response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"stale","method":"channel.confirm","params":{"operation_id":%q,"expected_revision":2,"approve":true}}`, uuid.NewString()))
+	requireOperatorChannelAPIErrorCode(t, response, ChannelCredentialRequiredCode)
+	details := asMap(t, response.Error.Data)["details"].(map[string]any)
+	wantCommand := "swarm channel resume " + parentID + " --credential-stdin"
+	if details["operation_id"] != parentID || details["role"] != "bot_token" || details["store_key"] != "channel.telegram.provider" || details["remediation"] != wantCommand {
+		t.Fatalf("credential rotation details = %#v", details)
 	}
 }
 

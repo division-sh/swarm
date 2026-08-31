@@ -550,6 +550,8 @@ type AdvanceRequest struct {
 	BindingRevision              int64
 	ConfirmationOperationID      string
 	ClearConfirmationOperationID bool
+	ClearIdentityOperationID     bool
+	ClearBindingRevision         bool
 	FailureCode                  string
 	FailureMessage               string
 	Now                          time.Time

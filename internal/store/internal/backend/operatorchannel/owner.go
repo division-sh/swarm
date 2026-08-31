@@ -236,8 +236,9 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 			Interface: req.Interface.Normalized(), Challenge: challenge, State: domain.StateAwaitingClaim,
 			Revision: 1, SaveProof: req.SaveProof, ProofStatus: domain.ProofSkipped,
 			PlannedProofID: req.PlannedProofID, PlannedProofRevision: req.PlannedProofRevision,
-			ProviderCredential: req.ProviderCredential,
-			RequestedAt:        canonicalTime(req.RequestedAt), ExpiresAt: canonicalTime(req.ExpiresAt),
+			ProviderCredential:    req.ProviderCredential,
+			OnboardingOperationID: strings.TrimSpace(req.OnboardingOperationID),
+			RequestedAt:           canonicalTime(req.RequestedAt), ExpiresAt: canonicalTime(req.ExpiresAt),
 		}
 		return insertOperation(txctx, tx, runner.dialect(), out, req.RequestKeyHash, req.RequestHash, req.ExpectedRevision, "")
 	})
@@ -265,6 +266,11 @@ func validateBegin(req domain.BeginRequest) error {
 	}
 	if err := req.ProviderCredential.Validate(); err != nil {
 		return fmt.Errorf("%w: provider credential evidence is required", domain.ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.OnboardingOperationID) != "" {
+		if _, err := uuid.Parse(strings.TrimSpace(req.OnboardingOperationID)); err != nil {
+			return fmt.Errorf("%w: onboarding operation identity must be a UUID", domain.ErrInvalidRequest)
+		}
 	}
 	return nil
 }
@@ -363,7 +369,18 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 				terminalErr = domain.ErrOperationTerminal
 				return nil
 			}
-			if op.Revision != req.ExpectedRevision+1 || (op.State == domain.StateBound) != req.Approve || (op.State == domain.StateRejected) == req.Approve {
+			if op.Revision != req.ExpectedRevision+1 {
+				return domain.ErrRevisionConflict
+			}
+			if op.State == domain.StateCredentialStale {
+				if !req.Approve {
+					return domain.ErrRevisionConflict
+				}
+				out = op
+				terminalErr = domain.ErrCredentialStale
+				return nil
+			}
+			if (op.State == domain.StateBound) != req.Approve || (op.State == domain.StateRejected) == req.Approve {
 				return domain.ErrRevisionConflict
 			}
 			out = op
@@ -394,6 +411,15 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 				return err
 			}
 			out = op
+			return nil
+		}
+		if !req.ProviderCredentialCurrent {
+			op.State, op.Revision, op.CompletedAt = domain.StateCredentialStale, op.Revision+1, now
+			if err := updateOperationTerminal(txctx, tx, runner.dialect(), op); err != nil {
+				return err
+			}
+			out = op
+			terminalErr = domain.ErrCredentialStale
 			return nil
 		}
 		current, currentFound, err := loadBinding(txctx, tx, runner.dialect(), op.Interface.Key(), true)
@@ -806,7 +832,7 @@ func requirePrincipal(ctx context.Context, db queryer, d dialect, principalID st
 	return nil
 }
 
-const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_credential_key, provider_credential_value_seal, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at FROM operator_channel_operations`
+const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_credential_key, provider_credential_value_seal, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at FROM operator_channel_operations`
 
 func loadOperationByRequestKey(ctx context.Context, db queryer, d dialect, key string, forUpdate bool) (domain.Operation, bool, error) {
 	query := operationSelect + ` WHERE request_key_hash = ?`
@@ -845,16 +871,17 @@ func scanOperationFound(row scanner) (domain.Operation, bool, error) {
 func scanOperation(row scanner) (domain.Operation, error) {
 	var op domain.Operation
 	var kind, state, proofStatus string
-	var providerCredentialKey, providerCredentialSeal, challenge, account, conversation, scope, presentation, disposition, plannedProofID, proofID sql.NullString
+	var providerCredentialKey, providerCredentialSeal, onboardingOperationID, challenge, account, conversation, scope, presentation, disposition, plannedProofID, proofID sql.NullString
 	var bindingRevision, plannedProofRevision, proofRevision sql.NullInt64
 	var requested, expires, claimed, completed any
-	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerCredentialKey, &providerCredentialSeal, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed); err != nil {
+	if err := row.Scan(&op.OperationID, &kind, &op.PrincipalID, &op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration, &providerCredentialKey, &providerCredentialSeal, &onboardingOperationID, &op.RequestHash, &op.ExpectedBindingRevision, &challenge, &state, &op.Revision, &bindingRevision, &account, &conversation, &scope, &presentation, &disposition, &op.SaveProof, &plannedProofID, &plannedProofRevision, &proofID, &proofRevision, &proofStatus, &requested, &expires, &claimed, &completed); err != nil {
 		return domain.Operation{}, err
 	}
 	op.Kind, op.State, op.ConversationScope, op.ProofStatus = domain.OperationKind(kind), domain.OperationState(state), domain.ConversationScope(scope.String), domain.ProofStatus(proofStatus)
 	op.Challenge, op.ExternalAccountRef, op.ConversationRef, op.AccountPresentation, op.ClaimDisposition, op.ProofID = challenge.String, account.String, conversation.String, presentation.String, disposition.String, proofID.String
 	op.BindingRevision, op.ProofRevision = bindingRevision.Int64, proofRevision.Int64
 	op.PlannedProofID, op.PlannedProofRevision = plannedProofID.String, plannedProofRevision.Int64
+	op.OnboardingOperationID = onboardingOperationID.String
 	if providerCredentialKey.Valid || providerCredentialSeal.Valid {
 		seal, sealErr := runtimecredentials.ParseValueSeal(providerCredentialSeal.String)
 		if sealErr != nil || strings.TrimSpace(providerCredentialKey.String) == "" {
@@ -880,8 +907,8 @@ func scanOperation(row scanner) (domain.Operation, error) {
 }
 
 func insertOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, requestKey, requestHash string, expectedRevision int64, claimProvider string) error {
-	_, err := tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_operations (operation_id, operation_kind, principal_id, interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_credential_key, provider_credential_value_seal, request_key_hash, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_provider, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		op.OperationID, string(op.Kind), op.PrincipalID, op.Interface.Key(), op.Interface.InterfaceRef, op.Interface.ChannelPackID, op.Interface.ChannelPackVersion, op.Interface.ChannelManifestHash, op.Interface.SemanticGeneration, nullable(op.ProviderCredential.Key), nullable(op.ProviderCredential.Seal.String()), requestKey, requestHash, expectedRevision,
+	_, err := tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_operations (operation_id, operation_kind, principal_id, interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_credential_key, provider_credential_value_seal, onboarding_operation_id, request_key_hash, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_provider, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		op.OperationID, string(op.Kind), op.PrincipalID, op.Interface.Key(), op.Interface.InterfaceRef, op.Interface.ChannelPackID, op.Interface.ChannelPackVersion, op.Interface.ChannelManifestHash, op.Interface.SemanticGeneration, nullable(op.ProviderCredential.Key), nullable(op.ProviderCredential.Seal.String()), nullable(op.OnboardingOperationID), requestKey, requestHash, expectedRevision,
 		nullable(op.Challenge), string(op.State), op.Revision, nullableInt(op.BindingRevision), nullable(op.ExternalAccountRef), nullable(op.ConversationRef), nullable(string(op.ConversationScope)), nullable(op.AccountPresentation), nullable(claimProvider), nullable(op.ClaimDisposition), op.SaveProof, nullable(op.PlannedProofID), nullableInt(op.PlannedProofRevision), nullable(op.ProofID), nullableInt(op.ProofRevision), string(op.ProofStatus), op.RequestedAt, nullableTime(op.ExpiresAt), nullableTime(op.ClaimedAt), nullableTime(op.CompletedAt), op.RequestedAt)
 	return err
 }

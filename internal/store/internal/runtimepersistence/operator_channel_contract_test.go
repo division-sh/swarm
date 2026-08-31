@@ -99,6 +99,41 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		}
 	}
 
+	staleIdentity := operatorChannelContractIdentity("generation-credential-stale")
+	staleOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+		ProviderCredential: operatorChannelProviderEvidence(), OperationID: uuid.NewString(),
+		Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID, Interface: staleIdentity,
+		ExpectedRevision: 0, RequestKeyHash: "credential-stale-key", RequestHash: "credential-stale-body",
+		RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleSettlement, err := fixture.settle(ctx, operatorChannelContractClaim(staleOp, operatorchannel.ConversationScopeDirect, "account-stale", "conversation-stale", uuid.NewString()), now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleOp, staleBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: staleOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: staleSettlement.Operation.Revision,
+		Approve: true, ProviderCredentialCurrent: false, ConfirmedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, operatorchannel.ErrCredentialStale) || staleOp.State != operatorchannel.StateCredentialStale || staleOp.Revision != staleSettlement.Operation.Revision+1 || staleBinding != (operatorchannel.Binding{}) {
+		t.Fatalf("stale confirmation = op:%#v binding:%#v err:%v", staleOp, staleBinding, err)
+	}
+	replayedStale, replayedStaleBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: staleOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: staleSettlement.Operation.Revision,
+		Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(3 * time.Second),
+	})
+	if !errors.Is(err, operatorchannel.ErrCredentialStale) || replayedStale.State != operatorchannel.StateCredentialStale || replayedStale.Revision != staleOp.Revision || replayedStaleBinding != (operatorchannel.Binding{}) {
+		t.Fatalf("stale confirmation replay = op:%#v binding:%#v err:%v", replayedStale, replayedStaleBinding, err)
+	}
+	if _, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: staleOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: staleSettlement.Operation.Revision,
+		Approve: false, ConfirmedAt: now.Add(4 * time.Second),
+	}); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+		t.Fatalf("changed stale confirmation decision error = %v", err)
+	}
+
 	concurrentIdentity := operatorChannelContractIdentity("generation-concurrent-claim")
 	concurrentOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
@@ -199,7 +234,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 
 	confirmed, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
-		OperationID: op.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ConfirmedAt: now.Add(4 * time.Second),
+		OperationID: op.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(4 * time.Second),
 	})
 	if err != nil || confirmed.State != operatorchannel.StateBound || confirmed.ProofStatus != operatorchannel.ProofSkipped || binding.Revision != 1 || binding.ConversationScope != operatorchannel.ConversationScopeDirect ||
 		binding.ProofID != "" || binding.ProofRevision != 0 ||
@@ -212,7 +247,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("no-save proof responsibilities = %#v, %v", responsibilities, err)
 	}
 	replayedConfirm, replayedBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
-		OperationID: op.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ConfirmedAt: now.Add(5 * time.Second),
+		OperationID: op.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(5 * time.Second),
 	})
 	if err != nil || replayedConfirm.Revision != confirmed.Revision || replayedBinding.Revision != binding.Revision {
 		t.Fatalf("confirmation replay = op:%#v binding:%#v err:%v", replayedConfirm, replayedBinding, err)
@@ -247,7 +282,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 	if _, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 		OperationID: reconnectOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: reconnectSettlement.Operation.Revision,
-		Approve: true, ConfirmedAt: now.Add(7 * time.Second),
+		Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(7 * time.Second),
 	}); !errors.Is(err, operatorchannel.ErrConflict) {
 		t.Fatalf("reconnect changed conversation scope: %v", err)
 	}
@@ -266,7 +301,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 	if _, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 		OperationID: sameClaimantRebind.OperationID, PrincipalID: principal.ID, ExpectedRevision: sameClaimantSettlement.Operation.Revision,
-		Approve: true, ConfirmedAt: now.Add(7 * time.Second),
+		Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(7 * time.Second),
 	}); !errors.Is(err, operatorchannel.ErrConflict) {
 		t.Fatalf("rebind admitted unchanged claimant: %v", err)
 	}
@@ -292,7 +327,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("rebind claim = %#v, %v", settlement, err)
 	}
 	_, binding, err = fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
-		OperationID: rebindOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ConfirmedAt: now.Add(8 * time.Second),
+		OperationID: rebindOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: 2, Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(8 * time.Second),
 	})
 	if err != nil || binding.Revision != 2 || binding.ConversationScope != operatorchannel.ConversationScopeShared {
 		t.Fatalf("rebind confirmation = %#v, %v", binding, err)
@@ -361,7 +396,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 	expiredConfirmation, expiredBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 		OperationID: confirmExpiryOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: confirmExpirySettlement.Operation.Revision,
-		Approve: true, ConfirmedAt: now.Add(2 * time.Second),
+		Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
 	})
 	if !errors.Is(err, operatorchannel.ErrOperationTerminal) || expiredConfirmation.State != operatorchannel.StateExpired || expiredConfirmation.Revision != 3 || expiredBinding != (operatorchannel.Binding{}) {
 		t.Fatalf("expired confirmation = op:%#v binding:%#v err:%v", expiredConfirmation, expiredBinding, err)
@@ -381,7 +416,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 	replayedExpired, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 		OperationID: confirmExpiryOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: confirmExpirySettlement.Operation.Revision,
-		Approve: true, ConfirmedAt: now.Add(3 * time.Second),
+		Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(3 * time.Second),
 	})
 	if !errors.Is(err, operatorchannel.ErrOperationTerminal) || replayedExpired.State != operatorchannel.StateExpired || replayedExpired.Revision != 3 {
 		t.Fatalf("expired confirmation replay = op:%#v err:%v", replayedExpired, err)
