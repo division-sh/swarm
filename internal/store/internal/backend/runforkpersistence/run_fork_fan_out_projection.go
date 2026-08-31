@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -80,7 +81,7 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 		}
 		fact := *aggregate.intent
 		var capsule fanoutobligation.Capsule
-		if err := json.Unmarshal(fact.Capsule, &capsule); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(fact.Capsule, &capsule); err != nil {
 			return nil, fmt.Errorf("decode run-fork fan-out %s capsule: %w", key, err)
 		}
 		source := fanoutobligation.SourceRef{

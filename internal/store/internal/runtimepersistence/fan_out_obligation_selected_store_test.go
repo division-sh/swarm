@@ -1354,6 +1354,11 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 	if err != nil || !found || intent.Request.Key.RunID != materialized.ForkRunID {
 		t.Fatalf("fair claim did not reach materialized fork fan-out: intent=%#v found=%v err=%v", intent, found, err)
 	}
+	integer, integerOK := intent.Request.Capsule.StateFields["integer"].(json.Number)
+	decimal, decimalOK := intent.Request.Capsule.StateFields["decimal"].(json.Number)
+	if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
+		t.Fatalf("materialized fork capsule numerics = integer:%#v decimal:%#v, want exact lexical carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
+	}
 	input, err := pg.LoadFanOutEvaluation(ctx, claim)
 	if err != nil {
 		t.Fatalf("load materialized fork fan-out evaluation: %v", err)
@@ -2037,7 +2042,8 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 	capsule := fanoutobligation.Capsule{
 		NodeKey: "root.fan-out-source", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
-		Lineage: events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
+		Lineage:     events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
+		StateFields: map[string]any{"integer": json.Number("75"), "decimal": json.Number("75.0")},
 	}
 	capsuleJSON, err := json.Marshal(capsule)
 	if err != nil {

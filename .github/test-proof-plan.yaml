@@ -22,6 +22,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/cliapp
   - github.com/division-sh/swarm/internal/releasee2e
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
+  - github.com/division-sh/swarm/internal/runtime/conformance
   - github.com/division-sh/swarm/internal/runtime
   - github.com/division-sh/swarm/internal/runtime/llm
   - github.com/division-sh/swarm/internal/serveapp
@@ -37,6 +38,7 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-required-smoke
+      - conformance-full
       - hitl-llm-full
       - hitl-releasee2e-full
       - runtime-full
@@ -54,6 +56,7 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - conformance-full
       - hitl-llm-full
       - hitl-releasee2e-full
       - runtime-full
@@ -71,6 +74,7 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - conformance-full
       - hitl-llm-full
       - hitl-releasee2e-full
       - runtime-full
@@ -88,6 +92,7 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - conformance-full
       - hitl-llm-full
       - hitl-releasee2e-full
       - runtime-full
@@ -122,6 +127,12 @@ units:
   catalog-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  conformance-full:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

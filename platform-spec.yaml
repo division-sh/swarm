@@ -240,7 +240,7 @@ contract_formats:
     - decision-card provenance, verdict fields, change payloads, persistence, lifecycle events, replay, fork cloning, and readback
     - complete JSON-RPC request envelopes admitted by the v1 HTTP and WebSocket server
     - complete JSON-RPC response and subscription-notification envelopes emitted by the v1 HTTP and WebSocket server
-    - ordinary and deferred event-payload, persisted workflow-state, exact entity-revision, and resource-version values
+    - ordinary and deferred event-payload, persisted workflow-state, persisted and fork-projected fan-out capsules, exact entity-revision, and resource-version values
       projected into workflow/CEL evaluation, including deferred fan-out emit fields
     explicitly_deferred_scope:
     - unrelated event payload interpreters
@@ -3868,7 +3868,7 @@ handler_specification:
           or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
           still prove the same element before any ordinal is evaluated.
         semantic_value_projection: >-
-          Event-payload, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
+          Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
           checked owner. No source-specific float64 conversion, numeric-string coercion, private parser, or unchecked CEL
           normalizer may reinterpret persisted values.

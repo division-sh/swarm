@@ -524,6 +524,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			}
 			publishNotifyAllChildrenRunCreatingEvent(t, validCtx, runtime, source, validRunID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-numeric-valid",
+				"threshold":    75,
 			})
 			assertNotifyAllChildrenMetadata(t, validCtx, selected, db, "portfolio", "portfolio_id", "portfolio-numeric-valid")
 			for batch := 0; batch < 20; batch++ {
@@ -573,7 +574,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if err != nil {
 				t.Fatalf("load numeric registration operator event: %v", err)
 			}
-			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || len(view.Deliveries) != 0 || view.NoDelivery == nil {
+			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || view.Payload["eligible"] != true || len(view.Deliveries) != 0 || view.NoDelivery == nil {
 				t.Fatalf("numeric registration operator readback = payload:%#v deliveries:%#v", view.Payload, view.Deliveries)
 			}
 
@@ -655,6 +656,7 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 			}
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-numeric-internal",
+				"threshold":    75,
 			})
 			rows := make([]map[string]any, 0, 25)
 			for ordinal := 0; ordinal < 25; ordinal++ {
@@ -723,7 +725,7 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.bundleSourceFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
-			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-numeric-template"})
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-numeric-template", "threshold": 75})
 			rows := []map[string]any{
 				{"account_id": "template-zero", "eng_roles": 0, "gem_score": 0.25},
 				{"account_id": "template-negative", "eng_roles": -7, "gem_score": -7.5},
