@@ -166,16 +166,26 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 	if err := providerCredential.Validate(); err != nil {
 		return Operation{}, fmt.Errorf("%w: provider credential evidence is required", ErrInvalidRequest)
 	}
-	current, err := s.credentials.CurrentValueMatchesSeal(ctx, providerCredential)
-	if err != nil {
-		return Operation{}, fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
-	}
-	if !current {
-		return Operation{}, fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
-	}
 	principal, err := s.Principal()
 	if err != nil {
 		return Operation{}, err
+	}
+	replayRequest := BeginReplayRequest{
+		PrincipalID: principal.ID, RequestKeyHash: strings.TrimSpace(requestKey), RequestHash: strings.TrimSpace(requestHash),
+	}
+	if replayed, found, err := s.store.FindChannelBindingBeginReplay(ctx, replayRequest); err != nil {
+		return Operation{}, err
+	} else if found {
+		return replayed, nil
+	}
+	current, err := s.credentials.CurrentValueMatchesSeal(ctx, providerCredential)
+	if err != nil {
+		gateErr := fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
+		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
+	}
+	if !current {
+		gateErr := fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
+		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
 	}
 	identity, err := s.ResolveInterface(selector)
 	if err != nil {
@@ -205,6 +215,17 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 		ProviderCredential: providerCredential,
 		RequestedAt:        now, ExpiresAt: now.Add(DefaultChallengeTTL),
 	})
+}
+
+func (s *Service) beginReplayAfterCurrentnessGate(ctx context.Context, req BeginReplayRequest, gateErr error) (Operation, error) {
+	replayed, found, err := s.store.FindChannelBindingBeginReplay(ctx, req)
+	if err != nil {
+		return Operation{}, errors.Join(gateErr, err)
+	}
+	if found {
+		return replayed, nil
+	}
+	return Operation{}, gateErr
 }
 
 func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevision int64, approve bool, now time.Time) (Operation, Binding, error) {

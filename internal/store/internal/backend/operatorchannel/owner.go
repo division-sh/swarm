@@ -176,6 +176,34 @@ func (s *SQLiteOwner) BeginChannelBinding(ctx context.Context, req domain.BeginR
 	return beginBinding(ctx, sqliteRunner{s}, req)
 }
 
+func (s *PostgresOwner) FindChannelBindingBeginReplay(ctx context.Context, req domain.BeginReplayRequest) (domain.Operation, bool, error) {
+	return findBeginReplay(ctx, postgresRunner{s}, req)
+}
+
+func (s *SQLiteOwner) FindChannelBindingBeginReplay(ctx context.Context, req domain.BeginReplayRequest) (domain.Operation, bool, error) {
+	return findBeginReplay(ctx, sqliteRunner{s}, req)
+}
+
+func findBeginReplay(ctx context.Context, runner transactionRunner, req domain.BeginReplayRequest) (domain.Operation, bool, error) {
+	if err := runner.require(); err != nil {
+		return domain.Operation{}, false, err
+	}
+	principalID := strings.TrimSpace(req.PrincipalID)
+	requestKey := strings.TrimSpace(req.RequestKeyHash)
+	requestHash := strings.TrimSpace(req.RequestHash)
+	if principalID == "" || requestKey == "" || requestHash == "" {
+		return domain.Operation{}, false, fmt.Errorf("%w: principal and exact begin request identity are required", domain.ErrInvalidRequest)
+	}
+	existing, found, err := loadOperationByRequestKey(ctx, runner.query(), runner.dialect(), requestKey, false)
+	if err != nil || !found {
+		return domain.Operation{}, found, err
+	}
+	if existing.PrincipalID != principalID || existing.RequestHash != requestHash {
+		return domain.Operation{}, false, fmt.Errorf("%w: request key was already used with different input", domain.ErrConflict)
+	}
+	return existing, true, nil
+}
+
 func beginBinding(ctx context.Context, runner transactionRunner, req domain.BeginRequest) (domain.Operation, error) {
 	if err := runner.require(); err != nil {
 		return domain.Operation{}, err
@@ -183,12 +211,8 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 	if err := validateBegin(req); err != nil {
 		return domain.Operation{}, err
 	}
-	challenge, err := domain.NewChallenge()
-	if err != nil {
-		return domain.Operation{}, err
-	}
 	var out domain.Operation
-	err = runner.mutate(ctx, "begin operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
+	err := runner.mutate(ctx, "begin operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
 		if err := requirePrincipal(txctx, tx, runner.dialect(), req.PrincipalID); err != nil {
 			return err
 		}
@@ -231,14 +255,20 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 				return fmt.Errorf("%w: %s requires a current binding", domain.ErrConflict, req.Kind)
 			}
 		}
+		challenge, err := domain.NewChallenge()
+		if err != nil {
+			return err
+		}
 		out = domain.Operation{
 			OperationID: req.OperationID, Kind: req.Kind, PrincipalID: req.PrincipalID,
 			Interface: req.Interface.Normalized(), Challenge: challenge, State: domain.StateAwaitingClaim,
 			Revision: 1, SaveProof: req.SaveProof, ProofStatus: domain.ProofSkipped,
 			PlannedProofID: req.PlannedProofID, PlannedProofRevision: req.PlannedProofRevision,
-			ProviderCredential:    req.ProviderCredential,
-			OnboardingOperationID: strings.TrimSpace(req.OnboardingOperationID),
-			RequestedAt:           canonicalTime(req.RequestedAt), ExpiresAt: canonicalTime(req.ExpiresAt),
+			ProviderCredential:      req.ProviderCredential,
+			OnboardingOperationID:   strings.TrimSpace(req.OnboardingOperationID),
+			RequestHash:             req.RequestHash,
+			ExpectedBindingRevision: req.ExpectedRevision,
+			RequestedAt:             canonicalTime(req.RequestedAt), ExpiresAt: canonicalTime(req.ExpiresAt),
 		}
 		return insertOperation(txctx, tx, runner.dialect(), out, req.RequestKeyHash, req.RequestHash, req.ExpectedRevision, "")
 	})

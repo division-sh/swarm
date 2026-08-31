@@ -430,6 +430,10 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 	return s.agentPostgresOwner.FinalizeDirectiveSuccess(ctx, operationID, now, ttl)
 }
 
+func (s *PostgresStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
+	return s.operatorChannelPostgresOwner.FindChannelBindingBeginReplay(ctx, req)
+}
+
 func (s *PostgresStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.ForkRunSource(ctx, request)
 }
@@ -1672,6 +1676,10 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveFailure(ctx context.Context, opera
 
 func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, error) {
 	return s.agentSQLiteOwner.FinalizeDirectiveSuccess(ctx, operationID, now, ttl)
+}
+
+func (s *SQLiteRuntimeStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
+	return s.operatorChannelSQLiteOwner.FindChannelBindingBeginReplay(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {

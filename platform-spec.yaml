@@ -9999,7 +9999,11 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. Credential currentness gates only a pending approved
+        return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
+        before credential currentness, active-interface resolution, proof planning, revision admission, fresh challenge
+        generation, or any other mutable new-ceremony precondition; a replay recheck precedes return from a failed
+        currentness gate so a racing exact commit cannot be hidden. Credential currentness gates only a genuinely new
+        ceremony or a pending approved
         mutation after terminal replay classification. Only a successful currentness observation whose value does not match
         proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
         trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
@@ -10133,7 +10137,10 @@ tool_model:
         credential file tier. Process-random seal keys and per-boot durable currentness are forbidden. Plain pre-seal
         credential files remain ordinary key/value stores and require no migration or backfill.
         The operation first reserves exact credential roles and keys, then privately persists role, key, admission kind,
-        keyed value seal, and a receipt only for operation-written values. Every newly written value is staged under an
+        keyed value seal, and a receipt only for operation-written values. The credential subsystem's one usability rule
+        runs before every receipt-writing caller and store mutation. Empty or whitespace-only input creates no value,
+        receipt, or seal authority, so corrected bytes may use the same deterministic operation receipt without migration
+        or correction-in-place behavior. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
         current predecessor activation. A deterministic operation-owned write is recovered by observing its exact receipt
         and resealing its current exact value, never by rewriting or guessing the secret, and the complete admission set commits in a

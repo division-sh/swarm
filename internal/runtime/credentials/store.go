@@ -126,6 +126,15 @@ func SealCurrentValue(ctx context.Context, store Store, key string) (ValueEviden
 	return owner.sealCurrentValue(ctx, key)
 }
 
+// ValidateValue applies the credential subsystem's sole admission rule before
+// any caller creates durable receipt or seal authority for the value.
+func ValidateValue(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return ErrCredentialValueUnusable
+	}
+	return nil
+}
+
 func CurrentValueMatchesSeal(ctx context.Context, store Store, evidence ValueEvidence) (bool, error) {
 	if err := evidence.Validate(); err != nil {
 		return false, err
@@ -151,7 +160,7 @@ func credentialValueSeal(key []byte, storeKey, value string) ValueSeal {
 }
 
 func credentialValueUsable(value string) bool {
-	return strings.TrimSpace(value) != ""
+	return ValidateValue(value) == nil
 }
 
 func newValueSealKey() (string, error) {

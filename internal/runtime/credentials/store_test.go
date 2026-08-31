@@ -339,6 +339,41 @@ func TestFileStoreDeleteWithReceiptCannotDeleteSuccessorOccurrence(t *testing.T)
 	}
 }
 
+func TestReceiptAdmissionRejectsUnusableValueBeforeMutation(t *testing.T) {
+	for _, value := range []string{"", " \t\n "} {
+		for _, posture := range []string{"file", "overlay"} {
+			t.Run(posture+"/"+fmt.Sprintf("%q", value), func(t *testing.T) {
+				ctx := context.Background()
+				file, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var store Store = file
+				if posture == "overlay" {
+					store = NewOverlayStore(nil, file)
+				}
+				writer := store.(ReceiptWriter)
+				observer := store.(ReceiptObserver)
+				const key = "channel.telegram.provider"
+				const receipt = "operation/provider"
+				if _, err := writer.AdmitWithReceipt(ctx, key, value, receipt); !errors.Is(err, ErrCredentialValueUnusable) {
+					t.Fatalf("unusable receipt admission error = %v", err)
+				}
+				if observed, found, err := observer.ObserveReceipt(ctx, key, receipt); err != nil || found || observed != (WriteReceipt{}) {
+					t.Fatalf("unusable receipt survived = %#v found=%v err=%v", observed, found, err)
+				}
+				if got, found, err := store.Get(ctx, key); err != nil || found || got != "" {
+					t.Fatalf("unusable value survived = %q found=%v err=%v", got, found, err)
+				}
+				corrected, err := writer.AdmitWithReceipt(ctx, key, "corrected-token", receipt)
+				if err != nil || corrected.Key != key || corrected.Receipt != receipt {
+					t.Fatalf("same-receipt correction = %#v err=%v", corrected, err)
+				}
+			})
+		}
+	}
+}
+
 func TestCredentialValueSealOwnsExactKeyAndValueCurrentness(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "credentials.json")

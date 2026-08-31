@@ -134,6 +134,67 @@ func TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremo
 	}
 }
 
+func TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			identity := operatorChannelContractIdentity("begin-replay-currentness-" + backend)
+			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := true
+			var currentErr error
+			service, err := operatorchannel.NewService(fixture.store, proofs,
+				operatorChannelCredentialCurrentness{current: &current, currentErr: &currentErr},
+				[]operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 8, 31, 20, 30, 0, 0, time.UTC)
+			if _, _, err := service.Bootstrap(ctx, now); err != nil {
+				t.Fatal(err)
+			}
+			const requestKey = "begin-replay-currentness-key"
+			const requestHash = "begin-replay-currentness-request"
+			parentID := uuid.NewString()
+			committed, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey, requestHash, parentID, operatorChannelProviderEvidence(), false, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			current = false
+			replayed, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey, requestHash, parentID, operatorChannelProviderEvidence(), false, now.Add(time.Second))
+			if err != nil || replayed != committed {
+				t.Fatalf("exact begin replay after rotation = %#v err=%v, want %#v", replayed, err, committed)
+			}
+			if _, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey+"-new", requestHash+"-new", uuid.NewString(), operatorChannelProviderEvidence(), false, now.Add(2*time.Second)); !errors.Is(err, operatorchannel.ErrCredentialStale) {
+				t.Fatalf("new stale begin error = %v", err)
+			}
+			if _, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey, requestHash+"-changed", parentID, operatorChannelProviderEvidence(), false, now.Add(3*time.Second)); !errors.Is(err, operatorchannel.ErrConflict) {
+				t.Fatalf("changed begin replay error = %v", err)
+			}
+
+			current = true
+			currentErr = errInjectedCredentialCurrentnessRead
+			replayed, err = service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey, requestHash, parentID, operatorChannelProviderEvidence(), false, now.Add(4*time.Second))
+			if err != nil || replayed != committed {
+				t.Fatalf("exact begin replay during observation failure = %#v err=%v, want %#v", replayed, err, committed)
+			}
+			if _, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				requestKey+"-error", requestHash+"-error", uuid.NewString(), operatorChannelProviderEvidence(), false, now.Add(5*time.Second)); !errors.Is(err, errInjectedCredentialCurrentnessRead) {
+				t.Fatalf("new begin observation error = %v", err)
+			}
+		})
+	}
+}
+
 func TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilitySelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

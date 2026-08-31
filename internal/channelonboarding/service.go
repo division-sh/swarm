@@ -136,6 +136,7 @@ type TestLifecycleBoundary string
 
 const (
 	TestAfterCredentialWriteBeforeCheckpoint   TestLifecycleBoundary = "credential_write_before_checkpoint"
+	TestAfterIdentityBeginBeforeCheckpoint     TestLifecycleBoundary = "identity_begin_before_checkpoint"
 	TestAfterActivationCommitBeforePublication TestLifecycleBoundary = "activation_commit_before_process_publication"
 	TestAfterProcessPublicationBeforePromotion TestLifecycleBoundary = "process_publication_before_promotion"
 	TestAfterAuthorityRetirementBeforeCleanup  TestLifecycleBoundary = "authority_retirement_before_cleanup"
@@ -1267,6 +1268,9 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		op.OperationID,
 		providerCredential, op.SaveProof, s.now().UTC())
 	if err != nil {
+		return op, false, err
+	}
+	if err := s.reachTestBarrier(TestAfterIdentityBeginBeforeCheckpoint, op.OperationID); err != nil {
 		return op, false, err
 	}
 	next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{

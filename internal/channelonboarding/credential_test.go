@@ -46,7 +46,7 @@ func TestOnboardingCredentialWriterRejectsEnvOnlyBeforeMutation(t *testing.T) {
 
 func TestOnboardingCredentialWriterRejectsUnusableValuesAcrossAdmissionAndRecovery(t *testing.T) {
 	for _, value := range []string{"", " \t\n "} {
-		for _, path := range []string{"admit", "observe", "observe_written"} {
+		for _, path := range []string{"admit", "observe"} {
 			t.Run(fmt.Sprintf("%s/%q", path, value), func(t *testing.T) {
 				ctx := context.Background()
 				store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
@@ -66,17 +66,40 @@ func TestOnboardingCredentialWriterRejectsUnusableValuesAcrossAdmissionAndRecove
 					if err = store.Set(ctx, key, value); err == nil {
 						_, err = writer.Observe(ctx, key)
 					}
-				case "observe_written":
-					if _, writeErr := store.AdmitWithReceipt(ctx, key, value, receipt); writeErr != nil {
-						t.Fatal(writeErr)
-					}
-					_, _, err = writer.ObserveWritten(ctx, key, receipt)
 				}
 				if !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
 					t.Fatalf("%s unusable value error = %v", path, err)
 				}
 			})
 		}
+	}
+}
+
+func TestOnboardingCredentialWriterUnusableSubmissionDoesNotPoisonSameReceiptRetry(t *testing.T) {
+	for _, value := range []string{"", " \t\n "} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			ctx := context.Background()
+			store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := NewCredentialWriter(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const key = "channel.telegram.provider"
+			const receipt = "operation/provider"
+			if _, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: value, Receipt: receipt}); !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
+				t.Fatalf("unusable admission error = %v", err)
+			}
+			if observed, found, err := store.ObserveReceipt(ctx, key, receipt); err != nil || found || observed != (runtimecredentials.WriteReceipt{}) {
+				t.Fatalf("unusable receipt survived = %#v found=%v err=%v", observed, found, err)
+			}
+			corrected, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "corrected-token", Receipt: receipt})
+			if err != nil || corrected.StoreKey != key || corrected.Receipt != receipt || corrected.ValueSeal == "" {
+				t.Fatalf("same-receipt correction = %#v err=%v", corrected, err)
+			}
+		})
 	}
 }
 
