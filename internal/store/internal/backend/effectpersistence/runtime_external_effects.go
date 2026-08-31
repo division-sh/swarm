@@ -835,8 +835,13 @@ func (c externalEffectRecoveryCandidate) runID() (string, error) {
 	agentRunID := strings.TrimSpace(c.AgentRunID)
 	conflict := lineageRunID != "" && authorityRunID != "" && lineageRunID != authorityRunID
 	if c.AuthorityKind == string(runtimeeffects.AuthorityNormalAgent) {
-		conflict = conflict || lineageRunID == "" || authorityRunID == "" || concreteAgentRunID == "" || agentRunID == "" ||
-			lineageRunID != agentRunID || authorityRunID != agentRunID || concreteAgentRunID != agentRunID
+		conflict = conflict || lineageRunID == "" || agentRunID == "" || lineageRunID != agentRunID
+		if c.HasUsageTarget {
+			conflict = conflict || authorityRunID == "" || concreteAgentRunID == "" ||
+				authorityRunID != agentRunID || concreteAgentRunID != agentRunID
+		} else {
+			conflict = conflict || authorityRunID != "" || concreteAgentRunID != ""
+		}
 	} else if agentRunID != "" {
 		conflict = true
 	}

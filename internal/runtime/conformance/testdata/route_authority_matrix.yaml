@@ -352,7 +352,7 @@ rows:
       typed producer migration after this guardrail is in place.
 
   - id: route_table_resolve_role_separation
-    concept: RouteTable.Resolve remains direct pub/sub topology only and cannot participate in compiled-connect recipient admission.
+    concept: RouteTable Resolve APIs remain direct pub/sub topology only; Resolve is authored/runless and ResolveForRun preserves admitted runtime ownership, and neither participates in compiled-connect recipient admission.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [route_table_resolve, typed_connect_recipient_evaluation, connect_route_plan, split_tracker, required_pr_smoke]
@@ -369,9 +369,10 @@ rows:
       - {kind: go_test, name: TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput}
     notes: >
       EventBus connect dispatch and lifecycle consume the compiled typed
-      recipient evaluator and never call RouteTable.Resolve. Runstart and the
-      separately named direct selected-fork branch retain RouteTable for direct
-      pub/sub admission facts, not lowered-connect authority.
+      recipient evaluator and never call RouteTable Resolve APIs. Runstart uses
+      runless authored Resolve, while the separately named direct selected-fork
+      branch uses exact-run ResolveForRun for direct pub/sub admission facts,
+      not lowered-connect authority.
 
   - id: compiled_connect_recipient_single_owner
     concept: One typed compiled evaluator owns receiver and recipient admission for EventBus, lifecycle, and selected fork.
