@@ -190,6 +190,17 @@ func (p *releaseServeProcess) killAndWait(timeout time.Duration) error {
 	}
 }
 
+func (p *releaseServeProcess) waitForExit(timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-p.exited:
+		return p.waitError()
+	case <-timer.C:
+		return fmt.Errorf("serve did not exit within %s", timeout)
+	}
+}
+
 func (p *releaseServeProcess) stopAndWait(timeout time.Duration) error {
 	select {
 	case <-p.exited:
