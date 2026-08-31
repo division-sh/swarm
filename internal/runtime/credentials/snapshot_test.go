@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -75,8 +74,8 @@ func TestCredentialSnapshotOwnerOwnsSecretBindingUsability(t *testing.T) {
 			if got := binding.CredentialValue(); got != tc.wantValue {
 				t.Fatalf("credential value = %q, want %q", got, tc.wantValue)
 			}
-			if binding.Epoch() == "" {
-				t.Fatal("binding observation has no private epoch")
+			if binding.ObservationToken() == "" {
+				t.Fatal("binding observation has no private token")
 			}
 		})
 	}
@@ -121,8 +120,8 @@ func TestSecretBindingProjectionReusesExactKeyAndRejectsRotation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if first.Epoch() != second.Epoch() || store.calls != 1 {
-				t.Fatalf("shared-key observations epochs=%q/%q calls=%d, want one capture", first.Epoch(), second.Epoch(), store.calls)
+			if first.ObservationToken() != second.ObservationToken() || store.calls != 1 {
+				t.Fatalf("shared-key observation tokens=%q/%q calls=%d, want one capture", first.ObservationToken(), second.ObservationToken(), store.calls)
 			}
 			err = projection.ValidateCurrent(context.Background())
 			var staleErr *SecretBindingProjectionStaleError
@@ -136,7 +135,7 @@ func TestSecretBindingProjectionReusesExactKeyAndRejectsRotation(t *testing.T) {
 	}
 }
 
-func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateEpoch(t *testing.T) {
+func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateObservationToken(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
@@ -157,7 +156,7 @@ func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateEpoch(t *testin
 	if err != nil {
 		t.Fatalf("Observe second: %v", err)
 	}
-	if first.CredentialValue() != "token-a" || first.Epoch() == "" || second.Epoch() != first.Epoch() {
+	if first.CredentialValue() != "token-a" || first.ObservationToken() == "" || second.ObservationToken() != first.ObservationToken() {
 		t.Fatalf("stable snapshots = %#v/%#v", first.Metadata(), second.Metadata())
 	}
 	if err := store.Set(ctx, "bot", "token-b"); err != nil {
@@ -167,8 +166,8 @@ func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateEpoch(t *testin
 	if err != nil {
 		t.Fatalf("Observe rotated: %v", err)
 	}
-	if rotated.CredentialValue() != "token-b" || rotated.Epoch() == first.Epoch() {
-		t.Fatal("credential rotation did not mint a private snapshot epoch")
+	if rotated.CredentialValue() != "token-b" || rotated.ObservationToken() == first.ObservationToken() {
+		t.Fatal("credential rotation did not mint a private observation token")
 	}
 	if err := store.Delete(ctx, "bot"); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -177,12 +176,12 @@ func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateEpoch(t *testin
 	if err != nil {
 		t.Fatalf("Observe missing: %v", err)
 	}
-	if missing.Present || missing.Epoch() == rotated.Epoch() {
-		t.Fatal("credential disappearance did not revoke the snapshot epoch")
+	if missing.Present || missing.ObservationToken() == rotated.ObservationToken() {
+		t.Fatal("credential disappearance did not revoke the observation token")
 	}
 }
 
-func TestCredentialSnapshotOwnerRejectsFileOccurrenceWithoutPersistedEpoch(t *testing.T) {
+func TestCredentialSnapshotOwnerAcceptsPlainCredentialFileWithoutMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	original := `{"version":1,"entries":{"bot":{"value":"unsupported-token","updated_at":"2026-08-28T00:00:00Z"}}}`
 	writeCredentialsFixtureFile(t, path, original)
@@ -194,8 +193,12 @@ func TestCredentialSnapshotOwnerRejectsFileOccurrenceWithoutPersistedEpoch(t *te
 	if err != nil {
 		t.Fatalf("NewSnapshotOwner: %v", err)
 	}
-	if _, err := owner.Observe(context.Background(), "bot"); err == nil || !strings.Contains(err.Error(), `credential "bot" exists without an occurrence epoch`) {
-		t.Fatalf("Observe error = %v, want missing occurrence epoch", err)
+	snapshot, err := owner.Observe(context.Background(), "bot")
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	if snapshot.CredentialValue() != "unsupported-token" || snapshot.ObservationToken() == "" {
+		t.Fatalf("snapshot = %#v", snapshot.Metadata())
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

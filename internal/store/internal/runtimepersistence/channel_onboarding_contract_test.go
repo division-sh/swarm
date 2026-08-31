@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -29,6 +31,245 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 				store = admitTestPostgresStore(t, db)
 			}
 			runChannelOnboardingStoreContract(t, store)
+		})
+	}
+}
+
+func TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 31, 17, 0, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op, err := selected.ReserveChannelOnboarding(ctx, channelOnboardingStartRequest(principal.ID, now))
+			if err != nil {
+				t.Fatal(err)
+			}
+			admissions := []channelonboarding.CredentialAdmission{{
+				Role: "bot_token", StoreKey: "telegram_bot_token.operation", Kind: channelonboarding.CredentialAdmissionWritten,
+				Receipt: "receipt-provider", ValueSeal: operatorChannelProviderEvidence().Seal,
+			}}
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+			} {
+				req := channelonboarding.AdvanceRequest{
+					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now.Add(time.Duration(op.Revision) * time.Second),
+				}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = uuid.NewString()
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+					req.BindingRevision = 4
+				}
+				op, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance %s: %v", phase, err)
+				}
+			}
+			if _, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, Now: now.Add(time.Minute),
+			}); !errors.Is(err, channelonboarding.ErrConflict) && !errors.Is(err, channelonboarding.ErrInvalidRequest) {
+				t.Fatalf("partial stale reset error = %v", err)
+			}
+			reset, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, ClearBindingRevision: true, Now: now.Add(time.Minute),
+			})
+			if err != nil || reset.Phase != channelonboarding.PhasePreparing || reset.IdentityOperationID != "" || reset.BindingRevision != 0 || len(reset.CredentialAdmissions) != 0 {
+				t.Fatalf("credential-stale reset = %#v err=%v", reset, err)
+			}
+
+			boundOp := reset
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+			} {
+				req := channelonboarding.AdvanceRequest{
+					OperationID: boundOp.OperationID, ExpectedRevision: boundOp.Revision, Phase: phase,
+					Now: now.Add(2*time.Minute + time.Duration(boundOp.Revision)*time.Second),
+				}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = uuid.NewString()
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+					req.BindingRevision = 7
+				}
+				boundOp, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance bound parent %s: %v", phase, err)
+				}
+			}
+			boundReset, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: boundOp.OperationID, ExpectedRevision: boundOp.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, RetainBindingRevision: true, Now: now.Add(3 * time.Minute),
+			})
+			if err != nil || boundReset.Phase != channelonboarding.PhasePreparing || boundReset.IdentityOperationID != "" || boundReset.BindingRevision != 7 || len(boundReset.CredentialAdmissions) != 0 {
+				t.Fatalf("bound credential-stale reset = %#v err=%v", boundReset, err)
+			}
+			publishingOp := boundReset
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+				channelonboarding.PhasePublishingActivation,
+			} {
+				req := channelonboarding.AdvanceRequest{
+					OperationID: publishingOp.OperationID, ExpectedRevision: publishingOp.Revision, Phase: phase,
+					Now: now.Add(4*time.Minute + time.Duration(publishingOp.Revision)*time.Second),
+				}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = uuid.NewString()
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+					req.BindingRevision = 8
+				}
+				publishingOp, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance publishing parent %s: %v", phase, err)
+				}
+			}
+			publishingReset, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: publishingOp.OperationID, ExpectedRevision: publishingOp.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, RetainBindingRevision: true, Now: now.Add(5 * time.Minute),
+			})
+			if err != nil || publishingReset.Phase != channelonboarding.PhasePreparing || publishingReset.IdentityOperationID != "" || publishingReset.BindingRevision != 8 || len(publishingReset.CredentialAdmissions) != 0 {
+				t.Fatalf("publishing credential-stale reset = %#v err=%v", publishingReset, err)
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 31, 17, 30, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := channelOnboardingStartRequest(principal.ID, now)
+			op, err := selected.ReserveChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := credentialStore.Set(ctx, request.CredentialReservations[0].StoreKey, "provider-token"); err != nil {
+				t.Fatal(err)
+			}
+			writer, err := channelonboarding.NewCredentialWriter(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observed, err := writer.Observe(ctx, request.CredentialReservations[0].StoreKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admissions := []channelonboarding.CredentialAdmission{{
+				Role: request.CredentialReservations[0].Role, StoreKey: observed.StoreKey,
+				Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: observed.ValueSeal,
+			}}
+			identityID := uuid.NewString()
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+			} {
+				req := channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now.Add(time.Duration(op.Revision) * time.Second)}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = identityID
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+					req.BindingRevision = 3
+				}
+				op, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance %s: %v", phase, err)
+				}
+			}
+			parsedTarget, err := packs.ParseChannelRegistrationTarget(request.TargetSelector)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := channelonboarding.Candidate{
+				Provider: request.Provider, Interface: request.Interface, Coordinate: request.Coordinate,
+				Target: channelonboarding.CandidateTarget{
+					Selector: request.TargetSelector, ServiceID: "service-support", PackageKey: parsedTarget.PackageKey,
+					FlowID: parsedTarget.FlowID, Alias: "support", Provider: parsedTarget.Provider,
+					Generation: request.Coordinate.TargetGeneration, PublicationSequence: 1,
+					AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("stale-recovery")), SigningCredentialKey: "signing",
+				},
+				Posture: request.Posture, Ceremony: request.Ceremony,
+				ProviderCredentialRole: request.CredentialReservations[0].Role, SigningCredentialRole: "webhook_signing_secret",
+				ConfirmationOperation: "deliver",
+			}
+			catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identities := staleRecoveryOnboardingIdentities{principal: principal, operation: operatorchannel.Operation{
+				OperationID: identityID, OnboardingOperationID: op.OperationID, State: operatorchannel.StateCredentialStale, Revision: 3,
+			}}
+			service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
+				Store: selected, Identities: identities, Credentials: writer,
+				Catalog:     func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil },
+				Activations: retiredOnboardingActivations{}, Confirmation: retiredOnboardingConfirmation{},
+				Readiness: retiredOnboardingReadiness{}, Now: func() time.Time { return now.Add(time.Minute) },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.Recover(ctx); err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := selected.GetChannelOnboarding(ctx, op.OperationID)
+			if err != nil || recovered.Phase != channelonboarding.PhasePreparing || recovered.IdentityOperationID != "" || recovered.BindingRevision != 0 || len(recovered.CredentialAdmissions) != 0 {
+				t.Fatalf("recovered stale parent = %#v err=%v", recovered, err)
+			}
 		})
 	}
 }
@@ -111,15 +352,108 @@ func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStore
 	}
 }
 
+func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := channelOnboardingStartRequest(principal.ID, now)
+			op, err := selected.ReserveChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admissions := []channelonboarding.CredentialAdmission{
+				{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "provider-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+				{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+			}
+			op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
+				CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseFailed,
+				FailureCode: "provider_rejected", FailureMessage: "provider rejected credential", Now: now.Add(2 * time.Second),
+			})
+			if err != nil || failed.Phase != channelonboarding.PhaseFailed {
+				t.Fatalf("terminal fence = %#v err=%v", failed, err)
+			}
+			if _, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: failed.OperationID, ExpectedRevision: failed.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, Now: now.Add(3 * time.Second),
+			}); !errors.Is(err, channelonboarding.ErrConflict) {
+				t.Fatalf("terminal credential readmission error = %v, want conflict", err)
+			}
+			replay := request
+			replay.OperationID = uuid.NewString()
+			replayed, err := selected.ReserveChannelOnboarding(ctx, replay)
+			if err != nil || replayed.OperationID != failed.OperationID || replayed.Phase != channelonboarding.PhaseFailed || replayed.Revision != failed.Revision {
+				t.Fatalf("terminal request replay = %#v err=%v", replayed, err)
+			}
+		})
+	}
+}
+
 type retiredOnboardingIdentities struct {
 	principal operatorchannel.Principal
+}
+
+type staleRecoveryOnboardingIdentities struct {
+	principal operatorchannel.Principal
+	operation operatorchannel.Operation
+}
+
+func (i staleRecoveryOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
+	return i.principal, nil
+}
+func (staleRecoveryOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error) {
+	return operatorchannel.Operation{}, operatorchannel.ErrConflict
+}
+func (i staleRecoveryOnboardingIdentities) Confirm(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return i.operation, operatorchannel.Binding{}, operatorchannel.ErrCredentialStale
+}
+func (i staleRecoveryOnboardingIdentities) GetOperation(_ context.Context, operationID string) (operatorchannel.Operation, error) {
+	if operationID != i.operation.OperationID {
+		return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+	}
+	return i.operation, nil
+}
+func (staleRecoveryOnboardingIdentities) ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error) {
+	return operatorchannel.Operation{}, operatorchannel.ErrConflict
+}
+func (staleRecoveryOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+func (staleRecoveryOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
+	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
+}
+func (staleRecoveryOnboardingIdentities) Readback(context.Context) ([]operatorchannel.Readback, error) {
+	return nil, nil
 }
 
 func (i retiredOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
 	return i.principal, nil
 }
-func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error) {
+func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) Confirm(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return operatorchannel.Operation{}, operatorchannel.Binding{}, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) GetOperation(context.Context, string) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
@@ -129,6 +463,9 @@ func (retiredOnboardingIdentities) ExpireOperation(context.Context, string, int6
 }
 func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
+	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) Readback(context.Context) ([]operatorchannel.Readback, error) {
 	return nil, nil
@@ -228,7 +565,7 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 	for _, reservation := range request.CredentialReservations {
 		admissions = append(admissions, channelonboarding.CredentialAdmission{
 			Role: reservation.Role, StoreKey: reservation.StoreKey + "." + request.OperationID,
-			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, Epoch: "epoch-" + request.OperationID,
+			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, ValueSeal: operatorChannelProviderEvidence().Seal,
 		})
 	}
 	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
@@ -239,10 +576,14 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 		t.Fatal(err)
 	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: bindingRevision, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = bindingRevision
+		}
+		op, err = selected.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,8 +641,8 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		t.Fatalf("concurrent slot operation = %v", err)
 	}
 	admissions := []channelonboarding.CredentialAdmission{
-		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", Epoch: "epoch-provider"},
-		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", Epoch: "epoch-signing"},
+		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", ValueSeal: operatorChannelProviderEvidence().Seal},
+		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", ValueSeal: operatorChannelProviderEvidence().Seal},
 	}
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseCredentialsAdmitted,
@@ -313,11 +654,21 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseAwaitingExternalIdentity, Now: now.Add(2 * time.Second)}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("stale phase advance = %v", err)
 	}
+	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseActivatingProvider,
+		BindingRevision: 4, Now: now.Add(2 * time.Second),
+	}); !errors.Is(err, channelonboarding.ErrInvalidRequest) {
+		t.Fatalf("binding revision outside confirmation/publication phase = %v", err)
+	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: 4, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = 4
+		}
+		op, err = store.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatalf("advance %s: %v", phase, err)
 		}

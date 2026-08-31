@@ -161,11 +161,16 @@ type telegramRegistrationTransport struct {
 
 type failingSigningSnapshotStore struct {
 	runtimecredentials.Store
-	err error
+	err        error
+	failingKey string
 }
 
 func (s failingSigningSnapshotStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
-	if key == "signing" {
+	failingKey := s.failingKey
+	if failingKey == "" {
+		failingKey = "signing"
+	}
+	if key == failingKey {
 		return runtimecredentials.AtomicSnapshot{}, s.err
 	}
 	return s.Store.(runtimecredentials.Snapshotter).Snapshot(ctx, key)
@@ -230,72 +235,78 @@ func (transport *telegramRegistrationTransport) counts() (int, int) {
 	return transport.identifyCount, transport.applyCount
 }
 
-func TestProviderRegistrationRejectsUnusableSigningBeforeAnySideEffect(t *testing.T) {
+func TestProviderRegistrationRejectsUnusableCredentialsBeforeAnySideEffect(t *testing.T) {
 	registration := loadTelegramRegistrationPlan(t)
-	for _, tc := range []struct {
-		name       string
-		value      string
-		set        bool
-		unreadable bool
-	}{
-		{name: "missing"},
-		{name: "empty", set: true},
-		{name: "whitespace", value: " \t\n", set: true},
-		{name: "unreadable", unreadable: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := store.Set(ctx, "bot", "provider-token"); err != nil {
-				t.Fatal(err)
-			}
-			if tc.set {
-				if err := store.Set(ctx, "signing", tc.value); err != nil {
+	for _, credentialKey := range []string{"bot", "signing"} {
+		for _, tc := range []struct {
+			name       string
+			value      string
+			set        bool
+			unreadable bool
+		}{
+			{name: "missing"},
+			{name: "empty", set: true},
+			{name: "whitespace", value: " \t\n", set: true},
+			{name: "unreadable", unreadable: true},
+		} {
+			t.Run(credentialKey+"/"+tc.name, func(t *testing.T) {
+				ctx := context.Background()
+				store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
 					t.Fatal(err)
 				}
-			}
-			var credentialStore runtimecredentials.Store = store
-			if tc.unreadable {
-				credentialStore = failingSigningSnapshotStore{Store: store, err: errors.New("signing store unavailable")}
-			}
-			owner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
-			if err != nil {
-				t.Fatal(err)
-			}
-			effectsStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
-			transport := &telegramRegistrationTransport{t: t}
-			readiness := NewReadinessOwner(true)
-			startup := testStartupAuthority(t, "runtime-negative")
-			controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
-				CredentialOwner: owner, EffectsStore: effectsStore,
-				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
-				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+				for key, value := range map[string]string{"bot": "provider-token", "signing": "signing-token"} {
+					if key != credentialKey {
+						if err := store.Set(ctx, key, value); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if tc.set {
+					if err := store.Set(ctx, credentialKey, tc.value); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var credentialStore runtimecredentials.Store = store
+				if tc.unreadable {
+					credentialStore = failingSigningSnapshotStore{Store: store, err: errors.New("credential store unavailable"), failingKey: credentialKey}
+				}
+				owner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+				if err != nil {
+					t.Fatal(err)
+				}
+				effectsStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				transport := &telegramRegistrationTransport{t: t}
+				readiness := NewReadinessOwner(true)
+				startup := testStartupAuthority(t, "runtime-negative")
+				controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+					CredentialOwner: owner, EffectsStore: effectsStore,
+					HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+					Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+					StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
+				readiness.SetRuntimeReady(true)
+				readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
+				pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram:telegram")
+				if err := controller.Reconcile(ctx, exposure, []RegistrationPair{pair}); err == nil {
+					t.Fatalf("Reconcile succeeded with unusable %s credential", credentialKey)
+				}
+				identified, applied := transport.counts()
+				if identified != 0 || applied != 0 {
+					t.Fatalf("provider calls identify=%d apply=%d, want 0/0", identified, applied)
+				}
+				if _, launched := effectsStore.StateForAdapter("provider_registration"); launched {
+					t.Fatal("unusable signing credential launched an external effect")
+				}
+				if snapshot := readiness.Snapshot(time.Now().UTC()); snapshot.PublicIngressReady {
+					t.Fatalf("unusable signing credential published readiness: %#v", snapshot)
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
-			readiness.SetRuntimeReady(true)
-			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
-			pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram:telegram")
-			if err := controller.Reconcile(ctx, exposure, []RegistrationPair{pair}); err == nil {
-				t.Fatal("Reconcile succeeded with unusable target signing credential")
-			}
-			identified, applied := transport.counts()
-			if identified != 0 || applied != 0 {
-				t.Fatalf("provider calls identify=%d apply=%d, want 0/0", identified, applied)
-			}
-			if _, launched := effectsStore.StateForAdapter("provider_registration"); launched {
-				t.Fatal("unusable signing credential launched an external effect")
-			}
-			if snapshot := readiness.Snapshot(time.Now().UTC()); snapshot.PublicIngressReady {
-				t.Fatalf("unusable signing credential published readiness: %#v", snapshot)
-			}
-		})
+		}
 	}
 }
 

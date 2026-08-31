@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
 
@@ -61,8 +62,8 @@ func TestFileProofStoreRejectsCorruptUnknownAndConflictingDocuments(t *testing.T
 		raw  string
 	}{
 		{name: "empty", raw: ""},
-		{name: "unknown version", raw: `{"version":2,"entries":{}}`},
-		{name: "unknown field", raw: `{"version":1,"entries":{},"extra":true}`},
+		{name: "unknown version", raw: `{"version":3,"entries":{}}`},
+		{name: "unknown field", raw: `{"version":2,"entries":{},"extra":true}`},
 		{name: "malformed", raw: `{`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -86,12 +87,40 @@ func TestFileProofStoreRejectsCorruptUnknownAndConflictingDocuments(t *testing.T
 		t.Fatal(err)
 	}
 	proof := testVerifiedProof(time.Now().UTC())
-	raw := `{"version":1,"entries":{"wrong-key":` + mustProofJSON(t, proof) + `}}`
+	raw := `{"version":2,"entries":{"wrong-key":` + mustProofRecordJSON(t, proof) + `}}`
 	if err := os.WriteFile(store.Path(), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.List(context.Background()); err == nil || !strings.Contains(err.Error(), "conflicting entry") {
 		t.Fatalf("conflicting key error = %v", err)
+	}
+}
+
+func TestFileProofStoreClassifiesV1WithoutDecodingAuthorityAndQuarantinesOnFreshProof(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileProofStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"entries":{"untrusted":{"format":"swarm-verified-account-proof-v1","epoch":"legacy-authority","external_account_reference":"must-not-load"}}}`
+	if err := os.WriteFile(store.Path(), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proofs, err := store.List(context.Background())
+	if err != nil || len(proofs) != 0 {
+		t.Fatalf("v1 classification = %#v, %v", proofs, err)
+	}
+	proof := testVerifiedProof(time.Now().UTC())
+	if err := store.Put(context.Background(), proof); err != nil {
+		t.Fatal(err)
+	}
+	quarantined, err := os.ReadFile(store.Path() + ".unsupported-v1")
+	if err != nil || string(quarantined) != legacy {
+		t.Fatalf("v1 quarantine = %q, %v", quarantined, err)
+	}
+	current, found, err := store.Get(context.Background(), proof.Interface)
+	if err != nil || !found || current.ProofID != proof.ProofID || current.ProviderCredential != proof.ProviderCredential {
+		t.Fatalf("fresh v2 proof = %#v, found=%v err=%v", current, found, err)
 	}
 }
 
@@ -103,13 +132,14 @@ func testVerifiedProof(at time.Time) VerifiedProof {
 		ConversationScope: ConversationScopeDirect, AccountPresentation: "@operator", Method: "connect",
 		Challenge: "SWARM-AAAAAAAAAAAAAAAA", OriginalOperationID: uuid.NewString(), MintingStoreID: uuid.NewString(),
 		MintingDeploymentID: uuid.NewString(), VerifiedAt: at, OperatorConfirmed: true,
-		ConsentScopes: []ConsentScope{ConsentNotify, ConsentDecide},
+		ConsentScopes:      []ConsentScope{ConsentNotify, ConsentDecide},
+		ProviderCredential: runtimecredentials.ValueEvidence{Key: "channel.telegram.provider", Seal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64))},
 	}
 }
 
-func mustProofJSON(t *testing.T, proof VerifiedProof) string {
+func mustProofRecordJSON(t *testing.T, proof VerifiedProof) string {
 	t.Helper()
-	raw, err := json.Marshal(proof)
+	raw, err := json.Marshal(recordFromProof(proof))
 	if err != nil {
 		t.Fatal(err)
 	}

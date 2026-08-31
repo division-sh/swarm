@@ -177,6 +177,40 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("credential rotation during confirmation returns parent resume command", func(t *testing.T) {
+		remediation := "swarm channel resume " + operatorChannelCLIOperation + " --credential-stdin"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			var rpcRequest jsonRPCRequest
+			if err := json.NewDecoder(request.Body).Decode(&rpcRequest); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			response := map[string]any{"jsonrpc": "2.0", "id": rpcRequest.ID}
+			switch rpcRequest.Method {
+			case "channel.onboarding_start":
+				response["result"] = channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
+			case "channel.confirm":
+				response["error"] = map[string]any{
+					"code": -32000, "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
+					"data": map[string]any{"code": "CHANNEL_CREDENTIAL_REQUIRED", "retryable": false, "details": map[string]any{
+						"reason": "provider credential rotated before confirmation", "operation_id": operatorChannelCLIOperation,
+						"role": "bot_token", "store_key": "channel.telegram.provider", "remediation": remediation,
+					}},
+				}
+			default:
+				t.Fatalf("unexpected method %q", rpcRequest.Method)
+			}
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				t.Fatal(err)
+			}
+		}))
+		t.Cleanup(server.Close)
+		_, stderr, code := runOperatorChannelCLIWithInput(t, server, "provider-token\n", "channel", "connect", "telegram", "--yes")
+		if code != CLIExitRuntime || !strings.Contains(stderr, operatorChannelCLIOperation) || !strings.Contains(stderr, remediation) {
+			t.Fatalf("credential rotation code=%d stderr=%q", code, stderr)
+		}
+	})
+
 	t.Run("connect uses durable onboarding and confirms nested identity", func(t *testing.T) {
 		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {

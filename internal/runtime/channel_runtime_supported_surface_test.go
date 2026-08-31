@@ -663,7 +663,7 @@ func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBi
 		for role, key := range binding.CredentialStoreKeys() {
 			admissions = append(admissions, channelonboarding.CredentialAdmission{
 				Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved,
-				Receipt: "test-receipt-" + role, Epoch: "test-epoch-" + role,
+				ValueSeal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64)),
 			})
 		}
 		activations = append(activations, channelonboarding.CompiledActivation{

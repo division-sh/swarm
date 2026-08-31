@@ -9979,7 +9979,7 @@ tool_model:
         claim_settlement: selected-store inbound publication transaction plus operator_channel_claim_receipts
         machine_proof: resolved Swarm state directory operator-channel-proofs.json
         provider_fact: current packs.SatisfactionPlan text projection from satisfier-authenticated normalized v2 output
-        api: /v1/rpc channel.connect|reconnect|rebind|confirm|unbind|proof_revoke|list
+        api: /v1/rpc channel.onboarding_start|onboarding_get|onboarding_retry|confirm|unbind|proof_revoke|list
         cli: swarm channel connect|list|unbind
       principal_rule: >
         One selected store owns one deployment operator principal. A successfully authenticated bearer token resolves to
@@ -9999,13 +9999,29 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. After same-request replay handling, an unresolved
+        return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
+        before credential currentness, active-interface resolution, proof planning, revision admission, fresh challenge
+        generation, or any other mutable new-ceremony precondition; a replay recheck precedes return from a failed
+        currentness gate so a racing exact commit cannot be hidden. Credential currentness gates only a genuinely new
+        ceremony or a pending approved
+        mutation after terminal replay classification. Only a successful currentness observation whose value does not match
+        proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
+        trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
+        pending identity ceremony as credential_stale; its parent onboarding responsibility releases the old admissions,
+        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. If currentness changes
+        after the child commits bound but before its parent publishes activation, the parent likewise releases the old
+        admissions and resets while retaining the exact bound revision; fresh evidence may then create only an exact
+        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb. After
+        same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
         fence commits, so no later boot can recover it against the fence. The selected-store identity owner
         revision-fences and durably expires an overdue awaiting-claim or awaiting-confirmation operation when its parent
-        responsibility is driven or recovered. An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
+        responsibility is driven or recovered. The selected-store confirmation transaction must admit any nonterminal
+        identity child only while its onboarding parent remains nonterminal and names that exact child; it serializes
+        against parent retirement, which fences new child mutation, while exact terminal child replay remains available.
+        An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
         without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
         API results rather than serialized as year-one timestamps or empty enum values.
       challenge_storage_rationale: >
@@ -10016,17 +10032,27 @@ tool_model:
       proof_rule: >
         Operator-confirmed success may project one structured machine-local verified-account proof for the exact interface
         identity. The proof contains opaque provider references, provider-neutral scope, original challenge/operation,
-        minting store/deployment, confirmation, consent scope, stable proof identity, and monotonic revision; it contains
-        no provider secret or independently validatable credential. Database claim/binding settlement commits first and
-        one durable proof responsibility makes file materialization idempotently recoverable. --no-save suppresses the
-        projection. Boot may create a missing local binding from an exact active proof and must announce that source.
+        minting store/deployment, confirmation, consent scope, stable proof identity, monotonic revision, and private exact
+        provider-credential value evidence; it contains no provider secret or reusable secret digest. Every live binding,
+        including --no-save bindings, owns the same private provider evidence through the selected-store operation that
+        confirmation consumes. Database claim/binding settlement commits first and one durable proof responsibility carries
+        an exact projection of the committed binding evidence, making file materialization idempotently recoverable without
+        rereading credentials. --no-save suppresses only that proof projection. Boot may create a missing local binding from
+        an exact active v2 proof whose evidence is still current and must announce that source.
         Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
         non-authoritative, and re-verification creates the next proof revision. Exact confirmation replay retries either
         pending or failed proof materialization responsibility without repeating claim or binding mutation. When the
         exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
         validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
-        and complete the selected-store responsibility without rewriting the proof; any mismatch fails closed. A retained
-        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation.
+        and complete the selected-store responsibility without rewriting the proof or consulting later credential
+        currentness; currentness gates only a new proof-file write. A successful mismatch terminally fails that new write,
+        while a currentness observation error leaves the durable proof responsibility pending for retry. Any immutable
+        responsibility mismatch fails closed. A retained
+        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation. V1 or digest-less proof
+        documents are unsupported stale material: they may be classified and quarantined, but no identity fact is decoded,
+        copied, adapted, migrated, or rewritten into v2 authority. Fresh v2 evidence requires a new confirmation ceremony.
+        An independently retained active proof remains exactly revocable after its provider credential becomes stale or
+        unavailable; revocation resolves that active proof record without treating it as current identity authority.
       readback_rule: >
         Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
         unbound, or revoked from one exact retained lifecycle projection: the union of current admitted interfaces, local
@@ -10101,22 +10127,37 @@ tool_model:
         confirmation delivery owns the next step.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
-        values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
-        logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
-        stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
+        values and reusable or unkeyed secret digests are forbidden in semantic request hashes, API idempotency rows,
+        selected-store rows, logs, traces, progress, errors, and readback. The credential subsystem alone may create and
+        compare a versioned, domain-separated keyed value seal over the exact credential key and raw value. Its random
+        seal key is durable root metadata in the writable credential file, never a credential entry; it is created only by
+        the first explicit sealing operation. Validation never creates a missing key. The normal environment/file overlay
+        seals the effective environment value through that writable key home. A standalone environment-only store rejects
+        connect, with or without --no-save, before selected-store or provider mutation and teaches configuration of a writable
+        credential file tier. Process-random seal keys and per-boot durable currentness are forbidden. Plain pre-seal
+        credential files remain ordinary key/value stores and require no migration or backfill.
+        The operation first reserves exact credential roles and keys, then privately persists role, key, admission kind,
+        keyed value seal, and a receipt only for operation-written values. The credential subsystem's one usability rule
+        runs before every receipt-writing caller and store mutation. Empty or whitespace-only input creates no value,
+        receipt, or seal authority, so corrected bytes may use the same deterministic operation receipt without migration
+        or correction-in-place behavior. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
         current predecessor activation. A deterministic operation-owned write is recovered by observing its exact receipt
-        and epoch, never by rewriting or guessing the secret, and the complete admission set commits in a
+        and resealing its current exact value, never by rewriting or guessing the secret, and the complete admission set commits in a
         credentials_admitted checkpoint before provider preflight. Provider activation preflight validates the staged
         candidate's exact credential occurrence and provider identity without changing registration selection or launching
-        a registration effect. A present file-store credential without a persisted occurrence epoch fails closed at snapshot
-        admission; runtime never assigns a process-local epoch, backfills the file, or migrates that unsupported occurrence.
+        a registration effect. The admitted provider key and seal are persisted into the nested identity operation before
+        claim or confirmation; the selected-store binding commits that exact evidence in proof-backed and proofless modes.
+        Any requested v2 proof and proof responsibility carry byte-identical evidence and cannot mint from a later credential read.
         Rejection compare-deletes operation-written candidate occurrences and returns the operation
         to preparing, so resume can admit a different credential while the predecessor activation and registration remain
         current. Fresh webhook connect generates a missing signing value;
-        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
+        replay, reconnect, and rebind do not rotate credentials without an explicitly admitted replacement value. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
-        longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
+        longer current. Provider-value rotation invalidates binding and optional-proof identity evidence and requires fresh
+        same-identity reconnect confirmation; a different claimant teaches rebind. Signing-only rotation invalidates
+        activation, registration, and readiness without invalidating provider identity. Every operation-written credential
+        occurrence is owned only by its exact key and receipt: terminal
         onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
         retires. Durable successor activation publication, exact process publication, and activation-backed registration
         promotion each commit before predecessor occurrence retirement; nonterminal recovery resumes from the last durable
@@ -10129,7 +10170,7 @@ tool_model:
         collision and any generation, credential-role, destination, or identity contradiction fail before publication.
         One process-local owner publishes the complete current canonical activation records. Its deterministic typed
         generation includes source variant, exact runtime-context coordinate, activation revision, complete executable
-        plan canonical value, and non-secret credential admission/epoch facts; secret values and reusable secret digests
+        plan canonical value, and private non-secret credential admission/value-seal facts; secret values and reusable secret digests
         are excluded. Before a runtime-context occurrence exists, verify, preflight, test, and serve admission use the same
         publication carrier in an explicit declared-only mode containing only configured binding plans. Declared-only
         publications cannot grant execution and cannot synthesize learned state; executable owners reject them. Replacement
@@ -10153,7 +10194,7 @@ tool_model:
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
         activation-owned destination, coordinate, credential, or revision facts fail closed.
       registration_handoff_rule: >
-        A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
+        A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
         Candidate credential/provider-identity admission completes before registration selection changes; failed admission
@@ -10175,6 +10216,8 @@ tool_model:
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
         inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
         and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+        Each dispatched credential value is the exact single observation validated against the activation's durable value
+        seal; validate-then-reread and any other split currentness/value path are forbidden.
         The journal retains the authorizing onboarding revision and complete durable/live context coordinate. A proven
         prelaunch failure may clear and remint the confirmation operation only in the successor-coordinate CAS; terminal
         success retains its operation identity, and launched, response-observed, or uncertain work is never redispatched.
@@ -10183,8 +10226,11 @@ tool_model:
         reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
         before identity mutation, proof-file revocation, source removal, or successor authority. Runtime refresh then fences
         registration, public runtime tools, and private activity routes. Only after that retirement, teardown removes each
-        exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
-        authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
+        exact operation-written credential occurrence through its key/receipt fence. Explicit interface teardown removes
+        every matching operation-owned credential. Runtime-context unload or activation supersession instead preserves only
+        the exact provider key/value-seal evidence still referenced by a current retained binding, while deleting signing
+        and every other matching operation-owned occurrence. Recovery resumes every reserved or authority-retired teardown
+        idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
         fails. Authoritative bundle deletion and explicit runtime-context unload/source removal are semantic retirement;
         ordinary serve process shutdown only quiesces process work and withdraws the live occurrence, and must not invoke
@@ -10196,7 +10242,7 @@ tool_model:
         ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
         generation used by API/CLI readback. READY requires one exact current coordinate,
         available channel plan, current activation and binding revisions, current proof when the binding is proof-backed,
-        current credential epochs, terminal-success confirmation for the same activation/binding, and posture-specific
+        current exact credential value seals, terminal-success confirmation for the same activation/binding, and posture-specific
         target evidence. Webhook posture additionally joins exact ingress/signing, exposure, callback, and provider
         registration generations from that same activation publication. The current activation publication, not authored
         standing-target configuration, supplies the webhook signing credential identity used by the registration/readiness
@@ -10233,7 +10279,7 @@ tool_model:
         active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
         transition, and boot presentation uses the same masked claimant fallback as canonical channel readback. When startup
         finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
-        runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
+        runtime_context_retired terminal failure, compare-deletes only that operation's receipt-owned credentials,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
         Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
         durable identity without registration-order or primary-context inference, reconciles admitted predecessor effects,
@@ -10406,15 +10452,15 @@ tool_model:
       semantic_identity: >
         One fresh intent binds exposure generation and public origin, exact binding and target generations, compiled plan
         generation, callback route and random token, stable provider slot, and atomic provider/signing credential snapshot
-        identities. Snapshot identity is source plus store key plus a process-random epoch that changes whenever the value
-        or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
+        identities. Snapshot identity is source plus store key plus a private process observation token that changes whenever
+        the value or metadata changes; it is never serialized or used as durable channel identity. Secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
         and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
         deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
       callback: >
         `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
         only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
         the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
-        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential epochs, selected pair,
+        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential observations, selected pair,
         and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
@@ -14389,7 +14435,8 @@ platform_tables:
       description: >-
         Durable owner of one connect, reconnect, rebind, or unbind operation. It owns exact request replay,
         challenge lifecycle, provider-authenticated claimant, operator confirmation, binding revision, and
-        the bounded proof-file projection responsibility. A challenge cannot be terminally consumed without
+        the exact private provider-credential key/value-seal evidence from onboarding plus the bounded optional proof-file
+        projection responsibility. A challenge cannot be terminally consumed without
         either a bound result or the explicit rejected/expired terminal disposition.
       ddl: |
         CREATE TABLE operator_channel_operations (
@@ -14402,11 +14449,14 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
+            onboarding_operation_id UUID,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
             expected_binding_revision BIGINT NOT NULL CHECK (expected_binding_revision >= 0),
             challenge TEXT UNIQUE,
-            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','expired','unbound')),
+            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','credential_stale','expired','unbound')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             binding_revision BIGINT CHECK (binding_revision > 0),
             external_account_reference TEXT,
@@ -14431,7 +14481,8 @@ platform_tables:
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
-            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK ((operation_kind = 'unbind' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL) OR (operation_kind <> 'unbind' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
             CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
@@ -14442,8 +14493,10 @@ platform_tables:
     operator_channel_bindings:
       description: >-
         Current selected-store local binding or explicit unbind fence for one exact pack-qualified interface.
-        A bound row is authoritative only when its semantic generation is current and any referenced machine-local
-        proof identity/revision remains active. Unbind is persisted state, never inferred from row absence.
+        Every current binding owns the provider-credential key/value-seal evidence established by its confirmation,
+        independently of whether a machine proof was requested. A bound row is authoritative only when that evidence and
+        semantic generation are current and any referenced machine-local proof identity/revision remains active. Unbind is
+        persisted state, never inferred from row absence.
       ddl: |
         CREATE TABLE operator_channel_bindings (
             interface_key TEXT PRIMARY KEY,
@@ -14453,6 +14506,8 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
             external_account_reference TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
@@ -14464,7 +14519,7 @@ platform_tables:
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'current' AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK ((status = 'current' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
             CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
@@ -14473,7 +14528,8 @@ platform_tables:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
         reconnect, or rebind operation. Secret values and reusable secret digests are forbidden;
-        only admitted credential key, receipt, and epoch metadata may be stored. Request-key replay,
+        only private admitted credential key, keyed value seal, admission kind, and operation-write receipt may be stored.
+        Public DTOs omit value seals, and observed credentials own no receipt. Request-key replay,
         target-slot exclusion, phase transitions, selected-store activation publication, exact process
         publication, registration promotion, and predecessor cleanup are revision fenced.
       ddl: |
@@ -22318,7 +22374,7 @@ test_specification:
           generation. Missing required schemas or external provenance fails closed. Mutable declared/learned deployment
           activations are a separate ChannelActivationGeneration and do not alter historical workflow/source identity.
         excluded: >-
-          channel deployment destinations, activation runtime tools and private targets, activation credential references/epochs,
+          channel deployment destinations, activation runtime tools and private targets, activation credential references/value seals,
           readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
       execution_profile:
         owner: internal/runtime/scenarioexecution
@@ -25956,8 +26012,9 @@ cli_specification:
       behavior: >
         API-only complete connected-channel lifecycle. `connect <provider>`, `reconnect <provider>`, and
         `rebind <provider>` select one exact bundle/interface/target candidate and consume the durable onboarding
-        operation through start/get/retry. The nested satisfier-authenticated identity ceremony remains owned by
-        channel.connect|reconnect|rebind plus channel.confirm, but those lower RPCs are not a second whole-journey CLI.
+        operation through start/get/retry. The onboarding owner persists the exact admitted provider-credential evidence
+        into the nested satisfier-authenticated identity ceremony; channel.confirm remains the only lower-level public
+        mutation because explicit operator confirmation is a separate user step.
         Provider credentials enter only through hidden TTY input or stdin and are never accepted in argv. `list`
         consumes the composed identity/activation/readiness projection. `status` selects one activation by exact
         interface/bundle/target coordinate. `unbind` durably retires selected-store
@@ -28927,9 +28984,6 @@ api_specification:
       - conversation.fork_delete
       - channel.onboarding_start
       - channel.onboarding_retry
-      - channel.connect
-      - channel.reconnect
-      - channel.rebind
       - channel.unbind
       - channel.confirm
       - channel.proof_revoke
@@ -32761,11 +32815,12 @@ api_specification:
         required: [operation_id, kind, principal_id, interface, state, revision, save_proof, proof_status, requested_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          onboarding_operation_id: {$ref: '#/components/schemas/OpaqueId'}
           kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
           challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
-          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, expired, unbound]}
+          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
           external_account_reference: {type: string}
@@ -32804,7 +32859,7 @@ api_specification:
         additionalProperties: false
         required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
         properties:
-          format: {type: string, const: swarm-verified-account-proof-v1}
+          format: {type: string, const: swarm-verified-account-proof-v2}
           proof_id: {$ref: '#/components/schemas/OpaqueId'}
           revision: {type: integer, minimum: 1}
           status: {type: string, enum: [active, revoked]}
@@ -32871,13 +32926,12 @@ api_specification:
       ChannelCredentialAdmission:
         type: object
         additionalProperties: false
-        required: [role, store_key, kind, receipt, epoch]
+        required: [role, store_key, kind]
         properties:
           role: {type: string, minLength: 1}
           store_key: {type: string, minLength: 1}
           kind: {type: string, enum: [written, observed]}
           receipt: {type: string, minLength: 1}
-          epoch: {type: string, minLength: 1}
       ChannelOnboardingOperation:
         type: object
         additionalProperties: false
@@ -37358,42 +37412,6 @@ api_specification:
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
-    channel.connect:
-      tier: must_have
-      description: Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 0}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.reconnect:
-      tier: must_have
-      description: Re-verify the same authenticated account and conversation against the current exact binding revision and active interface generation.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.rebind:
-      tier: must_have
-      description: Replace a current binding with a different satisfier-authenticated claimant after explicit operator confirmation; it never silently selects or overwrites an account.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.confirm:
       tier: must_have
       description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.
@@ -37405,7 +37423,7 @@ api_specification:
       - {name: approve, required: true, schema: {type: boolean}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
     channel.unbind:
       tier: must_have
       description: Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.

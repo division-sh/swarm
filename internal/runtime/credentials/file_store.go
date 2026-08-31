@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type FileStore struct {
@@ -20,15 +19,15 @@ type FileStore struct {
 }
 
 type fileCredentialSet struct {
-	Version int                           `json:"version"`
-	Entries map[string]fileCredentialItem `json:"entries"`
+	Version      int                           `json:"version"`
+	ValueSealKey string                        `json:"value_seal_key,omitempty"`
+	Entries      map[string]fileCredentialItem `json:"entries"`
 }
 
 type fileCredentialItem struct {
 	Value     string    `json:"value"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Receipt   string    `json:"receipt,omitempty"`
-	Epoch     string    `json:"epoch"`
 }
 
 func NewFileStore(path string) (*FileStore, error) {
@@ -46,6 +45,8 @@ func DefaultFilePath() (string, error) {
 	}
 	return filepath.Join(root, "swarm", "credentials.json"), nil
 }
+
+func (s *FileStore) hasDurableValueSealKeyHome() bool { return s != nil }
 
 func (s *FileStore) Get(_ context.Context, key string) (string, bool, error) {
 	s.mu.Lock()
@@ -76,7 +77,6 @@ func (s *FileStore) Set(_ context.Context, key, value string) error {
 		doc.Entries[key] = fileCredentialItem{
 			Value:     value,
 			UpdatedAt: time.Now().UTC(),
-			Epoch:     uuid.NewString(),
 		}
 		return s.saveLocked(doc)
 	})
@@ -88,6 +88,9 @@ func (s *FileStore) AdmitWithReceipt(_ context.Context, key, value, receipt stri
 	if key == "" || receipt == "" {
 		return WriteReceipt{}, fmt.Errorf("credential key and write receipt are required")
 	}
+	if err := ValidateValue(value); err != nil {
+		return WriteReceipt{}, fmt.Errorf("%w: credential %q cannot be admitted", err, key)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out WriteReceipt
@@ -97,19 +100,16 @@ func (s *FileStore) AdmitWithReceipt(_ context.Context, key, value, receipt stri
 			return err
 		}
 		if item, ok := doc.Entries[key]; ok && item.Receipt == receipt {
-			if strings.TrimSpace(item.Epoch) == "" {
-				return fmt.Errorf("credential %q receipt exists without an occurrence epoch", key)
-			}
-			out = WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: item.UpdatedAt.UTC()}
+			out = WriteReceipt{Key: key, Receipt: receipt, UpdatedAt: item.UpdatedAt.UTC()}
 			return nil
 		}
 		now := time.Now().UTC()
-		item := fileCredentialItem{Value: value, UpdatedAt: now, Receipt: receipt, Epoch: uuid.NewString()}
+		item := fileCredentialItem{Value: value, UpdatedAt: now, Receipt: receipt}
 		doc.Entries[key] = item
 		if err := s.saveLocked(doc); err != nil {
 			return err
 		}
-		out = WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: now}
+		out = WriteReceipt{Key: key, Receipt: receipt, UpdatedAt: now}
 		return nil
 	})
 	return out, err
@@ -131,10 +131,7 @@ func (s *FileStore) ObserveReceipt(_ context.Context, key, receipt string) (Writ
 	if !found || strings.TrimSpace(item.Receipt) != receipt {
 		return WriteReceipt{}, false, nil
 	}
-	if strings.TrimSpace(item.Epoch) == "" {
-		return WriteReceipt{}, false, fmt.Errorf("credential %q receipt exists without an occurrence epoch", key)
-	}
-	return WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: item.UpdatedAt.UTC()}, true, nil
+	return WriteReceipt{Key: key, Receipt: receipt, UpdatedAt: item.UpdatedAt.UTC()}, true, nil
 }
 
 func (s *FileStore) List(_ context.Context) ([]string, error) {
@@ -172,12 +169,11 @@ func (s *FileStore) Delete(_ context.Context, key string) error {
 	})
 }
 
-func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt, epoch string) (bool, error) {
+func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt string) (bool, error) {
 	key = strings.TrimSpace(key)
 	receipt = strings.TrimSpace(receipt)
-	epoch = strings.TrimSpace(epoch)
-	if key == "" || receipt == "" || epoch == "" {
-		return false, fmt.Errorf("credential key, write receipt, and occurrence epoch are required")
+	if key == "" || receipt == "" {
+		return false, fmt.Errorf("credential key and write receipt are required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -188,7 +184,7 @@ func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt, epoch str
 			return err
 		}
 		item, found := doc.Entries[key]
-		if !found || strings.TrimSpace(item.Receipt) != receipt || strings.TrimSpace(item.Epoch) != epoch {
+		if !found || strings.TrimSpace(item.Receipt) != receipt {
 			return nil
 		}
 		delete(doc.Entries, key)
@@ -222,17 +218,149 @@ func (s *FileStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, err
 		Writable: true,
 	}
 	if item, ok := doc.Entries[key]; ok {
-		epoch := strings.TrimSpace(item.Epoch)
-		if epoch == "" {
-			return AtomicSnapshot{}, fmt.Errorf("credential %q exists without an occurrence epoch", key)
-		}
 		snapshot.Present = true
 		snapshot.Source = SourceFile
 		snapshot.UpdatedAt = timePtr(item.UpdatedAt)
 		snapshot.value = item.Value
-		snapshot.occurrenceEpoch = epoch
 	}
 	return snapshot, nil
+}
+
+func (s *FileStore) sealCurrentValue(_ context.Context, key string) (ValueEvidence, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ValueEvidence{}, fmt.Errorf("credential key is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var evidence ValueEvidence
+	err := s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		item, found := doc.Entries[key]
+		if !found {
+			return fmt.Errorf("credential %q is not present", key)
+		}
+		if !credentialValueUsable(item.Value) {
+			return fmt.Errorf("%w: credential %q cannot be admitted", ErrCredentialValueUnusable, key)
+		}
+		seal, changed, err := sealValueInDocument(&doc, key, item.Value)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := s.saveLocked(doc); err != nil {
+				return err
+			}
+		}
+		evidence = ValueEvidence{Key: key, Seal: seal}
+		return nil
+	})
+	return evidence, err
+}
+
+func (s *FileStore) currentValueMatchesSeal(_ context.Context, evidence ValueEvidence) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return false, err
+	}
+	key, err := decodeValueSealKey(doc.ValueSealKey)
+	if err != nil {
+		return false, fmt.Errorf("%w: restore the credential key home and repeat the channel identity ceremony", err)
+	}
+	item, found := doc.Entries[strings.TrimSpace(evidence.Key)]
+	if !found {
+		return false, nil
+	}
+	if !credentialValueUsable(item.Value) {
+		return false, nil
+	}
+	want := credentialValueSeal(key, evidence.Key, item.Value)
+	return subtleSealEqual(want, evidence.Seal), nil
+}
+
+func (s *FileStore) observedValueMatchesSeal(ctx context.Context, evidence ValueEvidence, value string) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	return s.matchExactValue(ctx, evidence.Key, value, evidence.Seal)
+}
+
+func (s *FileStore) sealExactValue(_ context.Context, key, value string) (ValueSeal, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", fmt.Errorf("credential key is required")
+	}
+	if !credentialValueUsable(value) {
+		return "", fmt.Errorf("%w: credential %q cannot be admitted", ErrCredentialValueUnusable, key)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var seal ValueSeal
+	err := s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		var changed bool
+		seal, changed, err = sealValueInDocument(&doc, key, value)
+		if err != nil {
+			return err
+		}
+		if changed {
+			return s.saveLocked(doc)
+		}
+		return nil
+	})
+	return seal, err
+}
+
+func (s *FileStore) matchExactValue(_ context.Context, key, value string, seal ValueSeal) (bool, error) {
+	if _, err := ParseValueSeal(seal.String()); err != nil {
+		return false, err
+	}
+	if !credentialValueUsable(value) {
+		return false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return false, err
+	}
+	sealKey, err := decodeValueSealKey(doc.ValueSealKey)
+	if err != nil {
+		return false, fmt.Errorf("%w: restore the credential key home and repeat the channel identity ceremony", err)
+	}
+	return subtleSealEqual(credentialValueSeal(sealKey, strings.TrimSpace(key), value), seal), nil
+}
+
+func sealValueInDocument(doc *fileCredentialSet, key, value string) (ValueSeal, bool, error) {
+	changed := false
+	if strings.TrimSpace(doc.ValueSealKey) == "" {
+		encoded, err := newValueSealKey()
+		if err != nil {
+			return "", false, err
+		}
+		doc.ValueSealKey = encoded
+		changed = true
+	}
+	sealKey, err := decodeValueSealKey(doc.ValueSealKey)
+	if err != nil {
+		return "", false, err
+	}
+	return credentialValueSeal(sealKey, key, value), changed, nil
+}
+
+func subtleSealEqual(left, right ValueSeal) bool {
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 func (s *FileStore) loadLocked() (fileCredentialSet, error) {

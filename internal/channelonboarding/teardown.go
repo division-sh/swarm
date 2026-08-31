@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
 
@@ -157,14 +158,14 @@ type DestructiveStore interface {
 }
 
 type OperationCredentialReleaser interface {
-	ReleaseOperation(context.Context, Operation) error
+	ReleaseOperation(context.Context, Operation, ...runtimecredentials.ValueEvidence) error
 }
 
 type DestructiveIdentityLifecycle interface {
 	Principal() (operatorchannel.Principal, error)
 	ResolveRetainedInterface(context.Context, string) (operatorchannel.InterfaceIdentity, error)
 	CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
-	CurrentProof(context.Context, string) (operatorchannel.VerifiedProof, error)
+	ActiveProof(context.Context, string) (operatorchannel.VerifiedProof, error)
 	Unbind(context.Context, string, int64, string, string, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error)
 	RevokeProof(context.Context, string, int64, time.Time) (operatorchannel.VerifiedProof, error)
 }
@@ -198,10 +199,11 @@ func (s *DestructiveService) Unbind(ctx context.Context, selector string, expect
 		return operatorchannel.Operation{}, operatorchannel.Binding{}, err
 	}
 	binding, bindingErr := s.identities.CurrentBinding(ctx, identity)
-	if bindingErr == nil && binding.Revision != expectedRevision {
+	staleBinding := errors.Is(bindingErr, operatorchannel.ErrCredentialStale) && binding.Revision > 0
+	if (bindingErr == nil || staleBinding) && binding.Revision != expectedRevision {
 		return operatorchannel.Operation{}, operatorchannel.Binding{}, operatorchannel.ErrRevisionConflict
 	}
-	if bindingErr != nil {
+	if bindingErr != nil && !staleBinding {
 		replay, replayErr := s.exactTeardownReplay(ctx, TeardownUnbind, requestKey, requestHash)
 		if replayErr != nil {
 			return operatorchannel.Operation{}, operatorchannel.Binding{}, replayErr
@@ -243,7 +245,7 @@ func (s *DestructiveService) RevokeProof(ctx context.Context, selector string, e
 	if err != nil {
 		return operatorchannel.VerifiedProof{}, err
 	}
-	proof, proofErr := s.identities.CurrentProof(ctx, selector)
+	proof, proofErr := s.identities.ActiveProof(ctx, selector)
 	if proofErr == nil && (proof.Status != operatorchannel.ProofActive || proof.Revision != expectedRevision || proof.Interface.Normalized() != identity.Normalized()) {
 		return operatorchannel.VerifiedProof{}, operatorchannel.ErrProofUnavailable
 	}
@@ -408,11 +410,29 @@ func (s *DestructiveService) releaseScopedCredentials(ctx context.Context, scope
 		if !teardownScopeMatchesOperation(scope, operation) {
 			continue
 		}
-		if err := s.credentials.ReleaseOperation(ctx, operation); err != nil {
+		retained, err := s.retainedCredentialEvidence(ctx, scope, operation)
+		if err != nil {
+			return err
+		}
+		if err := s.credentials.ReleaseOperation(ctx, operation, retained...); err != nil {
 			return fmt.Errorf("release channel onboarding operation %s credentials: %w", operation.OperationID, err)
 		}
 	}
 	return nil
+}
+
+func (s *DestructiveService) retainedCredentialEvidence(ctx context.Context, scope TeardownScope, operation Operation) ([]runtimecredentials.ValueEvidence, error) {
+	if scope.normalized().Interface.Validate() == nil {
+		return nil, nil
+	}
+	binding, err := s.identities.CurrentBinding(ctx, operation.Interface)
+	if err != nil && !errors.Is(err, operatorchannel.ErrCredentialStale) && !errors.Is(err, operatorchannel.ErrNotFound) {
+		return nil, fmt.Errorf("resolve retained channel credential authority: %w", err)
+	}
+	if binding.Status != operatorchannel.BindingCurrent || binding.ProviderCredential.Validate() != nil {
+		return nil, nil
+	}
+	return []runtimecredentials.ValueEvidence{binding.ProviderCredential}, nil
 }
 
 func teardownScopeMatchesOperation(scope TeardownScope, operation Operation) bool {

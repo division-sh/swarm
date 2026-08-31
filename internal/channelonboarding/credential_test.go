@@ -2,6 +2,9 @@ package channelonboarding
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,96 @@ import (
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
+
+func TestOnboardingCredentialWriterRejectsEnvOnlyBeforeMutation(t *testing.T) {
+	for storeName, store := range map[string]runtimecredentials.Store{
+		"direct_env":           runtimecredentials.EnvStore{},
+		"overlay_without_home": runtimecredentials.NewOverlayStore(runtimecredentials.EnvStore{}, nil),
+	} {
+		for _, saveProof := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/save_proof_%t", storeName, saveProof), func(t *testing.T) {
+				_, err := NewCredentialWriter(store)
+				if !errors.Is(err, runtimecredentials.ErrValueSealKeyUnavailable) ||
+					!strings.Contains(err.Error(), "swarm channel connect <provider> --credential-stdin") {
+					t.Fatalf("env-only onboarding error = %v", err)
+				}
+				file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				remediated, err := NewCredentialWriter(runtimecredentials.NewOverlayStore(runtimecredentials.EnvStore{}, file))
+				if err != nil {
+					t.Fatalf("configure writable credential tier: %v", err)
+				}
+				admitted, err := remediated.Admit(context.Background(), CredentialWriteRequest{
+					StoreKey: "channel.telegram.provider", Value: "provider-token", Receipt: "operation/provider",
+				})
+				if err != nil || admitted.ValueSeal == "" {
+					t.Fatalf("follow credential remediation = %#v, %v", admitted, err)
+				}
+			})
+		}
+	}
+}
+
+func TestOnboardingCredentialWriterRejectsUnusableValuesAcrossAdmissionAndRecovery(t *testing.T) {
+	for _, value := range []string{"", " \t\n "} {
+		for _, path := range []string{"admit", "observe"} {
+			t.Run(fmt.Sprintf("%s/%q", path, value), func(t *testing.T) {
+				ctx := context.Background()
+				store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writer, err := NewCredentialWriter(store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				const key = "channel.telegram.provider"
+				const receipt = "operation/provider"
+				switch path {
+				case "admit":
+					_, err = writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: value, Receipt: receipt})
+				case "observe":
+					if err = store.Set(ctx, key, value); err == nil {
+						_, err = writer.Observe(ctx, key)
+					}
+				}
+				if !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
+					t.Fatalf("%s unusable value error = %v", path, err)
+				}
+			})
+		}
+	}
+}
+
+func TestOnboardingCredentialWriterUnusableSubmissionDoesNotPoisonSameReceiptRetry(t *testing.T) {
+	for _, value := range []string{"", " \t\n "} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			ctx := context.Background()
+			store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := NewCredentialWriter(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const key = "channel.telegram.provider"
+			const receipt = "operation/provider"
+			if _, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: value, Receipt: receipt}); !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
+				t.Fatalf("unusable admission error = %v", err)
+			}
+			if observed, found, err := store.ObserveReceipt(ctx, key, receipt); err != nil || found || observed != (runtimecredentials.WriteReceipt{}) {
+				t.Fatalf("unusable receipt survived = %#v found=%v err=%v", observed, found, err)
+			}
+			corrected, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "corrected-token", Receipt: receipt})
+			if err != nil || corrected.StoreKey != key || corrected.Receipt != receipt || corrected.ValueSeal == "" {
+				t.Fatalf("same-receipt correction = %#v err=%v", corrected, err)
+			}
+		})
+	}
+}
 
 func TestOnboardingCredentialWriterCrashConvergence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
@@ -28,7 +121,7 @@ func TestOnboardingCredentialWriterCrashConvergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed != first || first.Epoch == "" || first.Receipt != "operation-a/provider" {
+	if replayed != first || first.ValueSeal == "" || first.Receipt != "operation-a/provider" {
 		t.Fatalf("receipt replay = first:%#v replay:%#v", first, replayed)
 	}
 	value, found, err := store.Get(context.Background(), "channel.telegram.provider")
@@ -39,22 +132,26 @@ func TestOnboardingCredentialWriterCrashConvergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rotated.Epoch == first.Epoch || rotated.Receipt == first.Receipt {
+	if rotated.ValueSeal == first.ValueSeal || rotated.Receipt == first.Receipt {
 		t.Fatalf("explicit new receipt did not rotate occurrence: old=%#v new=%#v", first, rotated)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), first.Epoch) && strings.Contains(first.Epoch, "super-secret-token") {
-		t.Fatal("credential epoch was derived from secret bytes")
+	if strings.Contains(string(raw), "super-secret-token") && strings.Contains(first.ValueSeal.String(), "super-secret-token") {
+		t.Fatal("credential value seal exposed secret bytes")
 	}
 }
 
 func TestCredentialAdmissionJSONNeverContainsValue(t *testing.T) {
-	admission := CredentialAdmission{Role: "provider", StoreKey: "channel.telegram.provider", Kind: CredentialAdmissionWritten, Receipt: "receipt-a", Epoch: "epoch-a"}
-	if strings.Contains(strings.ToLower(strings.Join([]string{admission.Role, admission.StoreKey, admission.Receipt, admission.Epoch}, " ")), "secret") {
-		t.Fatal("test admission unexpectedly contains secret material")
+	admission := CredentialAdmission{Role: "provider", StoreKey: "channel.telegram.provider", Kind: CredentialAdmissionWritten, Receipt: "receipt-a", ValueSeal: testValueSeal('a')}
+	raw, err := json.Marshal(admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "value_seal") || strings.Contains(string(raw), admission.ValueSeal.String()) {
+		t.Fatalf("public admission JSON exposed the value seal: %s", raw)
 	}
 }
 
@@ -79,14 +176,14 @@ func TestOnboardingCredentialOccurrenceSurvivesSnapshotOwnerRestart(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.Epoch != written.Epoch {
-		t.Fatalf("restarted epoch = %q, want %q", observed.Epoch, written.Epoch)
+	if observed.ValueSeal != written.ValueSeal {
+		t.Fatalf("restarted credential value seal = %q, want %q", observed.ValueSeal, written.ValueSeal)
 	}
 }
 
-func TestOnboardingCredentialObservationRejectsFileOccurrenceWithoutPersistedEpoch(t *testing.T) {
+func TestPreEpochCredentialFileBootsWithoutRemediationLoop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
-	original := `{"version":1,"entries":{"channel.telegram.provider":{"value":"unsupported-token","updated_at":"2026-08-28T00:00:00Z"}}}`
+	original := `{"version":1,"entries":{"channel.telegram.provider":{"value":"provider-token","updated_at":"2026-08-28T00:00:00Z"},"unrelated-a":{"value":"leave-a","updated_at":"2026-08-27T00:00:00Z"},"unrelated-b":{"value":"leave-b","updated_at":"2026-08-26T00:00:00Z"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,15 +195,19 @@ func TestOnboardingCredentialObservationRejectsFileOccurrenceWithoutPersistedEpo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.Observe(context.Background(), "channel.telegram.provider"); err == nil || !strings.Contains(err.Error(), "exists without an occurrence epoch") {
-		t.Fatalf("Observe error = %v, want missing occurrence epoch", err)
+	observed, err := writer.Observe(context.Background(), "channel.telegram.provider")
+	if err != nil || observed.ValueSeal == "" {
+		t.Fatalf("Observe = %#v, %v", observed, err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != original {
-		t.Fatalf("unsupported credential file was mutated:\n%s", raw)
+	if !strings.Contains(string(raw), `"value_seal_key"`) || strings.Count(string(raw), `"value_seal`) != 1 ||
+		!strings.Contains(string(raw), `"unrelated-a"`) || !strings.Contains(string(raw), `"leave-a"`) ||
+		!strings.Contains(string(raw), `"unrelated-b"`) || !strings.Contains(string(raw), `"leave-b"`) ||
+		strings.Contains(string(raw), `"epoch"`) {
+		t.Fatalf("credential file did not gain only root seal custody:\n%s", raw)
 	}
 }
 
@@ -123,7 +224,7 @@ func TestOnboardingCredentialReleaseOwnsOnlyWrittenCurrentOccurrence(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	admission := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}
+	admission := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, ValueSeal: written.ValueSeal}
 	if released, err := writer.Release(context.Background(), admission); err != nil || !released {
 		t.Fatalf("release = %v, %v; want true, nil", released, err)
 	}
@@ -132,7 +233,7 @@ func TestOnboardingCredentialReleaseOwnsOnlyWrittenCurrentOccurrence(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionObserved, Receipt: "observation", Epoch: written.Epoch}
+	observed := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionObserved, ValueSeal: written.ValueSeal}
 	if released, err := writer.Release(context.Background(), observed); err != nil || released {
 		t.Fatalf("observed release = %v, %v; want false, nil", released, err)
 	}
@@ -178,7 +279,7 @@ func TestCredentialWriterReleaseOperationReconcilesPhysicalAndCheckpointedWrites
 				}
 				written = append(written, CredentialAdmission{
 					Role: reservation.Role, StoreKey: result.StoreKey, Kind: CredentialAdmissionWritten,
-					Receipt: result.Receipt, Epoch: result.Epoch,
+					Receipt: result.Receipt, ValueSeal: result.ValueSeal,
 				})
 			}
 			if test.checkpointWrites {
@@ -193,7 +294,7 @@ func TestCredentialWriterReleaseOperationReconcilesPhysicalAndCheckpointedWrites
 			}
 			op.CredentialAdmissions = append(op.CredentialAdmissions, CredentialAdmission{
 				Role: "provider", StoreKey: predecessor.StoreKey, Kind: CredentialAdmissionObserved,
-				Receipt: "predecessor-observation", Epoch: predecessor.Epoch,
+				ValueSeal: predecessor.ValueSeal,
 			})
 			successorReservation := op.CredentialReservations[0]
 			successor, err := writer.Admit(context.Background(), CredentialWriteRequest{
@@ -221,6 +322,52 @@ func TestCredentialWriterReleaseOperationReconcilesPhysicalAndCheckpointedWrites
 	}
 }
 
+func TestCredentialWriterReleaseOperationRetainsExactBindingEvidence(t *testing.T) {
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{
+		OperationID: "operation-a",
+		CredentialReservations: []CredentialReservation{
+			{Role: "provider", StoreKey: "channel.telegram.provider"},
+			{Role: "signing", StoreKey: "channel.telegram.signing"},
+		},
+	}
+	for _, reservation := range op.CredentialReservations {
+		written, err := writer.Admit(context.Background(), CredentialWriteRequest{
+			StoreKey: operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role),
+			Value:    reservation.Role + "-secret", Receipt: credentialReceipt(op.OperationID, reservation.Role),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		op.CredentialAdmissions = append(op.CredentialAdmissions, CredentialAdmission{
+			Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
+			Receipt: written.Receipt, ValueSeal: written.ValueSeal,
+		})
+	}
+	provider := op.CredentialAdmissions[0]
+	if err := writer.ReleaseOperation(context.Background(), op, runtimecredentials.ValueEvidence{Key: provider.StoreKey, Seal: provider.ValueSeal}); err != nil {
+		t.Fatal(err)
+	}
+	if value, found, err := store.Get(context.Background(), provider.StoreKey); err != nil || !found || value != "provider-secret" {
+		t.Fatalf("retained provider credential = %q, found=%v, err=%v", value, found, err)
+	}
+	signing := op.CredentialAdmissions[1]
+	if _, found, err := store.Get(context.Background(), signing.StoreKey); err != nil || found {
+		t.Fatalf("retired signing credential found=%v, err=%v", found, err)
+	}
+}
+
+func testValueSeal(digit byte) runtimecredentials.ValueSeal {
+	return runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat(string(digit), 64))
+}
+
 func TestCredentialWriterReleaseOperationRejectsForeignWrittenAdmission(t *testing.T) {
 	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
@@ -240,7 +387,7 @@ func TestCredentialWriterReleaseOperationRejectsForeignWrittenAdmission(t *testi
 	}
 	op := Operation{OperationID: "operation-a", CredentialReservations: []CredentialReservation{reservation}, CredentialAdmissions: []CredentialAdmission{{
 		Role: reservation.Role, StoreKey: foreign.StoreKey, Kind: CredentialAdmissionWritten,
-		Receipt: foreign.Receipt, Epoch: foreign.Epoch,
+		Receipt: foreign.Receipt, ValueSeal: foreign.ValueSeal,
 	}}}
 	if err := writer.ReleaseOperation(context.Background(), op); err == nil || !strings.Contains(err.Error(), "not owned") {
 		t.Fatalf("foreign written cleanup error = %v", err)

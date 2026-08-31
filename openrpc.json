@@ -2599,13 +2599,13 @@
           }
         },
         {
-          "code": -32046,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "code": -32017,
+          "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
           "data": {
             "additionalProperties": false,
             "properties": {
               "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
+                "const": "CHANNEL_CREDENTIAL_REQUIRED",
                 "type": "string"
               },
               "correlation_id": {
@@ -2614,269 +2614,33 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId",
+                    "description": "Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another."
                   },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  "reason": {
+                    "type": "string"
                   },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "channel.connect",
-      "description": "Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.",
-      "params": [
-        {
-          "name": "interface",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "name": "expected_revision",
-          "required": true,
-          "schema": {
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "save_proof",
-          "required": false,
-          "schema": {
-            "default": true,
-            "type": "boolean"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/OperatorChannelOperationResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32019,
-          "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
+                  "remediation": {
+                    "description": "Exact executable command `swarm channel resume \u003coperation_id\u003e --credential-stdin` for continuing the same responsibility.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "role": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "store_key": {
+                    "minLength": 1,
                     "type": "string"
                   }
                 },
                 "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32018,
-          "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_AMBIGUOUS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32016,
-          "message": "Application error: CHANNEL_BINDING_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_BINDING_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32023,
-          "message": "Application error: CHANNEL_REVISION_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_REVISION_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32022,
-          "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_PROOF_UNAVAILABLE",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
+                  "reason",
+                  "operation_id",
+                  "role",
+                  "store_key",
+                  "remediation"
                 ],
                 "type": "object"
               },
@@ -3788,596 +3552,6 @@
             "properties": {
               "code": {
                 "const": "CHANNEL_INTERFACE_AMBIGUOUS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32023,
-          "message": "Application error: CHANNEL_REVISION_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_REVISION_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32022,
-          "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_PROOF_UNAVAILABLE",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "channel.rebind",
-      "description": "Replace a current binding with a different satisfier-authenticated claimant after explicit operator confirmation; it never silently selects or overwrites an account.",
-      "params": [
-        {
-          "name": "interface",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "name": "expected_revision",
-          "required": true,
-          "schema": {
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "save_proof",
-          "required": false,
-          "schema": {
-            "default": true,
-            "type": "boolean"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/OperatorChannelOperationResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32019,
-          "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32018,
-          "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_AMBIGUOUS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32016,
-          "message": "Application error: CHANNEL_BINDING_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_BINDING_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32023,
-          "message": "Application error: CHANNEL_REVISION_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_REVISION_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32022,
-          "message": "Application error: CHANNEL_PROOF_UNAVAILABLE",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_PROOF_UNAVAILABLE",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
-      "name": "channel.reconnect",
-      "description": "Re-verify the same authenticated account and conversation against the current exact binding revision and active interface generation.",
-      "params": [
-        {
-          "name": "interface",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "name": "expected_revision",
-          "required": true,
-          "schema": {
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "name": "save_proof",
-          "required": false,
-          "schema": {
-            "default": true,
-            "type": "boolean"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/OperatorChannelOperationResult"
-        }
-      },
-      "errors": [
-        {
-          "code": -32019,
-          "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32018,
-          "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_INTERFACE_AMBIGUOUS",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32016,
-          "message": "Application error: CHANNEL_BINDING_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "CHANNEL_BINDING_CONFLICT",
                 "type": "string"
               },
               "correlation_id": {
@@ -15739,10 +14913,6 @@
       "ChannelCredentialAdmission": {
         "additionalProperties": false,
         "properties": {
-          "epoch": {
-            "minLength": 1,
-            "type": "string"
-          },
           "kind": {
             "enum": [
               "written",
@@ -15766,9 +14936,7 @@
         "required": [
           "role",
           "store_key",
-          "kind",
-          "receipt",
-          "epoch"
+          "kind"
         ],
         "type": "object"
       },
@@ -20668,6 +19836,9 @@
             ],
             "type": "string"
           },
+          "onboarding_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
           "operation_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
@@ -20707,6 +19878,7 @@
               "awaiting_confirmation",
               "bound",
               "rejected",
+              "credential_stale",
               "expired",
               "unbound"
             ],
@@ -20779,7 +19951,7 @@
             "type": "string"
           },
           "format": {
-            "const": "swarm-verified-account-proof-v1",
+            "const": "swarm-verified-account-proof-v2",
             "type": "string"
           },
           "interface": {

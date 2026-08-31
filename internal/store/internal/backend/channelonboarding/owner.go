@@ -12,6 +12,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -250,6 +251,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, err
 		}
 	}
+	if req.BindingRevision > 0 && req.Phase != domain.PhaseAwaitingOperatorConfirmation && req.Phase != domain.PhasePublishingActivation {
+		return domain.Operation{}, domain.ErrInvalidRequest
+	}
 	if req.RebindCoordinate != nil {
 		coordinate := req.RebindCoordinate.Normalized()
 		if err := coordinate.Validate(); err != nil {
@@ -270,8 +274,17 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.ErrRevisionConflict
 		}
 		coordinateOnlyTerminalRebind := req.RebindCoordinate != nil && op.Phase == domain.PhaseSucceeded && req.Phase == op.Phase
-		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind {
+		credentialStaleReset := op.Phase == domain.PhaseAwaitingOperatorConfirmation && req.Phase == domain.PhasePreparing &&
+			req.ClearIdentityOperationID && req.ClearBindingRevision && !req.RetainBindingRevision &&
+			req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
+		boundCredentialStaleReset := (op.Phase == domain.PhaseAwaitingOperatorConfirmation || op.Phase == domain.PhasePublishingActivation) &&
+			req.Phase == domain.PhasePreparing && req.ClearIdentityOperationID && !req.ClearBindingRevision && req.RetainBindingRevision &&
+			op.BindingRevision > 0 && req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
+		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !credentialStaleReset && !boundCredentialStaleReset {
 			return domain.ErrConflict
+		}
+		if (req.ClearIdentityOperationID || req.ClearBindingRevision || req.RetainBindingRevision) && !credentialStaleReset && !boundCredentialStaleReset {
+			return domain.ErrInvalidRequest
 		}
 		var reboundActivation *domain.ConnectedChannelActivation
 		if req.RebindCoordinate != nil && !op.Coordinate.Matches(*req.RebindCoordinate) {
@@ -305,8 +318,14 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if strings.TrimSpace(req.IdentityOperationID) != "" {
 			op.IdentityOperationID = strings.TrimSpace(req.IdentityOperationID)
 		}
+		if req.ClearIdentityOperationID {
+			op.IdentityOperationID = ""
+		}
 		if req.BindingRevision > 0 {
 			op.BindingRevision = req.BindingRevision
+		}
+		if req.ClearBindingRevision {
+			op.BindingRevision = 0
 		}
 		if strings.TrimSpace(req.ConfirmationOperationID) != "" {
 			op.ConfirmationOperationID = strings.TrimSpace(req.ConfirmationOperationID)
@@ -422,7 +441,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			}
 		}
 		i, c := op.Interface.Normalized(), op.Coordinate.Normalized()
-		admissions, err := json.Marshal(op.CredentialAdmissions)
+		admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
 		if err != nil {
 			return err
 		}
@@ -886,7 +905,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	if err := json.Unmarshal([]byte(reservations), &op.CredentialReservations); err != nil {
 		return domain.Operation{}, false, err
 	}
-	if err := json.Unmarshal([]byte(admissions), &op.CredentialAdmissions); err != nil {
+	if op.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
 		return domain.Operation{}, false, err
 	}
 	op.IdentityOperationID, op.ConfirmationOperationID = identityOp.String, confirmationOp.String
@@ -906,7 +925,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 }
 
 func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
-	admissions, err := json.Marshal(op.CredentialAdmissions)
+	admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
 	if err != nil {
 		return err
 	}
@@ -966,7 +985,7 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	}
 	a.Posture, a.Status = domain.ActivationPosture(posture), domain.ActivationStatus(status)
 	a.ProofID, a.ProofRevision, a.RetirementReason = proofID.String, proofRevision.Int64, retirement.String
-	if err := json.Unmarshal([]byte(admissions), &a.CredentialAdmissions); err != nil {
+	if a.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
 		return a, false, err
 	}
 	var timeErr error
@@ -980,6 +999,51 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 		return a, false, timeErr
 	}
 	return a, true, nil
+}
+
+type credentialAdmissionRecord struct {
+	Role      string                         `json:"role"`
+	StoreKey  string                         `json:"store_key"`
+	Kind      domain.CredentialAdmissionKind `json:"kind"`
+	Receipt   string                         `json:"receipt,omitempty"`
+	ValueSeal string                         `json:"value_seal"`
+}
+
+func marshalCredentialAdmissions(admissions []domain.CredentialAdmission) ([]byte, error) {
+	records := make([]credentialAdmissionRecord, 0, len(admissions))
+	for _, admission := range admissions {
+		if err := admission.Validate(); err != nil {
+			return nil, err
+		}
+		records = append(records, credentialAdmissionRecord{
+			Role: admission.Role, StoreKey: admission.StoreKey, Kind: admission.Kind,
+			Receipt: admission.Receipt, ValueSeal: admission.ValueSeal.String(),
+		})
+	}
+	return json.Marshal(records)
+}
+
+func unmarshalCredentialAdmissions(raw string) ([]domain.CredentialAdmission, error) {
+	var records []credentialAdmissionRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		return nil, err
+	}
+	admissions := make([]domain.CredentialAdmission, 0, len(records))
+	for _, record := range records {
+		seal, err := runtimecredentials.ParseValueSeal(record.ValueSeal)
+		if err != nil {
+			return nil, fmt.Errorf("decode channel credential admission: %w", err)
+		}
+		admission := domain.CredentialAdmission{
+			Role: record.Role, StoreKey: record.StoreKey, Kind: record.Kind,
+			Receipt: record.Receipt, ValueSeal: seal,
+		}
+		if err := admission.Validate(); err != nil {
+			return nil, err
+		}
+		admissions = append(admissions, admission)
+	}
+	return admissions, nil
 }
 
 func scanActivation(rows *sql.Rows) (domain.ConnectedChannelActivation, error) {

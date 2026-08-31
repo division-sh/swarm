@@ -2,8 +2,15 @@ package credentials
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -24,7 +31,6 @@ type Store interface {
 type WriteReceipt struct {
 	Key       string
 	Receipt   string
-	Epoch     string
 	UpdatedAt time.Time
 }
 
@@ -44,7 +50,136 @@ type ReceiptObserver interface {
 // receipt-bearing admission. A stale receipt can never delete its successor.
 type ReceiptDeleter interface {
 	Store
-	DeleteWithReceipt(context.Context, string, string, string) (bool, error)
+	DeleteWithReceipt(context.Context, string, string) (bool, error)
+}
+
+const valueSealPrefix = "credential-value-seal-v1:"
+
+var (
+	ErrValueSealKeyUnavailable = errors.New("credential value seal key is unavailable")
+	ErrCredentialValueUnusable = errors.New("credential value is empty or whitespace")
+)
+
+// ValueSeal is opaque, non-secret evidence that one exact credential key had
+// one exact value when a consumer admitted it.
+type ValueSeal string
+
+func ParseValueSeal(raw string) (ValueSeal, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, valueSealPrefix) {
+		return "", fmt.Errorf("invalid credential value seal")
+	}
+	digest := strings.TrimPrefix(raw, valueSealPrefix)
+	if len(digest) != sha256.Size*2 {
+		return "", fmt.Errorf("invalid credential value seal")
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return "", fmt.Errorf("invalid credential value seal")
+	}
+	return ValueSeal(raw), nil
+}
+
+func (s ValueSeal) String() string { return string(s) }
+
+// ValueEvidence is the typed durable currentness evidence consumed by channel
+// admissions and provider identity. Public DTOs must not serialize it.
+type ValueEvidence struct {
+	Key  string    `json:"-"`
+	Seal ValueSeal `json:"-"`
+}
+
+func (e ValueEvidence) Validate() error {
+	if strings.TrimSpace(e.Key) == "" {
+		return fmt.Errorf("credential value evidence key is required")
+	}
+	_, err := ParseValueSeal(e.Seal.String())
+	return err
+}
+
+type valueSealStore interface {
+	hasDurableValueSealKeyHome() bool
+	sealCurrentValue(context.Context, string) (ValueEvidence, error)
+	currentValueMatchesSeal(context.Context, ValueEvidence) (bool, error)
+	observedValueMatchesSeal(context.Context, ValueEvidence, string) (bool, error)
+}
+
+type valueSealKeyHome interface {
+	sealExactValue(context.Context, string, string) (ValueSeal, error)
+	matchExactValue(context.Context, string, string, ValueSeal) (bool, error)
+}
+
+// RequireDurableValueSealKeyHome performs a mutation-free capability check for
+// durable credential admission. It never creates a seal key.
+func RequireDurableValueSealKeyHome(store Store) error {
+	owner, ok := store.(valueSealStore)
+	if !ok || owner == nil || !owner.hasDurableValueSealKeyHome() {
+		return fmt.Errorf("%w: configure a writable credential file tier, then run swarm channel connect <provider> --credential-stdin", ErrValueSealKeyUnavailable)
+	}
+	return nil
+}
+
+func SealCurrentValue(ctx context.Context, store Store, key string) (ValueEvidence, error) {
+	if err := RequireDurableValueSealKeyHome(store); err != nil {
+		return ValueEvidence{}, err
+	}
+	owner := store.(valueSealStore)
+	return owner.sealCurrentValue(ctx, key)
+}
+
+// ValidateValue applies the credential subsystem's sole admission rule before
+// any caller creates durable receipt or seal authority for the value.
+func ValidateValue(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return ErrCredentialValueUnusable
+	}
+	return nil
+}
+
+func CurrentValueMatchesSeal(ctx context.Context, store Store, evidence ValueEvidence) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	owner, ok := store.(valueSealStore)
+	if !ok || owner == nil {
+		return false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	return owner.currentValueMatchesSeal(ctx, evidence)
+}
+
+func credentialValueSeal(key []byte, storeKey, value string) ValueSeal {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte("swarm/credential-currentness/value-seal/v1"))
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(storeKey)))
+	_, _ = mac.Write(length[:])
+	_, _ = mac.Write([]byte(storeKey))
+	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+	_, _ = mac.Write(length[:])
+	_, _ = mac.Write([]byte(value))
+	return ValueSeal(valueSealPrefix + hex.EncodeToString(mac.Sum(nil)))
+}
+
+func credentialValueUsable(value string) bool {
+	return ValidateValue(value) == nil
+}
+
+func newValueSealKey() (string, error) {
+	key := make([]byte, sha256.Size)
+	if _, err := rand.Read(key); err != nil {
+		return "", fmt.Errorf("create credential value seal key: %w", err)
+	}
+	return base64.RawStdEncoding.EncodeToString(key), nil
+}
+
+func decodeValueSealKey(encoded string) ([]byte, error) {
+	if strings.TrimSpace(encoded) == "" {
+		return nil, ErrValueSealKeyUnavailable
+	}
+	key, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil || len(key) != sha256.Size {
+		return nil, fmt.Errorf("credential value seal key is invalid")
+	}
+	return key, nil
 }
 
 type Inspector interface {
@@ -63,9 +198,6 @@ type AtomicSnapshot struct {
 	Shadowed  bool
 	UpdatedAt *time.Time
 	value     string
-	// occurrenceEpoch is store-owned, non-secret currentness metadata. It is
-	// deliberately excluded from JSON and public credential metadata.
-	occurrenceEpoch string
 }
 
 // Snapshotter is the strict credential boundary used when a value and its
@@ -83,29 +215,21 @@ func NewAtomicSnapshot(metadata Metadata, value string) AtomicSnapshot {
 	}
 }
 
-// NewAtomicSnapshotWithOccurrence is for credential stores that persist an
-// opaque occurrence identity alongside the credential value.
-func NewAtomicSnapshotWithOccurrence(metadata Metadata, value, occurrenceEpoch string) AtomicSnapshot {
-	snapshot := NewAtomicSnapshot(metadata, value)
-	snapshot.occurrenceEpoch = strings.TrimSpace(occurrenceEpoch)
-	return snapshot
-}
-
 func (s AtomicSnapshot) Metadata() Metadata {
 	return Metadata{Key: s.Key, Present: s.Present, Source: s.Source, Writable: s.Writable, Shadowed: s.Shadowed, UpdatedAt: timePtrValue(s.UpdatedAt)}
 }
 
 func (s AtomicSnapshot) CredentialValue() string { return s.value }
 
-// AdmittedSnapshot adds a process-private epoch. The epoch changes whenever
+// AdmittedSnapshot adds a process-private observation token. The token changes whenever
 // the observed value or metadata changes and is safe to include in redacted
 // registration identity; it is not derived from secret bytes.
 type AdmittedSnapshot struct {
 	AtomicSnapshot
-	epoch string
+	observationToken string
 }
 
-func (s AdmittedSnapshot) Epoch() string { return s.epoch }
+func (s AdmittedSnapshot) ObservationToken() string { return s.observationToken }
 
 type SecretBindingStatus string
 
@@ -124,7 +248,7 @@ type SecretBinding struct {
 
 func (b SecretBinding) Status() SecretBindingStatus { return b.status }
 func (b SecretBinding) Bound() bool                 { return b.status == SecretBindingBound }
-func (b SecretBinding) Epoch() string               { return b.snapshot.Epoch() }
+func (b SecretBinding) ObservationToken() string    { return b.snapshot.ObservationToken() }
 
 func (b SecretBinding) CredentialValue() string {
 	if !b.Bound() {
@@ -168,14 +292,15 @@ type SecretBindingProjection struct {
 }
 
 type SnapshotOwner struct {
-	store Snapshotter
-	mu    sync.Mutex
-	seen  map[string]snapshotObservation
+	store  Snapshotter
+	values Store
+	mu     sync.Mutex
+	seen   map[string]snapshotObservation
 }
 
 type snapshotObservation struct {
 	snapshot AtomicSnapshot
-	epoch    string
+	token    string
 }
 
 func NewSnapshotOwner(store Store) (*SnapshotOwner, error) {
@@ -183,7 +308,43 @@ func NewSnapshotOwner(store Store) (*SnapshotOwner, error) {
 	if !ok || snapshotter == nil {
 		return nil, fmt.Errorf("credential store does not provide atomic snapshots")
 	}
-	return &SnapshotOwner{store: snapshotter, seen: map[string]snapshotObservation{}}, nil
+	return &SnapshotOwner{store: snapshotter, values: store, seen: map[string]snapshotObservation{}}, nil
+}
+
+func (o *SnapshotOwner) SealCurrentValue(ctx context.Context, key string) (ValueEvidence, error) {
+	if o == nil || o.values == nil {
+		return ValueEvidence{}, fmt.Errorf("credential snapshot owner is required")
+	}
+	return SealCurrentValue(ctx, o.values, key)
+}
+
+func (o *SnapshotOwner) CurrentValueMatchesSeal(ctx context.Context, evidence ValueEvidence) (bool, error) {
+	_, current, err := o.ObserveValueMatchingSeal(ctx, evidence)
+	return current, err
+}
+
+// ObserveValueMatchingSeal returns the exact credential observation whose raw
+// value was checked against the supplied durable evidence.
+func (o *SnapshotOwner) ObserveValueMatchingSeal(ctx context.Context, evidence ValueEvidence) (AdmittedSnapshot, bool, error) {
+	if o == nil || o.values == nil {
+		return AdmittedSnapshot{}, false, fmt.Errorf("credential snapshot owner is required")
+	}
+	if err := evidence.Validate(); err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	snapshot, err := o.Observe(ctx, evidence.Key)
+	if err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	if !snapshot.Present || !credentialValueUsable(snapshot.CredentialValue()) {
+		return snapshot, false, nil
+	}
+	owner, ok := o.values.(valueSealStore)
+	if !ok || owner == nil {
+		return AdmittedSnapshot{}, false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	current, err := owner.observedValueMatchesSeal(ctx, evidence, snapshot.CredentialValue())
+	return snapshot, current, err
 }
 
 func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapshot, error) {
@@ -203,14 +364,10 @@ func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapsh
 	defer o.mu.Unlock()
 	observation, exists := o.seen[key]
 	if !exists || !sameAtomicSnapshot(observation.snapshot, snapshot) {
-		epoch := strings.TrimSpace(snapshot.occurrenceEpoch)
-		if epoch == "" {
-			epoch = uuid.NewString()
-		}
-		observation = snapshotObservation{snapshot: cloneAtomicSnapshot(snapshot), epoch: epoch}
+		observation = snapshotObservation{snapshot: cloneAtomicSnapshot(snapshot), token: uuid.NewString()}
 		o.seen[key] = observation
 	}
-	return AdmittedSnapshot{AtomicSnapshot: cloneAtomicSnapshot(snapshot), epoch: observation.epoch}, nil
+	return AdmittedSnapshot{AtomicSnapshot: cloneAtomicSnapshot(snapshot), observationToken: observation.token}, nil
 }
 
 func (o *SnapshotOwner) ObserveSecretBinding(ctx context.Context, key string) (SecretBinding, error) {
@@ -220,7 +377,7 @@ func (o *SnapshotOwner) ObserveSecretBinding(ctx context.Context, key string) (S
 		return SecretBinding{}, &SecretBindingObservationError{Key: key, Err: err}
 	}
 	status := SecretBindingUnbound
-	if snapshot.Present && strings.TrimSpace(snapshot.CredentialValue()) != "" {
+	if snapshot.Present && credentialValueUsable(snapshot.CredentialValue()) {
 		status = SecretBindingBound
 	}
 	return SecretBinding{status: status, snapshot: snapshot}, nil
@@ -266,7 +423,7 @@ func (p *SecretBindingProjection) ValidateCurrent(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if current.Epoch() != p.bindings[key].Epoch() {
+		if current.ObservationToken() != p.bindings[key].ObservationToken() {
 			return &SecretBindingProjectionStaleError{Key: key}
 		}
 	}

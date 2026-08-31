@@ -98,8 +98,8 @@ func TestChannelUnbindReleasesOnlyOperationOwnedCredentialsAfterAuthorityRetirem
 	store := &recordingTeardownStore{calls: &calls, onboarding: []Operation{{
 		OperationID: "operation-a", Interface: identity,
 		CredentialAdmissions: []CredentialAdmission{
-			{Role: "provider", StoreKey: "channel.telegram.provider", Kind: CredentialAdmissionWritten, Receipt: "receipt-a", Epoch: "epoch-a"},
-			{Role: "signing", StoreKey: "channel.telegram.signing", Kind: CredentialAdmissionObserved, Receipt: "observation-a", Epoch: "epoch-b"},
+			{Role: "provider", StoreKey: "channel.telegram.provider", Kind: CredentialAdmissionWritten, Receipt: "receipt-a", ValueSeal: testValueSeal('a')},
+			{Role: "signing", StoreKey: "channel.telegram.signing", Kind: CredentialAdmissionObserved, ValueSeal: testValueSeal('b')},
 		},
 	}}}
 	identities := &recordingDestructiveIdentities{
@@ -190,6 +190,66 @@ func TestChannelActivationRetiresAuthorityBeforeRuntimeContextUnload(t *testing.
 	want := []string{"principal", "reserve", "retire", "refresh", "get", "complete"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("context retirement order = %#v, want %#v", calls, want)
+	}
+}
+
+func TestRuntimeContextRetirementRetainsCurrentBindingCredentialOnly(t *testing.T) {
+	ctx := context.Background()
+	identity := testTeardownInterface()
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{
+		OperationID: "operation-a", Interface: identity,
+		Coordinate: ChannelRuntimeContextCoordinate{BundleHash: bundleHash, BundleSource: "persisted", ContextPublicationGeneration: 7},
+		CredentialReservations: []CredentialReservation{
+			{Role: "provider", StoreKey: "channel.telegram.provider"},
+			{Role: "signing", StoreKey: "channel.telegram.signing"},
+		},
+	}
+	for _, reservation := range op.CredentialReservations {
+		written, err := credentials.Admit(ctx, CredentialWriteRequest{
+			StoreKey: operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role),
+			Value:    reservation.Role + "-secret", Receipt: credentialReceipt(op.OperationID, reservation.Role),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		op.CredentialAdmissions = append(op.CredentialAdmissions, CredentialAdmission{
+			Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
+			Receipt: written.Receipt, ValueSeal: written.ValueSeal,
+		})
+	}
+	provider := op.CredentialAdmissions[0]
+	store := &recordingTeardownStore{onboarding: []Operation{op}}
+	calls := []string{}
+	store.calls = &calls
+	identities := &recordingDestructiveIdentities{
+		calls: &calls, identity: identity, principal: operatorchannel.Principal{ID: "principal-a"},
+		binding: operatorchannel.Binding{
+			Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent,
+			ProviderCredential: runtimecredentials.ValueEvidence{Key: provider.StoreKey, Seal: provider.ValueSeal},
+		},
+	}
+	service, err := NewDestructiveService(store, identities, credentials, recordingActivationRefresher{calls: &calls}, testTeardownNow, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RetireContext(ctx, bundleHash, "persisted", 7, "context-key", "context-hash", "runtime_context_retired"); err != nil {
+		t.Fatal(err)
+	}
+	if value, found, err := credentialStore.Get(ctx, provider.StoreKey); err != nil || !found || value != "provider-secret" {
+		t.Fatalf("retained provider credential = %q, found=%v, err=%v", value, found, err)
+	}
+	signing := op.CredentialAdmissions[1]
+	if _, found, err := credentialStore.Get(ctx, signing.StoreKey); err != nil || found {
+		t.Fatalf("retired signing credential found=%v, err=%v", found, err)
 	}
 }
 
@@ -284,6 +344,21 @@ func TestChannelProofRevokeRecoveryReplaysCommittedProofFileBeforeResponsibility
 	if err != nil {
 		t.Fatal(err)
 	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.Set(ctx, "channel.telegram.provider", "provider-token"); err != nil {
+		t.Fatal(err)
+	}
+	credentialOwner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerEvidence, err := credentialOwner.SealCurrentValue(ctx, "channel.telegram.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
 	proof := operatorchannel.VerifiedProof{
 		Format: operatorchannel.ProofFormat, ProofID: operatorchannel.ProofIDForInterface(identity), Revision: 2,
 		Status: operatorchannel.ProofActive, Interface: identity, ExternalAccountRef: "account-a",
@@ -291,6 +366,7 @@ func TestChannelProofRevokeRecoveryReplaysCommittedProofFileBeforeResponsibility
 		Method: "manual", Challenge: operatorchannel.ChallengePrefix + "AAAAAAAAAAAAAAAA",
 		OriginalOperationID: "proof-operation-a", MintingStoreID: "store-a", MintingDeploymentID: "deployment-a",
 		VerifiedAt: now, OperatorConfirmed: true, ConsentScopes: []operatorchannel.ConsentScope{operatorchannel.ConsentNotify},
+		ProviderCredential: providerEvidence,
 	}
 	if err := proofs.Put(ctx, proof); err != nil {
 		t.Fatal(err)
@@ -304,7 +380,7 @@ func TestChannelProofRevokeRecoveryReplaysCommittedProofFileBeforeResponsibility
 		}},
 		completionFailure: responsibilityFailure,
 	}
-	identities, err := operatorchannel.NewService(operatorStore, proofs, []operatorchannel.InterfaceIdentity{identity}, "deployment-a")
+	identities, err := operatorchannel.NewService(operatorStore, proofs, credentialOwner, []operatorchannel.InterfaceIdentity{identity}, "deployment-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +591,7 @@ func (i *recordingDestructiveIdentities) CurrentBinding(ctx context.Context, _ o
 	i.record("current_binding")
 	return i.binding, nil
 }
-func (i *recordingDestructiveIdentities) CurrentProof(ctx context.Context, _ string) (operatorchannel.VerifiedProof, error) {
+func (i *recordingDestructiveIdentities) ActiveProof(ctx context.Context, _ string) (operatorchannel.VerifiedProof, error) {
 	i.observe(ctx)
 	i.record("current_proof")
 	return i.proof, i.proofErr
@@ -548,7 +624,7 @@ func (r recordingCredentialReleaser) Release(_ context.Context, admission Creden
 	return admission.Kind == CredentialAdmissionWritten, nil
 }
 
-func (r recordingCredentialReleaser) ReleaseOperation(ctx context.Context, operation Operation) error {
+func (r recordingCredentialReleaser) ReleaseOperation(ctx context.Context, operation Operation, retained ...runtimecredentials.ValueEvidence) error {
 	for _, admission := range operation.CredentialAdmissions {
 		if _, err := r.Release(ctx, admission); err != nil {
 			return err
