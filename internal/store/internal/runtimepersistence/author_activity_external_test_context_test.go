@@ -85,6 +85,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type externalStoreTestDurableEventBusStore interface {
+	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -145,6 +146,7 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}
+	selected.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
