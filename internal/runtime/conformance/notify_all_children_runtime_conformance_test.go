@@ -1329,6 +1329,7 @@ func startNotifyAllChildrenDeliveryContinuations(
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
 		backend,
+		backend,
 		snapshot.Authority,
 		runtime.workOwner,
 		runtime.bus,

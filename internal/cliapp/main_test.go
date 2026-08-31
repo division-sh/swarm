@@ -797,8 +797,8 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	if !captured.Dev {
 		t.Fatal("serve dev = false, want true")
 	}
-	if !captured.AbandonActiveRuns {
-		t.Fatal("serve abandon active runs = false, want dev composition")
+	if captured.AbandonActiveRuns {
+		t.Fatal("serve abandon active runs = true, want fresh-epoch dev to preserve explicit direct-abandon authority")
 	}
 	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
 		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)

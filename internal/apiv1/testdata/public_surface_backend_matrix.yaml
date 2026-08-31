@@ -284,7 +284,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       runtime_deps: [EventStore, EventBusDurable, EventPayloadValidationBinder, DeliveryStore]
-      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, WorkflowInstances, PreparedEvents, TargetFailureRecorder, RunOrigins]}
+      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, WorkflowInstances, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, event_delivery_outcomes, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
       public_methods: [event.publish, event.replay, event.get, event.list, agent.replay, run.start]
     - id: author_activity
@@ -343,7 +343,7 @@ store_parity:
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       required_ports: [agentUsage, agentDeliveryLifecycle, agents]
       runtime_deps: [ManagerStore, ManagerLifecycleDiagnostics, ManagerPersistenceRoles]
-      nested_roles: {runtime_manager: [LifecycleCensus, LifecycleState, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes]}
+      nested_roles: {runtime_manager: [LifecycleCensus, LifecycleState, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes, StandingRestarts]}
       platform_tables: [agents, agent_directive_operations, agent_lifecycle_operations, agent_lifecycle_transition_facts, agent_lifecycle_diagnostic_outbox]
       public_methods: [agent.delivery_diagnostics, agent.delivery_lifecycle, agent.diagnose, agent.get, agent.list, agent.usage, agent.send_directive, agent.restart]
     - id: external_effects

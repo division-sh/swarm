@@ -82,7 +82,7 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -131,10 +131,11 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
+	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
 	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, story, effects, true, attempts, now)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -182,7 +183,18 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
+	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
 	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, story, effects, false, attempts, now)
+}
+
+func filterCompletionRecoveryAttempts(attempts []completionRecoveryAttempt, allowed map[string]struct{}) []completionRecoveryAttempt {
+	filtered := make([]completionRecoveryAttempt, 0, len(attempts))
+	for _, attempt := range attempts {
+		if _, ok := allowed[strings.TrimSpace(attempt.AttemptID)]; ok {
+			filtered = append(filtered, attempt)
+		}
+	}
+	return filtered
 }
 
 func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt, error) {

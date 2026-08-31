@@ -68,8 +68,8 @@ func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context
 	return nil, nil
 }
 
-func (startupRecoveryWorkflowOwner) StandingRunUsesIntrinsicRecovery(context.Context, string) (bool, error) {
-	return false, nil
+func (startupRecoveryWorkflowOwner) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
+	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
 }
 
 func (startupRecoveryWorkflowOwner) ClaimFanOutIntent(context.Context, runtimepipeline.FanOutClaimRequest) (runtimefanout.Intent, runtimefanout.Claim, bool, error) {
@@ -745,13 +745,13 @@ func TestStartupRecoveryDecisionAdmissionMatrix(t *testing.T) {
 		{
 			name:       "enabled delivery",
 			recovery:   true,
-			delivery:   runtimedelivery.RecoveryInventory{Pending: 1, Failed: 2, InProgress: 3},
+			delivery:   runtimedelivery.RecoveryInventory{Runs: []runtimedelivery.RecoveryRunInventory{{RunID: "run-1", Pending: 1, Failed: 2, InProgress: 3}}},
 			want:       startupRecoveryOutcomeAllowed,
 			wantReason: startupRecoveryReasonEnabledWithWork,
 		},
 		{
 			name:       "disabled delivery",
-			delivery:   runtimedelivery.RecoveryInventory{Pending: 1},
+			delivery:   runtimedelivery.RecoveryInventory{Runs: []runtimedelivery.RecoveryRunInventory{{RunID: "run-1", Pending: 1}}},
 			want:       startupRecoveryOutcomeDenied,
 			wantReason: startupRecoveryReasonDisabledWithDelivery,
 		},
@@ -769,6 +769,48 @@ func TestStartupRecoveryDecisionAdmissionMatrix(t *testing.T) {
 				t.Fatalf("decision = %s/%s, want %s/%s", report.Outcome, report.ReasonCode, test.want, test.wantReason)
 			}
 		})
+	}
+}
+
+type startupRecoveryDispositionMap map[string]runtimepipeline.StandingRestartDispositionKind
+
+func (m startupRecoveryDispositionMap) StandingRunRestartDisposition(_ context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
+	kind, ok := m[runID]
+	if !ok {
+		return runtimepipeline.StandingRestartDisposition{}, errors.New("missing test standing restart disposition")
+	}
+	return runtimepipeline.StandingRestartDisposition{Kind: kind}, nil
+}
+
+func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *testing.T) {
+	inventory := runtimedelivery.RecoveryInventory{Runs: []runtimedelivery.RecoveryRunInventory{
+		{RunID: "ordinary", Pending: 1},
+		{RunID: "active", Failed: 2},
+		{RunID: "suspended", InProgress: 3},
+		{RunID: "orphaned", Pending: 4},
+		{RunID: "terminal-declared", Failed: 5},
+		{RunID: "terminal-orphaned", InProgress: 6},
+		{RunID: "invalid", Pending: 7},
+	}}
+	restarts := startupRecoveryDispositionMap{
+		"ordinary":          runtimepipeline.StandingRestartOrdinary,
+		"active":            runtimepipeline.StandingRestartActiveIntrinsic,
+		"suspended":         runtimepipeline.StandingRestartSuspended,
+		"orphaned":          runtimepipeline.StandingRestartOrphaned,
+		"terminal-declared": runtimepipeline.StandingRestartTerminalDeclared,
+		"terminal-orphaned": runtimepipeline.StandingRestartTerminalOrphaned,
+		"invalid":           runtimepipeline.StandingRestartInvalidCurrent,
+	}
+
+	blocking, standing, err := partitionDeliveryRecoveryInventory(context.Background(), inventory, restarts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocking.Runs) != 1 || blocking.Runs[0].RunID != "ordinary" || blocking.Total() != 1 {
+		t.Fatalf("generic delivery recovery inventory = %#v, want only ordinary run", blocking)
+	}
+	if standing != 2 {
+		t.Fatalf("intrinsic standing delivery obligations = %d, want active run's 2", standing)
 	}
 }
 
@@ -791,7 +833,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		DeliveryStore:       deliveryStore,
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -867,7 +909,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		DeliveryStore:       deliveryStore,
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -944,7 +986,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -1025,7 +1067,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
@@ -1102,7 +1144,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -1164,7 +1206,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -1203,6 +1245,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}}}
 	managerRoles := runtimeTestManagerBusRoles(rt.Bus)
 	managerRoles.LifecycleCensus = managerStore
+	managerRoles.StandingRestarts = startupRecoveryWorkflowOwner{}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
@@ -1249,7 +1292,7 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 		PipelineObligations: eventStore.PipelineObligations(),
 		ManagerStore:        managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: managerStore,
+			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,

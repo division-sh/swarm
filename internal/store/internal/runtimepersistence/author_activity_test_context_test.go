@@ -103,6 +103,7 @@ type storeTestDurableEventBusStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
+	runtimepipeline.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -145,7 +146,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
 		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, WorkflowInstances: store, PreparedEvents: store,
-		TargetFailureRecorder: store, RunOrigins: store,
+		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
 	if err != nil {

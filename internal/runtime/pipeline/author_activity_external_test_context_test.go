@@ -111,6 +111,7 @@ type scopedTestDurableStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
+	runtimepipeline.StandingRestartDispositionReader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -161,6 +162,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		PreparedEvents:        eventStore,
 		TargetFailureRecorder: eventStore,
 		RunOrigins:            eventStore,
+		StandingRestarts:      eventStore,
 	}
 	descriptors := testAuthorActivityEventDescriptors(t, opts)
 	for _, eventType := range differentEvents {

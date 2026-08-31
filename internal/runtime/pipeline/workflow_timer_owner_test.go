@@ -27,7 +27,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -813,62 +812,6 @@ func TestWorkflowTimerActiveProjectionRequiresSchedulerOnBothStores(t *testing.T
 			}
 			if err := pc.RestoreWorkflowTimers(ctx); !errors.Is(err, errWorkflowTimerSchedulerRequired) {
 				t.Fatalf("RestoreWorkflowTimers error = %v, want scheduler-required failure", err)
-			}
-		})
-	}
-}
-
-type settledPipelineTestObligationOwner struct {
-	unavailablePipelineTestObligationOwner
-}
-
-func (settledPipelineTestObligationOwner) SummarizeRun(context.Context, string) (runtimepipelineobligation.RunSummary, error) {
-	return runtimepipelineobligation.RunSummary{}, nil
-}
-
-func TestStandingRestartAbandonUsesTimerObligationSnapshotOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			_, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
-			store.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, store.testDB())
-			store.pipelineStore = settledPipelineTestObligationOwner{}
-			if store.isSQLite() {
-				if _, err := store.testDB().ExecContext(ctx, `CREATE TABLE IF NOT EXISTS agent_sessions (run_id TEXT, status TEXT)`); err != nil {
-					t.Fatalf("create SQLite standing session proof table: %v", err)
-				}
-			}
-
-			tx, err := store.testDB().BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatalf("begin standing timer proof: %v", err)
-			}
-			observedAt := canonicalWorkflowTimerTime(activation.FireAt.Add(time.Minute))
-			live, err := store.standingRunHasLiveWorkTx(ctx, tx, activation.RunID, observedAt)
-			if err != nil || !live {
-				t.Fatalf("standing live work before cancellation = %v err=%v, want true", live, err)
-			}
-
-			txctx := WithPipelineSQLTxContext(ctx, tx)
-			if _, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref); err != nil || !changed {
-				t.Fatalf("cancel workflow timer in standing transaction changed=%v err=%v", changed, err)
-			}
-			live, err = store.standingRunHasLiveWorkTx(ctx, tx, activation.RunID, observedAt)
-			if err != nil || live {
-				t.Fatalf("standing live work after in-transaction cancellation = %v err=%v, want false", live, err)
-			}
-
-			if err := tx.Rollback(); err != nil {
-				t.Fatalf("rollback standing timer proof: %v", err)
-			}
-			verifyTx, err := store.testDB().BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatalf("begin standing timer rollback verification: %v", err)
-			}
-			defer func() { _ = verifyTx.Rollback() }()
-			live, err = store.standingRunHasLiveWorkTx(ctx, verifyTx, activation.RunID, observedAt)
-			if err != nil || !live {
-				t.Fatalf("standing live work after rollback = %v err=%v, want true", live, err)
 			}
 		})
 	}
@@ -1990,18 +1933,23 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			standingCtx := ctx
 			if store.isSQLite() {
 				if _, err := store.testDB().ExecContext(ctx, `
-					CREATE TABLE standing_services (
-						current_run_id TEXT NOT NULL,
-						declaration_present BOOLEAN NOT NULL,
-						effective_state TEXT NOT NULL
-					)
-				`); err != nil {
+						CREATE TABLE standing_services (
+							service_id TEXT NOT NULL,
+							current_run_id TEXT NOT NULL,
+							current_generation INTEGER NOT NULL,
+							declaration_present BOOLEAN NOT NULL,
+							effective_state TEXT NOT NULL,
+							operator_override TEXT NOT NULL
+						)
+					`); err != nil {
 					t.Fatalf("create standing ownership fixture: %v", err)
 				}
 				if _, err := store.testDB().ExecContext(ctx, `
-					INSERT INTO standing_services (current_run_id, declaration_present, effective_state)
-					VALUES (?, TRUE, 'active')
-				`, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+						INSERT INTO standing_services (
+							service_id, current_run_id, current_generation,
+							declaration_present, effective_state, operator_override
+						) VALUES (?, ?, 1, TRUE, 'active', 'none')
+					`, uuid.NewString(), runtimecorrelation.RunIDFromContext(ctx)); err != nil {
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			} else {

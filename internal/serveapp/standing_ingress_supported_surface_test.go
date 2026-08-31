@@ -22,12 +22,15 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -626,7 +629,7 @@ func configureStandingLifecycleCredentials(t *testing.T) {
 func loadServedStandingOwner(t *testing.T, db *sql.DB, backend string) (serviceID, runID string, generation int64) {
 	t.Helper()
 	query := `SELECT service_id, current_run_id, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
-	if backend == string(servedparity.BackendExplicitPostgres) {
+	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
 		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
 	}
 	if err := db.QueryRowContext(context.Background(), query).Scan(&serviceID, &runID, &generation); err != nil {
@@ -642,7 +645,7 @@ func assertServedStandingState(t *testing.T, db *sql.DB, backend, serviceID, run
 		FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
 		WHERE ss.service_id = ?`
 	args := []any{serviceID}
-	if backend == string(servedparity.BackendExplicitPostgres) {
+	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
 		query = `
 			SELECT ss.current_run_id::text, ss.current_generation, ss.effective_state, r.status
 			FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
@@ -1057,6 +1060,184 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	})
 }
 
+func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			calls := make(chan map[string]any, 4)
+			telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode Telegram call: %v", err)
+				}
+				calls <- body
+				w.Header().Set("content-type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+			}))
+			t.Cleanup(telegram.Close)
+			contractsRoot := writeMixedStandingTelegramServeFixture(t, telegram.URL)
+			configureStandingLifecycleCredentials(t)
+
+			var (
+				db            *sql.DB
+				postgresStore *store.PostgresStore
+				sqliteStore   *store.SQLiteRuntimeStore
+			)
+			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+				db, postgresStore, sqliteStore = selectedRuntimeStoreForTest(t, persistence)
+			})
+			runtimes := make(chan *runtimepkg.Runtime, 2)
+			opts := cliapp.ServeOptions{
+				ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+				TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+				TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) { runtimes <- rt },
+			}
+			selectedStore := ""
+			if backend == "sqlite" {
+				sqlitePath := filepath.Join(t.TempDir(), "mixed-standing.sqlite")
+				opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil)
+				opts.StoreMode = "sqlite"
+				selectedStore = sqlitePath
+			} else {
+				dsn, _, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				var opened *store.PostgresStore
+				oldBuildStores := buildStoresForServe
+				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+					var err error
+					opened, err = store.NewPostgresStore(dsn)
+					if err != nil {
+						return nil, err
+					}
+					storetest.BootstrapPostgresRuntimeStore(t, opened)
+					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg), nil
+				}
+				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+					return serveRuntimeWorkspaceStub{}, nil
+				}
+				t.Cleanup(func() {
+					buildStoresForServe = oldBuildStores
+					cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
+				})
+				opts.ConfigPath = writeServeRuntimeTestConfig(t)
+				opts.StoreMode = "postgres"
+				opts.StoreModeSet = true
+				selectedStore = "postgres:" + dsn
+			}
+
+			first := startServeRuntimeTestProcess(t, opts)
+			first.waitForReadyLine()
+			firstRuntime := waitForStandingRuntime(t, runtimes, backend, "first boot")
+			if db == nil {
+				t.Fatalf("%s mixed standing database was not captured", backend)
+			}
+			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-ingress")
+			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-stopped")
+			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
+			if entity := sendStandingTelegramUpdate(t, firstURL, 301, 42); entity == "" {
+				t.Fatalf("%s healthy standing service returned an empty entity before restart", backend)
+			}
+			requireStandingTelegramCalls(t, calls, selectedStore, 42)
+			waitForStandingDeliveryQuiescence(t, selectedStore)
+			terminalizeStandingRunFromRuntime(t, firstRuntime, postgresStore, sqliteStore, terminalRun)
+			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			if code := first.stop(); code != 0 {
+				t.Fatalf("%s first mixed standing serve exit = %d", backend, code)
+			}
+
+			enableServeRuntimeRecovery(t, opts.ConfigPath)
+			second := startServeRuntimeTestProcess(t, opts)
+			second.waitForReadyLine()
+			_ = waitForStandingRuntime(t, runtimes, backend, "restart")
+			secondOutput := second.outputString()
+			for _, want := range []string{terminalService, "terminal_declared", "swarm standing reset " + terminalService} {
+				if !strings.Contains(secondOutput, want) {
+					t.Fatalf("%s mixed standing restart output missing %q:\n%s", backend, want, secondOutput)
+				}
+			}
+			secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, secondOutput)
+			if entity := sendStandingTelegramUpdate(t, secondURL, 302, 84); entity == "" {
+				t.Fatalf("%s healthy standing service returned an empty entity after restart", backend)
+			}
+			requireStandingTelegramCalls(t, calls, selectedStore, 84)
+			waitForStandingDeliveryQuiescence(t, selectedStore)
+			assertNoStandingTelegramCall(t, calls, backend)
+			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "running")
+			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			if code := second.stop(); code != 0 {
+				t.Fatalf("%s second mixed standing serve exit = %d", backend, code)
+			}
+		})
+	}
+}
+
+func waitForStandingRuntime(t testing.TB, runtimes <-chan *runtimepkg.Runtime, backend, phase string) *runtimepkg.Runtime {
+	t.Helper()
+	select {
+	case rt := <-runtimes:
+		return rt
+	case <-time.After(15 * time.Second):
+		t.Fatalf("%s timed out waiting for runtime during %s", backend, phase)
+		return nil
+	}
+}
+
+func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, postgresStore *store.PostgresStore, sqliteStore *store.SQLiteRuntimeStore, runID string) {
+	t.Helper()
+	if rt == nil || rt.WorkOccurrence() == nil {
+		t.Fatal("standing terminalization requires the live runtime occurrence")
+	}
+	fact := rt.Options.BundleSourceFact
+	runtimeInstanceID := strings.TrimSpace(rt.Options.RuntimeInstanceID)
+	if runtimeInstanceID == "" || fact.BundleHash() == "" {
+		t.Fatalf("standing terminalization runtime identity = %q/%q", runtimeInstanceID, fact.BundleHash())
+	}
+	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
+	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+	request := runtimerunlifecycle.TerminalRequest{
+		RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+	}
+	var err error
+	if postgresStore != nil {
+		_, _, err = postgresStore.MarkTerminalRun(ctx, request)
+	} else if sqliteStore != nil {
+		_, _, err = sqliteStore.MarkTerminalRun(ctx, request)
+	} else {
+		t.Fatal("standing terminalization requires a selected-store lifecycle owner")
+	}
+	if err != nil {
+		t.Fatalf("terminalize standing run %s: %v", runID, err)
+	}
+}
+
+func loadServedStandingOwnerByFlow(t testing.TB, db *sql.DB, backend, flowID string) (serviceID, runID string, generation int64) {
+	t.Helper()
+	query := `SELECT service_id, current_run_id, current_generation FROM standing_services WHERE flow_id = ?`
+	args := []any{flowID}
+	if backend == "postgres" {
+		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services WHERE flow_id = $1`
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&serviceID, &runID, &generation); err != nil {
+		t.Fatalf("%s load standing owner for flow %s: %v", backend, flowID, err)
+	}
+	return serviceID, runID, generation
+}
+
+func assertNoStandingTelegramCall(t testing.TB, calls <-chan map[string]any, backend string) {
+	t.Helper()
+	select {
+	case call := <-calls:
+		t.Fatalf("%s emitted an unexpected duplicate Telegram call: %#v", backend, call)
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
 func enableServeRuntimeRecovery(t *testing.T, configPath string) {
 	t.Helper()
 	setServeRuntimeRecovery(t, configPath, false, true)
@@ -1425,5 +1606,35 @@ func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) str
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	removeExactCanonicalTelegramAgentMock(t, root)
 	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegramBaseURL})
+	return root
+}
+
+func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
+	t.Helper()
+	root := writeStandingTelegramServeFixture(t, telegramBaseURL)
+	flowDir := filepath.Join(root, "flows", "telegram-stopped")
+	if err := os.MkdirAll(flowDir, 0o755); err != nil {
+		t.Fatalf("create terminal standing flow directory: %v", err)
+	}
+	baseSchema, err := os.ReadFile(filepath.Join(root, "flows", "telegram-ingress", "schema.yaml"))
+	if err != nil {
+		t.Fatalf("read healthy standing flow schema: %v", err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1))
+	baseEntities, err := os.ReadFile(filepath.Join(root, "flows", "telegram-ingress", "entities.yaml"))
+	if err != nil {
+		t.Fatalf("read healthy standing flow entities: %v", err)
+	}
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "entities.yaml"), string(baseEntities))
+	packagePath := filepath.Join(root, "package.yaml")
+	basePackage, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read standing package: %v", err)
+	}
+	writeStandingCandidateFile(t, packagePath, string(basePackage)+`  - id: telegram-stopped
+    flow: telegram-stopped
+    mode: singleton
+    activation: standing
+`)
 	return root
 }

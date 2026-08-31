@@ -247,14 +247,14 @@ func (s *processLifecycleSupervisor) compensateBundleDeletePredecessor(ctx conte
 	if err := s.startRuntime(s.runtimeStartContext(ctx), clone); err != nil {
 		return fmt.Errorf("start bundle delete predecessor runtime: %w", err)
 	}
-	targets, _, err := clone.EnsureStandingTargets(ctx)
+	targets, activations, err := clone.EnsureStandingTargets(ctx)
 	if err != nil {
 		return fmt.Errorf("restore bundle delete predecessor standing targets: %w", err)
 	}
 	restored := predecessor
 	restored.Runtime = clone
 	restored.WorkOwner = workOwner
-	restored.StandingTargets = targets
+	restored.StandingTargets = serveRuntimeContextStandingTargets(targets, predecessor.StandingTargets, activations)
 	publication, err := manager.PrepareBundleRuntimeRestoration(restored)
 	if err != nil {
 		return err

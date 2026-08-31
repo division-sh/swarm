@@ -117,6 +117,7 @@ type DurableDependencies struct {
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
+	StandingRestarts      runtimepipeline.StandingRestartDispositionReader
 }
 
 func (d DurableDependencies) validate() error {
@@ -138,6 +139,7 @@ func (d DurableDependencies) validate() error {
 		{"prepared event settlement reader", d.PreparedEvents},
 		{"target failure recorder", d.TargetFailureRecorder},
 		{"run origin reader", d.RunOrigins},
+		{"standing restart disposition reader", d.StandingRestarts},
 	}
 	for _, role := range required {
 		if role.value == nil {

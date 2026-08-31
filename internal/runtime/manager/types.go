@@ -324,6 +324,7 @@ type PersistenceRoles struct {
 	LifecycleEffects     runtimeeffects.Store
 	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence
 	EffectsRecovery      runtimeeffects.RecoveryStore
+	StandingRestarts     runtimepipeline.StandingRestartDispositionReader
 	DeliveryQuiescence   ActiveRunDeliveryQuiescenceReader
 	DeliveryRuntime      DeliveryRuntimeOwner
 	EventExistence       EventExistenceReader

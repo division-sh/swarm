@@ -447,6 +447,7 @@ type externalRuntimeTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
+	runtimepipeline.StandingRestartDispositionReader
 }
 
 func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEventStore) runtimebus.DurableDependencies {
@@ -455,7 +456,7 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
 		ActiveFlows: durable, TargetOwners: durable, WorkflowInstances: durable, PreparedEvents: durable,
-		TargetFailureRecorder: durable, RunOrigins: durable,
+		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
 
@@ -479,6 +480,7 @@ func externalRuntimeTestSelectedManagerRoles(selected any) runtimemanager.Persis
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
 	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
+	roles.StandingRestarts, _ = selected.(runtimepipeline.StandingRestartDispositionReader)
 	return roles
 }
 

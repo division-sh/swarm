@@ -1580,7 +1580,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	var err error
 	if skipPersistentStartupRecovery {
-		startupRecoverySnapshot.Delivery, err = rt.inspectDeliveryRecoveryInventory(ctx)
+		startupRecoverySnapshot.Delivery, startupRecoverySnapshot.StandingDeliveryObligations, err = rt.inspectDeliveryRecoveryInventory(ctx)
 		if err != nil {
 			startupRecoverySnapshot.InspectionComplete = false
 			rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())

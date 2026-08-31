@@ -140,6 +140,9 @@ func (unexpectedDurableTestRoles) RecordDeadLetter(context.Context, runtimedeadl
 func (unexpectedDurableTestRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
+func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
+	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+}
 
 // ExactDurableTestDependencies projects synthetic test stores into the same
 // explicit role graph used by production constructors. Missing roles fail if
@@ -191,6 +194,9 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	}
 	if deps.RunOrigins == nil {
 		deps.RunOrigins = defaults
+	}
+	if deps.StandingRestarts == nil {
+		deps.StandingRestarts = defaults
 	}
 	return deps
 }
@@ -244,6 +250,9 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(RunOriginReader); ok {
 		deps.RunOrigins = role
 	}
+	if role, ok := selected.(runtimepipeline.StandingRestartDispositionReader); ok {
+		deps.StandingRestarts = role
+	}
 	return deps
 }
 
@@ -254,7 +263,7 @@ func TestDurableDependenciesRequireWorkflowInstanceStateReaderAtConstruction(t *
 		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
 		FlowRouteSets: roles, FlowRouteTopology: roles, FlowRouteRollback: roles,
 		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
-		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles,
+		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
 	}
 	opts := EventBusOptions{
 		BundleSourceFact:    authorActivityTestBundleSourceFact,

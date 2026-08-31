@@ -120,7 +120,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				t.Fatalf("terminalize before registration: %v", err)
 			}
 
-			coordinator, err := runtimedeliverycontinuation.New(deliveryStore, authority, occurrence, &standingSignalCoordinatorDispatcher{}, nil)
+			coordinator, err := runtimedeliverycontinuation.New(deliveryStore, workflowStore, authority, occurrence, &standingSignalCoordinatorDispatcher{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +160,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 	}
 }
 
-func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(t *testing.T) {
+func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
@@ -205,19 +205,14 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	}
 	candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
 	seedStoreTestPersistedBundle(t, store.backend.ConstructionHandle(), secondHash)
-	repaired, err := workflowStore.ReconcileStandingService(ctx, candidate)
+	stopped, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
-		t.Fatalf("ReconcileStandingService(repair): %v", err)
+		t.Fatalf("ReconcileStandingService(terminal): %v", err)
 	}
-	if repaired.Transition != "repaired" || repaired.Generation != 2 || repaired.RunID != runtimeflowidentity.StandingGenerationRunID(serviceID, 2) {
-		t.Fatalf("repaired reconciliation = %#v", repaired)
-	}
-	var state, name string
-	if err := store.backend.QueryRowContext(ctx, `SELECT current_state, json_extract(fields, '$.name') FROM entity_state WHERE run_id = ? AND entity_id = ?`, repaired.RunID, entityID).Scan(&state, &name); err != nil {
-		t.Fatalf("load repaired entity state: %v", err)
-	}
-	if state != "ready" || name != "preserved" {
-		t.Fatalf("repaired entity state = %s/%s", state, name)
+	if stopped.Transition != "stopped" || stopped.Generation != created.Generation || stopped.RunID != created.RunID ||
+		stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared ||
+		stopped.RestartDisposition.Remediation != runtimepipeline.StandingRestartReset {
+		t.Fatalf("terminal reconciliation = %#v", stopped)
 	}
 	var oldStatus, retiredReason string
 	if err := store.backend.QueryRowContext(ctx, `
@@ -227,12 +222,12 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	`, created.RunID).Scan(&oldStatus, &retiredReason); err != nil {
 		t.Fatalf("load predecessor lineage: %v", err)
 	}
-	if oldStatus != "cancelled" || retiredReason != "server_restart_abandon" {
+	if oldStatus != "cancelled" || retiredReason != "" {
 		t.Fatalf("predecessor = %s/%s", oldStatus, retiredReason)
 	}
 }
 
-func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *testing.T) {
+func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
@@ -252,9 +247,13 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 	); err != nil {
 		t.Fatal(err)
 	}
-	_, err = workflowStore.ReconcileStandingService(ctx, candidate)
-	if err == nil || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
-		t.Fatalf("error = %v, want teaching reset command", err)
+	stopped, err := workflowStore.ReconcileStandingService(ctx, candidate)
+	if err != nil {
+		t.Fatalf("reconcile terminal standing service: %v", err)
+	}
+	if stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared ||
+		!strings.Contains(stopped.RestartDisposition.RunControlGuidance(), "swarm standing reset "+serviceID) {
+		t.Fatalf("terminal result = %#v, want teaching reset command", stopped)
 	}
 }
 
@@ -973,5 +972,65 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	}
 	if status != "running" {
 		t.Fatalf("standing run status = %s, want running", status)
+	}
+}
+
+func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			var (
+				db       *sql.DB
+				selected workflowTestSelectedStore
+				workflow *runtimepipeline.PipelineCoordinator
+			)
+			if backend == "sqlite" {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db, selected = store.backend.ConstructionHandle(), store
+				workflow = newSQLiteWorkflowTestCoordinator(t, db, store)
+			} else {
+				_, opened, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store := admitTestPostgresStore(t, opened)
+				db, selected = opened, store
+				workflow = newPostgresWorkflowTestCoordinator(t, db, store)
+			}
+			stopper := selected.(interface {
+				StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+			})
+			ctx := testAuthorActivityRuntimeContext()
+			serviceID := runtimeflowidentity.StandingServiceID("run-stop-guidance", backend)
+			candidate := runtimepipeline.StandingServiceCandidate{
+				ServiceID: serviceID, PackageKey: "run-stop-guidance", FlowID: backend,
+				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+				Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
+			}
+			seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+			created, err := workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing service: %v", err)
+			}
+			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if err == nil || !strings.Contains(err.Error(), "swarm standing suspend "+serviceID) || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
+				t.Fatalf("active run-stop guidance = %v", err)
+			}
+
+			orphaned, err := workflow.ReconcileStandingServiceSet(ctx, nil)
+			if err != nil || len(orphaned) != 1 || orphaned[0].RestartDisposition.Kind != runtimepipeline.StandingRestartOrphaned {
+				t.Fatalf("orphan standing service = %#v err=%v", orphaned, err)
+			}
+			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if err == nil || !strings.Contains(err.Error(), "restore the standing declaration") || strings.Contains(err.Error(), "standing suspend") {
+				t.Fatalf("orphan run-stop guidance = %v", err)
+			}
+
+			if _, err := markRunTerminalStatusForTest(ctx, selected, created.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC()); err != nil {
+				t.Fatalf("terminalize orphaned standing run: %v", err)
+			}
+			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if err == nil || !strings.Contains(err.Error(), "restore the standing declaration, then use `swarm standing reset "+serviceID+"`") {
+				t.Fatalf("terminal orphan run-stop guidance = %v", err)
+			}
+		})
 	}
 }

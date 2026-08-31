@@ -1062,11 +1062,11 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 		// durable generation and process-visible routes are installed.
 		runtimeOwned := activations[:0]
 		for _, activation := range activations {
-			standingOwned, err := store.StandingRunUsesIntrinsicRecovery(ctx, activation.RunID)
+			disposition, err := store.StandingRunRestartDisposition(ctx, activation.RunID)
 			if err != nil {
 				return fmt.Errorf("classify workflow timer %s startup owner: %w", activation.Ref.ActivationID, err)
 			}
-			if !standingOwned {
+			if disposition.UsesGenericRecovery() {
 				runtimeOwned = append(runtimeOwned, activation)
 			}
 		}

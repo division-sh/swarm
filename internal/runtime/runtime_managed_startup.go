@@ -111,6 +111,7 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		}
 		coordinator, err := runtimedeliverycontinuation.New(
 			rt.deliveryStore,
+			rt.Pipeline,
 			deliveryAuthority,
 			rt.workOccurrence,
 			rt.Bus,

@@ -14,6 +14,7 @@ import (
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	"github.com/google/uuid"
 )
 
@@ -286,15 +287,14 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 }
 
 func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	var serviceID string
-	err := tx.QueryRowContext(ctx, `SELECT service_id::text FROM standing_services WHERE current_run_id = $1::uuid`, runID).Scan(&serviceID)
-	if err == sql.ErrNoRows {
-		return nil
-	}
+	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, runID)
 	if err != nil {
 		return fmt.Errorf("inspect standing run control ownership: %w", err)
 	}
-	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
+	if disposition.UsesGenericRecovery() {
+		return nil
+	}
+	return fmt.Errorf("run %s is owned by standing service %s; %s", runID, disposition.ServiceID, disposition.RunControlGuidance())
 }
 
 func (s *RunLifecyclePostgresOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {

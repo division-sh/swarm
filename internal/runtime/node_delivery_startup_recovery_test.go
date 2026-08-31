@@ -282,6 +282,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 			managerRoles := externalRuntimeTestManagerBusRoles(runtime.Bus)
 			managerRoles.LifecycleCensus = selected
+			managerRoles.StandingRestarts = selected
 			runtime.Manager = runtimemanager.NewAgentManagerWithOptions(runtime.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				hydrated.Store(true)
 				subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
@@ -565,6 +566,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			coordinator, err := runtimedeliverycontinuation.New(
 				selected,
+				selected,
 				snapshot.Authority,
 				runtimeTestEventBusWorkOwner(t, bus),
 				dispatcher,
@@ -722,6 +724,7 @@ func startNodeDeliveryContinuation(
 	ctx context.Context,
 	eventBus *runtimebus.EventBus,
 	selected runtimedelivery.Store,
+	restarts runtimepipeline.StandingRestartDispositionReader,
 	workOwner worklifetime.Occurrence,
 	eventID string,
 	route events.DeliveryRoute,
@@ -743,6 +746,7 @@ func startNodeDeliveryContinuation(
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
 		selected,
+		restarts,
 		snapshot.Authority,
 		workOwner,
 		eventBus,
@@ -851,7 +855,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 
-			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
 			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
 			if got := deliveryOwner.renewals.Load(); got < 2 {
 				t.Fatalf("claim renewals = %d, want immediate and final handler renewal", got)
@@ -966,7 +970,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 
-			startNodeDeliveryContinuation(t, ctx, bus, selected, workOwner, poison.ID(), poisonRoute)
+			startNodeDeliveryContinuation(t, ctx, bus, selected, selected, workOwner, poison.ID(), poisonRoute)
 			poisonDeliveryID, err := runtimedelivery.DeliveryID(poison.ID(), poisonRoute)
 			if err != nil {
 				t.Fatalf("derive poison delivery identity: %v", err)
@@ -1135,7 +1139,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			if err != nil {
 				t.Fatalf("claim node delivery before lease expiry: %v", err)
 			}
-			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
 			makeNodeDeliveryImmediatelyEligible(t, ctx, db, backend.name == "postgres", retrying.DeliveryID)
 			expireNodeDeliveryClaim(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
 			continuations.Signal()

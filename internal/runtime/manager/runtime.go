@@ -1126,7 +1126,7 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 		if err != nil {
 			return RecoverableStateSnapshot{}, err
 		}
-		projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
+		projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
 		if err != nil {
 			return RecoverableStateSnapshot{}, fmt.Errorf("inspect source-scoped dynamic flow runtime readiness: %w", err)
 		}

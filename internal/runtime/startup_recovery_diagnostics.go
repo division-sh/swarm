@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -43,13 +45,14 @@ type startupRecoverySnapshot struct {
 	StartupBlockingTimers         int
 	StartupBlockingWorkflowTimers int
 	StandingTimerObligations      int
+	StandingDeliveryObligations   int
 	TimerObligations              runtimetimerobligation.Snapshot
 	Manager                       runtimemanager.RecoverableStateSnapshot
 	Delivery                      runtimedelivery.RecoveryInventory
 }
 
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
-	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 ||
+	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 || s.StandingDeliveryObligations > 0 ||
 		s.Manager.HasRecoverableWork() || s.Delivery.HasWork()
 }
 
@@ -62,7 +65,7 @@ func (s startupRecoverySnapshot) WorkClasses() []string {
 	if s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 {
 		classes = append(classes, "timer obligations")
 	}
-	if s.Delivery.HasWork() {
+	if s.Delivery.HasWork() || s.StandingDeliveryObligations > 0 {
 		classes = append(classes, "executable delivery obligations")
 	}
 	classes = append(classes, s.Manager.Classes()...)
@@ -90,6 +93,7 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 		detail["startup_blocking_timer_count"] = s.StartupBlockingTimers
 		detail["startup_blocking_workflow_timer_count"] = s.StartupBlockingWorkflowTimers
 		detail["standing_timer_obligation_count"] = s.StandingTimerObligations
+		detail["standing_delivery_obligation_count"] = s.StandingDeliveryObligations
 		detail["timer_obligations"] = s.TimerObligations
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
 		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
@@ -154,7 +158,7 @@ func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupR
 		}
 	case snapshot.Manager.HasRecoverableWork():
 		report.ReasonCode = startupRecoveryReasonDisabledWithManagerWork
-	case snapshot.StandingTimerObligations > 0:
+	case snapshot.StandingTimerObligations > 0 || snapshot.StandingDeliveryObligations > 0:
 		report.ReasonCode = startupRecoveryReasonDisabledWithIntrinsic
 	default:
 		report.ReasonCode = startupRecoveryReasonDisabledNoWork
@@ -258,12 +262,13 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 	if rt == nil {
 		return snapshot, nil
 	}
-	delivery, err := rt.inspectDeliveryRecoveryInventory(ctx)
+	delivery, standingDelivery, err := rt.inspectDeliveryRecoveryInventory(ctx)
 	if err != nil {
 		snapshot.InspectionComplete = false
 		return snapshot, err
 	}
 	snapshot.Delivery = delivery
+	snapshot.StandingDeliveryObligations = standingDelivery
 	reader, err := rt.startupTimerObligationReader()
 	if err != nil {
 		snapshot.InspectionComplete = false
@@ -289,16 +294,20 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 					break
 				}
 			}
-			intrinsic := false
-			if rt.Pipeline != nil {
-				intrinsic, err = rt.Pipeline.StandingRunUsesIntrinsicRecovery(ctx, run.RunID)
-				if err != nil {
-					snapshot.InspectionComplete = false
-					return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
-				}
+			if rt.Pipeline == nil {
+				snapshot.InspectionComplete = false
+				return snapshot, errors.New("classify timer obligations: standing restart disposition reader is required")
 			}
-			if intrinsic {
+			disposition, err := rt.Pipeline.StandingRunRestartDisposition(ctx, run.RunID)
+			if err != nil {
+				snapshot.InspectionComplete = false
+				return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
+			}
+			if disposition.Executable() {
 				snapshot.StandingTimerObligations += recoverable
+				continue
+			}
+			if disposition.ExactCurrent() {
 				continue
 			}
 			snapshot.StartupBlockingTimers += recoverable
@@ -316,15 +325,43 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 	return snapshot, nil
 }
 
-func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtimedelivery.RecoveryInventory, error) {
+func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtimedelivery.RecoveryInventory, int, error) {
 	if rt == nil || rt.deliveryStore == nil {
-		return runtimedelivery.RecoveryInventory{}, nil
+		return runtimedelivery.RecoveryInventory{}, 0, nil
 	}
 	inventory, err := rt.deliveryStore.InspectDeliveryRecovery(ctx, rt.Options.BundleSourceFact)
 	if err != nil {
-		return runtimedelivery.RecoveryInventory{}, fmt.Errorf("inspect executable delivery recovery: %w", err)
+		return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("inspect executable delivery recovery: %w", err)
 	}
-	return inventory, nil
+	return partitionDeliveryRecoveryInventory(ctx, inventory, rt.Pipeline)
+}
+
+func partitionDeliveryRecoveryInventory(
+	ctx context.Context,
+	inventory runtimedelivery.RecoveryInventory,
+	restarts runtimepipeline.StandingRestartDispositionReader,
+) (runtimedelivery.RecoveryInventory, int, error) {
+	if !inventory.HasWork() {
+		return runtimedelivery.RecoveryInventory{}, 0, nil
+	}
+	if restarts == nil {
+		return runtimedelivery.RecoveryInventory{}, 0, errors.New("classify delivery obligations: standing restart disposition reader is required")
+	}
+	blocking := runtimedelivery.RecoveryInventory{}
+	standing := 0
+	for _, run := range inventory.Runs {
+		disposition, err := restarts.StandingRunRestartDisposition(ctx, run.RunID)
+		if err != nil {
+			return runtimedelivery.RecoveryInventory{}, 0, fmt.Errorf("classify standing delivery obligations for run %s: %w", run.RunID, err)
+		}
+		switch {
+		case disposition.UsesGenericRecovery():
+			blocking.Runs = append(blocking.Runs, run)
+		case disposition.Executable():
+			standing += run.Total()
+		}
+	}
+	return blocking, standing, nil
 }
 
 func (rt *Runtime) startupTimerObligationReader() (runtimetimerobligation.Reader, error) {

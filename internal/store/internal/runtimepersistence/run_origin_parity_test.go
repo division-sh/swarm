@@ -28,12 +28,12 @@ type runOriginReadStore interface {
 	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
 }
 
-type standingRepairExecutionCountingStore struct {
+type standingExecutionCountingStore struct {
 	delegate   runtimerunlifecycle.CandidateStore
 	executions atomic.Int64
 }
 
-func (s *standingRepairExecutionCountingStore) ListCompletionCandidates(
+func (s *standingExecutionCountingStore) ListCompletionCandidates(
 	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,
 	cursor runtimerunlifecycle.CandidateCursor,
@@ -42,7 +42,7 @@ func (s *standingRepairExecutionCountingStore) ListCompletionCandidates(
 	return s.delegate.ListCompletionCandidates(ctx, scope, cursor, limit)
 }
 
-func (s *standingRepairExecutionCountingStore) ExecuteCompletionCandidate(
+func (s *standingExecutionCountingStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
@@ -167,7 +167,6 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			ctx := testAuthorActivityRuntimeContext()
 			serviceID := runtimeflowidentity.StandingServiceID("origin-parity", backend)
 			firstHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-			secondHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 			candidate := runtimepipeline.StandingServiceCandidate{
 				ServiceID: serviceID, PackageKey: "origin-parity", FlowID: backend,
 				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
@@ -200,56 +199,18 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
 			commitStandingOriginIngress(t, selected, firstHash, reset.RunID, "reset")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
-			seedStandingRepairEntityState(t, ctx, db, backend, reset.RunID, candidate.EntityID)
-
-			if _, err := markRunTerminalStatusForTest(
-				ctx, selected, reset.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC(),
-			); err != nil {
-				t.Fatalf("cancel reset generation: %v", err)
-			}
-			insertStandingRestartAbandonControl(t, ctx, db, backend, reset.RunID)
-			candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
-			seedStoreTestPersistedBundle(t, db, secondHash)
-			repaired, err := workflow.ReconcileStandingService(ctx, candidate)
-			if err != nil {
-				t.Fatalf("repair standing generation: %v", err)
-			}
-			if repaired.Transition != "repaired" {
-				t.Fatalf("repair transition = %q, want repaired", repaired.Transition)
-			}
-			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
-			requireStandingRepairMutationProjection(t, ctx, db, backend, repaired.RunID, candidate.EntityID)
-			standingRecord := stateOnlyWorkflowEngineMutationRecord(
-				t, repaired.RunID, "standing", "standing/root", candidate.EntityID,
-				"serving", 4, time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC),
-			)
-			standingRecord.CurrentState = "serving"
-			standingRecord.EntityType = "standing_service"
-			standingRecord.Fields = json.RawMessage(`{"name":"standing"}`)
-			standingRecord.Bookkeeping = json.RawMessage(`{"generation":2}`)
-			standingRecord.Gates = json.RawMessage(`{"ready":true}`)
-			standingRecord.Accumulator = json.RawMessage(`{"metrics":{"requests":3}}`)
-			if _, err := selected.CommitWorkflowEngineMutation(
-				testAuthorActivityContextForBundle(secondHash),
-				runtimepipeline.WorkflowEngineMutationCommand{State: standingRecord},
-			); err != nil {
-				t.Fatalf("execute copied standing-generation state: %v", err)
-			}
-			assertWorkflowTargetTransitionRows(t, backend, db, repaired.RunID, candidate.EntityID, "standing/root", "standing", "serving", 5, 1)
-			commitStandingOriginIngress(t, selected, secondHash, repaired.RunID, "repair")
-			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
 
 			wrongServiceID := uuid.NewString()
-			wrongOrigin, err := runtimerunlifecycle.StandingGenerationRunOrigin(wrongServiceID, 3)
+			wrongOrigin, err := runtimerunlifecycle.StandingGenerationRunOrigin(wrongServiceID, 2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if backend == "postgres" {
-				runlifecyclefixture.CorruptPostgresOrigin(t, ctx, db, repaired.RunID, wrongOrigin)
+				runlifecyclefixture.CorruptPostgresOrigin(t, ctx, db, reset.RunID, wrongOrigin)
 			} else {
-				runlifecyclefixture.CorruptSQLiteOrigin(t, ctx, db, repaired.RunID, wrongOrigin)
+				runlifecyclefixture.CorruptSQLiteOrigin(t, ctx, db, reset.RunID, wrongOrigin)
 			}
-			if _, err := reader.LoadRunHeader(ctx, repaired.RunID); err == nil ||
+			if _, err := reader.LoadRunHeader(ctx, reset.RunID); err == nil ||
 				!strings.Contains(err.Error(), "standing generation origin relation is invalid") {
 				t.Fatalf("mismatched standing relation readback error = %v", err)
 			}
@@ -257,7 +218,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 	}
 }
 
-func TestStandingGenerationRepairSeedsCompletionCandidateParity(t *testing.T) {
+func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
@@ -317,7 +278,7 @@ func TestStandingGenerationRepairSeedsCompletionCandidateParity(t *testing.T) {
 			process := worklifetime.NewProcess()
 			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, secondHash)
 			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
-			countingStore := &standingRepairExecutionCountingStore{delegate: candidateStore}
+			countingStore := &standingExecutionCountingStore{delegate: candidateStore}
 			executor := newRunLifecycleParityExecutorForScope(
 				t,
 				countingStore,
@@ -338,18 +299,19 @@ func TestStandingGenerationRepairSeedsCompletionCandidateParity(t *testing.T) {
 				t.Fatalf("start repair candidate executor: %v", err)
 			}
 
-			repaired, err := workflow.ReconcileStandingService(runtimeCtx, candidate)
+			stopped, err := workflow.ReconcileStandingService(runtimeCtx, candidate)
 			if err != nil {
-				t.Fatalf("repair standing generation: %v", err)
+				t.Fatalf("reconcile terminal standing generation: %v", err)
 			}
-			if repaired.Transition != "repaired" {
-				t.Fatalf("repair transition = %q, want repaired", repaired.Transition)
+			if stopped.Transition != "stopped" || stopped.RunID != fresh.RunID || stopped.Generation != fresh.Generation ||
+				stopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+				t.Fatalf("terminal standing result = %#v", stopped)
 			}
-			awaitRunLifecycleState(t, candidateStore, repaired.RunID, runtimerunlifecycle.StateCompleted)
+			awaitRunLifecycleState(t, candidateStore, fresh.RunID, runtimerunlifecycle.StateCancelled)
 			fixture := runLifecycleCandidateParityFixture{store: candidateStore, db: db, postgres: backend == "postgres"}
-			state, duePresent, _ := loadRunLifecycleCandidateFacts(t, fixture, ctx, repaired.RunID)
-			if state != string(runtimerunlifecycle.StateCompleted) || duePresent {
-				t.Fatalf("repaired candidate convergence = state:%s due:%v, want completed/false", state, duePresent)
+			state, duePresent, _ := loadRunLifecycleCandidateFacts(t, fixture, ctx, fresh.RunID)
+			if state != string(runtimerunlifecycle.StateCancelled) || duePresent {
+				t.Fatalf("terminal candidate posture = state:%s due:%v, want cancelled/false", state, duePresent)
 			}
 			awaitRunLifecycleExecutorCandidates(t, executor, 0)
 
@@ -387,38 +349,22 @@ func TestStandingGenerationRepairSeedsCompletionCandidateParity(t *testing.T) {
 
 			suspendedCandidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
 			beforeSuspendedRepair := countingStore.executions.Load()
-			suspendedRepair, err := workflow.ReconcileStandingService(runtimeCtx, suspendedCandidate)
+			suspendedStopped, err := workflow.ReconcileStandingService(runtimeCtx, suspendedCandidate)
 			if err != nil {
-				t.Fatalf("repair suspended standing generation: %v", err)
+				t.Fatalf("reconcile terminal suspended standing generation: %v", err)
 			}
-			if suspendedRepair.Transition != "repaired" || suspendedRepair.EffectiveState != "suspended" {
-				t.Fatalf("suspended repair = %#v, want repaired/suspended", suspendedRepair)
+			if suspendedStopped.Transition != "stopped" || suspendedStopped.EffectiveState != "suspended" ||
+				suspendedStopped.RunID != suspendedFresh.RunID || suspendedStopped.Generation != suspendedFresh.Generation ||
+				suspendedStopped.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared {
+				t.Fatalf("terminal suspended result = %#v", suspendedStopped)
 			}
-			state, duePresent, _ = loadRunLifecycleCandidateFacts(t, fixture, ctx, suspendedRepair.RunID)
-			if state != string(runtimerunlifecycle.StatePaused) || duePresent {
-				t.Fatalf("suspended repair candidate = state:%s due:%v, want paused/false", state, duePresent)
+			state, duePresent, _ = loadRunLifecycleCandidateFacts(t, fixture, ctx, suspendedFresh.RunID)
+			if state != string(runtimerunlifecycle.StateCancelled) || duePresent {
+				t.Fatalf("terminal suspended candidate = state:%s due:%v, want cancelled/false", state, duePresent)
 			}
 			awaitRunLifecycleExecutorCandidates(t, executor, 0)
 			if got := countingStore.executions.Load(); got != beforeSuspendedRepair {
-				t.Fatalf("candidate executions while repair remained suspended = %d, want %d", got, beforeSuspendedRepair)
-			}
-
-			resumed, err := workflow.ResumeStandingService(runtimeCtx, runtimepipeline.StandingServiceOperation{
-				ServiceID: suspendedServiceID, Actor: "repair-parity", Reason: "maintenance_complete",
-			})
-			if err != nil {
-				t.Fatalf("resume repaired standing generation: %v", err)
-			}
-			if resumed.RunID != suspendedRepair.RunID || resumed.EffectiveState != "active" {
-				t.Fatalf("resumed repair = %#v, want same run active", resumed)
-			}
-			awaitRunLifecycleState(t, candidateStore, suspendedRepair.RunID, runtimerunlifecycle.StateCompleted)
-			state, duePresent, _ = loadRunLifecycleCandidateFacts(t, fixture, ctx, suspendedRepair.RunID)
-			if state != string(runtimerunlifecycle.StateCompleted) || duePresent {
-				t.Fatalf("resumed repair convergence = state:%s due:%v, want completed/false", state, duePresent)
-			}
-			if got := countingStore.executions.Load(); got <= beforeSuspendedRepair {
-				t.Fatalf("candidate executions after repair resume = %d, want greater than %d", got, beforeSuspendedRepair)
+				t.Fatalf("candidate executions while terminal standing remained parked = %d, want %d", got, beforeSuspendedRepair)
 			}
 
 			if err := executor.Retire(context.Background()); err != nil {
