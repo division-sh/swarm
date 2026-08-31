@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -566,7 +567,7 @@ func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T
 func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(rootAndAmbiguousFlowScopedEventPublishTestBundle())
+	source := semanticview.Wrap(rootAndAmbiguousFlowScopedEventPublishTestBundle(t))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2397,23 +2398,79 @@ func eventPublishBodyWithRetiredBundleInput(runID, bundleHash, eventName, payloa
 }
 
 func flowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
-	return flowScopedEventPublishBundle(map[string]string{
+	return mustCompileEventPublishTestBundle(flowScopedEventPublishBundle(map[string]string{
 		"repo-scaffold": "repo_scaffold.repo_commit_succeeded",
-	})
+	}))
 }
 
 func ambiguousFlowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
-	return flowScopedEventPublishBundle(map[string]string{
+	return mustCompileEventPublishTestBundle(flowScopedEventPublishBundle(map[string]string{
 		"alpha-flow": "workflow.completed",
 		"beta-flow":  "workflow.completed",
-	})
+	}))
 }
 
-func rootAndAmbiguousFlowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := ambiguousFlowScopedEventPublishTestBundle()
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-		"workflow.completed": {},
+func rootAndAmbiguousFlowScopedEventPublishTestBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"package.yaml": `name: review
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - {id: alpha-flow, flow: alpha-flow, mode: static}
+  - {id: beta-flow, flow: beta-flow, mode: static}
+`,
+		"schema.yaml": `name: review
+pins:
+  inputs:
+    events:
+      - {event: workflow.completed, source: external}
+`,
+		"events.yaml": `workflow.completed:
+  topic: text
+`,
+		"nodes.yaml": `root-observer:
+  id: root-observer
+  execution_type: system_node
+  subscribes_to: [workflow.completed]
+  event_handlers:
+    workflow.completed: {}
+`,
+		"flows/alpha-flow/schema.yaml": `name: alpha-flow
+mode: static
+`,
+		"flows/alpha-flow/events.yaml": `workflow.completed:
+  topic: text
+`,
+		"flows/beta-flow/schema.yaml": `name: beta-flow
+mode: static
+`,
+		"flows/beta-flow/events.yaml": `workflow.completed:
+  topic: text
+`,
 	}
+	for relative, contents := range files {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create event-publish fixture directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write event-publish fixture %s: %v", relative, err)
+		}
+	}
+	repoRoot := filepath.Join("..", "..")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load root/flow event-name collision fixture: %v", err)
+	}
+	entry, ok := bundle.AuthoredResolvedEventCatalog()["workflow.completed"]
+	if !ok {
+		t.Fatal("loaded collision fixture omitted root workflow.completed declaration")
+	}
+	// Preserve the API's exact root-name lookup while compiled schema evidence
+	// remains owned by the loader-admitted project declaration.
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"workflow.completed": entry}
 	return bundle
 }
 
@@ -2428,10 +2485,10 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 			nodeID = "repo-observer"
 		}
 		flows = append(flows, runtimecontracts.FlowContractView{
-			Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
+			Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, PackageKey: "."},
 			Path:  flowID,
 			Events: map[string]runtimecontracts.EventCatalogEntry{
-				eventName: {},
+				eventName: topicEventCatalogEntry(),
 			},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				nodeID: {
@@ -2453,6 +2510,7 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 		byID[strings.TrimSpace(flow.Paths.ID)] = flow
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		Package:   runtimecontracts.ProjectPackageDocument{Name: "review", Version: "1.0.0"},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -2463,9 +2521,9 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 
 func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 	eventsByName := map[string]runtimecontracts.EventCatalogEntry{
-		"scan.requested": {},
-		"scan.followup":  {},
-		"scan.unhandled": {},
+		"scan.requested": topicEventCatalogEntry(),
+		"scan.followup":  topicEventCatalogEntry(),
+		"scan.unhandled": topicEventCatalogEntry(),
 	}
 	node := runtimecontracts.SystemNodeContract{
 		ID:           "scan-orchestrator",
@@ -2539,7 +2597,7 @@ func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *r
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
+			eventName: topicAndEntityIDEventCatalogEntry(),
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
@@ -2566,10 +2624,10 @@ func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *r
 			eventName: {},
 		},
 	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: {}}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: topicAndEntityIDEventCatalogEntry()}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"root-orchestrator": rootNode}
 	bundle.RootSchema.Pins.Inputs.EventPins = []runtimecontracts.FlowInputEventPin{{Event: eventName}}
-	bundle.FlowTree.Root.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: {}}
+	bundle.FlowTree.Root.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: topicAndEntityIDEventCatalogEntry()}
 	bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{"root-orchestrator": rootNode}
 	return mustCompileEventPublishTestBundle(bundle)
 }
@@ -2631,6 +2689,19 @@ func mustCompileEventPublishTestBundle(bundle *runtimecontracts.WorkflowContract
 		panic(fmt.Sprintf("compile event-publish test bundle: %v", err))
 	}
 	return bundle
+}
+
+func topicEventCatalogEntry() runtimecontracts.EventCatalogEntry {
+	return runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
+		Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},
+		Required:   []string{"topic"},
+	}}
+}
+
+func topicAndEntityIDEventCatalogEntry() runtimecontracts.EventCatalogEntry {
+	entry := topicEventCatalogEntry()
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
+	return entry
 }
 
 func seedEventPublishEntityState(t *testing.T, db *sql.DB, runID, entityID, flowInstance, currentState string) {

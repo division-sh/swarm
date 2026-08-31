@@ -813,7 +813,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				t.Fatal(err)
 			}
 			forkRequestID := activityidentity.RequestEventID(activityidentity.Fact{
-				RunID: forkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
+				RunID: forkRunID, SourceEventID: activityidentity.ForkLineageEventID(forkRunID, continuation.RequestEventID), ParentEventID: forkPayload.ParentEventID,
 				EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
 				HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,
 			})

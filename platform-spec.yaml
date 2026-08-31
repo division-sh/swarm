@@ -1024,6 +1024,13 @@ contract_formats:
           selected-fork publication consume this owner. A schema-less generated or
           platform event is admissible only when no authored payload reader is
           reachable.
+          Admission first consumes the compiled input binding for the supplied flow.
+          When pre-route source provenance names a different flow, as with a
+          target-free normalized provider output, admission may resolve across the
+          pinned effective source only when every matching exact-event input binding
+          has the same event identity, source class, and acceptance-schema digest.
+          Missing or disagreeing bindings fail closed; route planning never chooses or
+          rewrites payload schema authority.
         normalization: |
           Admission recursively lowers external null on an optional field to
           omission, rejects null on a required field, rejects null list elements,

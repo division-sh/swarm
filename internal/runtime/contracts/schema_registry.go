@@ -565,6 +565,8 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		return map[string]any{"type": "object"}
 	case "array":
 		return map[string]any{"type": "array"}
+	case "json", "jsonb":
+		return map[string]any{}
 	default:
 		return map[string]any{"type": typeRef}
 	}

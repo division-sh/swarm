@@ -39,13 +39,13 @@ schema-ref-agent:
   role: schema_ref
   intent: intent/shared-schema-prompt.md
   emit_events:
-    - schema.prompt.created
+    - schema.prompt_created
 `, "\n"))...)
 	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
 		t.Fatalf("write %s: %v", agentsPath, err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(strings.TrimLeft(`
-schema.prompt.created:
+schema.prompt_created:
   item_id: string
 `, "\n")), 0o644); err != nil {
 		t.Fatalf("write events.yaml: %v", err)
@@ -65,7 +65,7 @@ When you call emit_schema_prompt_created with:
 	cases := DerivePromptSchemaGuards(bundle)
 	found := false
 	for _, tc := range cases {
-		if filepath.Base(tc.IntentSource) == "shared-schema-prompt.md" && tc.EmitTool == "emit_schema_prompt_created" {
+		if filepath.Base(tc.IntentSource) == "shared-schema-prompt.md" && tc.EventType == "schema.prompt_created" && tc.EmitTool == "emit_schema_prompt_created" {
 			found = true
 			break
 		}

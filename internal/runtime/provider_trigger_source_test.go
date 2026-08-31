@@ -399,13 +399,17 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if !resolution.HasStructural || !resolution.HasCompiled || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaImported {
 		t.Fatalf("imported payload reader schema resolution = %#v", resolution)
 	}
+	globalResolution := semanticview.ResolveEventSchema(wrapped, "", "inbound.telegram.text_message")
+	if !globalResolution.HasStructural || !globalResolution.HasCompiled || !globalResolution.HasClassification || globalResolution.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("target-free imported payload schema resolution = %#v", globalResolution)
+	}
 	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(payloadAdmissionTestBundleHash)
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}
 	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1,"text":"hello"}`)
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "coordinator")
+	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "telegram-ingress")
 	if err != nil {
 		t.Fatalf("admit imported provider payload: %v", err)
 	}

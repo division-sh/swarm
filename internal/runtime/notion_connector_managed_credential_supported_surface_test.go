@@ -364,14 +364,14 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram": handler,
+			"inbound.telegram.text_message": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	bundle := boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
 				},
 			},
 		},
@@ -383,17 +383,19 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 				nodeID: {
 					ID:                   nodeID,
 					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram"},
+					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram": handler},
+				nodeID: {"inbound.telegram.text_message": handler},
 			},
 			EventOwners: map[string][]string{
-				"inbound.telegram": {nodeID},
+				"inbound.telegram.text_message": {nodeID},
 			},
 		},
-	}))
+	})
+	declareTelegramTextMessageProviderImport(t, bundle)
+	base := semanticview.Wrap(bundle)
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -411,7 +413,7 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
-	return source
+	return withTelegramTextMessageProviderSchema(t, source)
 }
 
 func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {

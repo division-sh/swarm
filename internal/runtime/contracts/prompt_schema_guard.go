@@ -44,7 +44,7 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 		path := tc.IntentSource
 		text := tc.IntentContent
 
-		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
+		eventType := strings.TrimSpace(tc.EventType)
 		schema, _, ok := EventSchemaForFlowEvent(bundle, tc.FlowID, eventType)
 		if !ok {
 			return nil, fmt.Errorf("unknown emit tool %s", tc.EmitTool)

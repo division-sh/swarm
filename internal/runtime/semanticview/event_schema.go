@@ -113,6 +113,11 @@ func bindCompiledEventSchema(source Source, bundle *runtimecontracts.WorkflowCon
 	if resolution == nil {
 		return
 	}
+	if schema, ok := resolveCompiledInputPinEventSchema(source, flowID, eventType); ok {
+		resolution.CompiledSchema = schema
+		resolution.HasCompiled = true
+		return
+	}
 	association := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, eventType)
 	if endpoint, ok := association.Endpoint(); ok {
 		if pin, found := source.FlowInputEventPin(flowID, endpoint.PinName); found {
@@ -162,6 +167,65 @@ func bindCompiledEventSchema(source Source, bundle *runtimecontracts.WorkflowCon
 		resolution.CompiledSchema = scoped
 		resolution.HasCompiled = true
 	}
+}
+
+func resolveCompiledInputPinEventSchema(source Source, flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool) {
+	if source == nil {
+		return runtimecontracts.CompiledEventSchema{}, false
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	resolve := func(flowIDs []string) (runtimecontracts.CompiledEventSchema, bool, bool) {
+		var selected runtimecontracts.CompiledEventSchema
+		found := false
+		seenFlows := map[string]struct{}{}
+		for _, candidateFlowID := range flowIDs {
+			candidateFlowID = strings.TrimSpace(candidateFlowID)
+			if _, duplicate := seenFlows[candidateFlowID]; duplicate {
+				continue
+			}
+			seenFlows[candidateFlowID] = struct{}{}
+			for _, pin := range source.FlowInputEventPins(candidateFlowID) {
+				pinEvent := strings.TrimSpace(pin.EventType())
+				resolvedEvent := strings.TrimSpace(source.ResolveFlowEventReference(candidateFlowID, pinEvent))
+				if pinEvent != eventType && resolvedEvent != eventType {
+					continue
+				}
+				candidate, owned := pin.ReceiverEventSchema()
+				if !owned {
+					candidate, owned = pin.ProducerEventSchema()
+				}
+				if !owned {
+					continue
+				}
+				if !found {
+					selected = candidate
+					found = true
+					continue
+				}
+				if selected.EventName() != candidate.EventName() ||
+					selected.Classification() != candidate.Classification() ||
+					selected.AcceptanceSchemaDigest() != candidate.AcceptanceSchemaDigest() {
+					return runtimecontracts.CompiledEventSchema{}, false, true
+				}
+			}
+		}
+		return selected, found, false
+	}
+	if flowID != "" {
+		if selected, found, conflict := resolve([]string{flowID}); found || conflict {
+			return selected, found
+		}
+	}
+	// Provider-normalized events retain the ingress source route before target
+	// planning, so their imported schema can be owned by a different input flow.
+	// Only one semantically identical exact-event binding may cross that boundary.
+	flowIDs := []string{""}
+	for _, scope := range source.FlowScopes() {
+		flowIDs = append(flowIDs, strings.TrimSpace(scope.ID))
+	}
+	selected, found, _ := resolve(flowIDs)
+	return selected, found
 }
 
 func bindEventSchemaClassification(source Source, flowID, eventType string, resolution *EventSchemaResolution) {
