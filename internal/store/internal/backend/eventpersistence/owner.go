@@ -54,7 +54,7 @@ type EventPostgresOwner struct {
 
 	backend               *postgresbackend.Backend
 	requireCurrent        func() error
-	validatorMu           sync.RWMutex
+	payloadAdmitterMu     sync.RWMutex
 	payloadAdmitter       runtimebus.PayloadAdmitter
 	runFork               selectedForkLineageOwner
 	apiIdempotency        *storeapiidempotency.PostgresOwner
@@ -72,7 +72,7 @@ type EventSQLiteOwner struct {
 	backend               *sqlitebackend.Backend
 	requireCurrent        func() error
 	nowFn                 func() time.Time
-	validatorMu           sync.RWMutex
+	payloadAdmitterMu     sync.RWMutex
 	payloadAdmitter       runtimebus.PayloadAdmitter
 	runFork               selectedForkLineageOwner
 	apiIdempotency        *storeapiidempotency.SQLiteOwner
