@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -23,6 +24,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -30,6 +33,12 @@ import (
 )
 
 const runStatusTestRuntimeInstanceID = "22222222-2222-2222-2222-222222222222"
+
+func runStatusSubscriptionSource() semanticview.Source {
+	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+	})
+}
 
 func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact) context.Context {
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
@@ -250,6 +259,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		SemanticSource:   runStatusSubscriptionSource(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
@@ -260,6 +270,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		ExecutionMode: "live",
 		ID:            testAgent.id,
 		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		FlowID:        ".",
 		Role:          "worker",
 		Type:          "stub",
 		Model:         "regular",
@@ -375,6 +386,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		SemanticSource:   runStatusSubscriptionSource(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
@@ -385,6 +397,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		ExecutionMode: "live",
 		ID:            testAgent.id,
 		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		FlowID:        ".",
 		Role:          "worker",
 		Type:          "stub",
 		Model:         "regular",

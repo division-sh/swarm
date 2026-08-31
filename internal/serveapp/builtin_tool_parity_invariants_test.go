@@ -51,6 +51,9 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 				t.Fatalf("resolve test agent intent: %v", err)
 			}
 			bundle := testWorkflowValidationBundle()
+			bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+				"tool.test_started": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external test"}},
+			}
 			bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 				"agent-1": {
 					ID:             "agent-1",
@@ -58,7 +61,7 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 					Role:           "worker",
 					Model:          "regular",
 					ResolvedIntent: intent,
-					Subscriptions:  []string{"platform.run.started"},
+					Subscriptions:  []string{"tool.test_started"},
 					Tools:          []string{tc.configuredTool},
 					Permissions:    tc.permissions,
 				},

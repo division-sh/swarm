@@ -154,6 +154,7 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"test.event": {}}
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"agent-1": {
 			ID: "agent-1", Role: "agent-1", Model: "regular",
@@ -6799,8 +6800,8 @@ func TestRun_ReportsErrorForUnknownTimerTriggerEvent(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
-	if !reportContains(report.Errors(), "timer_validation", "unknown event") {
-		t.Fatalf("expected timer_validation unknown event error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "timer_validation", "does not resolve to receiver-local event") {
+		t.Fatalf("expected timer_validation receiver-local event error, got %#v", report.Errors())
 	}
 }
 
@@ -7118,8 +7119,8 @@ func TestRun_ReportsErrorForUnknownTimerCancelEvent(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
-	if !reportContains(report.Errors(), "timer_validation", "cancel_on references unknown event ticket.unknown") {
-		t.Fatalf("expected timer_validation unknown cancel event error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "timer_validation", "does not resolve to receiver-local event") {
+		t.Fatalf("expected timer_validation receiver-local cancel event error, got %#v", report.Errors())
 	}
 }
 

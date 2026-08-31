@@ -70,6 +70,7 @@ func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubs
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}}},
 		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 	}
 
 	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
@@ -121,7 +122,11 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"external.received":  {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"work.requested":     {},
+			"analysis.requested": {},
+			"review.requested":   {},
+			"timer.started":      {},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
@@ -129,7 +134,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	}
 	root := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: *bundle.RootSchema,
-		Nodes: bundle.Nodes, Agents: bundle.Agents,
+		Nodes: bundle.Nodes, Agents: bundle.Agents, Events: bundle.Events,
 		AgentURIs: map[string]string{"analyst": "test://endpoint-census/analyst"},
 	}
 	bundle.FlowTree = runtimecontracts.FlowTree{
@@ -540,6 +545,31 @@ func TestInvalidAuthoredSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 
 	if invalid := BuildAuthoredEventEndpointCensus(Wrap(bundle)).InvalidAuthoredSubscriptions(); len(invalid) != 0 {
 		t.Fatalf("connected input delivery misclassified as invalid authored subscription: %#v", invalid)
+	}
+}
+
+func TestInvalidAuthoredSubscriptionsRejectAncestorSameNameWithoutReceiverDeclaration(t *testing.T) {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		Path:  "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.started": {}}},
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Events:   map[string]runtimecontracts.EventCatalogEntry{"root.started": {}},
+		Children: []runtimecontracts.FlowContractView{child},
+	}
+	source := Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+	}})
+	invalid := BuildAuthoredEventEndpointCensus(source).InvalidAuthoredSubscriptions()
+	if len(invalid) != 1 {
+		t.Fatalf("invalid subscriptions = %#v, want one child listener", invalid)
+	}
+	if invalid[0].Consumer.FlowID != "child" || invalid[0].Consumer.NodeID != "listener" || invalid[0].Admission.Failure() != AuthoredSubscriptionFailureReceiverEventMissing {
+		t.Fatalf("invalid subscription = %#v", invalid[0])
 	}
 }
 

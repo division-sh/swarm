@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -49,14 +50,25 @@ type testAgentRoute struct {
 	token runtimeeffects.LifecycleToken
 }
 
+func testLocalSubscriptionEvents(subscriptions []string) map[string]struct{} {
+	localEvents := make(map[string]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if local := eventidentity.LeafName(subscription); local != "" && !strings.Contains(local, "*") {
+			localEvents[local] = struct{}{}
+		}
+	}
+	return localEvents
+}
+
 func subscribeTestAgent(t testing.TB, eventBus *EventBus, agentID string, eventTypes ...events.EventType) <-chan *LocalDelivery {
 	t.Helper()
 	subscriptions := make([]string, 0, len(eventTypes))
 	for _, eventType := range eventTypes {
-		subscriptions = append(subscriptions, string(eventType))
+		subscription := string(eventType)
+		subscriptions = append(subscriptions, subscription)
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: agentID, Subscriptions: subscriptions,
+		AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit test agent route: %v", err)

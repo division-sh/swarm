@@ -43,6 +43,9 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 
 func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {
 				ID: "node-a",

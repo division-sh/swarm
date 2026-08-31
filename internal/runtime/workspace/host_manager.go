@@ -141,7 +141,7 @@ func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimePro
 	cfg.SourceProjection = projection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = strings.TrimSpace(projection.Identity())
-	cfg.BundleScope = projectionScopeKey(cfg.BundleHash, cfg.SourceProjectionID)
+	cfg.BundleScope = bundleScopeKey(cfg.BundleHash)
 	m.cfg = cfg
 	m.ownedProjection = ownedProjection
 	return nil

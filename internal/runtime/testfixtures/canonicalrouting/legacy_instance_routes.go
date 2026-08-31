@@ -89,6 +89,7 @@ connect:
     from: producer
     to: consumer
 `+secondConnect)
+	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 mode: static
 pins:
@@ -111,6 +112,7 @@ pins:
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
 		t.Fatalf("unsupported template instance consumer %d", opts.Consumer)
 	}
+	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: template
 instance: vertical_id

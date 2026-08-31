@@ -39,11 +39,19 @@ func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	const eventName = "scan.unroutable_requested"
 	bundle := rootInputTestBundle(t, eventName)
-	bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
+	flow := &bundle.FlowTree.Root.Children[0]
+	flow.Schema.Pins.Inputs.EventPins = nil
+	flow.Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
+	flow.Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 		ID:           "scan-orchestrator",
 		SubscribesTo: []string{"scan.other_requested"},
 	}
-	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+	bundle.FlowTree.ByID["discovery"] = flow
+	bundle.FlowSchemas["discovery"] = flow.Schema
+	bundle.Nodes["scan-orchestrator"] = flow.Nodes["scan-orchestrator"]
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile unroutable root-input test semantics: %v", err)
+	}
 
 	_, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{eventName})
 	diagnostic, ok := AsRootInputValidationError(err)

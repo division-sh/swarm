@@ -1959,6 +1959,10 @@ validation_entity:
     type: boolean
     initial: false
 `,
+		"validation/events.yaml": `
+candidate.discovered: {}
+entity.created: {}
+`,
 		"validation/nodes.yaml": `
 node-a:
   id: node-a

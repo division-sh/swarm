@@ -5,11 +5,17 @@ import (
 	"testing"
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func runtimeTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	t.Helper()
+	if strings.TrimSpace(cfg.FlowID) == "" && cfg.CanonicalFlowPath() == "" {
+		cfg.FlowID = "."
+	}
 	if strings.TrimSpace(cfg.ResolvedLLMBackend) == "" {
 		cfg.ResolvedLLMBackend = strings.TrimSpace(cfg.LLMBackend)
 		if cfg.ResolvedLLMBackend == "" {
@@ -36,4 +42,18 @@ func runtimeTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtime
 		cfg.Prompt = prompt
 	}
 	return cfg
+}
+
+func runtimeTestSubscriptionSource(eventNames ...string) semanticview.Source {
+	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventNames))
+	for _, eventName := range eventNames {
+		events[eventName] = runtimecontracts.EventCatalogEntry{}
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Events: events}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+		},
+	})
 }

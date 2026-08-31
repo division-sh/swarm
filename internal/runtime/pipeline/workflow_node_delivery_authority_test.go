@@ -398,6 +398,9 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: testEntityContractsForType("test_entity"),
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"source.evt": {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},

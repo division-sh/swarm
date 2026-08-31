@@ -535,6 +535,9 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scanner": node,
 		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"source.requested": {},
+		},
 		Path: "research",
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}

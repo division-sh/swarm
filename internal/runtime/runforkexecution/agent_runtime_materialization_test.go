@@ -26,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -82,6 +83,20 @@ func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.Source
 		t.Fatalf("construct selected-contract source fact: %v", err)
 	}
 	return fact
+}
+
+func selectedContractAgentTestSource(eventNames ...string) semanticview.Source {
+	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventNames))
+	for _, eventName := range eventNames {
+		events[eventName] = runtimecontracts.EventCatalogEntry{}
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Events: events}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+		},
+	})
 }
 
 func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.Admission {
@@ -246,8 +261,15 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 
 func selectedContractAgentRouteAdmission(t *testing.T, agentID string, subscriptions ...string) semanticview.FlowOwnedAgentSubscriptionAdmission {
 	t.Helper()
+	localEvents := make(map[string]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription = strings.TrimSpace(subscription); subscription != "" && !strings.Contains(subscription, "*") {
+			localEvents[subscription] = struct{}{}
+		}
+	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       agentID,
+		LocalEvents:   localEvents,
 		Subscriptions: subscriptions,
 	})
 	if err != nil {
@@ -475,10 +497,14 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: selectedContractExecutionOwnerForTest(t, selected),
+		LoadedSource: LoadedSelectedContractSource{
+			Source:             selectedContractAgentTestSource("item.received"),
+			SourceArtifactFact: selectedContractAgentTestSourceFact(t),
+		},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
-				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
+				FlowID: ".", Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
 			}), Topology: selectedContractTestDeclarationTopology(t), ProcessBinding: probe.binding}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,

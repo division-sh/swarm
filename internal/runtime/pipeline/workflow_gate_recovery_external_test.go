@@ -1433,6 +1433,9 @@ func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContr
 	}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"support.reply_drafted": {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"support": {
 				ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,

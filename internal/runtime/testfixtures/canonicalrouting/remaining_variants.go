@@ -310,6 +310,7 @@ states: [initializing, waiting, ready]
 func CopyTemplateConnectRollback(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
+	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	files := map[string]string{
 
 		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer}\n",

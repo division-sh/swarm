@@ -2403,12 +2403,14 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 	)
 	componentFlow := runtimecontracts.FlowContractView{
 		Path: "component-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"component-node": {ID: "component-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},
 	}
 	repositoryFlow := runtimecontracts.FlowContractView{
 		Path: "repo-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "repo-scaffold"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"repo-scaffold-node": {ID: "repo-scaffold-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},

@@ -11,6 +11,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *testing.T) {
@@ -90,6 +91,40 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 	if !strings.HasPrefix(filepath.Clean(shared.Workdir), filepath.Join(canonicalRoot, "flows")) {
 		t.Fatalf("shared workdir = %q, want under flows root %q", shared.Workdir, filepath.Join(canonicalRoot, "flows"))
+	}
+}
+
+func TestHostManagerSameBundleProcessReplacementReusesDurableWorkspaceRoot(t *testing.T) {
+	first, _ := testRuntimeSourceProjectionNamed(t, "same-host-source")
+	second, _ := testRuntimeSourceProjectionNamed(t, "same-host-source")
+	if first.BundleHash() != second.BundleHash() || first.Identity() == second.Identity() {
+		t.Fatalf("same source projections = first %s/%s second %s/%s", first.BundleHash(), first.Identity(), second.BundleHash(), second.Identity())
+	}
+	root := filepath.Join(t.TempDir(), "host-workspaces")
+	bind := func(projection *sourceartifact.RuntimeProjection) *HostManager {
+		manager := NewHostManager()
+		manager.SetConfig(HostConfig{WorkspaceRoot: root, SourceProjection: projection, SourceMountPoint: LogicalSourceMount})
+		if err := manager.BindSourceProjection(projection); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
+		return manager
+	}
+	firstManager := bind(first)
+	secondManager := bind(second)
+	firstRoot, err := firstManager.hostRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRoot, err := secondManager.hostRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstRoot != secondRoot {
+		t.Fatalf("same-bundle host workspace root changed across process replacement: first=%q second=%q", firstRoot, secondRoot)
+	}
+	if firstManager.cfg.BundleScope == "" || firstManager.cfg.BundleScope != secondManager.cfg.BundleScope {
+		t.Fatalf("durable bundle scopes = first %q second %q", firstManager.cfg.BundleScope, secondManager.cfg.BundleScope)
 	}
 }
 

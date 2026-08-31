@@ -30,6 +30,7 @@ type AuthoredSubscriptionFailure string
 
 const (
 	AuthoredSubscriptionFailureQualifiedExact        AuthoredSubscriptionFailure = "qualified_exact_forbidden"
+	AuthoredSubscriptionFailureReceiverEventMissing  AuthoredSubscriptionFailure = "receiver_event_undeclared"
 	AuthoredSubscriptionFailurePatternUnauthorized   AuthoredSubscriptionFailure = "pattern_unauthorized"
 	AuthoredSubscriptionFailureTimerPatternForbidden AuthoredSubscriptionFailure = "timer_pattern_forbidden"
 	AuthoredSubscriptionFailureSemanticScopeInvalid  AuthoredSubscriptionFailure = "semantic_scope_invalid"
@@ -217,6 +218,10 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 		if req.FlowPath != "" && strings.HasPrefix(resolved, req.FlowPath+"/") {
 			result.localEvent = strings.TrimPrefix(resolved, req.FlowPath+"/")
 		}
+		if !receiverDeclaresSubscriptionEvent(source, req, result.localEvent) {
+			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureReceiverEventMissing,
+				missingReceiverEventMessage(req, result.localEvent))
+		}
 		result.persistedValue = resolved
 		result.routePatterns = []string{resolved}
 		return result
@@ -232,9 +237,42 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	}
 	result.class = AuthoredSubscriptionLocalExact
 	result.localEvent = req.Authored
+	if !receiverDeclaresSubscriptionEvent(source, req, result.localEvent) {
+		return failedAuthoredSubscription(result, AuthoredSubscriptionFailureReceiverEventMissing,
+			missingReceiverEventMessage(req, result.localEvent))
+	}
 	result.persistedValue = req.Authored
 	result.routePatterns = []string{resolved}
 	return result
+}
+
+func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRequest, localEvent string) bool {
+	localEvent = eventidentity.Normalize(localEvent)
+	if localEvent == "" {
+		return false
+	}
+	if runtimecontracts.IsIntrinsicWorkflowRuntimeEvent(localEvent) {
+		return true
+	}
+	for eventType := range req.LocalEvents {
+		if eventidentity.Normalize(eventType) == localEvent {
+			return true
+		}
+	}
+	for _, eventType := range req.InputEvents {
+		if eventidentity.Normalize(eventType) == localEvent {
+			return true
+		}
+	}
+	if source != nil && runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), localEvent) {
+		return true
+	}
+	return false
+}
+
+func missingReceiverEventMessage(req AuthoredSubscriptionRequest, localEvent string) string {
+	return fmt.Sprintf("%s %q exact subscription %q does not resolve to receiver-local event %q; declare that event in this flow, or declare an input pin and connect it in the nearest common ancestor schema.yaml",
+		req.ConsumerKind, req.ConsumerID, req.Authored, localEvent)
 }
 
 func admitNonImportNodePattern(req AuthoredSubscriptionRequest) string {
@@ -365,6 +403,27 @@ func fillAuthoredSubscriptionScope(source Source, req *AuthoredSubscriptionReque
 			}
 			if len(req.InputEvents) == 0 {
 				req.InputEvents = inputEvents
+			}
+		}
+	}
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || strings.TrimSpace(node.FlowPath()) != strings.TrimSpace(req.FlowID) {
+			continue
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
+			if req.LocalEvents == nil {
+				req.LocalEvents = map[string]struct{}{}
+			}
+			result := runtimecontracts.ActivityResultEventsForSite(site)
+			eventTypes := []string{result.SuccessEvent, result.FailureEvent}
+			if site.Spec.Approval != nil {
+				eventTypes = append(eventTypes, result.RevisionRequested, result.Rejected)
+			}
+			for _, eventType := range eventTypes {
+				if local := eventidentity.LeafName(eventType); local != "" {
+					req.LocalEvents[local] = struct{}{}
+				}
 			}
 		}
 	}

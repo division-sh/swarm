@@ -572,8 +572,9 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	originalSubscriptions := []string{"custom.snapshot"}
 	originalAdmission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: "agent-original", FlowPath: "flow-original", Subscriptions: []string{"custom.snapshot"},
+		AgentID: "agent-original", FlowPath: "flow-original", LocalEvents: testLocalSubscriptionEvents(originalSubscriptions), Subscriptions: originalSubscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit original snapshot recipient: %v", err)
@@ -1162,6 +1163,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.started": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"target-node": {ID: "target-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
 		},

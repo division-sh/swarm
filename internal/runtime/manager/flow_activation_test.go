@@ -353,7 +353,7 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 	if activationOwner == nil {
 		activationOwner = flowActivationTestCommitter{instances: instances, routes: routes}
 	}
-	return newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		WorkflowInstances:  instances,
 		LifecycleStore:     lifecycleStore,
 		WorkOwner:          newTestManagerWorkOwner(t),
@@ -364,6 +364,9 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 			FlowTermination: terminalOwner,
 		},
 	}, stores...)
+	manager.semanticSource = nil
+	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{}
+	return manager
 }
 
 func setFlowActivationManagerSemanticSource(
@@ -1385,6 +1388,9 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 	grandchild := &runtimecontracts.FlowContractView{
 		Path:  "child/grandchild",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.started": {},
+		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
 				ID:             "worker",
@@ -4612,7 +4618,7 @@ states:
   - done
 `, mode))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
-support/item.created:
+item.created:
   entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `

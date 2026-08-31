@@ -2930,8 +2930,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			subscriptions := []string{string(tc.eventType)}
 			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-				AgentID: agentID, Subscriptions: []string{string(tc.eventType)},
+				AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 			})
 			if err != nil {
 				t.Fatalf("admit standalone agent subscription: %v", err)
@@ -3120,7 +3121,8 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "discovery",
+		Path:   "discovery",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
 				ID:           "scan-orchestrator",
