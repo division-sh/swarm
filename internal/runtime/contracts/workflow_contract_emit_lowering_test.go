@@ -149,6 +149,30 @@ payload:
 
 func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 	rootSchema := FlowSchemaDocument{}
+	events := map[string]EventCatalogEntry{
+		"account.scored": {
+			Payload: EventPayloadSpec{
+				Properties: map[string]EventFieldSpec{
+					"account_id":      {Type: "string"},
+					"interest_score":  {Type: "number"},
+					"computed_tier":   {Type: "string"},
+					"unrelated_input": {Type: "string"},
+				},
+				Required: []string{"account_id", "interest_score"},
+			},
+		},
+		"account.bucketed": {
+			Payload: EventPayloadSpec{
+				Properties: map[string]EventFieldSpec{
+					"account_id":     {Type: "string"},
+					"bucket":         {Type: "string"},
+					"interest_score": {Type: "number"},
+					"tier":           {Type: "string"},
+				},
+				Required: []string{"account_id", "bucket", "interest_score"},
+			},
+		},
+	}
 	return &WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		RootEntities: EntityContractsDocument{
@@ -159,30 +183,7 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 				},
 			},
 		},
-		Events: map[string]EventCatalogEntry{
-			"account.scored": {
-				Payload: EventPayloadSpec{
-					Properties: map[string]EventFieldSpec{
-						"account_id":      {Type: "string"},
-						"interest_score":  {Type: "number"},
-						"computed_tier":   {Type: "string"},
-						"unrelated_input": {Type: "string"},
-					},
-					Required: []string{"account_id", "interest_score"},
-				},
-			},
-			"account.bucketed": {
-				Payload: EventPayloadSpec{
-					Properties: map[string]EventFieldSpec{
-						"account_id":     {Type: "string"},
-						"bucket":         {Type: "string"},
-						"interest_score": {Type: "number"},
-						"tier":           {Type: "string"},
-					},
-					Required: []string{"account_id", "bucket", "interest_score"},
-				},
-			},
-		},
+		Events: events,
 	}
 }
 

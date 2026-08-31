@@ -127,8 +127,9 @@ func collectCrossSurfaceShapeCandidates(source semanticview.Source) []crossSurfa
 	}
 
 	for _, eventType := range sortedEventTypes(source.ResolvedEventCatalog()) {
-		entry := source.ResolvedEventCatalog()[eventType]
-		add("event "+eventType+" payload", "event "+eventType, crossSurfaceEventPayloadFields(entry))
+		if structural, ok := source.ResolveFlowEventStructuralType("", eventType); ok {
+			add("event "+eventType+" payload", "event "+eventType, crossSurfaceEventPayloadFields(structural))
+		}
 	}
 
 	for _, scope := range sortedFlowScopes(source.FlowScopes()) {
@@ -230,7 +231,11 @@ func newCrossSurfaceShapeCandidate(label, location string, fields map[string]str
 func crossSurfaceNamedTypeFields(resolved runtimecontracts.ResolvedCatalogType) map[string]string {
 	fields := make(map[string]string, len(resolved.Fields))
 	for _, field := range resolved.Fields {
-		fields[field.Name] = field.TypeRef
+		typeRef := strings.TrimSpace(field.TypeRef)
+		if typeRef == "" {
+			typeRef = runtimecontracts.StructuralCatalogTypeSyntax(field.Type)
+		}
+		fields[field.Name] = typeRef
 		if field.IsOptional {
 			fields[field.Name] += "?"
 		}
@@ -238,12 +243,12 @@ func crossSurfaceNamedTypeFields(resolved runtimecontracts.ResolvedCatalogType) 
 	return fields
 }
 
-func crossSurfaceEventPayloadFields(entry runtimecontracts.EventCatalogEntry) map[string]string {
-	fields := make(map[string]string, len(entry.Payload.Properties))
-	for name, spec := range entry.Payload.Properties {
-		fields[name] = spec.Type
-		if !containsString(entry.Payload.Required, name) {
-			fields[name] += "?"
+func crossSurfaceEventPayloadFields(resolved runtimecontracts.ResolvedCatalogType) map[string]string {
+	fields := make(map[string]string, len(resolved.Fields))
+	for _, field := range resolved.Fields {
+		fields[field.Name] = field.TypeRef
+		if field.IsOptional {
+			fields[field.Name] += "?"
 		}
 	}
 	return fields

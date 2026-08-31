@@ -313,19 +313,8 @@ func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin r
 	if field == "" || strings.Contains(field, ".") {
 		return false
 	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
-	if !ok {
-		return false
-	}
-	if _, ok := entry.Payload.Properties[field]; ok {
-		return true
-	}
-	for _, required := range entry.Payload.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
-	return false
+	_, ok := semanticview.ResolveEventSchema(source, flowID, pin.EventType()).Field(field)
+	return ok
 }
 
 func outputPinRequiredPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowOutputPin, field string) bool {
@@ -333,19 +322,8 @@ func outputPinRequiredPayloadFieldExists(source semanticview.Source, flowID stri
 	if field == "" || strings.Contains(field, ".") {
 		return false
 	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
-	if !ok {
-		return false
-	}
-	if _, ok := entry.Payload.Properties[field]; !ok {
-		return false
-	}
-	for _, required := range entry.Payload.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
-	return false
+	resolved, ok := semanticview.ResolveEventSchema(source, flowID, pin.EventType()).Field(field)
+	return ok && !resolved.IsOptional
 }
 
 func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {

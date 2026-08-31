@@ -23,6 +23,41 @@ type EventSchemaResolution struct {
 	UnresolvedTypes   []string
 }
 
+func (r EventSchemaResolution) Field(name string) (runtimecontracts.ResolvedCatalogField, bool) {
+	if !r.HasStructural {
+		return runtimecontracts.ResolvedCatalogField{}, false
+	}
+	return r.StructuralType.Field(name)
+}
+
+func (r EventSchemaResolution) FieldNames() []string {
+	if !r.HasStructural {
+		return nil
+	}
+	names := make([]string, 0, len(r.StructuralType.Fields))
+	for _, field := range r.StructuralType.Fields {
+		if name := strings.TrimSpace(field.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (r EventSchemaResolution) RequiredFieldNames() []string {
+	if !r.HasStructural {
+		return nil
+	}
+	names := make([]string, 0, len(r.StructuralType.Fields))
+	for _, field := range r.StructuralType.Fields {
+		if name := strings.TrimSpace(field.Name); name != "" && !field.IsOptional {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaResolution {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)

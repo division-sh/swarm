@@ -870,10 +870,10 @@ func TestPostgresStore_AppendEvent_RejectsPayloadAdmissionFailureBeforePersisten
 	}
 	_, err = commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, nil, runtimepipelineobligation.ScopeDirect)
 	if err == nil {
-		t.Fatal("expected AppendEvent to fail on payload validator rejection")
+		t.Fatal("expected AppendEvent to fail on payload admission rejection")
 	}
 	if !strings.Contains(err.Error(), "schema validation failed") {
-		t.Fatalf("AppendEvent payload validator error = %v", err)
+		t.Fatalf("AppendEvent payload admission error = %v", err)
 	}
 
 	var count int

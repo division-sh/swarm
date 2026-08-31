@@ -1116,18 +1116,6 @@ payload:
   source_entity_id: uuid
   decided_by: text
   decided_at: timestamp
-required:
-  - mailbox_id
-  - mailbox_decision_id
-  - decision
-  - decision_payload
-  - item_type
-  - mailbox_payload
-  - source_event_id
-  - source_flow
-  - source_entity_id
-  - decided_by
-  - decided_at
 `),
 		},
 		{
@@ -3908,6 +3896,8 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
+	entry.Payload.Properties["current_state"] = runtimecontracts.EventFieldSpec{Type: "text"}
 	entry.Payload.Required = []string{"entity_id", "current_state"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
@@ -4294,6 +4284,10 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bootverifyFlowEvent(t, bundle, ".", "check.escalated")
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
 	entry.Payload.Required = []string{"entity_id"}
 	setBootverifyFlowEvent(t, bundle, ".", "check.escalated", entry)
 

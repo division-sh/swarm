@@ -93,7 +93,10 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		EmitEvents:     []string{"review.completed"},
 	}
 	events := map[string]EventCatalogEntry{
-		"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
+		"review.completed": {Payload: EventPayloadSpec{
+			Properties: map[string]EventFieldSpec{"review_id": {Type: "uuid"}},
+			Required:   []string{"review_id"},
+		}},
 	}
 	flow := FlowContractView{
 		Paths:  FlowContractPaths{FlowPath: "review"},
