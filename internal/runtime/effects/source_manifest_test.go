@@ -173,7 +173,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:4":                                             ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:5":                                             ownerManagedAgent,
 	"internal/runtime/tools/tool_result_relay.go:writeToolResultRelayFile:filesystem_write:6":                                             ownerManagedAgent,
-	"internal/runtime/workspace/host_manager.go:EnsurePrereqs:filesystem_write:1":                                                         ownerRuntimeDependency,
+	"internal/runtime/workspace/host_manager.go:ensurePrereqs:filesystem_write:1":                                                         ownerRuntimeDependency,
 	"internal/runtime/workspace/host_manager.go:ensureHostWorkspaceDir:filesystem_write:1":                                                ownerRuntimeDependency,
 }
 

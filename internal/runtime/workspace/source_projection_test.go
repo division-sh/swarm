@@ -14,6 +14,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -300,6 +301,121 @@ func TestDockerManagerRejectsRepeatedSourceProjectionBinding(t *testing.T) {
 	}
 	if _, err := os.Stat(projectionRoot); err != nil {
 		t.Fatalf("caller projection root removed before caller release: %v", err)
+	}
+}
+
+func TestHostManagerReleaseFencesLifecycleWhileCallerProjectionRemainsLive(t *testing.T) {
+	projection, projectionRoot := testRuntimeSourceProjection(t)
+	manager := NewHostManager()
+	manager.SetConfig(HostConfig{
+		WorkspaceRoot:    filepath.Join(t.TempDir(), "host-workspaces"),
+		SourceProjection: projection,
+		SourceMountPoint: LogicalSourceMount,
+	})
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
+	}
+	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
+		t.Fatalf("EnsureSystemWorkspaces before release: %v", err)
+	}
+	if err := manager.ReleaseSourceProjection(context.Background()); err != nil {
+		t.Fatalf("ReleaseSourceProjection: %v", err)
+	}
+	if projection.PrivateRoot() != projectionRoot {
+		t.Fatalf("caller projection root = %q, want retained root %q", projection.PrivateRoot(), projectionRoot)
+	}
+	if manager.SourceProjectionBundleHash() != "" || manager.SourceProjectionIdentity() != "" {
+		t.Fatalf("released host binding remains visible: hash=%q identity=%q", manager.SourceProjectionBundleHash(), manager.SourceProjectionIdentity())
+	}
+
+	assertReleased := func(name string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "source projection is released") {
+			t.Fatalf("%s error = %v, want released projection rejection", name, err)
+		}
+	}
+	assertReleased("EnsurePrereqs", manager.EnsurePrereqs(context.Background()))
+	assertReleased("EnsureSystemWorkspaces", manager.EnsureSystemWorkspaces(context.Background()))
+	assertReleased("ValidateSource", manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})))
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{WorkspaceClass: "system"})
+	assertReleased("ResolveWorkspace", err)
+	_, err = manager.ResolveWorkspaceForCapabilityAdmission(context.Background(), models.AgentConfig{WorkspaceClass: "system"})
+	assertReleased("ResolveWorkspaceForCapabilityAdmission", err)
+	assertReleased("BindSourceProjection", manager.BindSourceProjection(projection))
+	if err := manager.ReleaseSourceProjection(context.Background()); err != nil {
+		t.Fatalf("second ReleaseSourceProjection: %v", err)
+	}
+}
+
+func TestHostManagerReleaseWaitsForAdmittedResolutionAndRejectsNewWork(t *testing.T) {
+	projection, _ := testRuntimeSourceProjection(t)
+	manager := NewHostManager()
+	manager.SetConfig(HostConfig{
+		WorkspaceRoot:    filepath.Join(t.TempDir(), "host-workspaces"),
+		SourceProjection: projection,
+		SourceMountPoint: LogicalSourceMount,
+	})
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"workspace_classes": {Value: map[string]any{
+				"dedicated": map[string]any{"workspace_scope": "per-agent"},
+			}},
+		}},
+	}))
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
+	}
+	materializeStarted := make(chan struct{})
+	allowMaterialize := make(chan struct{})
+	dataRoot := filepath.Join(t.TempDir(), "data")
+	manager.SetDataProjectionProvider(workspaceProjectionProviderFunc(func(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
+		close(materializeStarted)
+		<-allowMaterialize
+		return runtimedataaccess.Projection{ID: testDataProjectionID("a"), Root: dataRoot}, nil
+	}))
+	actor := models.AgentConfig{
+		ExecutionMode:  "live",
+		ID:             "worker",
+		Identity:       runtimeagentidentitytest.RootDeclared(t, "worker", "test/agents.yaml"),
+		WorkspaceClass: "dedicated",
+	}
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, err := manager.ResolveWorkspace(context.Background(), actor)
+		resolveDone <- err
+	}()
+	<-materializeStarted
+	releaseDone := make(chan error, 1)
+	go func() { releaseDone <- manager.ReleaseSourceProjection(context.Background()) }()
+	deadline := time.After(time.Second)
+	for {
+		manager.projectionMu.Lock()
+		released := manager.projectionReleased
+		manager.projectionMu.Unlock()
+		if released {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("release did not install its host projection fence")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("release completed before admitted resolution settled: %v", err)
+	default:
+	}
+	if _, err := manager.ResolveWorkspaceForCapabilityAdmission(context.Background(), actor); err == nil || !strings.Contains(err.Error(), "source projection is released") {
+		t.Fatalf("new resolution during release error = %v, want released projection rejection", err)
+	}
+	close(allowMaterialize)
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("admitted ResolveWorkspace: %v", err)
+	}
+	if err := <-releaseDone; err != nil {
+		t.Fatalf("ReleaseSourceProjection: %v", err)
 	}
 }
 
