@@ -9920,7 +9920,7 @@ tool_model:
       activity input populated from verified inbound GitHub event context. The deployment record stores the app/client id,
       installation id, API base URL, and RSA private key, and caches the returned installation access token until expiry.
       Runtime must fail closed when the inbound-selected installation id is absent or differs from the connected record.
-      Issue-comment bot-loop flows that consume `inbound.github.issue_comment` and call a GitHub App issue-comment
+      Issue-comment bot-loop flows that consume the typed `inbound.github.issue_comment_created` normalized event and call a GitHub App issue-comment
       connector MUST guard app/bot-authored comments before activity lowering, using an `on_fail: discard` handler guard
       or equivalent no-side-effect filter. Delivery-id dedupe alone is not sufficient because an app-authored response is a
       separate GitHub webhook delivery with a new delivery id.
@@ -10912,7 +10912,7 @@ tool_model:
       event_name_policy: >
         New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
         `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
-        manifests because live subscriptions already consume `inbound.github.<event_type>` and
+        manifests because live subscriptions already consume `inbound.github.raw.<event_type>` and
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
@@ -10957,8 +10957,10 @@ tool_model:
         triggers. Missing delivery id fails before dedupe marker persistence.
       event_type: >
         `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
-        `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
-        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at.
+        `inbound.github.raw.<normalized_event_type>` and the raw payload includes provider, provider_event_id, event_type,
+        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at. Pack-declared typed
+        normalized outputs use distinct `inbound.github.<business_event>` names so raw and typed schemas never compete for
+        one event identity.
     - provider: slack
       issue: "#1691"
       signature: >

@@ -367,7 +367,10 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 		if key == "run_id" {
 			continue
 		}
-		details[key] = v
+		if v == nil {
+			continue
+		}
+		details[key] = omitRuntimeLogObjectNulls(v)
 	}
 	if component = strings.TrimSpace(component); component != "" {
 		details["component"] = component
@@ -418,4 +421,26 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 		payload["stack_trace"] = v
 	}
 	return payload
+}
+
+func omitRuntimeLogObjectNulls(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if item == nil {
+				continue
+			}
+			out[key] = omitRuntimeLogObjectNulls(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = omitRuntimeLogObjectNulls(item)
+		}
+		return out
+	default:
+		return value
+	}
 }

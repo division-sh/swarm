@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -353,18 +354,18 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `_entity.id != "" && payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
+			Check:  `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "github_create_issue_comment",
 			Tool: "github.create_issue_comment",
 			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.payload.installation.id"),
-				"owner":           runtimecontracts.CELExpression("payload.payload.repository.owner.login"),
-				"repo":            runtimecontracts.CELExpression("payload.payload.repository.name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.payload.issue.number"),
-				"body":            runtimecontracts.CELExpression("payload.payload.comment.body"),
+				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
+				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
+				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
+				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
+				"body":            runtimecontracts.CELExpression("payload.body"),
 			},
 		},
 	}
@@ -373,14 +374,14 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.github.issue_comment": handler,
+			"inbound.github.issue_comment_created": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	bundle := boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment"}},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment_created"}},
 				},
 			},
 		},
@@ -392,17 +393,19 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 				nodeID: {
 					ID:                   nodeID,
 					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.github.issue_comment"},
+					RuntimeSubscriptions: []string{"inbound.github.issue_comment_created"},
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.github.issue_comment": handler},
+				nodeID: {"inbound.github.issue_comment_created": handler},
 			},
 			EventOwners: map[string][]string{
-				"inbound.github.issue_comment": {nodeID},
+				"inbound.github.issue_comment_created": {nodeID},
 			},
 		},
-	}))
+	})
+	declareGitHubProviderImports(t, bundle, "inbound.github.issue_comment_created")
+	base := semanticview.Wrap(bundle)
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -420,7 +423,36 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
-	return source
+	return withGitHubProviderSchemas(t, source, "inbound.github.issue_comment_created")
+}
+
+func declareGitHubProviderImports(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, eventNames ...string) {
+	t.Helper()
+	if bundle == nil {
+		t.Fatal("bounded GitHub bundle is required")
+	}
+	if len(bundle.PackageTree) != 1 {
+		t.Fatalf("bounded GitHub package tree = %d, want one package", len(bundle.PackageTree))
+	}
+	imports := make([]runtimecontracts.ProviderTriggerEventImport, 0, len(eventNames))
+	for _, eventName := range eventNames {
+		imports = append(imports, runtimecontracts.ProviderTriggerEventImport{Provider: "github", Event: eventName})
+	}
+	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: imports}
+}
+
+func withGitHubProviderSchemas(t testing.TB, source semanticview.Source, eventNames ...string) semanticview.Source {
+	t.Helper()
+	composed, err := runtimepkg.SourceWithProviderTriggerEvents(source, packfixture.TriggerCatalog(t))
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	for _, eventName := range eventNames {
+		if resolved := semanticview.ResolveEventSchema(composed, boundedProviderFlowID, eventName); !resolved.HasStructural {
+			t.Fatalf("normalized GitHub event %s is missing its structural provider schema: %#v", eventName, resolved)
+		}
+	}
+	return composed
 }
 
 func githubAppIssueCommentPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
@@ -503,36 +535,7 @@ func requireGitHubAppIssueCommentFailureEventEventually(t *testing.T, backend sl
 }
 
 func loadGitHubAppIssueCommentInboundEventID(t *testing.T, backend slackManagedConnectorBackend, providerEventID string) string {
-	t.Helper()
-	var eventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id
-			FROM events
-			WHERE run_id = ?
-			  AND entity_id = ?
-			  AND event_name = 'inbound.github.issue_comment'
-			  AND json_extract(payload, '$.provider_event_id') = ?
-			ORDER BY created_at DESC
-			LIMIT 1
-		`, backend.runID, backend.entityID, providerEventID).Scan(&eventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id::text
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-			  AND event_name = 'inbound.github.issue_comment'
-			  AND payload->>'provider_event_id' = $3
-			ORDER BY created_at DESC
-			LIMIT 1
-		`, backend.runID, backend.entityID, providerEventID).Scan(&eventID)
-	}
-	if err != nil {
-		t.Fatalf("%s load GitHub inbound event id for %s: %v", backend.name, providerEventID, err)
-	}
-	return eventID
+	return loadNormalizedProviderEventID(t, backend, "inbound.github.issue_comment_created", providerEventID)
 }
 
 func waitForGitHubAppIssueCommentTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {

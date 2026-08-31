@@ -57,7 +57,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		webhookSecret     = "github-secret"
 		providerEventID   = "delivery-123"
 		agentID           = "github-webhook-subscriber"
-		providerEventName = "inbound.github.push"
+		providerEventName = "inbound.github.raw.push"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)

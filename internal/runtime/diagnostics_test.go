@@ -158,6 +158,54 @@ func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 	}
 }
 
+func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "debug", Message: "delivered", Component: "eventbus", Action: "delivered",
+		Detail: map[string]any{
+			"absent": nil,
+			"nested": map[string]any{"present": "value", "absent": nil},
+		},
+	}); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(capture.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(capture.records))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(capture.records[0].Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	details := payload["details"].(map[string]any)
+	if _, present := details["absent"]; present {
+		t.Fatalf("top-level absent detail survived admission: %#v", details)
+	}
+	nested := details["nested"].(map[string]any)
+	if _, present := nested["absent"]; present || nested["present"] != "value" {
+		t.Fatalf("nested details = %#v, want only present value", nested)
+	}
+}
+
+func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
+	err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "debug", Message: "delivered", Component: "eventbus", Action: "delivered",
+		Detail: map[string]any{"items": []any{"present", nil}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+		t.Fatalf("Log error = %v, want null rejection", err)
+	}
+	if len(capture.records) != 0 {
+		t.Fatalf("records = %d, want no persistence after rejected admission", len(capture.records))
+	}
+}
+
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

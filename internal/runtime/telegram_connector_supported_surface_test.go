@@ -165,7 +165,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.telegram", "inbound.telegram.text_message")
+	}, "inbound.telegram")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -174,7 +174,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
-	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello from telegram"}}`)
+	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"hello from telegram"}}`)
 	validReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
 	validRec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, validRec, validReq, "telegram", "telegram-secret")
@@ -254,7 +254,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.telegram", "inbound.telegram.text_message")
+	}, "inbound.telegram")
 	if err != nil {
 		t.Fatalf("%s missing-token NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -263,7 +263,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
-	missingTokenBody := []byte(`{"update_id":123456790,"message":{"message_id":8,"chat":{"id":42},"text":"missing token"}}`)
+	missingTokenBody := []byte(`{"update_id":123456790,"message":{"message_id":8,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"missing token"}}`)
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", missingTokenBody).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, rec, req, "telegram", "telegram-secret")
@@ -297,8 +297,8 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 			ID:   "telegram_send_message",
 			Tool: "telegram.send_message",
 			Input: map[string]runtimecontracts.ExpressionValue{
-				"chat_id": runtimecontracts.CELExpression("payload.payload.message.chat.id"),
-				"text":    runtimecontracts.CELExpression("payload.payload.message.text"),
+				"chat_id": runtimecontracts.CELExpression("payload.conversation_reference"),
+				"text":    runtimecontracts.CELExpression("payload.text"),
 			},
 		},
 	}
@@ -306,14 +306,14 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 		ID:            telegramConnectorSupportedSurfaceNodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram": handler,
+			"inbound.telegram.text_message": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	bundle := boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
 				},
 			},
 		},
@@ -327,19 +327,21 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 				telegramConnectorSupportedSurfaceNodeID: {
 					ID:                   telegramConnectorSupportedSurfaceNodeID,
 					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram"},
+					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				telegramConnectorSupportedSurfaceNodeID: {
-					"inbound.telegram": handler,
+					"inbound.telegram.text_message": handler,
 				},
 			},
 			EventOwners: map[string][]string{
-				"inbound.telegram": {telegramConnectorSupportedSurfaceNodeID},
+				"inbound.telegram.text_message": {telegramConnectorSupportedSurfaceNodeID},
 			},
 		},
-	}))
+	})
+	declareTelegramTextMessageProviderImport(t, bundle)
+	base := semanticview.Wrap(bundle)
 	importSource := telegramConnectorSupportedSurfacePackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -357,7 +359,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
-	return source
+	return withTelegramTextMessageProviderSchema(t, source)
 }
 
 func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
@@ -531,29 +533,43 @@ func loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t *testing.T, back
 	var err error
 	if backend.sqlite {
 		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id
-			FROM events
-			WHERE run_id = ?
-			  AND entity_id = ?
-			  AND event_name = 'inbound.telegram'
-			  AND json_extract(payload, '$.provider_event_id') = ?
-			ORDER BY created_at DESC
+			SELECT normalized.event_id
+			FROM events normalized
+			JOIN events evidence
+			  ON evidence.run_id = normalized.run_id
+			 AND evidence.event_name = 'platform.inbound_recorded'
+			WHERE normalized.run_id = ?
+			  AND normalized.entity_id = ?
+			  AND normalized.event_name = 'inbound.telegram.text_message'
+			  AND json_extract(evidence.payload, '$.provider_event_id') = ?
+			  AND EXISTS (
+				SELECT 1 FROM json_each(evidence.payload, '$.event_ids') ids
+				WHERE ids.value = normalized.event_id
+			  )
+			ORDER BY normalized.created_at DESC
 			LIMIT 1
 		`, runID, backend.entityID, providerEventID).Scan(&eventID)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id::text
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-			  AND event_name = 'inbound.telegram'
-			  AND payload->>'provider_event_id' = $3
-			ORDER BY created_at DESC
+			SELECT normalized.event_id::text
+			FROM events normalized
+			JOIN events evidence
+			  ON evidence.run_id = normalized.run_id
+			 AND evidence.event_name = 'platform.inbound_recorded'
+			WHERE normalized.run_id = $1::uuid
+			  AND normalized.entity_id = $2::uuid
+			  AND normalized.event_name = 'inbound.telegram.text_message'
+			  AND evidence.payload->>'provider_event_id' = $3
+			  AND EXISTS (
+				SELECT 1 FROM jsonb_array_elements_text(evidence.payload->'event_ids') ids(event_id)
+				WHERE ids.event_id = normalized.event_id::text
+			  )
+			ORDER BY normalized.created_at DESC
 			LIMIT 1
 		`, runID, backend.entityID, providerEventID).Scan(&eventID)
 	}
 	if err != nil {
-		t.Fatalf("%s load inbound event id for %s: %v", backend.name, providerEventID, err)
+		t.Fatalf("%s load inbound event id for %s: %v; diagnostics: %s", backend.name, providerEventID, err, telegramConnectorSupportedSurfaceDiagnostics(t, backend))
 	}
 	return eventID
 }

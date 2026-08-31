@@ -379,11 +379,11 @@ flows:
   swarm:
     source: external
   entity_id: string?
-  instance_id: string?
-  product_id: string?
+  instance_id: string
+  product_id: string
 opco.spinup_requested:
-  instance_id: string?
-  product_id: string?
+  instance_id: string
+  product_id: string
 `,
 		"nodes.yaml": `approval-router:
   id: approval-router
@@ -418,9 +418,9 @@ auto_emit_on_create:
 `,
 		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  product_id: string?
+  product_id: string
 component_scaffold.spawn_requested:
-  product_id: string?
+  product_id: string
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
