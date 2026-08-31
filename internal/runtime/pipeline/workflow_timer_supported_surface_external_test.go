@@ -561,16 +561,16 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			bundle := workflowTimerServedLifecycleBundle(false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			source := semanticview.Wrap(bundle)
-			validator := newFailOnceWorkflowTimerPayloadValidator()
+			admitter := newFailOnceWorkflowTimerPayloadAdmitter()
 			defer func() {
 				select {
-				case <-validator.releaseSecond:
+				case <-admitter.releaseSecond:
 				default:
-					close(validator.releaseSecond)
+					close(admitter.releaseSecond)
 				}
 			}()
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadAdmitter: validator.admit,
+				ContractBundle: source, PayloadAdmitter: admitter.admit,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -603,7 +603,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			}
 
 			select {
-			case <-validator.secondAttempt:
+			case <-admitter.secondAttempt:
 			case <-time.After(5 * time.Second):
 				t.Fatal("timed out waiting for same-process workflow timer retry")
 			}
@@ -616,7 +616,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 				t.Fatalf("persisted events before retried publication commit = %d, want 0", got)
 			}
 			wantEventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
-			close(validator.releaseSecond)
+			close(admitter.releaseSecond)
 
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
@@ -633,7 +633,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			if status != "fired" {
 				t.Fatalf("workflow timer after retry status = %s, want fired", status)
 			}
-			if got := validator.attempts.Load(); got != 2 {
+			if got := admitter.attempts.Load(); got != 2 {
 				t.Fatalf("workflow timer publish attempts = %d, want 2", got)
 			}
 		})
@@ -756,20 +756,20 @@ func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, f
 
 var errInjectedWorkflowTimerPublishFailure = errors.New("injected workflow timer publish failure")
 
-type failOnceWorkflowTimerPayloadValidator struct {
+type failOnceWorkflowTimerPayloadAdmitter struct {
 	attempts      atomic.Int32
 	secondAttempt chan struct{}
 	releaseSecond chan struct{}
 }
 
-func newFailOnceWorkflowTimerPayloadValidator() *failOnceWorkflowTimerPayloadValidator {
-	return &failOnceWorkflowTimerPayloadValidator{
+func newFailOnceWorkflowTimerPayloadAdmitter() *failOnceWorkflowTimerPayloadAdmitter {
+	return &failOnceWorkflowTimerPayloadAdmitter{
 		secondAttempt: make(chan struct{}),
 		releaseSecond: make(chan struct{}),
 	}
 }
 
-func (v *failOnceWorkflowTimerPayloadValidator) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, flowID)
 	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return admitted, err
