@@ -121,6 +121,41 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Con
 	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
+func (s *PipelinePostgresOwner) QueryWorkflowEntityCollection(ctx context.Context, owner runtimepipeline.WorkflowEntityCollectionOwner) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres workflow entity collection reader is required")
+	}
+	if !owner.Valid() {
+		return nil, fmt.Errorf("postgres workflow entity collection requires an admitted owner")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $1::uuid
+		  AND es.entity_type = $2
+		  AND EXISTS (
+			SELECT 1 FROM runs run
+			WHERE run.run_id = es.run_id AND run.status IN ($5, $6)
+		  )
+		  AND (es.flow_instance = $3 OR es.flow_instance LIKE $4 OR ($7::boolean AND es.flow_instance = $1::text))
+		  AND (fi.instance_id IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
+		ORDER BY es.created_at ASC, es.entity_id ASC
+	`, runID, owner.EntityType(), owner.ScopeKey(), owner.ScopeKey()+"/%", string(activeStates[0]), string(activeStates[1]), owner.ScopeKey() == runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records, err := scanPostgresWorkflowEntityStates(rows)
+	if err != nil {
+		return nil, err
+	}
+	return runtimepipeline.FilterWorkflowEntityCollectionRecords(records, owner)
+}
+
 func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres workflow instance reader is required")
@@ -549,6 +584,41 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Conte
 		return nil, err
 	}
 	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
+}
+
+func (s *PipelineSQLiteOwner) QueryWorkflowEntityCollection(ctx context.Context, owner runtimepipeline.WorkflowEntityCollectionOwner) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite workflow entity collection reader is required")
+	}
+	if !owner.Valid() {
+		return nil, fmt.Errorf("sqlite workflow entity collection requires an admitted owner")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = ?
+		  AND es.entity_type = ?
+		  AND EXISTS (
+			SELECT 1 FROM runs run
+			WHERE run.run_id = es.run_id AND run.status IN (?, ?)
+		  )
+		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
+		  AND (fi.instance_id IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
+		ORDER BY es.created_at ASC, es.entity_id ASC
+	`, runID, owner.EntityType(), string(activeStates[0]), string(activeStates[1]), owner.ScopeKey(), owner.ScopeKey()+"/%", owner.ScopeKey() == runID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records, err := scanSQLiteWorkflowEntityStates(rows)
+	if err != nil {
+		return nil, err
+	}
+	return runtimepipeline.FilterWorkflowEntityCollectionRecords(records, owner)
 }
 
 func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {

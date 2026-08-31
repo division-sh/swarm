@@ -128,6 +128,9 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	if owner, ok := any(runner).(WorkflowEntityStatePersistenceReader); ok {
 		store.entityStateReader = owner
 	}
+	if owner, ok := any(runner).(WorkflowEntityCollectionPersistenceReader); ok {
+		store.entityCollectionReader = owner
+	}
 	if owner, ok := any(runner).(WorkflowTargetPersistenceReader); ok {
 		store.targetReader = owner
 	}

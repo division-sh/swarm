@@ -114,6 +114,97 @@ func TestResolveHandlerQueryCollectionPlanRejectsDualSource(t *testing.T) {
 	}
 }
 
+func TestResolveHandlerCollectionPlanEnforcesPhaseOrderedDependencies(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	node := identitytest.RootNode(t, "worker")
+	valid := SystemNodeEventHandler{
+		Query:   &QuerySpec{Source: "payload.items"},
+		Filter:  &FilterSpec{ItemsFrom: "computed.query", Condition: "item.id != ''"},
+		GroupBy: &GroupBySpec{ItemsFrom: "computed.filter", Key: "status"},
+		Reduce:  &ReduceSpec{ItemsFrom: "computed.filter", Operation: "sum"},
+		Count:   &CountSpec{ItemsFrom: "computed.filter"},
+	}
+	if _, err := bundle.ResolveHandlerCollectionPlan(node, "work.received", valid); err != nil {
+		t.Fatalf("resolve valid phase-ordered collection plan: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		handler SystemNodeEventHandler
+	}{
+		{name: "query from same query", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "computed.query"}}},
+		{name: "query from later filter", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "computed.filter"}, Filter: &FilterSpec{ItemsFrom: "payload.items", Condition: "true"}}},
+		{name: "query from later group", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "computed.group_by"}, GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "status"}}},
+		{name: "query from later reduce", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "computed.reduce"}, Reduce: &ReduceSpec{ItemsFrom: "payload.items", Operation: "sum"}}},
+		{name: "query from later count", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "computed.count"}, Count: &CountSpec{ItemsFrom: "payload.items"}}},
+		{name: "filter from same filter", handler: SystemNodeEventHandler{Filter: &FilterSpec{ItemsFrom: "computed.filter", Condition: "true"}}},
+		{name: "filter from later group", handler: SystemNodeEventHandler{Filter: &FilterSpec{ItemsFrom: "computed.group_by", Condition: "true"}, GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "status"}}},
+		{name: "group from later reduce", handler: SystemNodeEventHandler{GroupBy: &GroupBySpec{ItemsFrom: "computed.reduce", Key: "status"}, Reduce: &ReduceSpec{ItemsFrom: "payload.items", Operation: "sum"}}},
+		{name: "reduce from later count", handler: SystemNodeEventHandler{Reduce: &ReduceSpec{ItemsFrom: "computed.count", Operation: "sum"}, Count: &CountSpec{ItemsFrom: "payload.items"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := bundle.ResolveHandlerCollectionPlan(node, "work.received", tc.handler)
+			if err == nil || !strings.Contains(err.Error(), "same or a later execution phase") {
+				t.Fatalf("error = %v, want future-phase rejection", err)
+			}
+		})
+	}
+}
+
+func TestResolveHandlerCollectionPlanRejectsDuplicateAndOverlappingOutputs(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	node := identitytest.RootNode(t, "worker")
+	tests := []struct {
+		name    string
+		handler SystemNodeEventHandler
+	}{
+		{
+			name: "mismatched collection exact collision",
+			handler: SystemNodeEventHandler{
+				Query:  &QuerySpec{Source: "payload.items", StoreAs: "computed.rows"},
+				Filter: &FilterSpec{ItemsFrom: "payload.other_items", Condition: "true", StoreAs: "computed.rows"},
+			},
+		},
+		{
+			name: "list aggregate exact collision",
+			handler: SystemNodeEventHandler{
+				Query: &QuerySpec{Source: "payload.items", StoreAs: "computed.rows"},
+				Count: &CountSpec{ItemsFrom: "payload.items", StoreAs: "computed.rows"},
+			},
+		},
+		{
+			name: "parent then child overlap",
+			handler: SystemNodeEventHandler{
+				Query:  &QuerySpec{Source: "payload.items", StoreAs: "computed.rows"},
+				Filter: &FilterSpec{ItemsFrom: "payload.items", Condition: "true", StoreAs: "computed.rows.filtered"},
+			},
+		},
+		{
+			name: "child then parent overlap",
+			handler: SystemNodeEventHandler{
+				Query:  &QuerySpec{Source: "payload.items", StoreAs: "computed.rows.filtered"},
+				Filter: &FilterSpec{ItemsFrom: "payload.items", Condition: "true", StoreAs: "computed.rows"},
+			},
+		},
+		{
+			name: "unrooted entity alias collision",
+			handler: SystemNodeEventHandler{
+				Query: &QuerySpec{Source: "payload.items", StoreAs: "entity.rows"},
+				Count: &CountSpec{ItemsFrom: "payload.items", StoreAs: "rows"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := bundle.ResolveHandlerCollectionPlan(node, "work.received", tc.handler)
+			if err == nil || !strings.Contains(err.Error(), "duplicate or overlapping ownership") {
+				t.Fatalf("error = %v, want output ownership rejection", err)
+			}
+		})
+	}
+}
+
 func TestResolveCollectionPlansAdmitGroupAndSelectionFields(t *testing.T) {
 	bundle := collectionSemanticsTestBundle()
 	node := identitytest.RootNode(t, "worker")
@@ -179,12 +270,13 @@ func collectionSemanticsTestBundle() *WorkflowContractBundle {
 				"note":   {Type: "text", IsOptional: true},
 				"tags":   {Type: "[text]"},
 			}},
+			"OtherItem": {Fields: map[string]TypeFieldSpec{"value": {Type: "integer"}}},
 		}},
 		RootEntities: EntityContractsDocument{
 			"items": {Fields: map[string]EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
 		},
 		Events: map[string]EventCatalogEntry{
-			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}}, Required: []string{"items"}}},
+			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}, "other_items": {Type: "[OtherItem]"}}, Required: []string{"items", "other_items"}}},
 		},
 	}
 }

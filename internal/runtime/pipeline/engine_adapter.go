@@ -502,19 +502,38 @@ type pipelineEngineEntityCollectionReader struct {
 func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.Context, flowID, entityType string) ([]map[string]any, error) {
 	flowID = strings.TrimSpace(flowID)
 	entityType = strings.TrimSpace(entityType)
-	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || r.coordinator.workflowStore.entityCollectionReader == nil {
 		return nil, fmt.Errorf("workflow entity collection reader is required")
 	}
-	instances, err := r.coordinator.workflowStore.list(ctx)
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]map[string]any, 0, len(instances))
-	for _, instance := range instances {
-		if strings.TrimSpace(instance.WorkflowName) != flowID || strings.TrimSpace(instance.EntityType) != entityType {
-			continue
+	owner, err := AdmitWorkflowEntityCollectionOwner(r.coordinator.SemanticSource(), flowID, entityType, runID)
+	if err != nil {
+		return nil, err
+	}
+	records, err := r.coordinator.workflowStore.queryEntityCollection(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	contract, ok := entityruntime.ResolveForFlow(r.coordinator.SemanticSource(), flowID)
+	if !ok {
+		return nil, fmt.Errorf("workflow entity collection flow %s has no exact entity contract", flowID)
+	}
+	rows := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		fields := map[string]any{}
+		if len(record.Fields) > 0 {
+			if err := json.Unmarshal(record.Fields, &fields); err != nil {
+				return nil, fmt.Errorf("decode workflow entity collection row %s: %w", record.EntityID, err)
+			}
 		}
-		rows = append(rows, cloneStringAnyMap(instance.Fields))
+		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
+		if err != nil {
+			return nil, fmt.Errorf("materialize workflow entity collection row %s: %w", record.EntityID, err)
+		}
+		rows = append(rows, materialized)
 	}
 	return rows, nil
 }

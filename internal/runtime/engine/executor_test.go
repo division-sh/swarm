@@ -3557,6 +3557,105 @@ func TestExecutor_QueryRejectsDualSourceBeforeReading(t *testing.T) {
 	}
 }
 
+func TestExecutor_RejectsFutureCollectionDependencyBeforeExecution(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event: eventtest.RunCreatingRootIngress("evt-query-future", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Query:  &runtimecontracts.QuerySpec{Source: "computed.filter"},
+			Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "true"},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "same or a later execution phase") {
+		t.Fatalf("Execute error = %v, want future dependency rejection", err)
+	}
+}
+
+func TestExecutor_RejectsOverlappingCollectionOutputsBeforeReading(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "exact list collision",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query:  &runtimecontracts.QuerySpec{Entities: "items", StoreAs: "computed.rows"},
+				Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "true", StoreAs: "computed.rows"},
+			},
+		},
+		{
+			name: "list aggregate collision",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query: &runtimecontracts.QuerySpec{Entities: "items", StoreAs: "computed.rows"},
+				Count: &runtimecontracts.CountSpec{ItemsFrom: "payload.items", StoreAs: "computed.rows"},
+			},
+		},
+		{
+			name: "parent child overlap",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query:  &runtimecontracts.QuerySpec{Entities: "items", StoreAs: "computed.rows"},
+				Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "true", StoreAs: "computed.rows.filtered"},
+			},
+		},
+		{
+			name: "child parent overlap",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query:  &runtimecontracts.QuerySpec{Entities: "items", StoreAs: "computed.rows.filtered"},
+				Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "true", StoreAs: "computed.rows"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &stubEntityCollectionReader{rows: []map[string]any{{"id": "a", "status": "queued"}}}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source: collectionExecutionSource(), EntityCollections: reader,
+				StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+				EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("root"), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+				Event:   eventtest.RunCreatingRootIngress("evt-query-collision", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler: tc.handler,
+				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if err == nil || !strings.Contains(err.Error(), "duplicate or overlapping ownership") {
+				t.Fatalf("Execute error = %v, want output ownership rejection", err)
+			}
+			if reader.calls != 0 {
+				t.Fatalf("entity reader calls = %d, want zero", reader.calls)
+			}
+		})
+	}
+}
+
+func TestExecutor_RejectsRootOnlyCollectionSourceWithoutPanic(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event:   eventtest.RunCreatingRootIngress("evt-query-root", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "payload"}},
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "must select a field below payload") {
+		t.Fatalf("Execute error = %v, want root-only rejection", err)
+	}
+}
+
 func TestExecutor_QuerySelectionPreservesOptionalOmission(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: collectionExecutionSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},

@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -3401,26 +3402,45 @@ func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCan
 	}
 }
 
-func TestPipelineEngineEntityCollectionReaderReturnsOnlyExactEntityType(t *testing.T) {
-	instances := []WorkflowInstance{
-		{WorkflowName: "work", EntityType: "items", Fields: map[string]any{"id": "a", "status": "queued"}},
-		{WorkflowName: "work", EntityType: "other", Fields: map[string]any{"id": "ignored"}},
-		{WorkflowName: "other", EntityType: "items", Fields: map[string]any{"id": "wrong-flow"}},
-		{WorkflowName: "work", EntityType: "items", Fields: map[string]any{"id": "b", "status": "done"}},
-	}
-	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
-		workflowStore: &workflowInstanceStore{instanceReader: deliveryTargetWorkflowReader{selected: instances}},
+type pipelineTestEntityCollectionPersistenceReader struct {
+	records []WorkflowEntityStatePersistenceRecord
+	calls   int
+}
+
+func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityCollection(_ context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
+	r.calls++
+	return FilterWorkflowEntityCollectionRecords(r.records, owner)
+}
+
+func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
+	runID := uuid.NewString()
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "work"},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+		},
+	})
+	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
+		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
 	}}
-	rows, err := reader.QueryEntityCollection(context.Background(), "work", "items")
+	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
+	}}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	rows, err := reader.QueryEntityCollection(ctx, "work", "items")
 	if err != nil {
 		t.Fatalf("QueryEntityCollection: %v", err)
 	}
-	if len(rows) != 2 || rows[0]["id"] != "a" || rows[1]["id"] != "b" {
+	if persisted.calls != 1 || len(rows) != 1 || rows[0]["id"] != "a" || rows[0]["status"] != "queued" {
 		t.Fatalf("rows = %#v", rows)
 	}
+	if _, survives := rows[0]["undeclared"]; survives {
+		t.Fatalf("entity collection leaked undeclared persisted field: %#v", rows[0])
+	}
 	rows[0]["status"] = "mutated"
-	if instances[0].Fields["status"] != "queued" {
-		t.Fatalf("query result aliases persisted fields: %#v", instances[0].Fields)
+	if strings.Contains(string(persisted.records[0].Fields), "mutated") {
+		t.Fatalf("query result aliases persisted fields: %s", persisted.records[0].Fields)
 	}
 }
 

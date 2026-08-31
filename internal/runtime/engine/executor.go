@@ -123,6 +123,7 @@ type executionFrame struct {
 	joinResultType            runtimecontracts.CatalogTypeReference
 	loopPlan                  *runtimecontracts.WorkflowLoopPlan
 	loopActivation            *loopruntime.Activation
+	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 }
 
 type handlerRuleSource string
@@ -650,12 +651,17 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
 	payloadType := e.executionPayloadType(req)
+	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
+	if err != nil {
+		return executionFrame{}, err
+	}
 	return executionFrame{
 		ctx:                      ctx,
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
 		payloadType:              payloadType,
+		collectionPlan:           collectionPlan,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
 			State:       state,
@@ -675,6 +681,18 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		},
 		ruleIndex: -1,
 	}, nil
+}
+
+func (e *Executor) resolveHandlerCollectionPlan(req ExecutionRequest) (runtimecontracts.WorkflowHandlerCollectionPlan, error) {
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return runtimecontracts.WorkflowHandlerCollectionPlan{}, fmt.Errorf("collection dataflow requires a loaded contract bundle")
+	}
+	eventType := strings.TrimSpace(req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(req.Event.Type()))
+	}
+	return bundle.ResolveHandlerCollectionPlan(req.Node, eventType, req.Handler)
 }
 
 func (e *Executor) runSteps(frame *executionFrame) error {
@@ -1135,10 +1153,10 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	if err != nil {
-		return err
+	if frame.collectionPlan.Filter == nil {
+		return fmt.Errorf("filter collection plan is unavailable")
 	}
+	resolution := *frame.collectionPlan.Filter
 	items, err := e.collectionItems(frame, resolution)
 	if err != nil {
 		return err
@@ -1174,11 +1192,10 @@ func (e *Executor) stepReduce(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	if err != nil {
-		return err
+	if frame.collectionPlan.Reduce == nil {
+		return fmt.Errorf("reduce collection plan is unavailable")
 	}
-	items, err := e.collectionItems(frame, resolution)
+	items, err := e.collectionItems(frame, *frame.collectionPlan.Reduce)
 	if err != nil {
 		return err
 	}
@@ -1194,10 +1211,10 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	if err != nil {
-		return err
+	if frame.collectionPlan.Count == nil {
+		return fmt.Errorf("count collection plan is unavailable")
 	}
+	resolution := *frame.collectionPlan.Count
 	items, err := e.collectionItems(frame, resolution)
 	if err != nil {
 		return err
@@ -2101,50 +2118,18 @@ func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionO
 	return workflowexpr.ValueExpressionOptions{PayloadType: &value}
 }
 
-func (e *Executor) handlerCollectionResolution(frame *executionFrame, parsed paths.Path, authored string) (runtimecontracts.WorkflowCollectionItemResolution, error) {
-	if frame == nil {
-		return runtimecontracts.WorkflowCollectionItemResolution{}, fmt.Errorf("collection source requires an execution frame")
-	}
-	if parsed.IsZero() {
-		parsed = paths.Parse(strings.TrimSpace(authored))
-	}
-	bundle, ok := semanticview.Bundle(e.deps.Source)
-	if !ok || bundle == nil {
-		return runtimecontracts.WorkflowCollectionItemResolution{}, fmt.Errorf("collection source requires a loaded contract bundle")
-	}
-	return bundle.ResolveHandlerCollectionItemType(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler, parsed.String())
-}
-
 func (e *Executor) queryCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowQueryCollectionPlan, error) {
-	if frame == nil {
+	if frame == nil || frame.collectionPlan.Query == nil {
 		return runtimecontracts.WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires an execution frame")
 	}
-	bundle, ok := semanticview.Bundle(e.deps.Source)
-	if !ok || bundle == nil {
-		return runtimecontracts.WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires a loaded contract bundle")
-	}
-	return bundle.ResolveHandlerQueryCollectionPlan(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler)
+	return *frame.collectionPlan.Query, nil
 }
 
 func (e *Executor) groupByCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowGroupByCollectionPlan, error) {
-	if frame == nil {
+	if frame == nil || frame.collectionPlan.GroupBy == nil {
 		return runtimecontracts.WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires an execution frame")
 	}
-	bundle, ok := semanticview.Bundle(e.deps.Source)
-	if !ok || bundle == nil {
-		return runtimecontracts.WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires a loaded contract bundle")
-	}
-	return bundle.ResolveHandlerGroupByCollectionPlan(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler)
-}
-
-func executionHandlerEventType(frame *executionFrame) string {
-	if frame == nil {
-		return ""
-	}
-	if eventType := strings.TrimSpace(frame.req.HandlerEventKey); eventType != "" {
-		return eventType
-	}
-	return strings.TrimSpace(string(frame.req.Event.Type()))
+	return *frame.collectionPlan.GroupBy, nil
 }
 
 func (e *Executor) collectionItems(frame *executionFrame, source runtimecontracts.WorkflowCollectionItemResolution) ([]any, error) {
