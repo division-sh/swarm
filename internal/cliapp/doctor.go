@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -12,7 +13,6 @@ import (
 type doctorOptions struct {
 	configPath          string
 	backend             string
-	contractsPath       string
 	dataSource          string
 	dataSourceSet       bool
 	workspaceBackend    string
@@ -72,7 +72,6 @@ func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	}
 	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "LLM backend profile to diagnose: anthropic, claude_cli, openai_compatible, or openai_responses")
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.workspaceBackend, "workspace-backend", opts.workspaceBackend, "Workspace backend for local diagnostics: docker or host")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.apiListenAddr, "api-listen-addr", opts.apiListenAddr, "HTTP bind address to preflight for API, WebSocket, health, and readiness routes")
@@ -107,15 +106,16 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	}
 	configReport := newReport()
 	addUnifiedConfigDiagnosticsToReport(&configReport, cfgResult.Diagnostics)
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath:    opts.contractsPath,
-		PlatformSpecPath: opts.platformSpecPath,
-		ConfigPath:       opts.configPath,
-	})
-	if err != nil {
-		report := configReport
-		report.add(localPreflightBackendPrerequisite, "path_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	platformSpecPath := strings.TrimSpace(cfgResult.cli.Paths.PlatformSpecPath)
+	if platformSpecPath == "" {
+		platformSpecPath, err = EmbeddedPlatformSpecPath()
+		if err != nil {
+			report := configReport
+			report.add(localPreflightBackendPrerequisite, "platform_spec_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the embedded platform spec")
+			return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+		}
+	} else {
+		platformSpecPath = ResolvePath(repo, platformSpecPath)
 	}
 	platformPackBase, err := LoadConfiguredPlatformPackBase(repo, cfgResult)
 	if err != nil {
@@ -124,54 +124,33 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	if opts.schemaInventory {
-		inventory, err := buildDoctorSchemaInventory(repo, resolvedPaths, platformPackBase)
+		inventory, err := buildDoctorSchemaInventory(platformSpecPath)
 		if err != nil {
 			report := configReport
-			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec so the generated schema can be derived")
+			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform store schema")
 			return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 		}
 		configReport.SchemaInventory = &inventory
 	}
-	contractsRoot, err := NormalizeContractsRoot(resolvedPaths.ContractsPath)
+	effectiveInventory, err := packartifact.NewEffectivePackInventory(platformPackBase, nil)
 	if err != nil {
 		report := configReport
-		if effectiveInventory, inventoryErr := packartifact.NewEffectivePackInventory(platformPackBase, nil); inventoryErr == nil {
-			appendDoctorPackInventoryReadback(&report, resolvedPaths.PlatformSpecPath, effectiveInventory)
-		}
-		report.add(localPreflightProviderPackPrerequisite, "contract_source_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --contracts")
+		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, contractsRoot, resolvedPaths.PlatformSpecPath, platformPackBase)
-	if err != nil {
-		report := configReport
-		projectPacks, projectErr := packartifact.LoadProjectPackSet(contractsRoot)
-		effectiveInventory, inventoryErr := packartifact.NewEffectivePackInventory(platformPackBase, projectPacks.Sources)
-		if projectErr == nil && inventoryErr == nil {
-			appendDoctorPackInventoryReadback(&report, resolvedPaths.PlatformSpecPath, effectiveInventory)
-		}
-		report.add(localPreflightProviderPackPrerequisite, "contract_source_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected contract and pack sources")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-	}
-	providerCredentials, err := BuildProviderCredentialStore()
+	appendDoctorPackInventoryReadback(&configReport, platformSpecPath, effectiveInventory)
+	_, err = BuildProviderCredentialStore()
 	if err != nil {
 		report := configReport
 		report.add(localPreflightProviderPackPrerequisite, "channel_provider_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	managedCredentials, err := BuildManagedCredentialStore()
+	_, err = BuildManagedCredentialStore()
 	if err != nil {
 		report := configReport
 		report.add(localPreflightProviderPackPrerequisite, "channel_managed_credentials_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix managed credential configuration")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	packRuntime, err := LoadBundlePackRuntime(ctx, cfgResult, bundle, providerCredentials, managedCredentials)
-	if err != nil {
-		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "pack_runtime_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected pack inventory or channel bindings")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-	}
-	providerPackLoad := packRuntime.ProviderTriggers
-	channelPacks := packRuntime.Channels
 	apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
 		APIListenAddr:        opts.apiListenAddr,
 		MCPListenAddr:        opts.mcpListenAddr,
@@ -220,7 +199,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	}
 	localState, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                repo,
-		ResolvedPaths:           resolvedPaths,
+		ResolvedPaths:           CLISourcePlatformSpecPaths{PlatformSpecPath: platformSpecPath},
 		SwarmDir:                swarmDir,
 		Config:                  cfgResult.Config,
 		DataSource:              opts.dataSource,
@@ -232,24 +211,18 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	report := runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
-		Mode:                   "doctor",
-		RepoRoot:               repo,
-		Config:                 cfgResult.Config,
-		ResolvedPaths:          resolvedPaths,
-		DataSource:             opts.dataSource,
-		MountSources:           localState.MountSources,
-		WorkspaceBackend:       workspaceBackend,
-		APIListenAddr:          opts.apiListenAddr,
-		MCPListenAddr:          opts.mcpListenAddr,
-		CheckListeners:         true,
-		CheckGatewayEnv:        true,
-		CheckContractSecrets:   cmd.Flags().Changed("contracts"),
-		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
-		ProviderTriggerPacks:   providerPackLoad.Loaded,
-		ProviderTriggerCatalog: providerPackLoad.Catalog,
-		ProviderCredentials:    providerCredentials,
-		ChannelPacks:           channelPacks,
-		PlatformPackBase:       platformPackBase,
+		Mode:             "doctor",
+		SourceFree:       true,
+		RepoRoot:         repo,
+		Config:           cfgResult.Config,
+		DataSource:       opts.dataSource,
+		MountSources:     localState.MountSources,
+		WorkspaceBackend: workspaceBackend,
+		APIListenAddr:    opts.apiListenAddr,
+		MCPListenAddr:    opts.mcpListenAddr,
+		CheckListeners:   true,
+		CheckGatewayEnv:  true,
+		PlatformPackBase: platformPackBase,
 	})
 	report.SchemaInventory = configReport.SchemaInventory
 	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)

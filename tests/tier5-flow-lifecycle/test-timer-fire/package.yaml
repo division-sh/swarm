@@ -1,5 +1,0 @@
-name: test-timer-fire
-version: 1.0.0
-description: Timer fires after delay and emits event.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

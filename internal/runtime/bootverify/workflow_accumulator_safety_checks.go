@@ -88,7 +88,7 @@ func accumulatorHandlerLocation(flowID, nodeID, eventType string) string {
 
 func accumulatorFlowLabel(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return "root"
 	}
 	return flowID

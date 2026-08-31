@@ -71,7 +71,7 @@ const postgresAgentRegistryQuery = `
 				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
 				lifecycle_process_authority_id::text, lifecycle_process_owner_id,
 				lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
-				lifecycle_bundle_hash, lifecycle_bundle_source,
+				lifecycle_bundle_hash,
 				lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
 				topology_admission
 		FROM agents
@@ -120,7 +120,6 @@ func scanPostgresAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error)
 			&rec.ProcessBinding.ProcessBootID,
 			&rec.ProcessBinding.GenerationGrantID,
 			&rec.ProcessBinding.BundleHash,
-			&rec.ProcessBinding.BundleSource,
 			&rec.ProcessBinding.RuntimeInstanceID,
 			&rec.ProcessBinding.RuntimeGeneration,
 			&topologyRaw,

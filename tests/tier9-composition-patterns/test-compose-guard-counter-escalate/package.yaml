@@ -1,8 +1,0 @@
-name: test-compose-guard-counter-escalate
-version: 1.0.0
-description: 'Composition: guard checks entity counter against policy limit. When
-  counter reaches limit, on_fail escalates to a named event.
-
-  '
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

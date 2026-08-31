@@ -57,7 +57,7 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", "--contracts", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
+				return []string{"verify", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return RepoRoot() },
 		},
@@ -200,7 +200,7 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", "--contracts", "missing", "--log-level", "fatal"}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", "missing", "--log-level", "fatal"}, &stdout, &stderr)
 	if code != CLIExitValidation {
 		t.Fatalf("verify invalid log-level code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 	}

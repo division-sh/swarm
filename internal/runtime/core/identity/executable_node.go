@@ -10,150 +10,252 @@ import (
 	"strings"
 )
 
-const RootPackageKey = "."
-
-// PackageKey is the canonical package coordinate shared by package-qualified
-// declaration identities. Its value can only be admitted through the package
-// path grammar below.
-type PackageKey struct {
+// FlowIdentity is the canonical identity of one authored filesystem flow.
+// The selected root is "."; descendants use their exact admitted relative path.
+type FlowIdentity struct {
 	value string
 }
 
-func AdmitPackageKey(raw string) (PackageKey, error) {
-	value, err := normalizePackageKey(raw)
-	if err != nil {
-		return PackageKey{}, err
+func AdmitFlowIdentity(raw string) (FlowIdentity, error) {
+	if raw != strings.TrimSpace(raw) {
+		return FlowIdentity{}, fmt.Errorf("flow path is not canonical")
 	}
-	return PackageKey{value: value}, nil
+	if raw == "" {
+		return FlowIdentity{}, fmt.Errorf("flow path is required; use %q for the selected root", ".")
+	}
+	if strings.Contains(raw, "\\") {
+		return FlowIdentity{}, fmt.Errorf("flow path %q is not canonical; use slash-separated spelling", raw)
+	}
+	value := raw
+	if value != "." && (path.Clean(value) != value || strings.HasPrefix(value, "/") || value == ".." || strings.HasPrefix(value, "../")) {
+		return FlowIdentity{}, fmt.Errorf("flow path %q is not canonical", raw)
+	}
+	segments := strings.Split(value, "/")
+	if len(segments) > 32 {
+		return FlowIdentity{}, fmt.Errorf("flow path has more than 32 segments")
+	}
+	for _, segment := range segments {
+		if segment == "." && value == "." {
+			continue
+		}
+		if !validFlowPathSegment(segment) {
+			return FlowIdentity{}, fmt.Errorf("flow path segment %q is not canonical", segment)
+		}
+	}
+	return FlowIdentity{value: value}, nil
 }
 
-func ParsePackageKey(raw string) (PackageKey, error) {
-	key, err := AdmitPackageKey(raw)
-	if err != nil {
-		return PackageKey{}, err
+func validFlowPathSegment(value string) bool {
+	if len(value) == 0 || len(value) > 100 {
+		return false
 	}
-	if raw != key.value {
-		return PackageKey{}, fmt.Errorf("package key is not canonical")
+	first := value[0]
+	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
+		return false
 	}
-	return key, nil
+	for _, ch := range []byte(value) {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
-func (k PackageKey) Valid() bool {
-	value, err := normalizePackageKey(k.value)
-	return err == nil && value == k.value
+func (f FlowIdentity) Valid() bool {
+	parsed, err := AdmitFlowIdentity(f.value)
+	return err == nil && parsed.value == f.value
 }
 
-func (k PackageKey) String() string {
-	if !k.Valid() {
+func (f FlowIdentity) String() string {
+	if !f.Valid() {
 		return ""
 	}
-	return k.value
+	return f.value
 }
 
-func (k PackageKey) Equal(other PackageKey) bool { return k == other }
+func (f FlowIdentity) Equal(other FlowIdentity) bool { return f == other }
 
-// ExecutableNode identifies one authored node declaration. Node IDs are local
-// to their package and owning flow; none of the three coordinates may be
-// interpreted independently after admission.
-type ExecutableNode struct {
-	packageKey string
-	flowID     string
-	nodeID     string
+// DeclarationIdentity is the sole authored declaration identity. SemanticPath
+// is family-owned and position-derived; moves and renames are delete plus add.
+type DeclarationIdentity struct {
+	flow         FlowIdentity
+	family       string
+	semanticPath string
 }
 
-type executableNodeWire struct {
-	PackageKey string `json:"package_key"`
-	FlowID     string `json:"flow_id"`
-	NodeID     string `json:"node_id"`
+type declarationIdentityWire struct {
+	FlowPath     string `json:"flow_path"`
+	Family       string `json:"family"`
+	SemanticPath string `json:"semantic_path"`
 }
 
-// AdmitExecutableNodeDeclaration is the declaration-origin constructor. The
-// contracts owner calls it after preserving the exact authored scope.
-func AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID string) (ExecutableNode, error) {
-	admittedPackage, err := AdmitPackageKey(packageKey)
+func AdmitDeclarationIdentity(flowPath, family, semanticPath string) (DeclarationIdentity, error) {
+	flow, err := AdmitFlowIdentity(flowPath)
 	if err != nil {
-		return ExecutableNode{}, err
+		return DeclarationIdentity{}, err
 	}
-	ref := ExecutableNode{
-		packageKey: admittedPackage.String(),
-		flowID:     strings.TrimSpace(flowID),
-		nodeID:     strings.TrimSpace(nodeID),
+	if family != strings.TrimSpace(family) || !validIdentityToken(family) {
+		return DeclarationIdentity{}, fmt.Errorf("declaration family %q is not canonical", family)
 	}
-	if !ref.Valid() {
-		return ExecutableNode{}, fmt.Errorf("executable node declaration requires package and local node identity")
+	if semanticPath != strings.TrimSpace(semanticPath) || semanticPath == "" || strings.ContainsAny(semanticPath, "\x00\r\n") {
+		return DeclarationIdentity{}, fmt.Errorf("declaration semantic path is not canonical")
 	}
-	return ref, nil
+	return DeclarationIdentity{flow: flow, family: family, semanticPath: semanticPath}, nil
 }
 
-// ParseExecutableNode is the strict hydration boundary for persisted and wire
-// identity. It rejects noncanonical input rather than silently normalizing it.
-func ParseExecutableNode(packageKey, flowID, nodeID string) (ExecutableNode, error) {
-	ref, err := AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID)
-	if err != nil {
-		return ExecutableNode{}, err
+func validIdentityToken(value string) bool {
+	if value == "" || value[0] < 'a' || value[0] > 'z' {
+		return false
 	}
-	if packageKey != ref.packageKey || flowID != ref.flowID || nodeID != ref.nodeID {
-		return ExecutableNode{}, fmt.Errorf("executable node identity is not canonical")
+	for _, ch := range []byte(value) {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			continue
+		}
+		return false
 	}
-	return ref, nil
+	return true
 }
 
-func normalizePackageKey(raw string) (string, error) {
-	cleaned := strings.Trim(path.Clean(strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")), "/")
-	if cleaned == "" || cleaned == "." {
-		return RootPackageKey, nil
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", fmt.Errorf("executable node package key %q escapes the package root", raw)
-	}
-	return cleaned, nil
+func (d DeclarationIdentity) Valid() bool {
+	parsed, err := AdmitDeclarationIdentity(d.flow.String(), d.family, d.semanticPath)
+	return err == nil && parsed == d
 }
 
-func (r ExecutableNode) Valid() bool {
-	packageKey, err := normalizePackageKey(r.packageKey)
-	return err == nil && packageKey == r.packageKey &&
-		strings.TrimSpace(r.flowID) == r.flowID &&
-		strings.TrimSpace(r.nodeID) == r.nodeID && r.nodeID != ""
-}
+func (d DeclarationIdentity) Flow() FlowIdentity                   { return d.flow }
+func (d DeclarationIdentity) Family() string                       { return d.family }
+func (d DeclarationIdentity) SemanticPath() string                 { return d.semanticPath }
+func (d DeclarationIdentity) Equal(other DeclarationIdentity) bool { return d == other }
 
-func (r ExecutableNode) Empty() bool { return r == (ExecutableNode{}) }
-
-func (r ExecutableNode) PackageKey() string { return r.packageKey }
-func (r ExecutableNode) FlowID() string     { return r.flowID }
-func (r ExecutableNode) NodeID() string     { return r.nodeID }
-
-func (r ExecutableNode) Equal(other ExecutableNode) bool { return r == other }
-
-func (r ExecutableNode) Key() string {
-	if !r.Valid() {
+func (d DeclarationIdentity) Key() string {
+	if !d.Valid() {
 		return ""
 	}
-	parts := []string{r.packageKey, r.flowID, r.nodeID}
-	for i := range parts {
-		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
+	parts := []string{d.flow.String(), d.family, d.semanticPath}
+	for index := range parts {
+		parts[index] = base64.RawURLEncoding.EncodeToString([]byte(parts[index]))
 	}
 	return strings.Join(parts, ".")
 }
 
-// ParseExecutableNodeKey hydrates the canonical compact form used by durable
-// indexes. It rejects every alternate spelling and partial coordinate.
+func ParseDeclarationIdentityKey(raw string) (DeclarationIdentity, error) {
+	if raw != strings.TrimSpace(raw) {
+		return DeclarationIdentity{}, fmt.Errorf("declaration identity key is not canonical")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return DeclarationIdentity{}, fmt.Errorf("declaration identity key requires flow, family, and semantic path")
+	}
+	decoded := make([]string, 3)
+	for index, part := range parts {
+		value, err := base64.RawURLEncoding.DecodeString(part)
+		if err != nil {
+			return DeclarationIdentity{}, fmt.Errorf("decode declaration identity coordinate %d: %w", index, err)
+		}
+		decoded[index] = string(value)
+	}
+	identity, err := AdmitDeclarationIdentity(decoded[0], decoded[1], decoded[2])
+	if err != nil {
+		return DeclarationIdentity{}, err
+	}
+	if identity.Key() != raw {
+		return DeclarationIdentity{}, fmt.Errorf("declaration identity key is not canonical")
+	}
+	return identity, nil
+}
+
+func (d DeclarationIdentity) MarshalJSON() ([]byte, error) {
+	if !d.Valid() {
+		return nil, fmt.Errorf("cannot encode invalid declaration identity")
+	}
+	return json.Marshal(declarationIdentityWire{FlowPath: d.flow.String(), Family: d.family, SemanticPath: d.semanticPath})
+}
+
+func (d *DeclarationIdentity) UnmarshalJSON(raw []byte) error {
+	if d == nil {
+		return fmt.Errorf("cannot decode declaration identity into nil target")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var wire declarationIdentityWire
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("declaration identity has trailing JSON")
+	}
+	parsed, err := AdmitDeclarationIdentity(wire.FlowPath, wire.Family, wire.SemanticPath)
+	if err != nil {
+		return err
+	}
+	*d = parsed
+	return nil
+}
+
+// ExecutableNode identifies one authored node declaration by filesystem flow
+// path and local node declaration name.
+type ExecutableNode struct {
+	declaration DeclarationIdentity
+}
+
+func AdmitExecutableNodeDeclaration(flowPath, nodeID string) (ExecutableNode, error) {
+	declaration, err := AdmitDeclarationIdentity(flowPath, "node", nodeID)
+	if err != nil {
+		return ExecutableNode{}, err
+	}
+	return ExecutableNode{declaration: declaration}, nil
+}
+
+func ParseExecutableNode(flowPath, nodeID string) (ExecutableNode, error) {
+	return AdmitExecutableNodeDeclaration(flowPath, nodeID)
+}
+
+func (r ExecutableNode) Valid() bool {
+	return r.declaration.Valid() && r.declaration.Family() == "node"
+}
+func (r ExecutableNode) Empty() bool { return r == (ExecutableNode{}) }
+func (r ExecutableNode) FlowPath() string {
+	if !r.Valid() {
+		return ""
+	}
+	return r.declaration.Flow().String()
+}
+func (r ExecutableNode) NodeID() string {
+	if !r.Valid() {
+		return ""
+	}
+	return r.declaration.SemanticPath()
+}
+func (r ExecutableNode) DeclarationIdentity() DeclarationIdentity { return r.declaration }
+func (r ExecutableNode) Equal(other ExecutableNode) bool          { return r == other }
+func (r ExecutableNode) Key() string {
+	if !r.Valid() {
+		return ""
+	}
+	parts := []string{r.FlowPath(), r.NodeID()}
+	for index := range parts {
+		parts[index] = base64.RawURLEncoding.EncodeToString([]byte(parts[index]))
+	}
+	return strings.Join(parts, ".")
+}
+
 func ParseExecutableNodeKey(raw string) (ExecutableNode, error) {
 	if raw != strings.TrimSpace(raw) {
 		return ExecutableNode{}, fmt.Errorf("executable node key is not canonical")
 	}
 	parts := strings.Split(raw, ".")
-	if len(parts) != 3 {
-		return ExecutableNode{}, fmt.Errorf("executable node key requires package, flow, and node coordinates")
+	if len(parts) != 2 {
+		return ExecutableNode{}, fmt.Errorf("executable node key requires flow and node coordinates")
 	}
-	decoded := make([]string, len(parts))
-	for i, part := range parts {
+	decoded := make([]string, 2)
+	for index, part := range parts {
 		value, err := base64.RawURLEncoding.DecodeString(part)
 		if err != nil {
-			return ExecutableNode{}, fmt.Errorf("decode executable node key coordinate %d: %w", i, err)
+			return ExecutableNode{}, fmt.Errorf("decode executable node key coordinate %d: %w", index, err)
 		}
-		decoded[i] = string(value)
+		decoded[index] = string(value)
 	}
-	ref, err := ParseExecutableNode(decoded[0], decoded[1], decoded[2])
+	ref, err := ParseExecutableNode(decoded[0], decoded[1])
 	if err != nil {
 		return ExecutableNode{}, err
 	}
@@ -167,32 +269,29 @@ func (r ExecutableNode) MarshalJSON() ([]byte, error) {
 	if !r.Valid() {
 		return nil, fmt.Errorf("cannot encode invalid executable node identity")
 	}
-	return json.Marshal(executableNodeWire{PackageKey: r.packageKey, FlowID: r.flowID, NodeID: r.nodeID})
+	return json.Marshal(struct {
+		FlowPath string `json:"flow_path"`
+		NodeID   string `json:"node_id"`
+	}{FlowPath: r.FlowPath(), NodeID: r.NodeID()})
 }
 
 func (r *ExecutableNode) UnmarshalJSON(raw []byte) error {
 	if r == nil {
 		return fmt.Errorf("cannot decode executable node identity into nil target")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return fmt.Errorf("executable node identity must be an object")
-	}
-	for _, required := range []string{"package_key", "flow_id", "node_id"} {
-		if _, ok := fields[required]; !ok {
-			return fmt.Errorf("executable node identity requires %s", required)
-		}
-	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var wire executableNodeWire
+	var wire struct {
+		FlowPath string `json:"flow_path"`
+		NodeID   string `json:"node_id"`
+	}
 	if err := decoder.Decode(&wire); err != nil {
 		return err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return fmt.Errorf("executable node identity has trailing JSON")
 	}
-	parsed, err := ParseExecutableNode(wire.PackageKey, wire.FlowID, wire.NodeID)
+	parsed, err := ParseExecutableNode(wire.FlowPath, wire.NodeID)
 	if err != nil {
 		return err
 	}

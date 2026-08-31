@@ -78,7 +78,7 @@ func hostileContractViewIndex(arbitrary runtimecontracts.FlowContractView, id st
 
 func hostileLegacyContractLookup(bundle *runtimecontracts.WorkflowContractBundle, actorID string) {
 	bundle.AgentContractSource(actorID)
-	bundle.ScopedAgentContractSource(runtimecontracts.ContractItemSource{FlowID: "hostile"}, actorID)
+	bundle.ScopedAgentContractSource(runtimecontracts.ContractItemSource{FlowPath: "hostile"}, actorID)
 }
 	`)}
 	toolsPath := filepath.Join(root, "internal", "runtime", "tools", "agent_source_guard_hostile.go")
@@ -108,7 +108,7 @@ func hostileAuthoringRawAgentMap(arbitrary semanticview.FlowScope, id string) {
 
 import "github.com/division-sh/swarm/internal/runtime/semanticview"
 
-func hostileRequiredAgentRawMap(arbitrary semanticview.ProjectScope) []string {
+func hostileRequiredAgentRawMap(arbitrary semanticview.FlowScope) []string {
 	var out []string
 	for id := range arbitrary.Agents {
 		out = append(out, id)
@@ -290,24 +290,20 @@ func agentNameGuardIsRawAgentScopeMap(selector *ast.SelectorExpr, info *types.In
 
 func agentNameGuardRawAgentScopeMapAllowed(path, enclosing string) bool {
 	allowed := map[string]struct{}{
-		"internal/runtime/contracts/agent_registry_resolution.go::bundleAgentRecords":                            {},
-		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                         {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":            {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                     {},
-		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":               {},
-		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntries":      {},
-		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntry":        {},
-		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":               {},
-		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                           {},
-		"internal/runtime/contracts/workflow_contract_tree.go::buildFlowTree":                                    {},
-		"internal/runtime/contracts/workflow_contract_tree.go::loadFlowContractView":                             {},
-		"internal/runtime/contracts/workflow_contract_tree.go::loadProjectContractView":                          {},
-		"internal/runtime/contracts/workflow_contract_tree.go::populateMergedPackageViews":                       {},
-		"internal/runtime/semanticview/bundle_source.go::(bundleSource).ProjectScopes":                           {},
-		"internal/runtime/semanticview/scopes.go::flowScopeFromView":                                             {},
-		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":    {},
-		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions": {},
-		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                            {},
+		"internal/runtime/contracts/agent_registry_resolution.go::bundleAgentRecords":                       {},
+		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                    {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":       {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                {},
+		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":          {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntries": {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntry":   {},
+		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":          {},
+		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                      {},
+		"internal/runtime/contracts/workflow_contract_tree.go::buildFilesystemFlowTree":                     {},
+		"internal/runtime/contracts/workflow_contract_tree.go::loadFlowContractViewFromSource":              {},
+		"internal/runtime/contracts/workflow_contract_tree.go::populateMergedFlowViews":                     {},
+		"internal/runtime/semanticview/scopes.go::flowScopeFromView":                                        {},
+		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                       {},
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok
@@ -364,16 +360,14 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 	// coordinate, or ignore it while inspecting non-identity entry fields. Any
 	// new range over the wire map must be classified here or consume a name plan.
 	allowed := map[string]struct{}{
-		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                         {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":            {},
-		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                     {},
-		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":               {},
-		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":               {},
-		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                           {},
-		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":    {},
-		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions": {},
-		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                            {},
-		"internal/runtime/tools/emit_runtime.go::NewEmitRegistry":                                                {},
+		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":              {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption": {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":          {},
+		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":    {},
+		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":    {},
+		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                {},
+		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                 {},
+		"internal/runtime/tools/emit_runtime.go::NewEmitRegistry":                                     {},
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok

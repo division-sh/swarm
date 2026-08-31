@@ -134,8 +134,9 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture := newCompleteEventDispatchFixture(t, backend, surface == "decision_obligation")
+				subscriptions := []string{string(fixture.event.Type())}
 				admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-					AgentID: fixture.agentID, Subscriptions: []string{string(fixture.event.Type())},
+					AgentID: fixture.agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 				})
 				if err != nil {
 					t.Fatalf("admit complete-event route: %v", err)
@@ -160,7 +161,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
-			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "flows/global/agents.yaml#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
+			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "global/agents.yaml#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
 			if err != nil {
 				t.Fatalf("resolve complete-event agent intent: %v", err)
 			}
@@ -327,11 +328,10 @@ func newCompleteEventDispatchFixtureWithOrigin(
 
 		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 			ServiceID:  origin.ServiceID(),
-			PackageKey: "standing-recovery-proof",
-			FlowID:     backend,
+			FlowPath:   backend,
 			InstanceID: uuid.NewString(),
 			EntityID:   uuid.NewString(),
-			Source:     authorActivityTestBundleSourceFact,
+			Source:     authorActivityTestSourceArtifactFact,
 		})
 		if err != nil {
 			t.Fatalf("reconcile standing recovery fixture: %v", err)
@@ -377,7 +377,7 @@ func (f completeEventDispatchFixture) subscribe(t testing.TB, eventTypes ...even
 		subscriptions = append(subscriptions, string(eventType))
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), Subscriptions: subscriptions,
+		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit complete-event route: %v", err)
@@ -529,7 +529,7 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 		1,
 		"",
 		"complete-event-proof",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -546,7 +546,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create complete-event work owner: %v", err)
@@ -554,10 +554,10 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
-		BundleSourceFact: authorActivityTestBundleSourceFact,
-		SemanticSource:   f.source,
-		DeliveryStore:    f.store,
-		ExecutionPosture: executionposture.Live,
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SemanticSource:     f.source,
+		DeliveryStore:      f.store,
+		ExecutionPosture:   executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
 			RouteRestorer: f.bus, RouteRetirer: f.bus, RouteRemover: f.bus,
@@ -573,8 +573,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 			t.Errorf("close complete-event dispatch generation: %v", err)
 		}
 	})
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(f.source, coordinate)
 	if err != nil {
 		t.Fatalf("compile complete-event static topology: %v", err)
@@ -594,14 +594,14 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		t.Fatalf("install complete-event source set: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(f.ctx, runtimestartupownership.GrantRequest{
-		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash: bundleHash, RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
 		t.Fatalf("issue complete-event generation grant: %v", err)
 	}
 	generation.grant = grant
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct complete-event static admission: %v", err)
 	}
@@ -617,7 +617,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 func completeEventAgentSource(agentID, subscription string, intent runtimeagentintent.Resolved) semanticview.Source {
 	ownerURI := completeEventAgentOwnerURI(agentID)
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "global", Flow: "global"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "global"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{subscription: {}},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			agentID: {
 				ID: agentID, Type: "recording", Role: "complete-event-proof", Model: "regular",

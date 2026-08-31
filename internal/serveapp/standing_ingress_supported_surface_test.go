@@ -33,8 +33,8 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -155,7 +155,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(telegram.Close)
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	configureStandingLifecycleCredentials(t)
 
 	var db *sql.DB
@@ -173,10 +173,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		}
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		opts = cliapp.ServeOptions{
-			ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-			ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+			ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+			SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-			SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+			SelfCheck: true, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
@@ -194,7 +194,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			db = storetest.DatabaseForTest(pg)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -202,10 +202,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
 		opts = cliapp.ServeOptions{
-			ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot,
+			ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot,
 			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-			SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+			SelfCheck: true, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
@@ -675,7 +675,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}))
 	defer telegram.Close()
 
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	dataRoot := t.TempDir()
 	sqlitePath := filepath.Join(dataRoot, "standing.sqlite")
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
@@ -692,9 +692,9 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 
 	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil)
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false,
+		SelfCheck:      true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	first := startServeRuntimeTestProcess(t, opts)
@@ -765,7 +765,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT current_run_id
 		FROM standing_services
-		WHERE flow_id = 'telegram-ingress'
+		WHERE flow_path = 'telegram-ingress'
 		  AND declaration_present = TRUE
 		  AND effective_state = 'active'
 	`).Scan(&standingRunID); err != nil {
@@ -774,7 +774,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
-		WHERE flow_id = 'telegram-ingress'
+		WHERE flow_path = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'bot/telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
@@ -820,7 +820,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	sqliteStore = nil
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, nil)
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, nil)
 }
 
 func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
@@ -830,7 +830,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	}))
 	defer telegram.Close()
 
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	dataRoot := t.TempDir()
 	sqlitePath := filepath.Join(dataRoot, "standing.sqlite")
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
@@ -846,10 +846,10 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 	}
 
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
+		SelfCheck: true, Dev: true, LocalRun: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		TestAfterAuthorActivityHead: func() error { return errors.New("author activity head unavailable") },
 	})
 	process.waitForReadyLine()
@@ -877,7 +877,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 
 func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -889,16 +889,16 @@ func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) 
 			t.Fatalf("set credential %s: %v", key, err)
 		}
 	}
-	packagePath := filepath.Join(contractsRoot, "package.yaml")
-	raw, err := os.ReadFile(packagePath)
+	schemaPath := filepath.Join(sourceRoot, "telegram-ingress", "schema.yaml")
+	raw, err := os.ReadFile(schemaPath)
 	if err != nil {
-		t.Fatalf("read package: %v", err)
+		t.Fatalf("read ingress schema: %v", err)
 	}
-	writeStandingCandidateFile(t, packagePath, strings.Replace(string(raw), "alias: chat", "alias: chat/support", 1))
+	writeStandingCandidateFile(t, schemaPath, strings.Replace(string(raw), "alias: chat", "alias: chat/support", 1))
 	sqlitePath := filepath.Join(t.TempDir(), "invalid-alias.sqlite")
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 	})
@@ -928,7 +928,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -944,7 +944,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer telegram.Close()
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -957,9 +957,9 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		}
 	}
 	opts := cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	first := startServeRuntimeTestProcess(t, opts)
@@ -1000,7 +1000,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT current_run_id::text
 		FROM standing_services
-		WHERE flow_id = 'telegram-ingress'
+		WHERE flow_path = 'telegram-ingress'
 		  AND declaration_present = TRUE
 		  AND effective_state = 'active'
 	`).Scan(&standingRunID); err != nil {
@@ -1009,7 +1009,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
-		WHERE flow_id = 'telegram-ingress'
+		WHERE flow_path = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
@@ -1023,7 +1023,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'bot/telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
 	if err := db.QueryRow(`
@@ -1051,7 +1051,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, func(t *testing.T) {
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) {
 		var reopenErr error
 		runtimePG, reopenErr = store.NewPostgresStore(dsn)
 		if reopenErr != nil {
@@ -1076,7 +1076,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 			}))
 			t.Cleanup(telegram.Close)
-			contractsRoot := writeMixedStandingTelegramServeFixture(t, telegram.URL)
+			sourceRoot := writeMixedStandingTelegramServeFixture(t, telegram.URL)
 			configureStandingLifecycleCredentials(t)
 
 			var (
@@ -1089,9 +1089,9 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			})
 			runtimes := make(chan *runtimepkg.Runtime, 2)
 			opts := cliapp.ServeOptions{
-				ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+				SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-				SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+				SelfCheck: true, Verbose: true,
 				TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 				TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) { runtimes <- rt },
 			}
@@ -1116,7 +1116,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 					storetest.BootstrapPostgresRuntimeStore(t, opened)
 					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg), nil
 				}
-				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
 				}
 				t.Cleanup(func() {
@@ -1191,13 +1191,13 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 	if rt == nil || rt.WorkOccurrence() == nil {
 		t.Fatal("standing terminalization requires the live runtime occurrence")
 	}
-	fact := rt.Options.BundleSourceFact
+	fact := rt.Options.SourceArtifactFact
 	runtimeInstanceID := strings.TrimSpace(rt.Options.RuntimeInstanceID)
 	if runtimeInstanceID == "" || fact.BundleHash() == "" {
 		t.Fatalf("standing terminalization runtime identity = %q/%q", runtimeInstanceID, fact.BundleHash())
 	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 	request := runtimerunlifecycle.TerminalRequest{
@@ -1218,10 +1218,10 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 
 func loadServedStandingOwnerByFlow(t testing.TB, db *sql.DB, backend, flowID string) (serviceID, runID string, generation int64) {
 	t.Helper()
-	query := `SELECT service_id, current_run_id, current_generation FROM standing_services WHERE flow_id = ?`
+	query := `SELECT service_id, current_run_id, current_generation FROM standing_services WHERE flow_path = ?`
 	args := []any{flowID}
 	if backend == "postgres" {
-		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services WHERE flow_id = $1`
+		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services WHERE flow_path = $1`
 	}
 	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&serviceID, &runID, &generation); err != nil {
 		t.Fatalf("%s load standing owner for flow %s: %v", backend, flowID, err)
@@ -1265,14 +1265,14 @@ func setServeRuntimeRecovery(t *testing.T, configPath string, from, to bool) {
 	}
 }
 
-func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, contractsRoot, originalRunID string, prepare func(*testing.T)) {
+func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, sourceRoot, originalRunID string, prepare func(*testing.T)) {
 	t.Helper()
-	packagePath := filepath.Join(contractsRoot, "package.yaml")
-	basePackage, err := os.ReadFile(packagePath)
+	manifestPath := filepath.Join(sourceRoot, "manifest.yaml")
+	baseManifest, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("read standing package: %v", err)
+		t.Fatalf("read standing manifest: %v", err)
 	}
-	flowDir := filepath.Join(contractsRoot, "flows", "telegram-ingress")
+	flowDir := filepath.Join(sourceRoot, "telegram-ingress")
 	flowSchemaPath := filepath.Join(flowDir, "schema.yaml")
 	baseFlowSchema, err := os.ReadFile(flowSchemaPath)
 	if err != nil {
@@ -1285,44 +1285,36 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 	}
 	mutations := []candidateMutation{
 		{name: "source revision one", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.1"`, 1))
+			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.1"`, 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "source revision two", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.2"`, 1))
+			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.2"`, 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "source revision three", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.3"`, 1))
+			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), `version: "1.0.0"`, `version: "1.0.3"`, 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
-		{name: "package manifest name revised", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), "name: telegram-agent", "name: renamed-telegram-agent", 1))
+		{name: "manifest name revised", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "standing declaration removed", apply: func(t *testing.T) {
-			before := string(basePackage)
-			start := strings.Index(before, "flows:\n")
-			if start < 0 {
-				t.Fatal("flows declaration not found")
+			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
+			if err := os.Rename(flowDir, removedDir); err != nil {
+				t.Fatalf("remove standing flow directory from the admitted tree: %v", err)
 			}
-			writeStandingCandidateFile(t, packagePath, before[:start]+"flows: []\n")
+			t.Cleanup(func() {
+				_ = os.Rename(removedDir, flowDir)
+			})
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "standing changed to non-standing", apply: func(t *testing.T) {
-			before := string(basePackage)
-			standingBlock := `    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-`
-			changed := strings.Replace(before, standingBlock, "", 1)
-			if changed == before {
-				t.Fatal("standing activation block not found")
-			}
-			writeStandingCandidateFile(t, packagePath, changed)
 			nonStandingSchema := canonicalrouting.WithoutStandingIngressPins(t, string(baseFlowSchema))
+			nonStandingSchema = strings.Replace(nonStandingSchema, "activation: standing\n", "", 1)
+			if ingress := strings.Index(nonStandingSchema, "\ningress:\n"); ingress >= 0 {
+				nonStandingSchema = nonStandingSchema[:ingress+1]
+			}
 			writeStandingCandidateFile(t, flowSchemaPath, nonStandingSchema)
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
-			renamedDir := filepath.Join(contractsRoot, "flows", "telegram-ingress-v2")
+			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
 			if err := os.Rename(flowDir, renamedDir); err != nil {
 				t.Fatalf("rename flow directory: %v", err)
 			}
@@ -1331,13 +1323,12 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 				_ = os.WriteFile(flowSchemaPath, baseFlowSchema, 0o600)
 			})
 			writeStandingCandidateFile(t, filepath.Join(renamedDir, "schema.yaml"), strings.Replace(string(baseFlowSchema), "name: telegram-ingress", "name: telegram-ingress-v2", 1))
-			writeStandingCandidateFile(t, packagePath, strings.ReplaceAll(string(basePackage), "telegram-ingress", "telegram-ingress-v2"))
 		}, wantOutput: []string{" created run=", " orphaned declaration_removed=true"}},
 	}
 	for _, mutation := range mutations {
 		mutation := mutation
 		t.Run(mutation.name, func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, string(basePackage))
+			writeStandingCandidateFile(t, manifestPath, string(baseManifest))
 			writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 			if _, err := os.Stat(flowDir); err != nil {
 				t.Fatalf("standing flow directory unavailable before mutation: %v", err)
@@ -1349,7 +1340,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			requireChangedStandingColdStartReconciled(t, opts, mutation.wantOutput...)
 		})
 	}
-	writeStandingCandidateFile(t, packagePath, string(basePackage))
+	writeStandingCandidateFile(t, manifestPath, string(baseManifest))
 	writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 }
 
@@ -1612,29 +1603,24 @@ func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) str
 func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := writeStandingTelegramServeFixture(t, telegramBaseURL)
-	flowDir := filepath.Join(root, "flows", "telegram-stopped")
+	flowDir := filepath.Join(root, "telegram-stopped")
 	if err := os.MkdirAll(flowDir, 0o755); err != nil {
 		t.Fatalf("create terminal standing flow directory: %v", err)
 	}
-	baseSchema, err := os.ReadFile(filepath.Join(root, "flows", "telegram-ingress", "schema.yaml"))
+	baseSchema, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "schema.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow schema: %v", err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1))
-	baseEntities, err := os.ReadFile(filepath.Join(root, "flows", "telegram-ingress", "entities.yaml"))
+	stoppedSchema := strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1)
+	stoppedSchema = canonicalrouting.WithoutStandingIngressPins(t, stoppedSchema)
+	if ingress := strings.Index(stoppedSchema, "\ningress:\n"); ingress >= 0 {
+		stoppedSchema = stoppedSchema[:ingress+1]
+	}
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
+	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "entities.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow entities: %v", err)
 	}
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "entities.yaml"), string(baseEntities))
-	packagePath := filepath.Join(root, "package.yaml")
-	basePackage, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatalf("read standing package: %v", err)
-	}
-	writeStandingCandidateFile(t, packagePath, string(basePackage)+`  - id: telegram-stopped
-    flow: telegram-stopped
-    mode: singleton
-    activation: standing
-`)
 	return root
 }

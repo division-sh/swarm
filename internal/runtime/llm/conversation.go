@@ -295,12 +295,11 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
 	}
 	turnCtx = managedcapabilities.WithContext(turnCtx, surface)
-	bundleSource, ok := runtimecorrelation.BundleSourceFactFromContext(turnCtx)
+	bundleSource, ok := runtimecorrelation.SourceArtifactFactFromContext(turnCtx)
 	if !ok || bundleSource.Validate() != nil {
-		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_bundle_source_missing", "llm-conversation", "prepare_turn", nil)
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_source_artifact_missing", "llm-conversation", "prepare_turn", nil)
 	}
-	bundleHash, source := bundleSource.StorageValues()
-	frame, err := agentframe.Complete(*c.seed, draft, agentframe.Completion{BundleHash: bundleHash, BundleSource: source, Surface: surface})
+	frame, err := agentframe.Complete(*c.seed, draft, agentframe.Completion{BundleHash: bundleSource.BundleHash(), Surface: surface})
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
 	}

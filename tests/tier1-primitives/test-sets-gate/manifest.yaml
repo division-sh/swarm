@@ -1,0 +1,4 @@
+name: test-sets-gate
+version: 1.0.0
+description: Handler sets a gate flag g1_check to true.
+platform_version: ">=0.7.0 <0.8.0"

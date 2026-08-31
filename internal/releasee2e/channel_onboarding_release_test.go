@@ -60,7 +60,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	env := appendReleaseChannelEnv(goldenProcessEnv(t, root, "", 1), providerEnv...)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Contracts: contracts,
+			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Source: contracts,
 			Store: "sqlite", APIPort: apiPort, MCPPort: mcpPort,
 			PublicWebhookBaseURL: "https://" + releaseChannelPublicHost, PublicWebhookListen: publicListen,
 			TokenFile: tokenFile, Token: releaseChannelAPIToken, Env: env,
@@ -106,17 +106,17 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 
 	t.Run("RB-02_recovery_path", func(t *testing.T) {
 		if err := process.stopAndWait(10 * time.Second); err != nil {
-			t.Fatalf("graceful release serve stop before changed-source restart: %v\n%s", err, process.output.String())
+			t.Fatalf("graceful release serve stop before source replacement: %v\n%s", err, process.output.String())
 		}
 		bumpReleaseChannelSource(t, contracts)
 		process = start()
-		restartedBundleHash := releaseChannelServedBundleHash(t, process.rpc)
-		if restartedBundleHash == initialBundleHash {
-			t.Fatalf("changed-source process restart retained bundle hash %s\n%s", initialBundleHash, process.output.String())
+		replacementBundleHash := releaseChannelServedBundleHash(t, process.rpc)
+		if replacementBundleHash == initialBundleHash {
+			t.Fatalf("release channel source replacement retained bundle hash %s\n%s", initialBundleHash, process.output.String())
 		}
 		retained := requireReleaseCurrentChannel(t, releaseChannelList(t, binaryPath, root, env, configPath, process.apiBase, tokenFile))
 		if retained.Activation != nil || retained.Readiness != nil || retained.Recovery == nil || len(retained.Recovery.Commands) != 1 || retained.Recovery.Commands[0] != "swarm channel reconnect telegram" {
-			t.Fatalf("release retained identity after changed-source restart %s -> %s = %#v\n%s", initialBundleHash, restartedBundleHash, retained, process.output.String())
+			t.Fatalf("release retained identity after source replacement %s -> %s = %#v\n%s", initialBundleHash, replacementBundleHash, retained, process.output.String())
 		}
 		beforeRegistrations, beforeDeliveries := provider.Counts()
 		blocked := runReleaseChannelCommand(t, binaryPath, root, env, "", configPath,
@@ -401,9 +401,10 @@ func writeReleaseChannelFixture(t *testing.T, root string) string {
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "integrations", "telegram-agent"), contracts)
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "channel_onboarding_release"), contracts)
 	for _, relative := range []string{
-		filepath.Join("bot", "flows", "telegram-chat", "agents.yaml"),
-		filepath.Join("bot", "flows", "telegram-chat", "nodes.yaml"),
-		filepath.Join("bot", "flows", "telegram-chat", "events.yaml"),
+		filepath.Join("bot", "telegram-chat", "agents.yaml"),
+		filepath.Join("bot", "telegram-chat", "nodes.yaml"),
+		filepath.Join("bot", "telegram-chat", "events.yaml"),
+		filepath.Join("tests", "smoke.yaml"),
 	} {
 		if err := os.Remove(filepath.Join(contracts, relative)); err != nil {
 			t.Fatalf("remove release channel consumer %s: %v", relative, err)
@@ -429,20 +430,16 @@ func releaseChannelRuntimeConfig(storePath string) string {
 
 func bumpReleaseChannelSource(t *testing.T, contracts string) {
 	t.Helper()
-	path := filepath.Join(contracts, releaseChannelManifestName())
+	path := filepath.Join(contracts, "manifest.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read release channel package for changed-source restart: %v", err)
+		t.Fatalf("read release channel source metadata for replacement: %v", err)
 	}
 	updated := strings.Replace(string(body), `version: "1.0.0"`, `version: "1.0.1"`, 1)
 	if updated == string(body) {
-		t.Fatal("release channel package has no exact version declaration to replace")
+		t.Fatal("release channel source metadata has no exact version declaration to replace")
 	}
 	writeReleaseFile(t, path, updated)
-}
-
-func releaseChannelManifestName() string {
-	return strings.Join([]string{"package", "yaml"}, ".")
 }
 
 func startReleaseTelegramAPI(t *testing.T, handler http.Handler, root, publicListen string) []string {

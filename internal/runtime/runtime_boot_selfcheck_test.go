@@ -101,12 +101,12 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
 		Options: RuntimeOptions{
-			SelfCheck:        true,
-			WorkflowModule:   module,
-			LLMRuntime:       noopLLMRuntime{},
-			BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
-			BootStartedAt:    time.Now().UTC().Add(-1500 * time.Millisecond),
-			SystemContainers: []string{"swarm-system", "swarm-scaffold"},
+			SelfCheck:          true,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
+			BootStartedAt:      time.Now().UTC().Add(-1500 * time.Millisecond),
+			SystemContainers:   []string{"swarm-system", "swarm-scaffold"},
 			BootProgress: func(evt BootProgressEvent) {
 				progress = append(progress, evt)
 			},

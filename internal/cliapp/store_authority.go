@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/platform"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/versionmetadata"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -119,11 +122,7 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	paths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
-	if err != nil {
-		return runtimestartupownership.AuthorityInspection{}, err
-	}
-	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, CLISourcePlatformSpecPaths{}, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
@@ -185,19 +184,7 @@ func openAuthorityMaintenanceStore(ctx context.Context, root InvocationRoot, cmd
 	if err != nil {
 		return nil, noClose, err
 	}
-	paths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
-	if err != nil {
-		return nil, noClose, err
-	}
-	_, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, paths.ContractsPath, paths.PlatformSpecPath, cfgResult)
-	if err != nil {
-		return nil, noClose, fmt.Errorf("load selected-store schema source: %w", err)
-	}
-	plans, err := StateStoreSchemaPlans(bundle)
-	if err != nil {
-		return nil, noClose, err
-	}
-	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, CLISourcePlatformSpecPaths{}, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return nil, noClose, err
 	}
@@ -206,20 +193,39 @@ func openAuthorityMaintenanceStore(ctx context.Context, root InvocationRoot, cmd
 		return nil, noClose, err
 	}
 	closeStore := selected.Close
-	metadata, err := versionmetadata.Resolve(InjectedBuildMetadata())
+	request, err := sourceFreeAuthoritySchemaBootstrapRequest()
 	if err != nil {
 		return nil, noClose, errors.Join(err, closeStore())
 	}
-	err = selected.BootstrapSchema(ctx, store.SchemaBootstrapRequest{
-		PlatformPlans: plans.Platform, StatePlans: plans.State,
-		Origin: store.RuntimeStoreOrigin{
-			SwarmVersion: metadata.BinaryVersion, PlatformVersion: strings.TrimSpace(bundle.Platform.Platform.Version), CreatedAt: time.Now().UTC(),
-		},
-	})
-	if err != nil {
+	if err := selected.BootstrapSchema(ctx, request); err != nil {
 		return nil, noClose, errors.Join(err, closeStore())
 	}
 	return selected, closeStore, nil
+}
+
+func sourceFreeAuthoritySchemaBootstrapRequest() (store.SchemaBootstrapRequest, error) {
+	var spec runtimecontracts.PlatformSpecDocument
+	source, err := yamlsource.Load(platform.PlatformSpecYAML())
+	if err != nil {
+		return store.SchemaBootstrapRequest{}, fmt.Errorf("load embedded platform schema: %w", err)
+	}
+	if err := source.Decode(&spec); err != nil {
+		return store.SchemaBootstrapRequest{}, fmt.Errorf("decode embedded platform schema: %w", err)
+	}
+	plans, err := store.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		return store.SchemaBootstrapRequest{}, err
+	}
+	metadata, err := versionmetadata.Resolve(InjectedBuildMetadata())
+	if err != nil {
+		return store.SchemaBootstrapRequest{}, err
+	}
+	return store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin: store.RuntimeStoreOrigin{
+			SwarmVersion: metadata.BinaryVersion, PlatformVersion: strings.TrimSpace(spec.Platform.Version), CreatedAt: time.Now().UTC(),
+		},
+	}, nil
 }
 
 func openAuthorityInspectionStore(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts doctorOptions) (authorityInspectionStore, func() error, error) {
@@ -233,13 +239,7 @@ func openAuthorityInspectionStore(ctx context.Context, root InvocationRoot, cmd 
 	if err != nil {
 		return nil, noClose, err
 	}
-	paths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
-		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath, ConfigPath: configPath,
-	})
-	if err != nil {
-		return nil, noClose, err
-	}
-	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, storebackend.ActiveDefaultBackend().String(), false)
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, CLISourcePlatformSpecPaths{}, storebackend.ActiveDefaultBackend().String(), false)
 	if err != nil {
 		return nil, noClose, err
 	}
@@ -258,7 +258,7 @@ func constructAuthorityInspectionStore(ctx context.Context, selection storebacke
 	return storeselected.OpenAuthorityInspection(ctx, request)
 }
 
-func resolveAuthorityStoreSelection(root InvocationRoot, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLIContractPlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
+func resolveAuthorityStoreSelection(root InvocationRoot, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLISourcePlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
 	repo := root.Path()
 	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {

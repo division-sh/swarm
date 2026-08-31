@@ -8,19 +8,19 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 var ConfiguredWorkspaceLifecycleForServe = ConfiguredWorkspaceLifecycleForBackend
 
 type ServeWorkspaceLifecycle interface {
 	workspace.Lifecycle
-	workspace.DevEntityContainerCleaner
 	runtimedestructivereset.ManagedContainerInventoryReader
 	runtimedestructivereset.ManagedContainerRuntime
 }
 
-func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
-	manager := workspace.NewDockerManager(lookup)
+func configuredWorkspaceLifecycle(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
+	manager := workspace.NewDockerManager()
 	workspaceCfg, err := dockerWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -28,15 +28,13 @@ func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, c
 	if strings.TrimSpace(mountSources.DataSource) != "" {
 		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
 	}
-	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
-		workspaceCfg.ContractsSource = contractsDir
-	}
+	workspaceCfg.SourceProjection = projection
 	manager.SetConfig(workspaceCfg)
 	manager.SetSemanticSource(source)
 	return manager, nil
 }
 
-func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
+func ConfiguredWorkspaceLifecycleForBackend(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
 	selected := strings.TrimSpace(backend.Backend)
 	if selected == "" {
 		return nil, fmt.Errorf("workspace backend decision is required")
@@ -45,9 +43,9 @@ func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config
 	case WorkspaceBackendNone:
 		return nil, nil
 	case workspace.BackendDocker:
-		return configuredWorkspaceLifecycle(lookup, cfg, contractsRoot, source, mountSources)
+		return configuredWorkspaceLifecycle(cfg, projection, source, mountSources)
 	case workspace.BackendHost:
-		return configuredHostWorkspaceLifecycle(cfg, contractsRoot, source, mountSources)
+		return configuredHostWorkspaceLifecycle(cfg, projection, source, mountSources)
 	default:
 		sourceLabel := strings.TrimSpace(backend.Source)
 		if sourceLabel == "" {
@@ -57,7 +55,7 @@ func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config
 	}
 }
 
-func configuredHostWorkspaceLifecycle(cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.HostManager, error) {
+func configuredHostWorkspaceLifecycle(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.HostManager, error) {
 	manager := workspace.NewHostManager()
 	workspaceCfg, err := hostWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
@@ -66,9 +64,7 @@ func configuredHostWorkspaceLifecycle(cfg *config.Config, contractsRoot string, 
 	if strings.TrimSpace(mountSources.DataSource) != "" {
 		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
 	}
-	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
-		workspaceCfg.ContractsSource = contractsDir
-	}
+	workspaceCfg.SourceProjection = projection
 	manager.SetConfig(workspaceCfg)
 	manager.SetSemanticSource(source)
 	return manager, nil

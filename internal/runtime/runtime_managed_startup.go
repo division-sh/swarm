@@ -88,13 +88,13 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		authority.RuntimeGeneration,
 		"",
 		actorFingerprint,
-		rt.Options.BundleSourceFact.BundleHash(),
+		rt.Options.SourceArtifactFact.BundleHash(),
 		authority.ProbeSurfaceIDs,
 	)
 	if err != nil {
 		return managedExecutionActivation{}, err
 	}
-	deliveryAuthority, err := runtimedelivery.NewExecutionAuthority(rt.Options.BundleSourceFact, admission)
+	deliveryAuthority, err := runtimedelivery.NewExecutionAuthority(rt.Options.SourceArtifactFact, admission)
 	if err != nil {
 		return managedExecutionActivation{}, err
 	}

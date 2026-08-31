@@ -77,7 +77,7 @@ func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventT
 }
 
 func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	if flowID == "" && !opts.AllowNonInputEvent {
+	if flowID == "." && !opts.AllowNonInputEvent {
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
 			EventType: eventType,
@@ -152,7 +152,7 @@ func appendExternalMetadataEvidence(source Source, flowID, eventType string, app
 
 func appendInternalTopologyEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	census := BuildAuthoredEventEndpointCensus(source)
-	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
 		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
 		}
@@ -162,18 +162,6 @@ func appendInternalTopologyEvidence(source Source, flowID, eventType string, app
 			FlowID:    endpoint.FlowID,
 			EventType: eventType,
 			Detail:    detail,
-		})
-	}
-	for _, endpoint := range census.MatchingOutputPinsAcrossFlows(flowID, eventType) {
-		if strings.TrimSpace(endpoint.FlowID) == strings.TrimSpace(flowID) {
-			continue
-		}
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-			FlowID:    endpoint.FlowID,
-			EventType: eventType,
-			Pin:       endpoint.PinName,
-			Detail:    fmt.Sprintf("sibling flow %s output pin %s", endpoint.FlowID, endpoint.PinName),
 		})
 	}
 }
@@ -205,12 +193,12 @@ func endpointProducerEvidenceDetail(endpoint AuthoredEventEndpoint) string {
 	case EventEndpointRequiredAgentRole:
 		return fmt.Sprintf("required agent role %s emits", endpoint.Role)
 	case EventEndpointTimer:
-		if endpoint.FlowID == "" {
+		if endpoint.FlowID == "." {
 			return strings.TrimSpace("root timer " + endpoint.TimerID)
 		}
 		return strings.TrimSpace(fmt.Sprintf("timer in flow %s %s", endpoint.FlowID, endpoint.TimerID))
 	case EventEndpointAutoEmit:
-		if endpoint.FlowID == "" {
+		if endpoint.FlowID == "." {
 			return "root auto_emit_on_create"
 		}
 		return fmt.Sprintf("flow %s auto_emit_on_create", endpoint.FlowID)

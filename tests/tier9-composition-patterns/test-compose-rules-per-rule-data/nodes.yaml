@@ -6,8 +6,7 @@ resolver:
   event_handlers:
     conflict.submitted:
       rules:
-        - element_id: 11edfefe-f466-48af-aa62-f370e9a05b7e
-          id: keep_first
+        - id: keep_first
           condition: "payload.strategy == 'keep_first'"
           data_accumulation:
             writes:
@@ -18,8 +17,7 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-        - element_id: d5dd003f-37d3-470c-894c-0dd46bdefff5
-          id: keep_best
+        - id: keep_best
           condition: "payload.strategy == 'keep_best'"
           data_accumulation:
             writes:
@@ -30,8 +28,7 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-        - element_id: 726cf4eb-5e06-4f50-9d12-54ff15510213
-          id: merge
+        - id: merge
           condition: "payload.strategy == 'merge'"
           data_accumulation:
             writes:

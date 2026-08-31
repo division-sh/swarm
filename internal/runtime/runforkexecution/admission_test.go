@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -18,9 +19,9 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
@@ -72,8 +73,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 		admission.AdmissionUse != runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding {
 		t.Fatalf("admission evidence accounting = %#v", admission)
 	}
-	if admission.SourceWorkflowName != binding.ContractSelection.WorkflowName ||
-		admission.SourceWorkflowVersion != binding.ContractSelection.WorkflowVersion {
+	if admission.SourceWorkflowName != "selected-workflow" || admission.SourceWorkflowVersion != "v2" {
 		t.Fatalf("source workflow = %s@%s", admission.SourceWorkflowName, admission.SourceWorkflowVersion)
 	}
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
@@ -180,48 +180,26 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	model := testSelectedContractExecutionModel(t, frontier)
 	routeAdmission := testSelectedContractRouteAdmission(frontier)
-	mismatched := binding.ContractSelection
-	mismatched.WorkflowVersion = "other-version"
+	mismatched := runfork.RunForkContractSelection{
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
+		BundleHash: runForkTestBundleHash,
+	}
 
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:     forkRunID,
 		BindingReader: &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader: &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{
-			Selection:        binding.ContractSelection,
-			Source:           testSelectedSource(mismatched),
-			BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
+			Selection:          mismatched,
+			Source:             testSelectedSource(mismatched),
+			SourceArtifactFact: testEphemeralSourceArtifactFact(runForkTestBundleHash),
 		}},
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
 		ExecutionModel:    model,
 	})
-	if err == nil || !strings.Contains(err.Error(), "workflow version mismatch") {
-		t.Fatalf("error = %v, want selected source mismatch", err)
-	}
-}
-
-func TestBuildSelectedContractExecutionAdmissionFailsClosedOnWrongContractsRoot(t *testing.T) {
-	ctx := context.Background()
-	forkRunID := uuid.NewString()
-	binding := testSelectedContractBinding(forkRunID)
-	frontier := testContractFrontierAdmission(binding.ContractSelection)
-	model := testSelectedContractExecutionModel(t, frontier)
-	routeAdmission := testSelectedContractRouteAdmission(frontier)
-	wrongRoot := binding.ContractSelection
-	wrongRoot.ContractsRoot = "/tmp/other-selected-contracts"
-
-	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         forkRunID,
-		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(wrongRoot)},
-		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
-		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
-		ExecutionModel:    model,
-	})
 	if err == nil || !strings.Contains(err.Error(), "selected source selection does not match durable binding") {
-		t.Fatalf("error = %v, want wrong contracts_root source failure", err)
+		t.Fatalf("error = %v, want selected source mismatch", err)
 	}
 }
 
@@ -414,55 +392,58 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRecipientPlanning(t
 	}
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderLoadsPersistedSourceForRequest(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
+	record := persistedSourceArtifactForTest(t, bundle)
 	sourceRunID := uuid.NewString()
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
 		availability: runbundle.Availability{
-			RunID:            sourceRunID,
-			Status:           "running",
-			BundleHash:       projection.BundleHash,
-			BundleSource:     runbundle.AvailabilitySourcePersisted,
-			BundleRowPresent: true,
+			RunID:                 sourceRunID,
+			Status:                "running",
+			BundleHash:            record.BundleHash,
+			SourceArtifactPresent: true,
 		},
-		record: runbundle.BundleCatalogRuntimeRecord{
-			BundleHash:  projection.BundleHash,
-			ContentYAML: projection.ContentYAML,
-			DataBlob:    projection.DataBlob,
-		},
+		record: record,
 	}
-	loader := BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}
-	selection := testDBLoadedContractSelection("/stale/db-loaded/source-root")
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRoot, Store: artifactStore}
+	selection := testDBLoadedContractSelection()
 
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
-		BundleHash:  projection.BundleHash,
+		BundleHash:  record.BundleHash,
 		Selection:   selection,
 	})
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceForRequest: %v", err)
 	}
-	defer cleanupLoadedSelectedContractSource(loaded)
-
-	if loaded.BundleSourceFact.BundleHash() != projection.BundleHash {
-		t.Fatalf("loaded bundle hash = %q, want %q", loaded.BundleSourceFact.BundleHash(), projection.BundleHash)
+	projectionRoot := loaded.RuntimeProjection.PrivateRoot()
+	if projectionRoot == "" {
+		t.Fatal("loaded selected source omitted its runtime projection")
 	}
-	if loaded.Selection.ContractsRoot != selection.ContractsRoot ||
-		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
-		loaded.Selection.WorkflowVersion != "1.0.0" {
+
+	if loaded.SourceArtifactFact.BundleHash() != record.BundleHash {
+		t.Fatalf("loaded bundle hash = %q, want %q", loaded.SourceArtifactFact.BundleHash(), record.BundleHash)
+	}
+	if loaded.Selection != selection {
 		t.Fatalf("loaded selection = %#v", loaded.Selection)
 	}
 	if loaded.Source == nil || loaded.Module == nil || loaded.Cleanup == nil {
 		t.Fatalf("loaded source = %#v, module = %#v, cleanup nil = %v", loaded.Source, loaded.Module, loaded.Cleanup == nil)
 	}
-	if catalogStore.requestedRunID != sourceRunID || catalogStore.requestedBundleHash != projection.BundleHash {
-		t.Fatalf("store requests = run:%q hash:%q", catalogStore.requestedRunID, catalogStore.requestedBundleHash)
+	if artifactStore.requestedRunID != sourceRunID || artifactStore.requestedBundleHash != record.BundleHash {
+		t.Fatalf("store requests = run:%q hash:%q", artifactStore.requestedRunID, artifactStore.requestedBundleHash)
+	}
+	for _, entry := range bundle.SourceArtifact.Entries() {
+		projected, err := os.ReadFile(filepath.Join(projectionRoot, filepath.FromSlash(entry.Label())))
+		if err != nil || !bytes.Equal(projected, entry.Bytes()) {
+			t.Fatalf("selected projection member %s = %q, %v", entry.Label(), projected, err)
+		}
+	}
+	cleanupLoadedSelectedContractSource(loaded)
+	if _, err := os.Stat(projectionRoot); !os.IsNotExist(err) {
+		t.Fatalf("selected source projection survived cleanup: %v", err)
 	}
 }
 
@@ -478,51 +459,42 @@ func TestSelectedContractSourceLoadersRejectPresentZeroBeforePublication(t *test
 		t.Fatalf("write present-zero selected-contract file: %v", err)
 	}
 	diskSelection := runfork.RunForkContractSelection{
-		Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
-		ContractsRoot: project,
+		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 	}
-	if _, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(ctx, diskSelection); err == nil ||
+	if _, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: project}).LoadRunForkSelectedContractSource(ctx, diskSelection); err == nil ||
 		!strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
 		t.Fatalf("disk selected-contract error = %v, want present-zero rejection", err)
 	}
 
-	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	artifactProject := t.TempDir()
+	if err := os.CopyFS(artifactProject, os.DirFS(fixtureRoot)); err != nil {
+		t.Fatalf("copy source artifact fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactProject, "types.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write present-zero source artifact file: %v", err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(artifactProject)
 	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+		t.Fatalf("admit present-zero source artifact: %v", err)
 	}
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
-		record: runbundle.BundleCatalogRuntimeRecord{
-			BundleHash:  projection.BundleHash,
-			ContentYAML: bundleCatalogContentWithPresentZeroTypes(t, projection.ContentYAML),
-			DataBlob:    projection.DataBlob,
-		},
+	record := persistedSourceArtifactForAdmittedTest(t, artifact)
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
+		record: record,
 	}
-	catalogSelection := runfork.RunForkContractSelection{
+	artifactSelection := runfork.RunForkContractSelection{
 		Mode:       runfork.RunForkContractSelectionModeBundleHash,
-		BundleHash: projection.BundleHash,
+		BundleHash: record.BundleHash,
 	}
-	if _, err := (BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}).LoadRunForkSelectedContractSource(ctx, catalogSelection); err == nil ||
+	if _, err := (SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRoot, Store: artifactStore}).LoadRunForkSelectedContractSource(ctx, artifactSelection); err == nil ||
 		!strings.Contains(err.Error(), "types.yaml declares nothing - delete the file (absent means empty)") {
-		t.Fatalf("catalog selected-contract error = %v, want present-zero rejection", err)
+		t.Fatalf("source artifact selected-contract error = %v, want present-zero rejection", err)
 	}
-	if catalogStore.requestedBundleHash != projection.BundleHash {
-		t.Fatalf("catalog selected-contract request hash = %q, want %q", catalogStore.requestedBundleHash, projection.BundleHash)
+	if artifactStore.requestedBundleHash != record.BundleHash {
+		t.Fatalf("source artifact selected-contract request hash = %q, want %q", artifactStore.requestedBundleHash, record.BundleHash)
 	}
 }
 
-func bundleCatalogContentWithPresentZeroTypes(t *testing.T, contentYAML string) string {
-	t.Helper()
-	const marker = "canonical_inputs:\n"
-	const file = "  - label: \"bundle/types.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
-	if !strings.Contains(contentYAML, marker) {
-		t.Fatal("bundle catalog content is missing canonical_inputs")
-	}
-	return strings.Replace(contentYAML, marker, file+marker, 1) +
-		"  - label: \"bundle/types.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
-}
-
-func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGenerationForFork(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderPreservesImportedPackGenerationForFork(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
@@ -561,10 +533,7 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 	if err != nil {
 		t.Fatalf("load imported project-pack bundle: %v", err)
 	}
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("build imported project-pack catalog projection: %v", err)
-	}
+	record := persistedSourceArtifactForTest(t, bundle)
 	telegram, ok := base.Lookup("provider.telegram")
 	if !ok {
 		t.Fatal("embedded Telegram pack is missing")
@@ -575,24 +544,22 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 		t.Fatalf("select successor development generation: %v", err)
 	}
 	sourceRunID := uuid.NewString()
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
 		availability: runbundle.Availability{
-			RunID: sourceRunID, Status: "running", BundleHash: projection.BundleHash,
-			BundleSource: runbundle.AvailabilitySourcePersisted, BundleRowPresent: true,
+			RunID: sourceRunID, Status: "running", BundleHash: record.BundleHash,
+			SourceArtifactPresent: true,
 		},
-		record: runbundle.BundleCatalogRuntimeRecord{
-			BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
-		},
+		record: record,
 	}
-	loader := BundleCatalogSelectedContractSourceLoader{
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		PlatformPackBases: baseGenerations, Store: catalogStore,
+		PlatformPackBases: baseGenerations, Store: artifactStore,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
-		BundleHash:  projection.BundleHash,
+		BundleHash:  record.BundleHash,
 		Selection: runfork.RunForkContractSelection{
-			Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+			Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
 		},
 	})
 	if err != nil {
@@ -605,62 +572,30 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 	}
 	entry, ok := loadedBundle.PackInventory.Lookup("provider.telegram")
 	if !ok || entry.Source() != packartifact.ProvenanceProject || !entry.Modified() || !entry.ShadowsBase() ||
-		loadedBundle.PackInventory.BaseDigest() != base.Digest() || string(entry.ManifestBody()) != string(edited) {
+		loadedBundle.PackInventory.BaseDigest() != successor.Digest() || string(entry.ManifestBody()) != string(edited) {
 		t.Fatalf("fork imported pack = %#v present=%t base=%s", entry, ok, loadedBundle.PackInventory.BaseDigest())
 	}
 }
 
-func TestContractBundleSourceLoaderRejectsIncompatiblePlatformVersion(t *testing.T) {
-	ctx := context.Background()
-	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := writeSelectedContractPlatformVersionFixture(t, ">=0.8.0")
-	loader := ContractBundleSourceLoader{RepoRoot: repoRoot}
-
-	_, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
-		Mode:            runfork.RunForkContractSelectionModeSelectedContracts,
-		ContractsRoot:   contractsRoot,
-		WorkflowName:    "selected-platform-version",
-		WorkflowVersion: "1.0.0",
-	})
-	if err == nil {
-		t.Fatal("LoadRunForkSelectedContractSource error = nil, want platform_version compatibility failure")
-	}
-	for _, want := range []string{
-		"selected-contract source admission failed",
-		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("LoadRunForkSelectedContractSource error = %v, want substring %q", err, want)
-		}
-	}
-}
-
-func TestBundleCatalogSelectedContractSourceLoaderUsesRunningPlatformVersionForAdmission(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderUsesRunningPlatformVersionForAdmission(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	record := persistedSourceArtifactForTest(t, bundle)
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
+		record: record,
 	}
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
-		record: runbundle.BundleCatalogRuntimeRecord{
-			BundleHash:  projection.BundleHash,
-			ContentYAML: projection.ContentYAML,
-			DataBlob:    projection.DataBlob,
-		},
-	}
-	loader := BundleCatalogSelectedContractSourceLoader{
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot:         repoRoot,
 		PlatformSpecPath: writeRunForkExecutionPlatformSpecVersion(t, repoRoot, "0.8.0"),
-		Store:            catalogStore,
+		Store:            artifactStore,
 	}
 
-	_, err = loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-		BundleHash: projection.BundleHash,
+	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		BundleHash: record.BundleHash,
 		Selection: runfork.RunForkContractSelection{
 			Mode:       runfork.RunForkContractSelectionModeBundleHash,
-			BundleHash: projection.BundleHash,
+			BundleHash: record.BundleHash,
 		},
 	})
 	if err == nil {
@@ -676,38 +611,30 @@ func TestBundleCatalogSelectedContractSourceLoaderUsesRunningPlatformVersionForA
 	}
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelection(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderLoadsCrossBundleTargetSelection(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection: %v", err)
-	}
+	record := persistedSourceArtifactForTest(t, bundle)
 	sourceRunID := uuid.NewString()
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
 		availability: runbundle.Availability{
-			RunID:            sourceRunID,
-			Status:           "running",
-			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			BundleSource:     runbundle.AvailabilitySourcePersisted,
-			BundleRowPresent: true,
+			RunID:                 sourceRunID,
+			Status:                "running",
+			BundleHash:            "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			SourceArtifactPresent: true,
 		},
-		record: runbundle.BundleCatalogRuntimeRecord{
-			BundleHash:  projection.BundleHash,
-			ContentYAML: projection.ContentYAML,
-			DataBlob:    projection.DataBlob,
-		},
+		record: record,
 	}
-	loader := BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRoot, Store: artifactStore}
 	selection := runfork.RunForkContractSelection{
 		Mode:       runfork.RunForkContractSelectionModeBundleHash,
-		BundleHash: projection.BundleHash,
+		BundleHash: record.BundleHash,
 	}
 
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
-		BundleHash:  projection.BundleHash,
+		BundleHash:  record.BundleHash,
 		Selection:   selection,
 	})
 	if err != nil {
@@ -715,35 +642,30 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 	}
 	defer cleanupLoadedSelectedContractSource(loaded)
 
-	if catalogStore.requestedRunID != "" {
-		t.Fatalf("requested source availability run = %q, want no source-run availability lookup for bundle_hash target", catalogStore.requestedRunID)
+	if artifactStore.requestedRunID != "" {
+		t.Fatalf("requested source availability run = %q, want no source-run availability lookup for bundle_hash target", artifactStore.requestedRunID)
 	}
-	if catalogStore.requestedBundleHash != projection.BundleHash {
-		t.Fatalf("requested target hash = %q, want %q", catalogStore.requestedBundleHash, projection.BundleHash)
+	if artifactStore.requestedBundleHash != record.BundleHash {
+		t.Fatalf("requested target hash = %q, want %q", artifactStore.requestedBundleHash, record.BundleHash)
 	}
-	if loaded.BundleSourceFact.BundleHash() != projection.BundleHash ||
+	if loaded.SourceArtifactFact.BundleHash() != record.BundleHash ||
 		loaded.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
-		loaded.Selection.BundleHash != projection.BundleHash ||
-		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
-		loaded.Selection.WorkflowVersion != "1.0.0" {
+		loaded.Selection.BundleHash != record.BundleHash {
 		t.Fatalf("loaded target source = %#v", loaded)
-	}
-	if loaded.Selection.ContractsRoot != "" {
-		t.Fatalf("loaded selection contracts_root = %q, want no path owner for bundle_hash mode", loaded.Selection.ContractsRoot)
 	}
 }
 
 func TestAdmittedSelectedContractSourceLoaderBindsExactPersistedBundleSelection(t *testing.T) {
 	repoRoot := runForkExecutionRepoRoot(t)
+	sourceRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
 	selection := runfork.RunForkContractSelection{
-		Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
-		ContractsRoot: filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"),
+		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 	}
-	loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), selection)
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: sourceRoot}).LoadRunForkSelectedContractSource(context.Background(), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := runtimecorrelation.NewPersistedBundleSourceFact(loaded.BundleSourceFact.BundleHash())
+	persisted, err := runtimecorrelation.NewSourceArtifactFact(loaded.SourceArtifactFact.BundleHash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,13 +684,11 @@ func TestAdmittedSelectedContractSourceLoaderBindsExactPersistedBundleSelection(
 		t.Fatal(err)
 	}
 	if admitted.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
-		admitted.Selection.BundleHash != persisted.BundleHash() ||
-		admitted.Selection.WorkflowName != loaded.Source.WorkflowName() ||
-		admitted.Selection.WorkflowVersion != loaded.Source.WorkflowVersion() {
+		admitted.Selection.BundleHash != persisted.BundleHash() {
 		t.Fatalf("admitted target selection = %#v", admitted.Selection)
 	}
 
-	target.BundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	target.BundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	if _, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{Selection: target}); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("mismatched bundle selection error = %v", err)
 	}
@@ -784,9 +704,8 @@ func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t 
 			}
 
 			t.Run("disk", func(t *testing.T) {
-				loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-					Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
-					ContractsRoot: contractsRoot,
+				loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
+					Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 				})
 				if err != nil {
 					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -794,23 +713,18 @@ func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t 
 				assertLoadedSelectedConnectorResponse(t, loaded)
 			})
 
-			t.Run("catalog", func(t *testing.T) {
+			t.Run("source artifact", func(t *testing.T) {
 				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 				if err != nil {
 					t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 				}
-				projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
-				if err != nil {
-					t.Fatalf("BuildBundleCatalogProjection: %v", err)
-				}
-				loader := BundleCatalogSelectedContractSourceLoader{
+				record := persistedSourceArtifactForTest(t, bundle)
+				loader := SourceArtifactSelectedContractSourceLoader{
 					RepoRoot: repoRoot,
-					Store: &fakeBundleCatalogSelectedContractSourceStore{record: runbundle.BundleCatalogRuntimeRecord{
-						BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
-					}},
+					Store:    &fakeSourceArtifactSelectedContractSourceStore{record: record},
 				}
 				loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
 				})
 				if err != nil {
 					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -850,7 +764,7 @@ func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
       chat_id: "{{input.chat_id}}"
       text: "{{input.text}}"
 `
-	if err := os.WriteFile(filepath.Join(root, "flows", "worker", "tools.yaml"), []byte(tool), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "worker", "tools.yaml"), []byte(tool), 0o644); err != nil {
 		t.Fatalf("write selected connector fixture: %v", err)
 	}
 	return root
@@ -858,20 +772,16 @@ func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
 
 func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot string) {
 	t.Helper()
-	packagePath := filepath.Join(contractsRoot, "package.yaml")
-	body, err := os.ReadFile(packagePath)
+	schemaPath := filepath.Join(contractsRoot, "worker", "schema.yaml")
+	body, err := os.ReadFile(schemaPath)
 	if err != nil {
-		t.Fatalf("read selected package fixture: %v", err)
+		t.Fatalf("read selected worker schema fixture: %v", err)
 	}
-	const marker = "platform_version: \">=0.7.0 <0.8.0\"\n"
-	if !strings.Contains(string(body), marker) {
-		t.Fatalf("selected package fixture is missing platform marker")
+	body = append(body, []byte("imports:\n  connector_packs:\n    - {provider: telegram, tool: telegram.send_message}\n")...)
+	if err := os.WriteFile(schemaPath, body, 0o644); err != nil {
+		t.Fatalf("write selected worker schema fixture: %v", err)
 	}
-	body = []byte(strings.Replace(string(body), marker, marker+"connector_packs:\n  imports:\n    - {provider: telegram, tool: telegram.send_message}\n", 1))
-	if err := os.WriteFile(packagePath, body, 0o644); err != nil {
-		t.Fatalf("write selected package fixture: %v", err)
-	}
-	if err := os.Remove(filepath.Join(contractsRoot, "flows", "worker", "tools.yaml")); err != nil {
+	if err := os.Remove(filepath.Join(contractsRoot, "worker", "tools.yaml")); err != nil {
 		t.Fatalf("remove selected flow-local connector fixture: %v", err)
 	}
 }
@@ -879,21 +789,21 @@ func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot stri
 func TestCompileSelectedContractSourceIsolatesEffectiveConnectorPlans(t *testing.T) {
 	firstTool := selectedMockConnectorTool()
 	secondTool := selectedMockConnectorTool()
-	firstFact := testEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("1", 64))
+	firstFact := testEphemeralSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("1", 64))
 	first, firstPlan, firstIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"first.send": firstTool,
 	}}), firstFact)
 	if err != nil {
 		t.Fatalf("compile first selected source: %v", err)
 	}
-	secondFact := testEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("2", 64))
+	secondFact := testEphemeralSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("2", 64))
 	second, secondPlan, secondIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"second.send": secondTool,
 	}}), secondFact)
 	if err != nil {
 		t.Fatalf("compile second selected source: %v", err)
 	}
-	if !firstIdentity.BundleSourceFact().Matches(firstFact) || !secondIdentity.BundleSourceFact().Matches(secondFact) || firstIdentity.Equal(secondIdentity) {
+	if !firstIdentity.SourceArtifactFact().Matches(firstFact) || !secondIdentity.SourceArtifactFact().Matches(secondFact) || firstIdentity.Equal(secondIdentity) {
 		t.Fatalf("selected effective identities were not bound to their exact sources: first=%s second=%s", firstIdentity.Digest(), secondIdentity.Digest())
 	}
 	if _, ok := first.ToolEntries()["second.send"]; ok {
@@ -946,68 +856,66 @@ func selectedMockConnectorTool() runtimecontracts.ToolSchemaEntry {
 
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnUnavailableStates(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnUnavailableStates(t *testing.T) {
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
-	hash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	loader := BundleCatalogSelectedContractSourceLoader{
+	hash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
-		Store: &fakeBundleCatalogSelectedContractSourceStore{
+		Store: &fakeSourceArtifactSelectedContractSourceStore{
 			availability: runbundle.Availability{
-				RunID:        sourceRunID,
-				Status:       "paused",
-				BundleHash:   hash,
-				BundleSource: runbundle.AvailabilitySourceEphemeral,
-				ErrorCode:    runbundle.CodeBundleUnavailable,
-				Cause:        storerunlifecycle.BundleSourceEphemeral,
+				RunID:      sourceRunID,
+				Status:     "paused",
+				BundleHash: hash,
+				ErrorCode:  runbundle.CodeBundleUnavailable,
+				Cause:      "missing_source_artifact",
 			},
 		},
 	}
 
 	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
-		Selection:   testDBLoadedContractSelection("/stale/db-loaded/source-root"),
+		Selection:   testDBLoadedContractSelection(),
 	})
 	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleUnavailable) {
 		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleUnavailable)
 	}
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCatalogBytes(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnMissingArtifact(t *testing.T) {
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
-	hash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	loader := BundleCatalogSelectedContractSourceLoader{
+	hash := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
-		Store: &fakeBundleCatalogSelectedContractSourceStore{
+		Store: &fakeSourceArtifactSelectedContractSourceStore{
 			availability: runbundle.Availability{
-				RunID:            sourceRunID,
-				Status:           "running",
-				BundleHash:       hash,
-				BundleSource:     runbundle.AvailabilitySourcePersisted,
-				BundleRowPresent: true,
+				RunID:                 sourceRunID,
+				Status:                "running",
+				BundleHash:            hash,
+				SourceArtifactPresent: true,
 			},
-			recordErr: runbundle.ErrBundleNotFound,
+			recordErr: sourceartifact.ErrNotFound,
 		},
 	}
 
 	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
 		BundleHash:  hash,
-		Selection:   testDBLoadedContractSelection("/stale/db-loaded/source-root"),
+		Selection:   testDBLoadedContractSelection(),
 	})
 	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) {
 		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleDataIntegrityError)
 	}
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCrossBundleTarget(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnMissingCrossBundleTarget(t *testing.T) {
 	ctx := context.Background()
-	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{recordErr: runbundle.ErrBundleNotFound}
-	loader := BundleCatalogSelectedContractSourceLoader{
+	targetHash := "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{recordErr: sourceartifact.ErrNotFound}
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
-		Store:    catalogStore,
+		Store:    artifactStore,
 	}
 
 	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
@@ -1021,20 +929,23 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCrossBundl
 	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleUnavailable) {
 		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleUnavailable)
 	}
-	if catalogStore.requestedRunID != "" {
-		t.Fatalf("requested source availability run = %q, want no source-run availability lookup for bundle_hash target", catalogStore.requestedRunID)
+	if artifactStore.requestedRunID != "" {
+		t.Fatalf("requested source availability run = %q, want no source-run availability lookup for bundle_hash target", artifactStore.requestedRunID)
 	}
 }
 
-func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundleTarget(t *testing.T) {
+func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundleTarget(t *testing.T) {
 	ctx := context.Background()
-	targetHash := "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	loader := BundleCatalogSelectedContractSourceLoader{
+	targetHash := "bundle-v2:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
-		Store: &fakeBundleCatalogSelectedContractSourceStore{
-			record: runbundle.BundleCatalogRuntimeRecord{
+		Store: &fakeSourceArtifactSelectedContractSourceStore{
+			record: sourceartifact.Persisted{
 				BundleHash:  targetHash,
-				ContentYAML: "projection_version: swarm.bundle.catalog.v2\nfiles: []\ncanonical_inputs: []\n",
+				SourceBlob:  []byte("not a source artifact"),
+				MemberCount: 1,
+				TotalBytes:  21,
+				CreatedAt:   time.Now().UTC(),
 			},
 		},
 	}
@@ -1068,11 +979,10 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 	selection := testContractSelection()
 	for _, tc := range []struct {
 		name         string
-		expectedFact runtimecorrelation.BundleSourceFact
+		expectedFact runtimecorrelation.SourceArtifactFact
 		want         string
 	}{
-		{name: "bundle hash", expectedFact: testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), want: "bundle_hash mismatch"},
-		{name: "bundle source", expectedFact: testPersistedBundleSourceFact(runForkTestBundleHash), want: "bundle_source mismatch"},
+		{name: "bundle hash", expectedFact: testEphemeralSourceArtifactFact("bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), want: "bundle_hash mismatch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cleaned := false
@@ -1083,8 +993,8 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 			_, err := loadRunForkSelectedContractSource(context.Background(), loader, SelectedContractSourceLoadRequest{
-				BundleSourceFact: tc.expectedFact,
-				Selection:        selection,
+				SourceArtifactFact: tc.expectedFact,
+				Selection:          selection,
 			})
 			if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %s %s", err, runbundle.CodeBundleDataIntegrityError, tc.want)
@@ -1116,16 +1026,16 @@ func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBindin
 	return r.binding, nil
 }
 
-type fakeBundleCatalogSelectedContractSourceStore struct {
+type fakeSourceArtifactSelectedContractSourceStore struct {
 	availability        runbundle.Availability
 	availabilityErr     error
-	record              runbundle.BundleCatalogRuntimeRecord
+	record              sourceartifact.Persisted
 	recordErr           error
 	requestedRunID      string
 	requestedBundleHash string
 }
 
-func (s *fakeBundleCatalogSelectedContractSourceStore) LoadRunBundleAvailability(_ context.Context, runID string) (runbundle.Availability, error) {
+func (s *fakeSourceArtifactSelectedContractSourceStore) LoadRunBundleAvailability(_ context.Context, runID string) (runbundle.Availability, error) {
 	s.requestedRunID = runID
 	if s.availabilityErr != nil {
 		return runbundle.Availability{}, s.availabilityErr
@@ -1133,18 +1043,34 @@ func (s *fakeBundleCatalogSelectedContractSourceStore) LoadRunBundleAvailability
 	return s.availability, nil
 }
 
-func (s *fakeBundleCatalogSelectedContractSourceStore) LoadBundleCatalogRuntimeRecord(_ context.Context, bundleHash string) (runbundle.BundleCatalogRuntimeRecord, error) {
+func (s *fakeSourceArtifactSelectedContractSourceStore) GetSourceArtifact(_ context.Context, bundleHash string) (sourceartifact.Persisted, error) {
 	s.requestedBundleHash = bundleHash
 	if s.recordErr != nil {
-		return runbundle.BundleCatalogRuntimeRecord{}, s.recordErr
+		return sourceartifact.Persisted{}, s.recordErr
 	}
 	return s.record, nil
 }
 
-func testDBLoadedContractSelection(contractsRoot string) runfork.RunForkContractSelection {
+func persistedSourceArtifactForTest(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) sourceartifact.Persisted {
+	t.Helper()
+	if bundle == nil || bundle.SourceArtifact == nil {
+		t.Fatal("loaded source artifact is required")
+	}
+	return persistedSourceArtifactForAdmittedTest(t, bundle.SourceArtifact)
+}
+
+func persistedSourceArtifactForAdmittedTest(t testing.TB, artifact *sourceartifact.AdmittedSourceArtifact) sourceartifact.Persisted {
+	t.Helper()
+	record, err := sourceartifact.PersistedFromArtifact(artifact, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("persist source artifact fixture: %v", err)
+	}
+	return record
+}
+
+func testDBLoadedContractSelection() runfork.RunForkContractSelection {
 	return runfork.RunForkContractSelection{
-		Mode:          "selected_contracts",
-		ContractsRoot: contractsRoot,
+		Mode: "selected_contracts",
 	}
 }
 
@@ -1157,19 +1083,6 @@ func loadRunForkExecutionFixtureBundle(t *testing.T, relativeRoot string) *runti
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", relativeRoot, err)
 	}
 	return bundle
-}
-
-func writeSelectedContractPlatformVersionFixture(t *testing.T, declaredRange string) string {
-	t.Helper()
-
-	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "package.yaml"), `name: selected-platform-version
-version: "1.0.0"
-platform_version: "`+declaredRange+`"
-flows: []
-`)
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-platform-version\n")
-	return root
 }
 
 func writeSelectedContractFixtureFile(t *testing.T, path, contents string) {
@@ -1207,10 +1120,7 @@ func testSelectedContractBinding(forkRunID string) runfork.RunForkSelectedContra
 		SourceRunID: uuid.NewString(),
 		ForkEventID: uuid.NewString(),
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v2",
+			Mode: "selected_contracts",
 		},
 		CreatedAt: time.Unix(1700000900, 0).UTC(),
 	}
@@ -1220,26 +1130,26 @@ func testContractSelection() runfork.RunForkContractSelection {
 	return testSelectedContractBinding(uuid.NewString()).ContractSelection
 }
 
-func testSelectedSource(selection runfork.RunForkContractSelection) semanticview.Source {
+func testSelectedSource(_ runfork.RunForkContractSelection) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    selection.WorkflowName,
-			Version: selection.WorkflowVersion,
+			Name:    "selected-workflow",
+			Version: "v2",
 		},
 	})
 }
 
 func testLoadedSelectedSource(selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
-	fact := testEphemeralBundleSourceFact(runForkTestBundleHash)
+	fact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
 	return LoadedSelectedContractSource{
 		Selection:               selection,
 		Source:                  testSelectedSource(selection),
-		BundleSourceFact:        fact,
+		SourceArtifactFact:      fact,
 		EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
 	}
 }
 
-func testEffectiveSourceIdentity(fact runtimecorrelation.BundleSourceFact) scenarioexecution.EffectiveSourceIdentity {
+func testEffectiveSourceIdentity(fact runtimecorrelation.SourceArtifactFact) scenarioexecution.EffectiveSourceIdentity {
 	identity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("a", 64))
 	if err != nil {
 		panic(err)
@@ -1247,16 +1157,16 @@ func testEffectiveSourceIdentity(fact runtimecorrelation.BundleSourceFact) scena
 	return identity
 }
 
-func testEphemeralBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+func testEphemeralSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
 	return fact
 }
 
-func testPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+func testPersistedSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}

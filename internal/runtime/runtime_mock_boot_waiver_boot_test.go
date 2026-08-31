@@ -34,11 +34,11 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			ProcessWorkOwner:  processOwner,
+			SelfCheck:          false,
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
+			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			ProcessWorkOwner:   processOwner,
 		},
 	})
 	if err != nil {
@@ -66,11 +66,11 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			ProcessWorkOwner:  processOwner,
+			SelfCheck:          false,
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
+			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			ProcessWorkOwner:   processOwner,
 		},
 	})
 	if err != nil {
@@ -98,12 +98,12 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemoryWithConnectorSource(t)),
-			Credentials:       credentialStore,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			ProcessWorkOwner:  processOwner,
+			SelfCheck:          false,
+			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemoryWithConnectorSource(t)),
+			Credentials:        credentialStore,
+			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+			ProcessWorkOwner:   processOwner,
 		},
 	})
 	if err != nil {
@@ -115,13 +115,8 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(
 func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
-	// This boot proof needs one declaration owner; package composition is
-	// covered by the contracts loader parity tests.
-	if err := os.Remove(filepath.Join(root, "flows", "support", "package.yaml")); err != nil {
-		t.Fatalf("remove overlapping nested package declaration: %v", err)
-	}
-	agentsPath := filepath.Join(root, "flows", "support", "agents.yaml")
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryDirectFlow)
+	agentsPath := filepath.Join(root, "support", "agents.yaml")
 	agents, err := os.ReadFile(agentsPath)
 	if err != nil {
 		t.Fatalf("read package-backed agents: %v", err)
@@ -130,7 +125,7 @@ func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 	if err := os.WriteFile(agentsPath, agents, 0o644); err != nil {
 		t.Fatalf("write package-backed mocked agents: %v", err)
 	}
-	mockPath := filepath.Join(root, "mocks", "backend.py")
+	mockPath := filepath.Join(root, "support", "mocks", "backend.py")
 	if err := os.MkdirAll(filepath.Dir(mockPath), 0o755); err != nil {
 		t.Fatalf("create mock module directory: %v", err)
 	}

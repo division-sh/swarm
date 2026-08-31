@@ -414,7 +414,7 @@ rows:
     enforcement_point: internal/runtime/runforkexecution/activation_gate.go
     proof_refs:
       - {kind: go_test, name: TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation}
-      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmissionJSON}
+      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON}
     rationale: "Selected-contract prerequisite failures remain blockers/readback; this PR does not promote them to execution."
 
   - id: memoized_reexecution_reserved

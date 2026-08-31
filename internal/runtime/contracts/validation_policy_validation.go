@@ -13,30 +13,16 @@ func validateWorkflowPolicyValidationContracts(bundle *WorkflowContractBundle) [
 		return nil
 	}
 	errs := []error{}
-	errs = append(errs, validateProjectPolicyValidationUnsupported(bundle)...)
 	errs = append(errs, validateFlowPolicyValidationSets(bundle)...)
 	errs = append(errs, validatePolicySheetValidationRows(bundle)...)
 	return errs
 }
 
-func validateProjectPolicyValidationUnsupported(bundle *WorkflowContractBundle) []error {
-	errs := []error{}
-	for _, view := range bundle.ProjectViews() {
-		if len(view.Policy.Validation) == 0 {
-			continue
-		}
-		errs = append(errs, fmt.Errorf("%w: project policy %s declares validation; validation must be declared in flow policy.yaml", ErrInvalidField, strings.TrimSpace(view.Paths.Key)))
-	}
-	return errs
-}
-
 func validateFlowPolicyValidationSets(bundle *WorkflowContractBundle) []error {
 	errs := []error{}
-	for _, flowID := range sortedFlowSchemaIDs(bundle.FlowSchemas) {
-		view, ok := bundle.FlowViewByID(flowID)
-		if !ok || view == nil {
-			continue
-		}
+	for _, value := range bundle.FlowViews() {
+		view := value
+		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		policy := bundle.ResolvedPolicyForFlow(flowID)
 		setNames := sortedValidationSetNames(view.Policy.Validation)
 		for _, setName := range setNames {

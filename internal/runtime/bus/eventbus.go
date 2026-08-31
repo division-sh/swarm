@@ -83,7 +83,7 @@ type EventBus struct {
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
 	standingRunWorkOwner        StandingRunWorkOwner
-	bundleSourceFact            runtimecorrelation.BundleSourceFact
+	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	runtimeInstanceID           string
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
@@ -287,7 +287,7 @@ type EventBusOptions struct {
 	RecipientPlanGuard          PublishRecipientPlanGuard
 	RuntimeIngressDispatchGate  RuntimeIngressDispatchGate
 	RunDispatchGate             RunDispatchGate
-	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID           string
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
@@ -351,7 +351,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 	if opts.PipelineObligations == nil {
 		return nil, errors.New("durable event bus requires the pipeline obligation owner")
 	}
-	if err := opts.BundleSourceFact.Validate(); err != nil {
+	if err := opts.SourceArtifactFact.Validate(); err != nil {
 		return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
 	}
 	if err := opts.Durable.validate(); err != nil {
@@ -483,7 +483,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		return nil, fmt.Errorf("event bus receiver execution: %w", err)
 	}
 	if opts.PipelineObligations != nil {
-		if err := opts.BundleSourceFact.Validate(); err != nil {
+		if err := opts.SourceArtifactFact.Validate(); err != nil {
 			return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
 		}
 	}
@@ -499,9 +499,6 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 	}
 	routeTable := opts.RouteTable
 	if routeTable != nil {
-		if err := validateTypedPubSubAuthorizations(semanticSource); err != nil {
-			return nil, err
-		}
 	}
 	if routeTable == nil {
 		derived, err := DeriveRouteTable(semanticSource)
@@ -537,7 +534,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		recipientPlanGuard:          opts.RecipientPlanGuard,
 		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 		runDispatchGate:             opts.RunDispatchGate,
-		bundleSourceFact:            opts.BundleSourceFact,
+		sourceArtifactFact:          opts.SourceArtifactFact,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
@@ -634,7 +631,7 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 		return false, nil
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -753,10 +750,10 @@ func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 	}
 	eb.mu.RLock()
 	source := eb.semanticSource
-	sourceFact := eb.bundleSourceFact
+	sourceFact := eb.sourceArtifactFact
 	eb.mu.RUnlock()
-	bundleHash, bundleSource := sourceFact.StorageValues()
-	if bundleHash == "" || bundleSource == "" || source == nil || strings.TrimSpace(source.WorkflowVersion()) == "" {
+	bundleHash := sourceFact.BundleHash()
+	if bundleHash == "" || source == nil || strings.TrimSpace(source.WorkflowVersion()) == "" {
 		return nil, errors.New("flow-instance route topology requires exact EventBus semantic source")
 	}
 	workflowVersion := strings.TrimSpace(source.WorkflowVersion())
@@ -767,7 +764,6 @@ func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 			return nil, fmt.Errorf("active flow-instance descriptor %s is missing exact semantic source", descriptor.FlowInstance)
 		}
 		if descriptor.BundleHash != bundleHash ||
-			descriptor.BundleSource != bundleSource ||
 			descriptor.WorkflowVersion != workflowVersion {
 			return nil, fmt.Errorf(
 				"active flow-instance descriptor %s semantic source does not match the current EventBus source",
@@ -863,7 +859,7 @@ func (eb *EventBus) PublishPersistedFlowInstanceRoute(req FlowInstanceRouteMater
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
-	if _, err := eb.admitBundleSourceFact(context.Background()); err != nil {
+	if _, err := eb.admitSourceArtifactFact(context.Background()); err != nil {
 		return err
 	}
 	eb.mu.RLock()
@@ -897,7 +893,7 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 		return errors.New("event bus is required")
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -960,7 +956,7 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 		return errors.New("event bus is required")
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -1033,7 +1029,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	if eb == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitBundleSourceFact(context.Background())
+	cleanupCtx, err := eb.admitSourceArtifactFact(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1159,7 +1155,7 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 		return nil
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -1218,7 +1214,7 @@ func (p *preparedAgentRoute) Publish() error {
 	if p == nil || p.bus == nil || p.route == nil {
 		return errors.New("prepared agent route is required")
 	}
-	cleanupCtx, err := p.bus.admitBundleSourceFact(p.lifecycleCtx)
+	cleanupCtx, err := p.bus.admitSourceArtifactFact(p.lifecycleCtx)
 	if err != nil {
 		return err
 	}
@@ -1275,7 +1271,7 @@ func (p *preparedAgentRoute) Discard() error {
 	if eb == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitBundleSourceFact(p.lifecycleCtx)
+	cleanupCtx, err := eb.admitSourceArtifactFact(p.lifecycleCtx)
 	if err != nil {
 		return err
 	}
@@ -1300,7 +1296,7 @@ func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admis
 	if eb == nil || eb.workOwner == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
-	lifecycleCtx, err := eb.admitBundleSourceFact(context.Background())
+	lifecycleCtx, err := eb.admitSourceArtifactFact(context.Background())
 	if err != nil {
 		return nil
 	}
@@ -1358,7 +1354,7 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	if eb == nil || !token.Valid() {
 		return
 	}
-	cleanupCtx, err := eb.admitBundleSourceFact(context.Background())
+	cleanupCtx, err := eb.admitSourceArtifactFact(context.Background())
 	if err != nil {
 		return
 	}
@@ -1383,7 +1379,7 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 		return nil, errors.New("event bus runtime work owner is required")
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1476,7 +1472,7 @@ func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHan
 	if eb == nil || handle == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))
+	cleanupCtx, err := eb.admitSourceArtifactFact(context.WithoutCancel(handle.lifecycleCtx))
 	if err != nil {
 		return err
 	}

@@ -84,7 +84,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			activityNode := mustRunForkPackageNode("activity-fork-proof", "flow_a", "test-node")
+			activityNode := mustRunForkNode("flow_a", "test-node")
 			beforeCalls := connectorCalls.Load()
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -140,8 +140,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
 			}
 			selection := runfork.RunForkContractSelection{
-				Mode: "selected_contracts", ContractsRoot: "/tmp/selected-contract-activity-proof",
-				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
+				Mode: "selected_contracts",
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: selectedContractActivityLoadedSource(source, selection)}
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -264,9 +263,10 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "flow_a", PackageKey: "activity-fork-proof", Dir: "flows/flow_a"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "flow_a"},
 		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", Mode: mode, InitialState: "pending", States: []string{"pending"}},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"review.requested": {}}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
@@ -295,11 +295,11 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
 	nodes := []runtimepipeline.WorkflowNode{{
-		Node: mustRunForkPackageNode("activity-fork-proof", "flow_a", "test-node"), ExecutionType: runtimecontracts.SystemNodeExecutionType,
+		Node: mustRunForkNode("flow_a", "test-node"), ExecutionType: runtimecontracts.SystemNodeExecutionType,
 	}}
-	fact := testEphemeralBundleSourceFact(runForkTestBundleHash)
+	fact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
 	return LoadedSelectedContractSource{
-		Selection: selection, Source: source, BundleSourceFact: fact, EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
+		Selection: selection, Source: source, SourceArtifactFact: fact, EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
 		Module: selectedContractWorkflowModule{
 			source: source, workflow: workflow, nodes: nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),

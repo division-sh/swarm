@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type Context string
@@ -52,11 +52,11 @@ func ParseDisposition(raw string) (Disposition, error) {
 type HandlerRuleSelectionFact struct {
 	context      Context
 	disposition  Disposition
-	ref          contractelementidentity.ContractElementRef
+	ref          runtimeidentity.DeclarationIdentity
 	displayLabel string
 }
 
-func Selected(context Context, ref contractelementidentity.ContractElementRef, displayLabel string) (HandlerRuleSelectionFact, error) {
+func Selected(context Context, ref runtimeidentity.DeclarationIdentity, displayLabel string) (HandlerRuleSelectionFact, error) {
 	fact := HandlerRuleSelectionFact{context: context, disposition: DispositionSelected, ref: ref, displayLabel: strings.TrimSpace(displayLabel)}
 	return fact, fact.Validate()
 }
@@ -66,7 +66,7 @@ func NoMatch(context Context) (HandlerRuleSelectionFact, error) {
 	return fact, fact.Validate()
 }
 
-func EvaluationFailed(context Context, ref contractelementidentity.ContractElementRef, displayLabel string) (HandlerRuleSelectionFact, error) {
+func EvaluationFailed(context Context, ref runtimeidentity.DeclarationIdentity, displayLabel string) (HandlerRuleSelectionFact, error) {
 	fact := HandlerRuleSelectionFact{context: context, disposition: DispositionEvaluationFailed, ref: ref, displayLabel: strings.TrimSpace(displayLabel)}
 	return fact, fact.Validate()
 }
@@ -75,7 +75,7 @@ func NotApplicable() HandlerRuleSelectionFact {
 	return HandlerRuleSelectionFact{context: ContextNone, disposition: DispositionNotApplicable}
 }
 
-func Hydrate(context, disposition, packageKey, elementID, displayLabel string) (HandlerRuleSelectionFact, error) {
+func Hydrate(context, disposition, flowPath, family, semanticPath, displayLabel string) (HandlerRuleSelectionFact, error) {
 	parsedContext, err := ParseContext(context)
 	if err != nil {
 		return HandlerRuleSelectionFact{}, err
@@ -85,8 +85,8 @@ func Hydrate(context, disposition, packageKey, elementID, displayLabel string) (
 		return HandlerRuleSelectionFact{}, err
 	}
 	fact := HandlerRuleSelectionFact{context: parsedContext, disposition: parsedDisposition, displayLabel: strings.TrimSpace(displayLabel)}
-	if packageKey != "" || elementID != "" {
-		fact.ref, err = contractelementidentity.ParseContractElementRef(packageKey, elementID)
+	if flowPath != "" || family != "" || semanticPath != "" {
+		fact.ref, err = runtimeidentity.AdmitDeclarationIdentity(flowPath, family, semanticPath)
 		if err != nil {
 			return HandlerRuleSelectionFact{}, err
 		}
@@ -104,7 +104,7 @@ func (f HandlerRuleSelectionFact) Validate() error {
 	switch f.disposition {
 	case DispositionSelected, DispositionEvaluationFailed:
 		if f.context == ContextNone || !f.ref.Valid() {
-			return fmt.Errorf("%s handler rule fact requires a concrete context and contract element reference", f.disposition)
+			return fmt.Errorf("%s handler rule fact requires a concrete context and declaration identity", f.disposition)
 		}
 		if f.disposition == DispositionEvaluationFailed && f.context != ContextRules && f.context != ContextOnComplete {
 			return fmt.Errorf("failed-evaluation handler rule fact requires rules or on-complete context")
@@ -124,9 +124,9 @@ func (f HandlerRuleSelectionFact) Validate() error {
 	return nil
 }
 
-func (f HandlerRuleSelectionFact) Context() Context                                { return f.context }
-func (f HandlerRuleSelectionFact) Disposition() Disposition                        { return f.disposition }
-func (f HandlerRuleSelectionFact) Ref() contractelementidentity.ContractElementRef { return f.ref }
-func (f HandlerRuleSelectionFact) DisplayLabel() string                            { return f.displayLabel }
-func (f HandlerRuleSelectionFact) Equal(other HandlerRuleSelectionFact) bool       { return f == other }
-func (f HandlerRuleSelectionFact) Empty() bool                                     { return f == (HandlerRuleSelectionFact{}) }
+func (f HandlerRuleSelectionFact) Context() Context                          { return f.context }
+func (f HandlerRuleSelectionFact) Disposition() Disposition                  { return f.disposition }
+func (f HandlerRuleSelectionFact) Ref() runtimeidentity.DeclarationIdentity  { return f.ref }
+func (f HandlerRuleSelectionFact) DisplayLabel() string                      { return f.displayLabel }
+func (f HandlerRuleSelectionFact) Equal(other HandlerRuleSelectionFact) bool { return f == other }
+func (f HandlerRuleSelectionFact) Empty() bool                               { return f == (HandlerRuleSelectionFact{}) }

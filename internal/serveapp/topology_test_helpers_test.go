@@ -11,7 +11,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -28,7 +27,6 @@ type supervisorTestRetainedSession struct {
 	authority                runtimestartupownership.Authority
 	plan                     runtimeagenttopology.SourceSetPlan
 	sourceSetRequests        []runtimeagenttopology.SourceSetCommitRequest
-	bundleDeleteRequests     []runtimebundledelete.FinalMutationRequest
 	destructiveResetRequests []runtimedestructivereset.CleanupRequest
 	callback                 func(runtimestartupownership.TerminalResult)
 	released                 bool
@@ -84,21 +82,6 @@ func (s *supervisorTestRetainedSession) CommitSourceSet(_ context.Context, req r
 	}, nil
 }
 
-func (s *supervisorTestRetainedSession) ApplyBundleDeleteFinalMutation(_ context.Context, req runtimebundledelete.FinalMutationRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.bundleDeleteRequests = append(s.bundleDeleteRequests, req)
-	if topology != nil {
-		s.sourceSetRequests = append(s.sourceSetRequests, *topology)
-		s.plan = topology.Plan
-	}
-	return runtimebundledelete.FinalMutationResult{OperationName: req.OperationName, BundleHash: req.BundleHash, AppliedAt: req.RequestedAt, Deleted: true}, nil
-}
-
-func (*supervisorTestRetainedSession) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
-	return runtimebundledelete.Result{}, errors.New("not implemented")
-}
-
 func (s *supervisorTestRetainedSession) ApplyDestructiveResetCleanup(_ context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,7 +90,7 @@ func (s *supervisorTestRetainedSession) ApplyDestructiveResetCleanup(_ context.C
 		s.sourceSetRequests = append(s.sourceSetRequests, *topology)
 		s.plan = topology.Plan
 	}
-	return runtimedestructivereset.CleanupResult{OperationName: req.Result.OperationName, IncludeBundles: req.Result.IncludeBundles, AppliedAt: req.RequestedAt}, nil
+	return runtimedestructivereset.CleanupResult{OperationName: req.Result.OperationName, IncludeSourceArtifacts: req.Result.IncludeSourceArtifacts, AppliedAt: req.RequestedAt}, nil
 }
 
 func (*supervisorTestRetainedSession) CommitAgentLifecycleTransition(context.Context, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -134,15 +117,14 @@ func installSelectedStoreTestProcessTopology(
 	stores *selectedStoreOwner,
 	rt *runtimepkg.Runtime,
 	source semanticview.Source,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 	runtimeInstanceID string,
 ) (runtimestartupownership.ProcessCapability, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
 	if stores == nil || rt == nil || rt.Manager == nil {
 		t.Fatal("selected-store topology test requires an owner and runtime manager")
 	}
-	bundleHash, bundleSource := fact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-store test source set: %v", err)
@@ -176,9 +158,8 @@ func installSelectedStoreTestGeneration(
 	if capability == nil || rt == nil {
 		t.Fatal("selected-store test generation requires a capability and runtime")
 	}
-	_, bundleSource := rt.Options.BundleSourceFact.StorageValues()
 	grant, err := capability.IssueGenerationGrant(context.Background(), runtimestartupownership.GrantRequest{
-		BundleHash: rt.Options.BundleSourceFact.BundleHash(), BundleSource: bundleSource,
+		BundleHash:        rt.Options.SourceArtifactFact.BundleHash(),
 		RuntimeInstanceID: rt.Options.RuntimeInstanceID, RuntimeGeneration: generation,
 		SourceSetRevision: plan.Revision,
 	})
@@ -237,7 +218,7 @@ func registerServeTestDurableAgent(
 	if err != nil {
 		t.Fatalf("resolve serve test durable agent identity: %v", err)
 	}
-	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		bundleHash,

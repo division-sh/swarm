@@ -1,0 +1,4 @@
+name: test-chain-depth-limit
+version: 1.0.0
+description: Event chain exceeding max depth is dead-lettered at the limit.
+platform_version: ">=0.7.0 <0.8.0"

@@ -20,7 +20,7 @@ import (
 
 func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -29,7 +29,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 		Path: "producer",
 	}
 	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
@@ -64,9 +64,38 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 	}
 }
 
+func TestWorkflowEventPolicyDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.done": {RuntimeHandling: "consuming"},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+
+	policy := deriveWorkflowEventPolicy(semanticview.Wrap(bundle), pipelineFlowPathNode(t, "child", "listener"), "task.done")
+	if policy.Consume || policy.VisibleDownstream {
+		t.Fatalf("child event policy = %#v, want no policy from another flow's declaration", policy)
+	}
+}
+
 func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProducerScopedEvent(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "vertical.shortlisted"}}},
@@ -75,7 +104,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 		Path: "scoring",
 	}
 	validation := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "vertical.shortlisted"}}},
@@ -146,7 +175,7 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 	for _, authored := range []string{"child/task.done", "missing/task.done", "child/grandchild/task.done", "swarm://child/task.done"} {
 		t.Run(strings.ReplaceAll(authored, "/", "_"), func(t *testing.T) {
 			source := workflowNodeExactSubscriptionSource(authored)
-			nodeRef := pipelinePackageNode(t, "flows/child", "child", "listener")
+			nodeRef := pipelineFlowPathNode(t, "child", "listener")
 			if aliases, err := workflowNodeSubscriptionAliases(source, nodeRef, authored); err == nil || aliases != nil {
 				t.Fatalf("subscription aliases = %#v error = %v, want typed rejection", aliases, err)
 			}
@@ -173,7 +202,7 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 
 func TestWorkflowNodeProjectionPreservesLocalExactHandler(t *testing.T) {
 	source := workflowNodeExactSubscriptionSource("task.done")
-	node := pipelinePackageNode(t, "flows/child", "child", "listener")
+	node := pipelineFlowPathNode(t, "child", "listener")
 	aliases, err := workflowNodeSubscriptionAliases(source, node, "task.done")
 	if err != nil {
 		t.Fatalf("workflowNodeSubscriptionAliases: %v", err)
@@ -197,7 +226,7 @@ func workflowNodeExactSubscriptionSource(authored string) semanticview.Source {
 	}
 	flow := runtimecontracts.FlowContractView{
 		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
 	}
@@ -241,7 +270,7 @@ func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T
 
 func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -251,7 +280,7 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
@@ -274,7 +303,7 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 			"scan.completed": {OwningNode: "consumer-node"},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
@@ -314,6 +343,10 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 
 func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.start": {},
+			"task.done":  {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -344,37 +377,41 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 	}
 }
 
-func TestLoadWorkflowNodes_NestedProjectPackageUsesOwningFlowForSubscriptionAndEmission(t *testing.T) {
+func TestLoadWorkflowNodes_NestedChildFlowUsesOwningFlowForSubscriptionAndEmission(t *testing.T) {
 	nodeContract := runtimecontracts.SystemNodeContract{
 		ID: "shared",
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 		},
 	}
-	childPackage := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": nodeContract},
+	childFlow := runtimecontracts.FlowContractView{
+		Path:   "orders/a",
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "orders/a", NodesFile: "orders/a/nodes.yaml"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.start": {}, "task.done": {}},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"shared": nodeContract},
 	}
 	flow := runtimecontracts.FlowContractView{
 		Path:  "orders",
-		Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "flows/orders"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "orders"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
 			Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.start"}}},
 			Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "task.done"}}},
 		}},
 		Events:   map[string]runtimecontracts.EventCatalogEntry{"task.start": {}, "task.done": {}},
-		Children: []runtimecontracts.FlowContractView{childPackage},
+		Children: []runtimecontracts.FlowContractView{childFlow},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"orders": flow.Schema},
-		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]}},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{
+			".": &root, "orders": &root.Children[0], "orders/a": &root.Children[0].Children[0],
+		}},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile nested package semantics: %v", err)
+		t.Fatalf("compile nested child flow semantics: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	ref := pipelinePackageNode(t, "packages/a", "orders", "shared")
+	ref := pipelineFlowPathNode(t, "orders/a", "shared")
 
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
@@ -390,13 +427,13 @@ func TestLoadWorkflowNodes_NestedProjectPackageUsesOwningFlowForSubscriptionAndE
 	if got == nil {
 		t.Fatalf("nested package node missing from %#v", nodes)
 	}
-	if !workflowNodeHasSubscriptionForTest(*got, "orders/task.start") || !workflowNodeHasSubscriptionForTest(*got, "task.start") {
+	if !workflowNodeHasSubscriptionForTest(*got, "orders/a/task.start") || !workflowNodeHasSubscriptionForTest(*got, "task.start") {
 		t.Fatalf("subscriptions = %#v, want owning-flow canonical and local forms", got.Subscriptions)
 	}
-	if !workflowNodeHasProducesForTest(*got, "orders/task.done") {
-		t.Fatalf("produces = %#v, want orders/task.done", got.Produces)
+	if !workflowNodeHasProducesForTest(*got, "orders/a/task.done") {
+		t.Fatalf("produces = %#v, want orders/a/task.done", got.Produces)
 	}
-	resolved := workflowNodeEventHandlerResolutionForEventType(source, ref, "orders/task.start")
+	resolved := workflowNodeEventHandlerResolutionForEventType(source, ref, "orders/a/task.start")
 	if !resolved.Matched || resolved.HandlerEventKey != "task.start" {
 		t.Fatalf("handler resolution = %#v, want exact nested declaration", resolved)
 	}
@@ -419,7 +456,7 @@ func TestLoadWorkflowNodes_ImportInputBindingRequiresEffectiveConnect(t *testing
 		t.Fatalf("worker-node subscriptions = %#v, bind must not add producer authority", worker.Subscriptions)
 	}
 	evt := eventtest.RunCreatingRootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, pipelinePackageNode(t, "flows/worker", "worker", "worker-node"), evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, pipelineFlowPathNode(t, "worker", "worker-node"), evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only producer event resolved handler: %#v", resolved)
 	}
@@ -490,7 +527,7 @@ func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.
 
 func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackageRootConnect(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-	producerEvent := source.ResolveFlowEventReference("grandchild", "micro.done")
+	producerEvent := source.ResolveFlowEventReference("child/grandchild", "micro.done")
 	receiverEvent := source.ResolveFlowEventReference("child", "micro.done")
 	if producerEvent == receiverEvent {
 		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
@@ -500,21 +537,21 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackage
 	route := workflowNodeStampedConnectRoute(t, source, "child", "micro.done", "child-relay")
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "child", "child-relay"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
-		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
+		t.Fatalf("authoring-flow connect handler resolution = %#v, want child-relay micro.done", resolved)
 	}
 }
 
 func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedRootReceiverConnect(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	producerEvent := source.ResolveFlowEventReference("child", "micro.relayed")
-	receiverEvent := source.ResolveFlowEventReference("", "micro.done")
+	receiverEvent := source.ResolveFlowEventReference(".", "micro.done")
 	if producerEvent == receiverEvent {
 		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
 	}
 
 	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	route := workflowNodeStampedConnectRoute(t, source, "", "micro.done", "root-collector")
-	node := pipelineSourceNode(t, source, "", "root-collector")
+	route := workflowNodeStampedConnectRoute(t, source, ".", "micro.done", "root-collector")
+	node := pipelineSourceNode(t, source, ".", "root-collector")
 	loaded, err := LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
@@ -530,7 +567,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedRootRec
 
 func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromFlowInstanceShape(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-	producerEvent := source.ResolveFlowEventReference("grandchild", "micro.done")
+	producerEvent := source.ResolveFlowEventReference("child/grandchild", "micro.done")
 	for _, tc := range []struct {
 		name         string
 		flowInstance string
@@ -689,7 +726,7 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 
 func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
@@ -699,7 +736,7 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.done": {}},
 	}
 	receiver := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "receiver"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
 				Event: "deploy.requested",
@@ -716,10 +753,17 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
-	connect := runtimecontracts.FlowPackageConnect{SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.requested"}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	connect := runtimecontracts.FlowConnect{SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.requested"}
+	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{connect}}
+	root.Schema = rootSchema
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
+		RootSchema: &rootSchema,
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":        {FlowPath: ".", Schema: "schema.yaml"},
+			"producer": {FlowPath: "producer", Schema: "producer/schema.yaml"},
+			"receiver": {FlowPath: "receiver", Schema: "receiver/schema.yaml"},
+		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"producer": producer.Schema,
 			"receiver": receiver.Schema,
@@ -762,7 +806,7 @@ func TestWorkflowPersistedFlowModeUsesClosedStoreRepresentation(t *testing.T) {
 
 func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}}}},
@@ -778,7 +822,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 		"deploy.audited":  {},
 	}
 	receiver := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver", PackageKey: "."},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "receiver"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: receiverInputs}},
@@ -788,13 +832,20 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 			"receiver-node": {ID: "receiver-node", EventHandlers: receiverHandlers},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
-	connects := []runtimecontracts.FlowPackageConnect{
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	connects := []runtimecontracts.FlowConnect{
 		{SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.accepted"},
 		{SourceLine: 2, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.audited"},
 	}
+	rootSchema := runtimecontracts.FlowSchemaDocument{Connect: connects}
+	root.Schema = rootSchema
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: connects}}},
+		RootSchema: &rootSchema,
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":        {FlowPath: ".", Schema: "schema.yaml"},
+			"producer": {FlowPath: "producer", Schema: "producer/schema.yaml"},
+			"receiver": {FlowPath: "receiver", Schema: "receiver/schema.yaml"},
+		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "receiver": receiver.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -812,7 +863,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 
 func TestWorkflowNodeHandlerResolution_TargetRouteConsumesDeclaredInputEventIdentity(t *testing.T) {
 	source := workflowNodeDirectTemplateDeliverySource()
-	evt := eventtest.RunCreatingRootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngress("", "account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
 		FlowID:       "account_case",
 		FlowInstance: "account_case/ti-1",
@@ -860,7 +911,7 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTarget
 
 func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 	accountCase := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "account_case", Flow: "account_case"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "account_case"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
@@ -925,32 +976,6 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 	}
 }
 
-func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
-	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardDenied)
-	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	workerNode := pipelineSourceNode(t, source, "worker", "worker-listener")
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, workerNode, evt)
-	if resolved.Matched {
-		t.Fatalf("worker-listener matched ungranted sibling event through raw wildcard fallback: %#v", resolved)
-	}
-	if _, ok := source.ExecutableNodeEventHandler(workerNode, "producer/task.done"); ok {
-		t.Fatal("semantic source NodeEventHandler matched ungranted sibling event")
-	}
-}
-
-func TestWorkflowNodeHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
-	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
-	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	node := pipelineSourceNode(t, source, "worker", "worker-listener")
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
-	if !resolved.Matched {
-		t.Fatal("worker-listener did not match granted sibling event")
-	}
-	if got := resolved.HandlerEventKey; got != "**/task.done" {
-		t.Fatalf("handler event key = %q, want **/task.done", got)
-	}
-}
-
 func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadPipelineImportBoundaryAliasVariant(t, canonicalrouting.ImportBoundaryAliasBindOnly)
@@ -977,21 +1002,6 @@ func loadPipelineImportBoundaryAliasVariant(t *testing.T, variant canonicalrouti
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	return semanticview.Wrap(bundle)
-}
-func loadPipelineImportBoundaryWildcardSource(t *testing.T, variant canonicalrouting.ImportBoundaryWildcardVariant) semanticview.Source {
-	t.Helper()
-	bundle := loadPipelineImportBoundaryWildcardBundle(t, variant)
-	return semanticview.Wrap(bundle)
-}
-
-func loadPipelineImportBoundaryWildcardBundle(t *testing.T, variant canonicalrouting.ImportBoundaryWildcardVariant) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	root := canonicalrouting.CopyImportBoundaryWildcard(t, variant)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return bundle
 }
 
 func workflowNodeByIDForTest(nodes []WorkflowNode, id string) *WorkflowNode {

@@ -6,24 +6,23 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
-	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
-	bundlecatalogstore "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
+	storesourceartifact "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 )
 
-func (s *PostgresStore) UpsertBundleCatalogWithData(ctx context.Context, request bundlecatalog.Upsert, catalog runtimedata.Catalog) (bundlecatalog.UpsertResult, error) {
-	if s == nil || s.backend == nil || s.postgres == nil || s.durableDataOwner == nil {
-		return bundlecatalog.UpsertResult{}, fmt.Errorf("postgres bundle and data catalog owners are required")
+func (s *PostgresStore) EnsureSourceArtifactWithData(ctx context.Context, artifact *sourceartifact.AdmittedSourceArtifact, catalog runtimedata.Catalog) (sourceartifact.EnsureResult, error) {
+	if s == nil || s.backend == nil || s.sourceArtifactOwner == nil || s.durableDataOwner == nil {
+		return sourceartifact.EnsureResult{}, fmt.Errorf("postgres source artifact and data catalog owners are required")
 	}
-	if request.BundleHash != catalog.BundleHash {
-		return bundlecatalog.UpsertResult{}, fmt.Errorf("bundle and data catalog hashes must match")
+	if artifact == nil || artifact.BundleHash() != catalog.BundleHash {
+		return sourceartifact.EnsureResult{}, fmt.Errorf("source artifact and data catalog hashes must match")
 	}
-	var result bundlecatalog.UpsertResult
+	var result sourceartifact.EnsureResult
 	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		result, err = bundlecatalogstore.UpsertPostgresBundleCatalogTx(s.postgres, txctx, tx, request)
+		result, err = storesourceartifact.EnsurePostgresSourceArtifactTx(txctx, tx, artifact, time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -32,27 +31,23 @@ func (s *PostgresStore) UpsertBundleCatalogWithData(ctx context.Context, request
 	return result, err
 }
 
-func (s *SQLiteRuntimeStore) UpsertBundleCatalogWithData(ctx context.Context, request bundlecatalog.Upsert, catalog runtimedata.Catalog) (bundlecatalog.UpsertResult, error) {
-	if s == nil || s.backend == nil || s.sQLite == nil || s.durableDataOwner == nil {
-		return bundlecatalog.UpsertResult{}, fmt.Errorf("sqlite bundle and data catalog owners are required")
+func (s *SQLiteRuntimeStore) EnsureSourceArtifactWithData(ctx context.Context, artifact *sourceartifact.AdmittedSourceArtifact, catalog runtimedata.Catalog) (sourceartifact.EnsureResult, error) {
+	if s == nil || s.backend == nil || s.sourceArtifactOwner == nil || s.durableDataOwner == nil {
+		return sourceartifact.EnsureResult{}, fmt.Errorf("sqlite source artifact and data catalog owners are required")
 	}
-	if request.BundleHash != catalog.BundleHash {
-		return bundlecatalog.UpsertResult{}, fmt.Errorf("bundle and data catalog hashes must match")
+	if artifact == nil || artifact.BundleHash() != catalog.BundleHash {
+		return sourceartifact.EnsureResult{}, fmt.Errorf("source artifact and data catalog hashes must match")
 	}
-	var result bundlecatalog.UpsertResult
-	err := s.backend.RunTransaction(ctx, "sqlite bundle and data catalog upsert", func(txctx context.Context, tx *sql.Tx) error {
+	var result sourceartifact.EnsureResult
+	err := s.backend.RunTransaction(ctx, "sqlite source artifact and data catalog ensure", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		result, err = bundlecatalogstore.UpsertSQLiteBundleCatalogTx(s.sQLite, txctx, tx, request)
+		result, err = storesourceartifact.EnsureSQLiteSourceArtifactTx(txctx, tx, artifact, time.Now().UTC())
 		if err != nil {
 			return err
 		}
 		return storedurabledata.RegisterCatalogTx(s.durableDataOwner, txctx, tx, catalog, time.Now().UTC())
 	})
 	return result, err
-}
-
-func (s *SQLiteRuntimeStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (runtimerunbundle.BundleCatalogRuntimeRecord, error) {
-	return s.sQLite.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
 }
 
 func (s *PostgresStore) ExecuteDataSourceOperation(ctx context.Context, command runtimedata.SourceCommand) (runtimedata.SourceOperationResult, error) {

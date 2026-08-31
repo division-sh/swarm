@@ -56,11 +56,11 @@ func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, 
 	return runtimetimerobligation.Snapshot{ObservedAt: observedAt.UTC()}, nil
 }
 
-func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 }
 
-func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	return nil, nil
 }
 
@@ -454,13 +454,13 @@ func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
 	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, nil
 }
 
-func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	projection := runtimepipeline.DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range s.items {
 		if !item.OwningRunSource.Matches(source) {
 			continue
 		}
-		planSource, err := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		planSource, err := runtimecorrelation.DecodeSourceArtifactFact(item.Plan.BundleHash)
 		if err != nil {
 			return projection, err
 		}
@@ -477,7 +477,7 @@ func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessFo
 	return projection, nil
 }
 
-func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	result := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(s.items))
 	for _, item := range s.items {
 		if item.Plan.RunID == strings.TrimSpace(runID) && item.OwningRunSource.Matches(source) {
@@ -1220,11 +1220,11 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		t.Fatalf("retire constructed manager before readiness failure replacement: %v", err)
 	}
 	runID := eventtest.UUID("startup-readiness-fatal-run")
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		t.Fatal("startup readiness context requires bundle source fact")
 	}
-	bundleHash, bundleSource := sourceFact.StorageValues()
+	bundleHash := sourceFact.BundleHash()
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
 		InstancePath:    "review/inst-1",
 		OwningRunSource: sourceFact,
@@ -1238,7 +1238,6 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 			},
 			RunID:           runID,
 			BundleHash:      bundleHash,
-			BundleSource:    bundleSource,
 			WorkflowVersion: activeWorkflowVersion + "-changed",
 			ExecutionMode:   executionmode.Live,
 		},
@@ -1250,7 +1249,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
 		BaseContext:                    ctx,
-		BundleSourceFact:               sourceFact,
+		SourceArtifactFact:             sourceFact,
 		LifecycleStore:                 managerStore,
 		DeliveryStore:                  deliveryStore,
 		SemanticSource:                 module.SemanticSource(),

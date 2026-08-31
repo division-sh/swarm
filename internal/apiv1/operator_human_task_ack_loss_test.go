@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -25,7 +26,9 @@ import (
 func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			bundle := runCompletionSystemNodeBundle(t)
+			fact := sourceArtifactFactForTestBundle(t, bundle)
+			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
@@ -34,7 +37,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			} else {
 				storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			}
-			card, continuation := newAPIHumanTaskAckLossCard(t, runID, now)
+			card, continuation := newAPIHumanTaskAckLossCard(t, runID, fact.BundleHash(), now)
 			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
 				t.Fatalf("create human-task card: %v", err)
 			}
@@ -46,7 +49,10 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 					Now: func() time.Time { return now.Add(time.Minute) }, Ready: func() bool { return true }, Database: fakePinger{},
 					Mailbox: mailbox, DecisionCards: cardStore, DecisionAuthority: authority,
 					Idempotency: idempotency,
-					Events:      failingRunStartPublisher{err: errors.New("unexpected human-task API event publication")},
+					Events: bundleScopedFailingEventPublisher{
+						failingRunStartPublisher: failingRunStartPublisher{err: errors.New("unexpected human-task API event publication")},
+						fact:                     fact,
+					},
 				}),
 			})
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)
@@ -91,6 +97,18 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 	}
 }
 
+type bundleScopedFailingEventPublisher struct {
+	failingRunStartPublisher
+	fact runtimecorrelation.SourceArtifactFact
+}
+
+func (p bundleScopedFailingEventPublisher) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	if err := p.fact.Validate(); err != nil {
+		return ctx, err
+	}
+	return runtimecorrelation.WithSourceArtifactFact(ctx, p.fact), nil
+}
+
 func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
@@ -124,8 +142,11 @@ func newHumanTaskAckLossDecisionAuthority(
 	humanTasks decisioncard.HumanTaskStore,
 ) DecisionCardAuthority {
 	t.Helper()
-	source := semanticview.Wrap(runCompletionSystemNodeBundle(t))
-	eventBus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+	bundle := runCompletionSystemNodeBundle(t)
+	source := semanticview.Wrap(bundle)
+	eventBus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: sourceArtifactFactForTestBundle(t, bundle),
+	})
 	if err != nil {
 		t.Fatalf("construct human-task acknowledgment-loss event bus: %v", err)
 	}
@@ -140,7 +161,7 @@ func newHumanTaskAckLossDecisionAuthority(
 
 }
 
-func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
+func newAPIHumanTaskAckLossCard(t *testing.T, runID, bundleHash string, now time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
 	t.Helper()
 	requesterEntityID := uuid.NewString()
 	source := eventtest.RootRoutingSource(requesterEntityID)
@@ -158,7 +179,7 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (deci
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode:    "live",
-		BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BundleHash:       bundleHash,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 	})
 	if err != nil {

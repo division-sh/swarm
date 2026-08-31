@@ -83,7 +83,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			node = resolution.Ref.Node()
 			handler = resolution.Handler
 			handlerEventKey = resolution.Ref.HandlerEvent()
-			handlerFlowID = resolution.Ref.FlowID()
+			handlerFlowID = resolution.Ref.FlowPath()
 			if handlerFlowID == "" {
 				handlerFlowID = semanticview.RootExecutionFlowID(source)
 			}

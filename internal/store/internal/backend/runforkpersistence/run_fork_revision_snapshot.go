@@ -192,8 +192,9 @@ type runForkRevisionFanOutFact struct {
 	runForkRevisionedFact
 	FactKind                    string          `json:"fact_kind"`
 	TriggeringDeliveryID        string          `json:"triggering_delivery_id"`
-	PackageKey                  string          `json:"package_key"`
-	ElementID                   string          `json:"element_id"`
+	FlowPath                    string          `json:"flow_path"`
+	DeclarationFamily           string          `json:"declaration_family"`
+	SemanticPath                string          `json:"semantic_path"`
 	BundleHash                  string          `json:"bundle_hash"`
 	SemanticDigest              string          `json:"semantic_digest"`
 	SourceKind                  string          `json:"source_kind"`
@@ -202,7 +203,7 @@ type runForkRevisionFanOutFact struct {
 	SourceEntityID              string          `json:"source_entity_id"`
 	SourceField                 string          `json:"source_field"`
 	SourceMutationID            string          `json:"source_mutation_id"`
-	SourceResourcePackageKey    string          `json:"source_resource_package_key"`
+	SourceResourceFlowPath      string          `json:"source_resource_flow_path"`
 	SourceResourceEventName     string          `json:"source_resource_event_name"`
 	SourceResourceVersionID     string          `json:"source_resource_version_id"`
 	Cardinality                 int             `json:"cardinality"`
@@ -217,8 +218,7 @@ type runForkRevisionFanOutFact struct {
 	SourceOutcomeEventID        string          `json:"outcome_source_event_id"`
 	InheritedDisposition        string          `json:"inherited_disposition"`
 	Failure                     json.RawMessage `json:"failure"`
-	BarrierTargetPackageKey     string          `json:"barrier_target_package_key"`
-	BarrierTargetFlowID         string          `json:"barrier_target_flow_id"`
+	BarrierTargetFlowPath       string          `json:"barrier_target_flow_path"`
 	BarrierTargetNodeID         string          `json:"barrier_target_node_id"`
 	BarrierHandlerEvent         string          `json:"barrier_handler_event"`
 	BarrierJoinID               string          `json:"barrier_join_id"`
@@ -538,8 +538,8 @@ func (s *runForkRevisionSnapshot) sort() {
 		return revisionFactLess(s.CommittedReplayScopes[i].FirstRevision, s.CommittedReplayScopes[i].EventID, s.CommittedReplayScopes[j].FirstRevision, s.CommittedReplayScopes[j].EventID)
 	})
 	sort.Slice(s.FanOutFacts, func(i, j int) bool {
-		left := strings.Join([]string{s.FanOutFacts[i].TriggeringDeliveryID, s.FanOutFacts[i].PackageKey, s.FanOutFacts[i].ElementID, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[i]))}, "|")
-		right := strings.Join([]string{s.FanOutFacts[j].TriggeringDeliveryID, s.FanOutFacts[j].PackageKey, s.FanOutFacts[j].ElementID, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[j]))}, "|")
+		left := strings.Join([]string{s.FanOutFacts[i].TriggeringDeliveryID, s.FanOutFacts[i].FlowPath, s.FanOutFacts[i].DeclarationFamily, s.FanOutFacts[i].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[i]))}, "|")
+		right := strings.Join([]string{s.FanOutFacts[j].TriggeringDeliveryID, s.FanOutFacts[j].FlowPath, s.FanOutFacts[j].DeclarationFamily, s.FanOutFacts[j].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[j]))}, "|")
 		return revisionFactLess(s.FanOutFacts[i].FirstRevision, left, s.FanOutFacts[j].FirstRevision, right)
 	})
 }

@@ -36,12 +36,11 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	BundleIdentity              runtimecontracts.BundleIdentity
 	RuntimeInstanceID           string
 	PublicationGeneration       uint64
 	Source                      semanticview.Source
-	ContractsRoot               string
 	PlatformSpecPath            string
 	Runtime                     *Runtime
 	WorkOwner                   *worklifetime.RuntimeOccurrence
@@ -66,14 +65,12 @@ const (
 	RuntimeContextCauseNotLoaded           = "runtime_context_not_loaded"
 	RuntimeContextCauseUnavailable         = "runtime_context_unavailable"
 	RuntimeContextCauseUnloaded            = "runtime_context_unloaded"
-	RuntimeContextCauseBundleDelete        = "runtime_context_bundle_delete"
 	RuntimeContextCauseSourceSetTransition = "runtime_context_source_set_transition"
 	RuntimeContextCauseStandingSuppressed  = "standing_service_suppressed"
 )
 
 func (c BundleContext) normalized() BundleContext {
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
-	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
@@ -90,7 +87,7 @@ func (c BundleContext) normalized() BundleContext {
 }
 
 func (c BundleContext) BundleHash() string {
-	return c.BundleSourceFact.BundleHash()
+	return c.SourceArtifactFact.BundleHash()
 }
 
 type runtimeContextEntry struct {
@@ -98,31 +95,10 @@ type runtimeContextEntry struct {
 	runtime          *Runtime
 	workOwner        *worklifetime.RuntimeOccurrence
 	standing         map[string]*worklifetime.StandingOccurrence
-	parkedStanding   map[string]*runtimepipeline.ParkedOccurrence
 	state            RuntimeContextState
 	cause            string
 	shutdownMu       sync.Mutex
 	shutdownComplete bool
-}
-
-type bundleRuntimeRestoration struct {
-	bundleHash     string
-	entry          *runtimeContextEntry
-	context        BundleContext
-	runtime        *Runtime
-	workOwner      *worklifetime.RuntimeOccurrence
-	standing       map[string]*worklifetime.StandingOccurrence
-	parkedStanding map[string]*runtimepipeline.ParkedOccurrence
-}
-
-// PreparedBundleRuntimeRestoration owns an exact same-predecessor publication
-// used only to compensate a bundle delete that did not commit.
-type PreparedBundleRuntimeRestoration struct {
-	mu          sync.Mutex
-	manager     *RuntimeContextManager
-	publication *bundleRuntimeRestoration
-	published   bool
-	discarded   bool
 }
 
 type runtimeSourceSetTransitionEntry struct {
@@ -199,7 +175,6 @@ func (a *runtimeSourceSetTransitionAdmission) PredecessorProcessBinding(current 
 func sourceSetTransitionRuntimeKey(binding runtimemanager.ProcessExecutionBinding) string {
 	return strings.Join([]string{
 		strings.TrimSpace(binding.BundleHash),
-		strings.TrimSpace(binding.BundleSource),
 		strings.TrimSpace(binding.RuntimeInstanceID),
 	}, "\x00")
 }
@@ -293,137 +268,6 @@ func (p *PreparedStandingServicePublication) Discard() error {
 	}
 	p.discarded = true
 	return p.occurrence.RetireAndWait(context.Background())
-}
-
-func (p *PreparedBundleRuntimeRestoration) Publish() error {
-	if p == nil {
-		return errors.New("prepared bundle runtime restoration is required")
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.published {
-		return nil
-	}
-	if p.discarded || p.manager == nil || p.publication == nil {
-		return errors.New("prepared bundle runtime restoration is no longer active")
-	}
-	scheduleTransition, err := prepareBundleRuntimeStandingSchedules(p.publication)
-	if err != nil {
-		return err
-	}
-	m := p.manager
-	m.mu.Lock()
-	entry := m.contexts[p.publication.bundleHash]
-	if entry != p.publication.entry || entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseBundleDelete {
-		m.mu.Unlock()
-		if scheduleTransition != nil {
-			_ = scheduleTransition.Abort()
-		}
-		return fmt.Errorf("runtime context %s is not withdrawn for bundle delete compensation", p.publication.bundleHash)
-	}
-	if scheduleTransition != nil {
-		if err := scheduleTransition.CommitDormant(); err != nil {
-			m.mu.Unlock()
-			_ = scheduleTransition.Abort()
-			return fmt.Errorf("commit restored bundle standing schedule set: %w", err)
-		}
-	}
-	previousContext := entry.context
-	previousRuntime := entry.runtime
-	previousWorkOwner := entry.workOwner
-	previousStanding := entry.standing
-	previousParked := entry.parkedStanding
-	contextDef := p.publication.context
-	entry.context = &contextDef
-	entry.runtime = p.publication.runtime
-	entry.workOwner = p.publication.workOwner
-	entry.standing = p.publication.standing
-	entry.parkedStanding = nil
-	entry.shutdownComplete = false
-	if entry.runtime != nil && entry.runtime.Bus != nil {
-		entry.runtime.Bus.SetStandingRunWorkOwner(m)
-	}
-	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-		entry: entry, state: RuntimeContextStateLoaded,
-	}); err != nil {
-		entry.context = previousContext
-		entry.runtime = previousRuntime
-		entry.workOwner = previousWorkOwner
-		entry.standing = previousStanding
-		entry.parkedStanding = previousParked
-		m.mu.Unlock()
-		if scheduleTransition != nil {
-			_ = scheduleTransition.Abort()
-		}
-		return err
-	}
-	if scheduleTransition != nil {
-		if err := scheduleTransition.Activate(); err != nil {
-			visibilityErr := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-				entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseBundleDelete,
-			})
-			m.mu.Unlock()
-			return errors.Join(fmt.Errorf("activate restored bundle standing schedule set: %w", err), visibilityErr)
-		}
-	}
-	p.published = true
-	m.mu.Unlock()
-	return nil
-}
-
-func (p *PreparedBundleRuntimeRestoration) Discard() error {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.published {
-		return errors.New("published bundle runtime restoration cannot be discarded")
-	}
-	if p.discarded {
-		return nil
-	}
-	p.discarded = true
-	var discardErr error
-	for serviceID, occurrence := range p.publication.standing {
-		if occurrence == nil {
-			continue
-		}
-		if err := occurrence.RetireAndWait(context.Background()); err != nil {
-			discardErr = errors.Join(discardErr, fmt.Errorf("discard restored standing occurrence %s: %w", serviceID, err))
-		}
-	}
-	return discardErr
-}
-
-func prepareBundleRuntimeStandingSchedules(publication *bundleRuntimeRestoration) (*runtimepipeline.PreparedParkedSetRebind, error) {
-	if publication == nil || len(publication.parkedStanding) == 0 {
-		return nil, nil
-	}
-	if publication.runtime == nil || publication.runtime.Scheduler == nil {
-		return nil, errors.New("restored standing schedules require the predecessor scheduler")
-	}
-	serviceIDs := make([]string, 0, len(publication.parkedStanding))
-	for serviceID := range publication.parkedStanding {
-		serviceIDs = append(serviceIDs, serviceID)
-	}
-	sort.Strings(serviceIDs)
-	bindings := make([]runtimepipeline.ParkedRebind, 0, len(serviceIDs))
-	for _, serviceID := range serviceIDs {
-		owner := publication.standing[serviceID]
-		if owner == nil {
-			return nil, fmt.Errorf("restored standing schedules for %s require a fresh standing owner", serviceID)
-		}
-		bindings = append(bindings, runtimepipeline.ParkedRebind{
-			Parked: publication.parkedStanding[serviceID],
-			Owner:  owner,
-		})
-	}
-	prepared, err := runtimepipeline.PrepareParkedSetRebind(context.Background(), publication.runtime.Scheduler, bindings)
-	if err != nil {
-		return nil, fmt.Errorf("prepare restored bundle standing schedule set: %w", err)
-	}
-	return prepared, nil
 }
 
 // RuntimeContextUse is the only execution-bearing result produced by the
@@ -528,10 +372,10 @@ type RuntimeContextManager struct {
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
 // manager-owned loaded context set. PrimaryBundle identifies the semantic
-// primary slot; BundleSourceFacts contains every currently selectable source.
+// primary slot; SourceArtifactFacts contains every currently selectable source.
 type RuntimeContextPublicationSnapshot struct {
-	PrimaryBundle     runtimecontracts.BundleIdentity
-	BundleSourceFacts []runtimecorrelation.BundleSourceFact
+	PrimaryBundle       runtimecontracts.BundleIdentity
+	SourceArtifactFacts []runtimecorrelation.SourceArtifactFact
 }
 
 type runtimeContextVisibilityUpdate struct {
@@ -758,7 +602,7 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 
 func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
 	contextDef = contextDef.normalized()
-	if err := contextDef.BundleSourceFact.Validate(); err != nil {
+	if err := contextDef.SourceArtifactFact.Validate(); err != nil {
 		return BundleContext{}, fmt.Errorf("runtime context bundle source fact: %w", err)
 	}
 	bundleHash := contextDef.BundleHash()
@@ -876,8 +720,8 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 		if target.BundleHash != bundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
-		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
-			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and compiled admission plan", bundleHash)
+		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
+			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_path, flow_instance, entity_id, and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
 			return fmt.Errorf("runtime context %s standing target %q/%q signing_secret presence contradicts compiled %s request authentication", bundleHash, target.Alias, target.Provider, target.AdmissionPlan.RequestAuthentication())
@@ -1055,7 +899,7 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
 				continue
 			}
-			selector := fmt.Sprintf("ingress:%s:%s:%s", target.PackageKey, target.FlowID, target.Provider)
+			selector := fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider)
 			if signingKey, found := activationSigning[selector]; found {
 				target.SigningSecret = signingKey
 			}
@@ -1116,7 +960,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 	}
 	lease, available := entry.runtime.ChannelActivations.AcquirePresentation()
 	if !available {
-		return nil, fmt.Errorf("runtime context %s channel activation publication is unavailable", entry.context.BundleSourceFact.BundleHash())
+		return nil, fmt.Errorf("runtime context %s channel activation publication is unavailable", entry.context.SourceArtifactFact.BundleHash())
 	}
 	defer lease.Release()
 	for _, activation := range lease.Activations() {
@@ -1124,7 +968,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 		if selector == "" {
 			continue
 		}
-		if activation.Coordinate.BundleHash != entry.context.BundleSourceFact.BundleHash() ||
+		if activation.Coordinate.BundleHash != entry.context.SourceArtifactFact.BundleHash() ||
 			activation.Coordinate.RuntimeInstanceID != entry.context.RuntimeInstanceID ||
 			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
 			return nil, fmt.Errorf("channel activation registration target %q contradicts its runtime context", selector)
@@ -1135,7 +979,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 		}
 		matched := false
 		for _, standing := range entry.context.StandingTargets {
-			if standing.PackageKey == target.PackageKey && standing.FlowID == target.FlowID && standing.Provider == target.Provider {
+			if standing.FlowPath == target.FlowPath && standing.Provider == target.Provider {
 				if uint64(standing.Generation) != activation.Coordinate.TargetGeneration {
 					return nil, fmt.Errorf("channel activation registration target %q has a contradictory target generation", selector)
 				}
@@ -1249,10 +1093,6 @@ func runtimeContextBundleLabel(contextDef BundleContext) string {
 	parts := []string{}
 	if bundleHash := contextDef.BundleHash(); bundleHash != "" {
 		parts = append(parts, "bundle_hash="+bundleHash)
-	}
-	_, source := contextDef.BundleSourceFact.StorageValues()
-	if source != "" {
-		parts = append(parts, "bundle_source="+source)
 	}
 	workflowName := strings.TrimSpace(contextDef.BundleIdentity.WorkflowName)
 	workflowVersion := strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion)
@@ -1495,19 +1335,19 @@ func (m *RuntimeContextManager) CurrentPublication() (RuntimeContextPublicationS
 	identity := primary.context.BundleIdentity
 	identity.BundleHash = primary.context.BundleHash()
 	snapshot := RuntimeContextPublicationSnapshot{
-		PrimaryBundle:     identity,
-		BundleSourceFacts: make([]runtimecorrelation.BundleSourceFact, 0, len(m.order)),
+		PrimaryBundle:       identity,
+		SourceArtifactFacts: make([]runtimecorrelation.SourceArtifactFact, 0, len(m.order)),
 	}
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
-		fact := entry.context.BundleSourceFact
+		fact := entry.context.SourceArtifactFact
 		if err := fact.Validate(); err != nil {
 			return RuntimeContextPublicationSnapshot{}, fmt.Errorf("loaded runtime context %s source fact: %w", bundleHash, err)
 		}
-		snapshot.BundleSourceFacts = append(snapshot.BundleSourceFacts, fact)
+		snapshot.SourceArtifactFacts = append(snapshot.SourceArtifactFacts, fact)
 	}
 	return snapshot, nil
 }
@@ -2046,300 +1886,6 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 	return nil
 }
 
-// BundleRuntimePredecessor is the exact runtime and generation withdrawn for
-// pre-commit bundle-delete compensation.
-type BundleRuntimePredecessor struct {
-	Context           BundleContext
-	RuntimeGeneration uint64
-}
-
-// BeginBundleRuntimeQuiescence withdraws one exact loaded context while
-// retaining only the predecessor authority needed for bundle-delete
-// compensation before the selected-store mutation commits.
-func (m *RuntimeContextManager) BeginBundleRuntimeQuiescence(ctx context.Context, bundleHash string) (BundleRuntimePredecessor, error) {
-	if m == nil {
-		return BundleRuntimePredecessor{}, errors.New("runtime context manager is required")
-	}
-	bundleHash = strings.TrimSpace(bundleHash)
-	m.mu.Lock()
-	entry := m.contexts[bundleHash]
-	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil || entry.context == nil {
-		m.mu.Unlock()
-		return BundleRuntimePredecessor{}, fmt.Errorf("loaded runtime context %s is required for bundle delete quiescence", bundleHash)
-	}
-	authority, err := entry.runtime.CurrentStartupGrantEvidence()
-	if err != nil {
-		m.mu.Unlock()
-		return BundleRuntimePredecessor{}, fmt.Errorf("read bundle delete predecessor generation: %w", err)
-	}
-	predecessor := *entry.context
-	predecessor.Runtime = entry.runtime
-	predecessor.WorkOwner = entry.workOwner
-	standing := make([]standingOccurrenceTransition, 0, len(entry.standing))
-	for _, occurrence := range entry.standing {
-		if err := occurrence.Fence(); err != nil {
-			for _, prior := range standing {
-				_ = prior.occurrence.Reopen()
-			}
-			m.mu.Unlock()
-			return BundleRuntimePredecessor{}, fmt.Errorf("fence bundle delete standing occurrence: %w", err)
-		}
-		standing = append(standing, standingOccurrenceTransition{
-			entry: entry, occurrence: occurrence, scheduler: entry.runtime.Scheduler,
-		})
-	}
-	if err := entry.workOwner.Fence(); err != nil {
-		for _, prior := range standing {
-			_ = prior.occurrence.Reopen()
-		}
-		m.mu.Unlock()
-		return BundleRuntimePredecessor{}, fmt.Errorf("fence bundle delete runtime occurrence: %w", err)
-	}
-	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseBundleDelete,
-	}); err != nil {
-		_ = entry.workOwner.Reopen()
-		for _, prior := range standing {
-			_ = prior.occurrence.Reopen()
-		}
-		m.mu.Unlock()
-		return BundleRuntimePredecessor{}, err
-	}
-	m.mu.Unlock()
-
-	parked := make(map[string]*runtimepipeline.ParkedOccurrence)
-	abort := func(cause error) (BundleRuntimePredecessor, error) {
-		restoreErr := m.abortBundleRuntimeQuiescence(entry, standing, parked)
-		return BundleRuntimePredecessor{}, errors.Join(cause, restoreErr)
-	}
-	for i := range standing {
-		item := &standing[i]
-		if item.scheduler == nil {
-			continue
-		}
-		projection, err := item.scheduler.ParkOccurrence(ctx, item.occurrence)
-		item.parked = projection
-		if projection != nil && projection.Count() > 0 {
-			parked[item.occurrence.Identity().ServiceID] = projection
-		}
-		if err != nil {
-			return abort(fmt.Errorf("park bundle delete standing schedules: %w", err))
-		}
-	}
-	for _, item := range standing {
-		if err := item.occurrence.Wait(ctx); err != nil {
-			return abort(fmt.Errorf("drain bundle delete standing occurrence: %w", err))
-		}
-	}
-	for _, item := range standing {
-		if err := item.occurrence.RetireAndWait(context.Background()); err != nil {
-			return BundleRuntimePredecessor{}, fmt.Errorf("retire bundle delete standing occurrence: %w", err)
-		}
-	}
-	m.mu.Lock()
-	entry.standing = nil
-	entry.parkedStanding = parked
-	m.mu.Unlock()
-	return BundleRuntimePredecessor{Context: predecessor, RuntimeGeneration: authority.RuntimeGeneration}, nil
-}
-
-func (m *RuntimeContextManager) abortBundleRuntimeQuiescence(
-	entry *runtimeContextEntry,
-	standing []standingOccurrenceTransition,
-	parked map[string]*runtimepipeline.ParkedOccurrence,
-) error {
-	if entry == nil {
-		return errors.New("bundle delete quiescence entry is required")
-	}
-	var restoreErr error
-	if entry.workOwner != nil {
-		restoreErr = errors.Join(restoreErr, entry.workOwner.Reopen())
-	}
-	for _, item := range standing {
-		restoreErr = errors.Join(restoreErr, item.occurrence.Reopen())
-	}
-	if len(parked) > 0 && entry.runtime != nil && entry.runtime.Scheduler != nil {
-		serviceIDs := make([]string, 0, len(parked))
-		for serviceID := range parked {
-			serviceIDs = append(serviceIDs, serviceID)
-		}
-		sort.Strings(serviceIDs)
-		bindings := make([]runtimepipeline.ParkedRebind, 0, len(serviceIDs))
-		for _, serviceID := range serviceIDs {
-			owner := entry.standing[serviceID]
-			if owner == nil {
-				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore parked bundle delete schedule %s: standing owner is missing", serviceID))
-				continue
-			}
-			bindings = append(bindings, runtimepipeline.ParkedRebind{Parked: parked[serviceID], Owner: owner})
-		}
-		if len(bindings) > 0 {
-			prepared, err := runtimepipeline.PrepareParkedSetRebind(context.Background(), entry.runtime.Scheduler, bindings)
-			if err == nil {
-				err = prepared.CommitDormant()
-			}
-			if err == nil {
-				err = prepared.Activate()
-			}
-			if err != nil {
-				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore parked bundle delete schedules: %w", err))
-			}
-		}
-	}
-	m.mu.Lock()
-	entry.parkedStanding = nil
-	restoreErr = errors.Join(restoreErr, m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-		entry: entry, state: RuntimeContextStateLoaded,
-	}))
-	m.mu.Unlock()
-	return restoreErr
-}
-
-// CommitBundleRuntimeRemoval forgets only the exact context previously
-// withdrawn for a committed bundle delete and returns the surviving primary
-// process attachment, if any.
-func (m *RuntimeContextManager) CommitBundleRuntimeRemoval(bundleHash string) (BundleContext, bool) {
-	if m == nil {
-		return BundleContext{}, false
-	}
-	bundleHash = strings.TrimSpace(bundleHash)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	entry := m.contexts[bundleHash]
-	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseBundleDelete {
-		return BundleContext{}, false
-	}
-	delete(m.contexts, bundleHash)
-	for i, current := range m.order {
-		if current == bundleHash {
-			m.order = append(m.order[:i], m.order[i+1:]...)
-			break
-		}
-	}
-	if m.primaryBundleHash == bundleHash {
-		m.primaryBundleHash = ""
-	}
-	if m.primaryBundleHash == "" {
-		for _, candidate := range m.order {
-			if runtimeContextEntryLoaded(m.contexts[candidate]) {
-				m.primaryBundleHash = candidate
-				break
-			}
-		}
-		if m.primaryBundleHash == "" && len(m.order) > 0 {
-			m.primaryBundleHash = m.order[0]
-		}
-	}
-	primary := m.contexts[m.primaryBundleHash]
-	if !runtimeContextEntryLoaded(primary) {
-		return BundleContext{}, false
-	}
-	contextDef := *primary.context
-	contextDef.Runtime = primary.runtime
-	contextDef.WorkOwner = primary.workOwner
-	return contextDef, true
-}
-
-// PrepareBundleRuntimeRestoration accepts only the exact predecessor withdrawn
-// by BeginBundleRuntimeQuiescence. It cannot publish a changed bundle.
-func (m *RuntimeContextManager) PrepareBundleRuntimeRestoration(contextDef BundleContext) (*PreparedBundleRuntimeRestoration, error) {
-	if m == nil {
-		return nil, errors.New("runtime context manager is required")
-	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
-	if err != nil {
-		return nil, err
-	}
-	bundleHash := contextDef.BundleHash()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	entry := m.contexts[bundleHash]
-	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseBundleDelete || entry.context == nil {
-		return nil, fmt.Errorf("runtime context %s is not withdrawn for bundle delete compensation", bundleHash)
-	}
-	if err := validateBundleRuntimeRestoration(*entry.context, contextDef); err != nil {
-		return nil, err
-	}
-	copied := contextDef
-	runtimeOwner := copied.Runtime
-	workOwner := copied.WorkOwner
-	copied.Runtime = nil
-	copied.WorkOwner = nil
-	standing, err := m.newStandingOccurrencesLocked(workOwner, copied.StandingTargets)
-	if err != nil {
-		return nil, err
-	}
-	return &PreparedBundleRuntimeRestoration{
-		manager: m,
-		publication: &bundleRuntimeRestoration{
-			bundleHash: bundleHash, entry: entry, context: copied,
-			runtime: runtimeOwner, workOwner: workOwner, standing: standing,
-			parkedStanding: copyParkedStandingOccurrences(entry.parkedStanding),
-		},
-	}, nil
-}
-
-func validateBundleRuntimeRestoration(predecessor, restored BundleContext) error {
-	if predecessor.BundleHash() != restored.BundleHash() {
-		return errors.New("bundle delete compensation cannot change bundle authority")
-	}
-	if restored.PublicationGeneration != 0 && restored.PublicationGeneration != predecessor.PublicationGeneration {
-		return fmt.Errorf(
-			"restored runtime context %s publication generation %d does not match predecessor generation %d",
-			predecessor.BundleHash(), restored.PublicationGeneration, predecessor.PublicationGeneration,
-		)
-	}
-	restored.PublicationGeneration = predecessor.PublicationGeneration
-	if err := validateRestoredAdmissionAuthority(predecessor, restored); err != nil {
-		return err
-	}
-	want := predecessor
-	got := restored
-	want.Runtime, want.WorkOwner, want.StandingTargets = nil, nil, nil
-	got.Runtime, got.WorkOwner, got.StandingTargets = nil, nil, nil
-	if !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("restored runtime context %s changed predecessor authority", predecessor.BundleHash())
-	}
-	return nil
-}
-
-func copyParkedStandingOccurrences(in map[string]*runtimepipeline.ParkedOccurrence) map[string]*runtimepipeline.ParkedOccurrence {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]*runtimepipeline.ParkedOccurrence, len(in))
-	for serviceID, parked := range in {
-		out[serviceID] = parked
-	}
-	return out
-}
-
-func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) error {
-	if len(predecessor.StandingTargets) != len(restored.StandingTargets) {
-		return fmt.Errorf("restored runtime context %s changed standing admission target count from %d to %d", predecessor.BundleHash(), len(predecessor.StandingTargets), len(restored.StandingTargets))
-	}
-	want := map[string]StandingTarget{}
-	for _, target := range predecessor.StandingTargets {
-		target = target.normalized()
-		want[target.Alias+"\x00"+target.Provider] = target
-	}
-	for _, target := range restored.StandingTargets {
-		target = target.normalized()
-		previous, ok := want[target.Alias+"\x00"+target.Provider]
-		if !ok || previous.SigningSecret != target.SigningSecret ||
-			!previous.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) ||
-			previous.AdmissionPlan.PolicySource() != target.AdmissionPlan.PolicySource() ||
-			previous.AdmissionPlan.RequestAuthentication() != target.AdmissionPlan.RequestAuthentication() {
-			return fmt.Errorf("restored runtime context %s changed standing admission authority for %q/%q", predecessor.BundleHash(), target.Alias, target.Provider)
-		}
-		delete(want, target.Alias+"\x00"+target.Provider)
-	}
-	if len(want) != 0 {
-		return fmt.Errorf("restored runtime context %s omitted predecessor standing admission targets", predecessor.BundleHash())
-	}
-	return nil
-}
-
 func validateTargetsGeneration(contextDef BundleContext, generation triggergeneration.Generation) error {
 	if (len(contextDef.StandingTargets) > 0 || len(contextDef.InstalledTriggerSubjects) > 0) && !generation.Valid() {
 		return fmt.Errorf("runtime context %s provider-trigger catalog generation is required", contextDef.BundleHash())
@@ -2435,8 +1981,7 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		if (!loaded && !pending) || (pendingOnly && !pending) {
 			continue
 		}
-		bundle, source := entry.context.BundleSourceFact.StorageValues()
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundle, BundleSource: source}.Normalize()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: entry.context.SourceArtifactFact.BundleHash()}.Normalize()
 		if _, survives := wanted[coordinate.Key()]; !survives {
 			m.mu.Unlock()
 			return nil, fmt.Errorf("loaded runtime context %s is absent from successor source set", bundleHash)

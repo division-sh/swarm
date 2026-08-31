@@ -56,7 +56,7 @@ type eventPublishDelivery struct {
 }
 
 type eventPublicationParams struct {
-	BundleSourceFact       runtimecorrelation.BundleSourceFact
+	SourceArtifactFact     runtimecorrelation.SourceArtifactFact
 	EventID                string
 	EventName              string
 	Payload                json.RawMessage
@@ -228,15 +228,15 @@ func executeOperatorEventPublication(
 			resolution := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
 			switch resolution.Kind {
 			case eventPublicationEndpointOrdinary:
-				if resolution.FlowID == "" {
-					if selectedOpts.Source != nil && selectedOpts.Source.FlowHasInputEvent("", resolvedEventName) {
+				if resolution.FlowID == "." {
+					if selectedOpts.Source != nil && selectedOpts.Source.FlowHasInputEvent(".", resolvedEventName) {
 						endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
 						if err != nil {
 							return apiidempotency.Completion{}, err
 						}
 						params.APIEventEndpoint = &endpoint
 					}
-				} else {
+				} else if resolution.FlowID != "" {
 					endpoint, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(selectedOpts.Source, resolution.FlowID, resolvedEventName)
 					if err != nil {
 						return apiidempotency.Completion{}, err
@@ -286,7 +286,7 @@ func executeOperatorEventPublication(
 					return apiidempotency.Completion{}, semanticErr
 				}
 				command := durabledata.RunCreationCommand{
-					RunID: params.RunID, Actor: req.ActorTokenID, BundleHash: params.BundleSourceFact.BundleHash(),
+					RunID: params.RunID, Actor: req.ActorTokenID, BundleHash: params.SourceArtifactFact.BundleHash(),
 					EventID: params.EventID, InitialEvent: semanticRequest, Data: params.Data,
 				}
 				runCreation = &command
@@ -843,11 +843,11 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	if !scoped {
 		if _, authored := source.AuthoredEventEntries()[requestedEventName]; authored {
-			return ordinary
+			return eventPublicationEndpointResolution{Kind: eventPublicationEndpointOrdinary, FlowID: "."}
 		}
 		for _, endpoint := range census.InputPins() {
-			if strings.TrimSpace(endpoint.FlowID) == "" && runtimeeventidentity.Normalize(endpoint.Event.Canonical) == resolvedEventName {
-				return ordinary
+			if strings.TrimSpace(endpoint.FlowID) == "." && runtimeeventidentity.Normalize(endpoint.Event.Canonical) == resolvedEventName {
+				return eventPublicationEndpointResolution{Kind: eventPublicationEndpointOrdinary, FlowID: "."}
 			}
 		}
 	}
@@ -1272,6 +1272,7 @@ func eventPublicationEventNameCandidates(source semanticview.Source, eventName s
 			return []string{eventName}
 		}
 	}
+	exactCandidates := make(map[string]struct{})
 	flowCandidates := make(map[string]struct{})
 	for _, scope := range source.FlowScopes() {
 		for localEventName := range scope.Events {
@@ -1284,13 +1285,20 @@ func eventPublicationEventNameCandidates(source semanticview.Source, eventName s
 				continue
 			}
 			if !scoped && localEventName == eventName {
-				flowCandidates[canonical] = struct{}{}
+				if canonical == eventName {
+					exactCandidates[canonical] = struct{}{}
+				} else {
+					flowCandidates[canonical] = struct{}{}
+				}
 				continue
 			}
 			if scoped && flowScopedEventNameMatches(eventName, scope, localEventName, canonical) {
 				flowCandidates[canonical] = struct{}{}
 			}
 		}
+	}
+	if len(exactCandidates) > 0 {
+		return sortedEventNameCandidates(exactCandidates)
 	}
 	if len(flowCandidates) > 0 {
 		return sortedEventNameCandidates(flowCandidates)

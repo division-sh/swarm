@@ -19,7 +19,7 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 		wantLoadErr  string
 	}{
 		{name: "valid", declaredFile: "resume.md", writeFile: true},
-		{name: "missing", declaredFile: "missing.md", wantLoadErr: "missing from the exact bundle catalog"},
+		{name: "missing", declaredFile: "missing.md", wantLoadErr: "is missing from the admitted source artifact"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeNestedFlowDataFixture(t, tc.declaredFile, tc.writeFile)
@@ -35,18 +35,13 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
 			rawOccurrences := 0
-			for _, project := range bundle.ProjectViews() {
-				if _, ok := project.Agents["worker"]; ok {
-					rawOccurrences++
-				}
-			}
 			for _, flow := range bundle.FlowViews() {
 				if _, ok := flow.Agents["worker"]; ok {
 					rawOccurrences++
 				}
 			}
-			if rawOccurrences < 2 {
-				t.Fatalf("raw nested declaration occurrences = %d, want at least two loader views", rawOccurrences)
+			if rawOccurrences != 1 {
+				t.Fatalf("raw nested declaration occurrences = %d, want one filesystem-owned flow declaration", rawOccurrences)
 			}
 
 			source := semanticview.Wrap(bundle)
@@ -64,29 +59,9 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 func writeNestedFlowDataFixture(t *testing.T, declaredFile string, writeFile bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: nested-flow-data
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - {path: parent}
-`)
 	writeFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-flow-data\n")
 	writeEmptyFlowDataContractFiles(t, root)
-	writeFlowDataFixtureFile(t, filepath.Join(root, "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-packages:
-  - {path: child}
-`)
-	writeFlowDataFixtureFile(t, filepath.Join(root, "parent", "child", "package.yaml"), `
-name: child
-version: "1.0.0"
-flows:
-  - {id: support, flow: support, mode: static}
-`)
-	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
-	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+	flowRoot := filepath.Join(root, "support")
 	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
 	writeFlowDataFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:

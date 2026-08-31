@@ -129,7 +129,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "stateful_presence_rule"), "stateful normal child flow")
 
 	composition := mustMappingValue(t, authoring, "composition_model")
-	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
+	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.composition_routing")
 	assertScalarValue(t, mustMappingValue(t, composition, "route_plan_owner"), "platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "owns only the directed edge")
 	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "remove parent-owned receiver identity, cardinality, and lifecycle syntax")

@@ -7,13 +7,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const fanOutDeliveryElementID = "a1111111-1111-4111-8111-111111111111"
-
 func TestFanOutDeliveryJoinStrictClosedGrammar(t *testing.T) {
 	canonical := `
 id: all-items-delivered
 members:
-  from_fan_out: ` + fanOutDeliveryElementID + `
+  from_fan_out: true
 on_complete:
   emit:
     event: batch.completed
@@ -22,25 +20,24 @@ on_complete:
 	if err := yaml.Unmarshal([]byte(canonical), &admitted); err != nil {
 		t.Fatalf("decode canonical fan-out delivery join: %v", err)
 	}
-	if admitted.Mode() != WorkflowJoinModeFanOutDelivery || admitted.Members.FromFanOut.String() != fanOutDeliveryElementID {
+	if admitted.Mode() != WorkflowJoinModeFanOutDelivery || !admitted.Members.FromFanOut {
 		t.Fatalf("canonical fan-out delivery join = %#v", admitted)
 	}
 
 	hostile := map[string]string{
-		"missing explicit id":  strings.Replace(canonical, "id: all-items-delivered\n", "", 1),
-		"missing on_complete":  strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed\n", "", 1),
-		"empty on_complete":    strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed", "on_complete: {}", 1),
-		"invalid fan-out id":   strings.Replace(canonical, fanOutDeliveryElementID, "fan-out-local-name", 1),
-		"zero fan-out id":      strings.Replace(canonical, fanOutDeliveryElementID, "00000000-0000-0000-0000-000000000000", 1),
-		"uppercase fan-out id": strings.Replace(canonical, fanOutDeliveryElementID, strings.ToUpper(fanOutDeliveryElementID), 1),
-		"fake stage":           canonical + "stage: __fan_out_delivery__\n",
-		"members from":         strings.Replace(canonical, "  from_fan_out: "+fanOutDeliveryElementID, "  from_fan_out: "+fanOutDeliveryElementID+"\n  from: entity.items", 1),
-		"members by":           strings.Replace(canonical, "  from_fan_out: "+fanOutDeliveryElementID, "  from_fan_out: "+fanOutDeliveryElementID+"\n  by: payload.id", 1),
-		"window":               canonical + "window:\n  from: entity.batch\n  by: payload.batch\n",
-		"output":               canonical + "output: item\n",
-		"complete_when":        canonical + "complete_when: join.completed == join.expected\n",
-		"remaining":            canonical + "remaining: ignore\n",
-		"timeout":              canonical + "timeout:\n  after: 1m\n  emit:\n    event: batch.timed_out\n",
+		"missing explicit id": strings.Replace(canonical, "id: all-items-delivered\n", "", 1),
+		"missing on_complete": strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed\n", "", 1),
+		"empty on_complete":   strings.Replace(canonical, "on_complete:\n  emit:\n    event: batch.completed", "on_complete: {}", 1),
+		"false selector":      strings.Replace(canonical, "from_fan_out: true", "from_fan_out: false", 1),
+		"identity spelling":   strings.Replace(canonical, "from_fan_out: true", "from_fan_out: old-element-id", 1),
+		"fake stage":          canonical + "stage: __fan_out_delivery__\n",
+		"members from":        strings.Replace(canonical, "  from_fan_out: true", "  from_fan_out: true\n  from: entity.items", 1),
+		"members by":          strings.Replace(canonical, "  from_fan_out: true", "  from_fan_out: true\n  by: payload.id", 1),
+		"window":              canonical + "window:\n  from: entity.batch\n  by: payload.batch\n",
+		"output":              canonical + "output: item\n",
+		"complete_when":       canonical + "complete_when: join.completed == join.expected\n",
+		"remaining":           canonical + "remaining: ignore\n",
+		"timeout":             canonical + "timeout:\n  after: 1m\n  emit:\n    event: batch.timed_out\n",
 	}
 	for name, document := range hostile {
 		t.Run(name, func(t *testing.T) {
@@ -52,10 +49,9 @@ on_complete:
 	}
 }
 
-func TestFanOutDeliveryJoinHandlerIsolationRequiresExactPairedElement(t *testing.T) {
+func TestFanOutDeliveryJoinHandlerIsolationRequiresPairedDeclaration(t *testing.T) {
 	canonical := `
 fan_out:
-  element_id: ` + fanOutDeliveryElementID + `
   items_from: payload.items
   as: candidate
   emit:
@@ -63,7 +59,7 @@ fan_out:
 join:
   id: all-items-delivered
   members:
-    from_fan_out: ` + fanOutDeliveryElementID + `
+    from_fan_out: true
   on_complete:
     emit:
       event: batch.completed
@@ -77,8 +73,8 @@ join:
 	}
 
 	for name, document := range map[string]string{
-		"mismatched element":        strings.Replace(canonical, "from_fan_out: "+fanOutDeliveryElementID, "from_fan_out: 22222222-2222-4222-8222-222222222222", 1),
-		"missing fan-out":           strings.Replace(canonical, "fan_out:\n  element_id: "+fanOutDeliveryElementID+"\n  items_from: payload.items\n  as: candidate\n  emit:\n    event: item.requested\n", "", 1),
+		"false selector":            strings.Replace(canonical, "from_fan_out: true", "from_fan_out: false", 1),
+		"missing fan-out":           strings.Replace(canonical, "fan_out:\n  items_from: payload.items\n  as: candidate\n  emit:\n    event: item.requested\n", "", 1),
 		"additional handler effect": canonical + "advances_to: complete\n",
 	} {
 		t.Run(name, func(t *testing.T) {

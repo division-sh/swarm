@@ -28,21 +28,19 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			}
 			source := admittedArchetypes[archetype]
 			assertArchetypeTreeEqual(t, source.Files, source.SourceRoot, destination)
-			requiredFiles := []string{"package.yaml"}
+			requiredFiles := []string{"manifest.yaml"}
 			if archetype == "webhook-responder" {
-				requiredFiles = append(requiredFiles, "swarm.live.yaml", "bot/swarm.yaml", "bot/.swarm/swarm.yaml", "bot/tests/smoke.yaml")
+				requiredFiles = append(requiredFiles, "swarm.yaml", "swarm.live.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml", "bot/manifest.yaml", "bot/telegram-chat/schema.yaml", "telegram-ingress/schema.yaml")
 			} else {
-				requiredFiles = append(requiredFiles, "swarm.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml")
+				requiredFiles = append(requiredFiles, "automation/schema.yaml", "swarm.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml")
 			}
 			for _, required := range requiredFiles {
 				if _, err := os.Stat(filepath.Join(destination, required)); err != nil {
 					t.Fatalf("missing %s: %v", required, err)
 				}
 			}
-			if archetype == "webhook-responder" {
-				if !strings.Contains(out.String(), "cd ./bot") {
-					t.Fatalf("output %q does not enter the runnable bot package", out.String())
-				}
+			if strings.Contains(out.String(), "cd ./bot") {
+				t.Fatalf("output %q retains the retired nested source-root handoff", out.String())
 			}
 			for _, command := range []string{"swarm verify", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {
@@ -85,7 +83,7 @@ func TestScaffoldEmbedsOnlyCheckedHiddenConfig(t *testing.T) {
 			name: "telegram-agent",
 			fs:   swarmassets.EmbeddedTelegramAgentExample(),
 			root: ".",
-			want: "bot/.swarm/swarm.yaml",
+			want: ".swarm/swarm.yaml",
 		},
 		{
 			name: "zero-agent-automation",

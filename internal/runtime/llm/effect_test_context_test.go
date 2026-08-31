@@ -88,12 +88,12 @@ func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runti
 	if !ok {
 		t.Fatal("managed provider test context requires execution admission")
 	}
-	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); !ok {
-		fact, err := runtimecorrelation.NewPersistedBundleSourceFact(admission.BundleHash)
+	if _, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok {
+		fact, err := runtimecorrelation.NewSourceArtifactFact(admission.BundleHash)
 		if err != nil {
 			t.Fatalf("managed provider test bundle source: %v", err)
 		}
-		ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	}
 	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
 	if !ok {
@@ -150,17 +150,16 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if !ok {
 		event = managedProviderEffectTestEvent(surface.Authority.RunID, mode)
 	}
-	bundleHash := "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	bundleSource := "persisted"
-	if fact, found := runtimecorrelation.BundleSourceFactFromContext(ctx); found {
-		bundleHash, bundleSource = fact.StorageValues()
+	bundleHash := "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	if fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx); found {
+		bundleHash = fact.BundleHash()
 	}
 	frame, err := agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: surface.ActorIdentity, Role: "effect-test", Intent: intent, ProviderPrompt: providerPrompt,
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "effect-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+		BundleHash: bundleHash, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete effect-test frame: %v", err)

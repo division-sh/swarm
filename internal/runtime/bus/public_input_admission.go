@@ -59,11 +59,11 @@ func NewRootInputAPIEventPublicationEndpoint(source semanticview.Source, eventTy
 	if source == nil || eventType == "" {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("root-input event publication endpoint is incomplete")
 	}
-	if !source.FlowHasInputEvent("", eventType) {
+	if !source.FlowHasInputEvent(".", eventType) {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("root input does not own %q", eventType)
 	}
 	return APIEventPublicationEndpoint{
-		kind: apiEventPublicationEndpointRootInput, eventType: events.EventType(eventType),
+		kind: apiEventPublicationEndpointRootInput, flowID: ".", eventType: events.EventType(eventType),
 	}, nil
 }
 
@@ -147,10 +147,10 @@ func (e APIEventPublicationEndpoint) admit(source semanticview.Source, evt event
 		if source == nil {
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication source is unavailable")
 		}
-		if !source.FlowHasInputEvent("", string(e.eventType)) {
+		if !source.FlowHasInputEvent(".", string(e.eventType)) {
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication endpoint %s no longer resolves exactly", e.eventType)
 		}
-		admission := apiEventPublicationAdmission{kind: apiEventPublicationEndpointRootInput, eventType: e.eventType}
+		admission := apiEventPublicationAdmission{kind: apiEventPublicationEndpointRootInput, flowID: ".", eventType: e.eventType}
 		if err := admission.validateEvent(evt); err != nil {
 			return apiEventPublicationAdmission{}, nil, err
 		}
@@ -176,7 +176,7 @@ func (a apiEventPublicationAdmission) validateEvent(evt events.Event) error {
 			return fmt.Errorf("ordinary flow event publication admission is incomplete")
 		}
 	case apiEventPublicationEndpointRootInput:
-		if a.flowID != "" || a.flowPath != "" || a.eventType == "" {
+		if a.flowID != "." || a.flowPath != "" || a.eventType == "" {
 			return fmt.Errorf("root-input event publication admission is incomplete")
 		}
 	default:

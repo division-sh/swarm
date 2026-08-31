@@ -9,3 +9,11 @@ pins:
   outputs:
     events:
       - step.begin
+connect:
+  - event: step.begin
+    from: .
+    to: child
+  - event: micro.relayed
+    from: child
+    to: .
+    rename: micro.done

@@ -10,11 +10,21 @@ import (
 
 type rootAgentsSource struct {
 	semanticview.Source
-	scopes []semanticview.ProjectScope
+	scopes []semanticview.FlowScope
 }
 
-func (s rootAgentsSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.scopes...)
+func (s rootAgentsSource) FlowScopes() []semanticview.FlowScope {
+	return append([]semanticview.FlowScope(nil), s.scopes...)
+}
+
+func (s rootAgentsSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
+	id = strings.TrimSpace(id)
+	for _, scope := range s.scopes {
+		if strings.TrimSpace(scope.ID) == id {
+			return scope, true
+		}
+	}
+	return semanticview.FlowScope{}, false
 }
 
 // WrapRootAgents gives direct in-memory root declarations the owner facts that
@@ -23,6 +33,43 @@ func (s rootAgentsSource) ProjectScopes() []semanticview.ProjectScope {
 func WrapRootAgents(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
 	if bundle == nil {
 		return nil
+	}
+	root := bundle.FlowTree.Root
+	if root == nil {
+		root = &runtimecontracts.FlowContractView{
+			Path:  ".",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		}
+		bundle.FlowTree.Root = root
+	}
+	if strings.TrimSpace(root.Path) == "" {
+		root.Path = "."
+	}
+	if strings.TrimSpace(root.Paths.FlowPath) == "" {
+		root.Paths.FlowPath = "."
+	}
+	if root.Nodes == nil {
+		root.Nodes = bundle.Nodes
+	}
+	if root.Events == nil {
+		root.Events = bundle.Events
+	}
+	if root.Tools == nil {
+		root.Tools = bundle.Tools
+	}
+	if len(root.Policy.Values) == 0 && len(root.Policy.Criteria) == 0 && len(root.Policy.Validation) == 0 && len(root.Policy.Modules) == 0 {
+		root.Policy = bundle.Policy
+	}
+	if bundle.RootSchema != nil {
+		root.Schema = *bundle.RootSchema
+	}
+	if bundle.FlowTree.ByID == nil {
+		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{}
+	}
+	bundle.FlowTree.ByID["."] = root
+	root.Agents = runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents)
+	if root.AgentURIs == nil {
+		root.AgentURIs = map[string]string{}
 	}
 	if bundle.URIRegistry.Agents == nil {
 		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
@@ -41,46 +88,35 @@ func WrapRootAgents(bundle *runtimecontracts.WorkflowContractBundle) semanticvie
 		bundle.URIRegistry.Agents[localID] = ref
 		bundle.URIRegistry.ByURI[uri] = ref
 		agentURIs[localID] = uri
+		root.AgentURIs[localID] = uri
 	}
 	base := semanticview.Wrap(bundle)
-	scopes := base.ProjectScopes()
-	rootScope := -1
+	scopes := base.FlowScopes()
+	rootIndex := -1
 	for index := range scopes {
-		key := strings.Trim(strings.TrimSpace(scopes[index].Key), "/")
-		if key == "" {
-			key = "."
-		}
-		if key == "." && strings.TrimSpace(scopes[index].OwningFlowID) == "" {
-			rootScope = index
+		path := strings.TrimSpace(scopes[index].Path)
+		if path == "." || strings.Trim(path, "/") == "" {
+			rootIndex = index
 			break
 		}
 	}
-	if rootScope >= 0 {
-		scopes[rootScope].Agents = runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents)
-		scopes[rootScope].AgentURIs = agentURIs
-		return rootAgentsSource{Source: base, scopes: scopes}
+	if rootIndex < 0 {
+		nodes := make(map[string]runtimecontracts.SystemNodeContract)
+		for _, record := range base.ExecutableNodeRecords() {
+			node, err := record.Identity()
+			if err != nil {
+				panic(fmt.Sprintf("semanticview test root node %q has invalid identity: %v", record.LogicalID, err))
+			}
+			if node.FlowPath() == "." {
+				nodes[node.NodeID()] = record.Entry
+			}
+		}
+		scopes = append(scopes, semanticview.FlowScope{ID: ".", Path: ".", Nodes: nodes})
+		rootIndex = len(scopes) - 1
 	}
-
-	nodes := make(map[string]runtimecontracts.SystemNodeContract)
-	for _, record := range base.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
-			panic(fmt.Sprintf("semanticview test root node %q has invalid identity: %v", record.LogicalID, err))
-		}
-		if node.PackageKey() != "." || node.FlowID() != "" {
-			continue
-		}
-		if _, duplicate := nodes[node.NodeID()]; duplicate {
-			panic(fmt.Sprintf("semanticview test root node %q has duplicate exact identity", record.LogicalID))
-		}
-		nodes[node.NodeID()] = record.Entry
-	}
-	scopes = append(scopes, semanticview.ProjectScope{
-		Key: ".", Manifest: runtimecontracts.ProjectPackageDocument{
-			Name: "semanticview-test-root", Version: "1.0.0", PlatformVersion: ">=0.7.0 <0.8.0",
-		}, Nodes: nodes, Events: bundle.EventEntries(),
-		Agents: runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents), AgentURIs: agentURIs,
-		Tools: bundle.ToolEntries(), Policy: bundle.Policy,
-	})
+	scopes[rootIndex].Agents = runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents)
+	scopes[rootIndex].AgentURIs = agentURIs
+	scopes[rootIndex].Tools = bundle.ToolEntries()
+	scopes[rootIndex].Policy = bundle.Policy
 	return rootAgentsSource{Source: base, scopes: scopes}
 }

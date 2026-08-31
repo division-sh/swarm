@@ -1,0 +1,4 @@
+name: test-event-validation
+version: 1.0.0
+description: Event with missing required payload field is rejected and dead-lettered.
+platform_version: ">=0.7.0 <0.8.0"

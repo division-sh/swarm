@@ -152,7 +152,7 @@ func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx 
 }
 
 func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string, now time.Time) error {
-	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
 	}

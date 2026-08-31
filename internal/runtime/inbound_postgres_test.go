@@ -25,6 +25,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -32,6 +33,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -1178,7 +1180,23 @@ func subscribeInboundGatewayAgent(
 	for _, eventType := range eventTypes {
 		subscriptions = append(subscriptions, string(eventType))
 	}
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+	flowEvents := make(map[string]runtimecontracts.EventCatalogEntry, len(subscriptions))
+	for _, subscription := range subscriptions {
+		flowEvents[subscription] = runtimecontracts.EventCatalogEntry{}
+	}
+	flow := runtimecontracts.FlowContractView{
+		Path:   boundedProviderFlowID,
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: boundedProviderFlowID},
+		Events: flowEvents,
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{boundedProviderFlowID: &root.Children[0]},
+		},
+	})
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       agentID,
 		FlowID:        boundedProviderFlowID,
 		FlowPath:      flowInstance,
@@ -1263,12 +1281,9 @@ func seedSQLiteInboundGatewayRuntime(
 	return seedBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, flowInstance, provider)
 }
 
-func boundedInboundStandingOrigin(t *testing.T, provider string) runtimerunlifecycle.RunOrigin {
+func boundedInboundStandingOrigin(t *testing.T, _ string) runtimerunlifecycle.RunOrigin {
 	t.Helper()
-	serviceID := runtimeflowidentity.StandingServiceID(
-		"test.provider."+strings.ToLower(strings.TrimSpace(provider)),
-		"bounded-inbound",
-	)
+	serviceID := runtimeflowidentity.StandingServiceID(boundedProviderFlowID)
 	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
 	if err != nil {
 		t.Fatalf("construct bounded inbound standing origin: %v", err)
@@ -1305,7 +1320,7 @@ func installInboundStandingRecoveryOwner(
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: runID,
-		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatal(err)

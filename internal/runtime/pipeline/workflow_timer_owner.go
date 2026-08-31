@@ -934,7 +934,7 @@ func workflowTimerDeclarationSourceEvent(
 		routingSource events.RoutingSource
 		err           error
 	)
-	if flowID == "" {
+	if flowID == "." {
 		routingSource, err = events.NewRootRoutingSource(entityID)
 	} else {
 		routingSource, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
@@ -1013,7 +1013,7 @@ func workflowTimerDeclarationOwnedByInstance(
 	if declarationFlowID == workflowName {
 		return true
 	}
-	return declarationFlowID == "" && workflowName == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
+	return false
 }
 
 func workflowTimerDeclarationForInstance(

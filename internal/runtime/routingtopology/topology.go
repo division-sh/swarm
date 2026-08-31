@@ -39,7 +39,6 @@ type Endpoint struct {
 	Kind           semanticview.EventEndpointKind      `json:"kind"`
 	FlowID         string                              `json:"flow_id,omitempty"`
 	FlowPath       string                              `json:"flow_path,omitempty"`
-	PackageKey     string                              `json:"package_key,omitempty"`
 	Event          EventIdentity                       `json:"event"`
 	Pattern        bool                                `json:"pattern,omitempty"`
 	NodeID         string                              `json:"node_id,omitempty"`
@@ -82,9 +81,7 @@ type RootInputAdmission struct {
 }
 
 type RootInputTarget struct {
-	PackageKey string `json:"package_key,omitempty"`
-	FlowID     string `json:"flow_id"`
-	FlowPath   string `json:"flow_path,omitempty"`
+	FlowPath string `json:"flow_path"`
 }
 
 type Edge struct {
@@ -100,24 +97,12 @@ type Edge struct {
 }
 
 type TypedPubSub struct {
-	Match         string                         `json:"match"`
-	Boundary      string                         `json:"boundary"`
-	Authorization *TypedPubSubAuthorizationProof `json:"authorization,omitempty"`
-}
-
-type TypedPubSubAuthorizationProof struct {
-	ParentPackageKey string `json:"parent_package_key,omitempty"`
-	ChildPackageKey  string `json:"child_package_key"`
-	ImportLabel      string `json:"import_label,omitempty"`
-	Source           string `json:"source,omitempty"`
-	EventPattern     string `json:"event_pattern"`
-	MatchPattern     string `json:"match_pattern"`
-	LocalizedEvent   string `json:"localized_event"`
-	RouteSource      string `json:"route_source"`
+	Match    string `json:"match"`
+	Boundary string `json:"boundary"`
 }
 
 type Boundary struct {
-	PackageKey       string `json:"package_key,omitempty"`
+	OwnerFlowPath    string `json:"owner_flow_path,omitempty"`
 	AuthoredLocation string `json:"authored_location,omitempty"`
 	From             string `json:"from"`
 	To               string `json:"to"`
@@ -164,7 +149,7 @@ type Issue struct {
 	CheckID          string `json:"check_id,omitempty"`
 	Severity         string `json:"severity,omitempty"`
 	Location         string `json:"location,omitempty"`
-	PackageKey       string `json:"package_key,omitempty"`
+	OwnerFlowPath    string `json:"owner_flow_path,omitempty"`
 	From             string `json:"from,omitempty"`
 	To               string `json:"to,omitempty"`
 	Failure          string `json:"failure"`
@@ -212,7 +197,7 @@ func Build(source semanticview.Source) Topology {
 		RootInputSources:  rootInputSourceViews(source),
 		BoundaryExposures: builder.sortedExposures(),
 		Edges:             builder.sortedEdges(),
-		Issues:            issueViews(planIssues, builder.relationIssues),
+		Issues:            issueViews(planIssues),
 	}
 	topology.Issues = append(topology.Issues, connectReceiverPinCollisionIssueViews(connectGraph.ReceiverPinCollisions())...)
 	sort.SliceStable(topology.Issues, func(i, j int) bool { return topology.Issues[i].ID < topology.Issues[j].ID })
@@ -251,50 +236,38 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		return []RootInputSource{}
 	}
 	out := make([]RootInputSource, 0)
-	for _, pkg := range bundle.PackageTree {
-		for flowIndex, ref := range pkg.Manifest.Flows {
-			if ref.Ingress == nil {
-				continue
+	for _, view := range bundle.FlowViews() {
+		if view.Schema.Ingress == nil {
+			continue
+		}
+		flowPath := strings.TrimSpace(view.Paths.FlowPath)
+		alias := strings.TrimSpace(view.Schema.Ingress.Alias)
+		target := RootInputTarget{FlowPath: flowPath}
+		sourceFile := strings.TrimSpace(view.Paths.SchemaFile)
+		for providerIndex, binding := range view.Schema.Ingress.Providers {
+			admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
+			if admissionKind == "" {
+				admissionKind = "pack-required"
 			}
-			flowID := strings.TrimSpace(ref.ID)
-			alias := strings.TrimSpace(ref.Ingress.Alias)
-			if alias == "" {
-				alias = flowID
+			item := RootInputSource{
+				Kind:             RootInputSourceStandingIngress,
+				Alias:            alias,
+				Provider:         strings.TrimSpace(binding.Provider),
+				Target:           target,
+				AuthoredLocation: sourceFile + ":ingress.providers[" + strconv.Itoa(providerIndex) + "]",
+				Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
 			}
-			target := RootInputTarget{
-				PackageKey: strings.TrimSpace(pkg.Key),
-				FlowID:     flowID,
-				FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+			if binding.Admission.Pack != nil {
+				item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
 			}
-			sourceFile := strings.TrimSpace(pkg.Paths.PackageFile)
-			if sourceFile == "" {
-				sourceFile = "package.yaml"
-			}
-			for providerIndex, binding := range ref.Ingress.Providers {
-				admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
-				if admissionKind == "" {
-					admissionKind = "pack-required"
+			if binding.Admission.Authentication != nil {
+				item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
+				if item.Admission.DeclaredAuthentication == "NONE" {
+					item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
 				}
-				item := RootInputSource{
-					Kind:             RootInputSourceStandingIngress,
-					Alias:            alias,
-					Provider:         strings.TrimSpace(binding.Provider),
-					Target:           target,
-					AuthoredLocation: sourceFile + ":flows[" + strconv.Itoa(flowIndex) + "].ingress.providers[" + strconv.Itoa(providerIndex) + "]",
-					Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
-				}
-				if binding.Admission.Pack != nil {
-					item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
-				}
-				if binding.Admission.Authentication != nil {
-					item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
-					if item.Admission.DeclaredAuthentication == "NONE" {
-						item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
-					}
-				}
-				item.ID = rootInputSourceID(item)
-				out = append(out, item)
 			}
+			item.ID = rootInputSourceID(item)
+			out = append(out, item)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -304,11 +277,8 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		if out[i].Provider != out[j].Provider {
 			return out[i].Provider < out[j].Provider
 		}
-		if out[i].Target.PackageKey != out[j].Target.PackageKey {
-			return out[i].Target.PackageKey < out[j].Target.PackageKey
-		}
-		if out[i].Target.FlowID != out[j].Target.FlowID {
-			return out[i].Target.FlowID < out[j].Target.FlowID
+		if out[i].Target.FlowPath != out[j].Target.FlowPath {
+			return out[i].Target.FlowPath < out[j].Target.FlowPath
 		}
 		if out[i].AuthoredLocation != out[j].AuthoredLocation {
 			return out[i].AuthoredLocation < out[j].AuthoredLocation
@@ -319,16 +289,14 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 }
 
 type topologyBuilder struct {
-	census         semanticview.AuthoredEventEndpointCensus
-	edges          []Edge
-	exposures      []BoundaryExposure
-	seenEdges      map[string]struct{}
-	seenExposures  map[string]struct{}
-	relationIssues []semanticview.TypedPubSubConsumerIssue
+	census        semanticview.AuthoredEventEndpointCensus
+	edges         []Edge
+	exposures     []BoundaryExposure
+	seenEdges     map[string]struct{}
+	seenExposures map[string]struct{}
 }
 
 func (b *topologyBuilder) addTypedPubSubRelations(relations semanticview.TypedPubSubRelations) {
-	b.relationIssues = append(b.relationIssues, relations.Issues...)
 	for _, match := range relations.Matches {
 		if match.Producer.Direction == semanticview.EventEndpointProducer && !isExecutableEndpoint(match.Producer) {
 			continue
@@ -347,23 +315,10 @@ func (b *topologyBuilder) addTypedPubSubRelations(relations semanticview.TypedPu
 }
 
 func typedPubSubView(match semanticview.TypedPubSubConsumerMatch) *TypedPubSub {
-	view := &TypedPubSub{
+	return &TypedPubSub{
 		Match:    string(match.Kind),
 		Boundary: string(match.Boundary),
 	}
-	if match.Authorization != nil {
-		view.Authorization = &TypedPubSubAuthorizationProof{
-			ParentPackageKey: strings.TrimSpace(match.Authorization.ParentPackageKey),
-			ChildPackageKey:  strings.TrimSpace(match.Authorization.ChildPackageKey),
-			ImportLabel:      strings.TrimSpace(match.Authorization.ImportLabel),
-			Source:           strings.TrimSpace(match.Authorization.Source),
-			EventPattern:     strings.TrimSpace(match.Authorization.EventPattern),
-			MatchPattern:     strings.TrimSpace(match.Authorization.MatchPattern),
-			LocalizedEvent:   strings.TrimSpace(match.Authorization.LocalizedEvent),
-			RouteSource:      strings.TrimSpace(match.Authorization.RouteSource),
-		}
-	}
-	return view
 }
 
 func (b *topologyBuilder) addBoundaryExposures() {
@@ -460,7 +415,6 @@ func endpointView(endpoint semanticview.AuthoredEventEndpoint) Endpoint {
 		Kind:           endpoint.Kind,
 		FlowID:         strings.TrimSpace(endpoint.FlowID),
 		FlowPath:       strings.TrimSpace(endpoint.FlowPath),
-		PackageKey:     strings.TrimSpace(endpoint.PackageKey),
 		Event:          eventView(endpoint.Event),
 		Pattern:        endpoint.Pattern,
 		NodeID:         strings.TrimSpace(endpoint.NodeID),
@@ -514,7 +468,7 @@ func boundaryView(plan pinrouting.ConnectRoutePlan) *Boundary {
 	source := plan.SourceEndpoint().Readback()
 	receiver := plan.ReceiverEndpoint().Readback()
 	return &Boundary{
-		PackageKey:       planReadback.PackageKey,
+		OwnerFlowPath:    planReadback.FlowPath,
 		AuthoredLocation: planReadback.AuthoredLocation,
 		From:             connectEndpointRef(plan.SourceEndpoint()),
 		To:               connectEndpointRef(plan.ReceiverEndpoint()),
@@ -580,11 +534,11 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 	return resolution
 }
 
-func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues []semanticview.TypedPubSubConsumerIssue) []Issue {
-	out := make([]Issue, 0, len(connectIssues)+len(relationIssues))
+func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue) []Issue {
+	out := make([]Issue, 0, len(connectIssues))
 	for _, issue := range connectIssues {
 		view := Issue{
-			PackageKey:       strings.TrimSpace(issue.Connect.PackageKey),
+			OwnerFlowPath:    strings.TrimSpace(issue.Connect.OwnerFlowPath),
 			From:             strings.TrimSpace(issue.Connect.From),
 			To:               strings.TrimSpace(issue.Connect.To),
 			Failure:          issue.Failure.Code(),
@@ -594,22 +548,9 @@ func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues
 		view.ID = issueID(view)
 		out = append(out, view)
 	}
-	for _, issue := range relationIssues {
-		view := Issue{
-			Location:    strings.TrimSpace(issue.Event.EventKey()),
-			From:        strings.TrimSpace(issue.Producer.ID),
-			To:          strings.TrimSpace(issue.Consumer.ID),
-			Failure:     strings.TrimSpace(issue.Failure),
-			Detail:      strings.Join(issue.Evidence(), ", "),
-			Message:     issue.Message(),
-			Remediation: issue.Remediation(),
-		}
-		view.ID = issueID(view)
-		out = append(out, view)
-	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].PackageKey != out[j].PackageKey {
-			return out[i].PackageKey < out[j].PackageKey
+		if out[i].OwnerFlowPath != out[j].OwnerFlowPath {
+			return out[i].OwnerFlowPath < out[j].OwnerFlowPath
 		}
 		if out[i].From != out[j].From {
 			return out[i].From < out[j].From
@@ -659,7 +600,7 @@ func WithIssues(topology Topology, additional ...Issue) Topology {
 }
 
 func issueID(issue Issue) string {
-	parts := []string{issue.CheckID, issue.Severity, issue.Location, issue.PackageKey, issue.From, issue.To, issue.Failure, issue.Detail, issue.AuthoredLocation}
+	parts := []string{issue.CheckID, issue.Severity, issue.Location, issue.OwnerFlowPath, issue.From, issue.To, issue.Failure, issue.Detail, issue.AuthoredLocation}
 	return "issue-" + topologyIdentityDigest(parts...)
 }
 
@@ -670,21 +611,9 @@ func edgeID(edge Edge) string {
 	parts := []string{string(edge.Scope), edge.Event.Canonical, edge.Producer.ID, edge.Consumer.ID}
 	if edge.TypedPubSub != nil {
 		parts = append(parts, edge.TypedPubSub.Match, edge.TypedPubSub.Boundary)
-		if edge.TypedPubSub.Authorization != nil {
-			parts = append(parts,
-				edge.TypedPubSub.Authorization.RouteSource,
-				edge.TypedPubSub.Authorization.ParentPackageKey,
-				edge.TypedPubSub.Authorization.ChildPackageKey,
-				edge.TypedPubSub.Authorization.ImportLabel,
-				edge.TypedPubSub.Authorization.Source,
-				edge.TypedPubSub.Authorization.EventPattern,
-				edge.TypedPubSub.Authorization.MatchPattern,
-				edge.TypedPubSub.Authorization.LocalizedEvent,
-			)
-		}
 	}
 	if edge.Boundary != nil {
-		parts = append(parts, edge.Boundary.PackageKey, edge.Boundary.From, edge.Boundary.To)
+		parts = append(parts, edge.Boundary.OwnerFlowPath, edge.Boundary.From, edge.Boundary.To)
 	}
 	return "route-" + topologyIdentityDigest(parts...)
 }
@@ -694,8 +623,6 @@ func rootInputSourceID(source RootInputSource) string {
 		strings.TrimSpace(source.Kind),
 		strings.TrimSpace(source.Alias),
 		strings.TrimSpace(source.Provider),
-		strings.TrimSpace(source.Target.PackageKey),
-		strings.TrimSpace(source.Target.FlowID),
 		strings.TrimSpace(source.Target.FlowPath),
 		strings.TrimSpace(source.AuthoredLocation),
 	}

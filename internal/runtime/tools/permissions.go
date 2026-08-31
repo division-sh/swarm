@@ -238,13 +238,10 @@ func knownPermissionNames(source semanticview.Source) map[string]struct{} {
 				out[perm] = struct{}{}
 			}
 		}
-		for _, scope := range source.ProjectScopes() {
-			collectPermissionBundleExtensions(out, scope.Policy)
-		}
 		for _, scope := range source.FlowScopes() {
 			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(scope.ID))
 		}
-		if len(source.ProjectScopes()) == 0 && len(source.FlowScopes()) == 0 {
+		if len(source.FlowScopes()) == 0 {
 			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(""))
 		}
 		collectToolPermissionExtensions(out, source)

@@ -1,0 +1,6 @@
+name: test-boot-prompt-missing
+version: 1.0.0
+description: >
+  Contract loading must fail closed when a managed agent has no intent declaration.
+
+platform_version: ">=0.7.0 <0.8.0"

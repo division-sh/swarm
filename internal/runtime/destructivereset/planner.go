@@ -30,7 +30,7 @@ func (r CompositeInventoryReader) ReadResetInventory(ctx context.Context) (Inven
 	if err != nil {
 		return Inventory{}, err
 	}
-	inventory.EntityContainers = append([]ContainerRef(nil), containers...)
+	inventory.ManagedContainers = append([]ContainerRef(nil), containers...)
 	return inventory, nil
 }
 
@@ -38,13 +38,13 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, req Request) (Plan, err
 	if p.Reader == nil {
 		return Plan{}, ErrPlannerNotConfigured
 	}
-	includeBundles := req.includeBundles()
+	includeSourceArtifacts := req.includeSourceArtifacts()
 	inventory, err := p.Reader.ReadResetInventory(ctx)
 	if err != nil {
 		return Plan{}, err
 	}
 	preserved := mergePreservedResources(inventory.Preserved)
-	preserved.BundleContracts = !includeBundles
+	preserved.SourceArtifacts = !includeSourceArtifacts
 	contracts := p.DownstreamContracts
 	if len(contracts) == 0 {
 		contracts = DefaultDownstreamContracts()
@@ -54,37 +54,37 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, req Request) (Plan, err
 		seams = DefaultResetSeams()
 	}
 	return Plan{
-		ActiveRuns:          append([]RunRef(nil), inventory.ActiveRuns...),
-		CleanupRuns:         append([]RunRef(nil), inventory.CleanupRuns...),
-		CleanupRunSetKnown:  inventory.CleanupRunSetKnown,
-		IncludeBundles:      includeBundles,
-		ActiveDeliveries:    append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
-		RunScopedTables:     resetInventoryRunScopedTables(inventory.RunScopedTables, includeBundles),
-		EntityContainers:    append([]ContainerRef(nil), inventory.EntityContainers...),
-		Preserved:           copyPreservedResources(preserved),
-		DownstreamContracts: append([]DownstreamContract(nil), contracts...),
-		ResetSeams:          append([]ResetSeam(nil), seams...),
+		ActiveRuns:             append([]RunRef(nil), inventory.ActiveRuns...),
+		CleanupRuns:            append([]RunRef(nil), inventory.CleanupRuns...),
+		CleanupRunSetKnown:     inventory.CleanupRunSetKnown,
+		IncludeSourceArtifacts: includeSourceArtifacts,
+		ActiveDeliveries:       append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
+		RunScopedTables:        resetInventoryRunScopedTables(inventory.RunScopedTables, includeSourceArtifacts),
+		ManagedContainers:      append([]ContainerRef(nil), inventory.ManagedContainers...),
+		Preserved:              copyPreservedResources(preserved),
+		DownstreamContracts:    append([]DownstreamContract(nil), contracts...),
+		ResetSeams:             append([]ResetSeam(nil), seams...),
 	}, nil
 }
 
-func resetInventoryRunScopedTables(tables []TableRef, includeBundles bool) []TableRef {
+func resetInventoryRunScopedTables(tables []TableRef, includeSourceArtifacts bool) []TableRef {
 	out := append([]TableRef(nil), tables...)
-	if !includeBundles {
+	if !includeSourceArtifacts {
 		return out
 	}
-	entry, ok := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: true})["bundles"]
+	entry, ok := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeSourceArtifacts: true})["source_artifacts"]
 	if !ok || entry.Classification != CleanupDeleteAll {
 		return out
 	}
 	for i := range out {
-		if out[i].Name == "bundles" {
+		if out[i].Name == "source_artifacts" {
 			out[i].Owner = ContractRunScopedTruncation
 			out[i].Action = entry.Classification
 			return out
 		}
 	}
 	return append(out, TableRef{
-		Name:   "bundles",
+		Name:   "source_artifacts",
 		Owner:  ContractRunScopedTruncation,
 		Action: entry.Classification,
 	})
@@ -105,6 +105,6 @@ func mergePreservedResources(p PreservedResources) PreservedResources {
 	}
 	p.SchemaMigrations = p.SchemaMigrations || defaults.SchemaMigrations
 	p.AuthTokens = p.AuthTokens || defaults.AuthTokens
-	p.BundleContracts = p.BundleContracts || defaults.BundleContracts
+	p.SourceArtifacts = p.SourceArtifacts || defaults.SourceArtifacts
 	return copyPreservedResources(p)
 }

@@ -197,7 +197,7 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 		seenBindings[bindingID] = struct{}{}
 		coordinate := activation.Coordinate.Normalized()
 		key := strings.Join([]string{
-			coordinate.BundleHash, coordinate.BundleSource, coordinate.BundleIdentity,
+			coordinate.BundleHash, coordinate.BundleIdentity,
 			coordinate.PackInventoryGeneration, coordinate.RuntimeInstanceID, fmt.Sprint(coordinate.ContextPublicationGeneration),
 		}, "\x00")
 		if contextKey == "" {

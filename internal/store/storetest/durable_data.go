@@ -2,13 +2,14 @@ package storetest
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -16,19 +17,14 @@ import (
 )
 
 type DurableDataCatalogStore interface {
-	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, runtimedata.Catalog) (bundlecatalog.UpsertResult, error)
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, runtimedata.Catalog) (sourceartifact.EnsureResult, error)
 }
 
 // RequireDurableDataCatalog registers the exact empty data catalog claimed by
 // a test run. Tests with authored declarations must register their full catalog.
 func RequireDurableDataCatalog(t testing.TB, ctx context.Context, selected DurableDataCatalogStore, bundleHash string) {
 	t.Helper()
-	if _, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash:  bundleHash,
-		ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
-		ParsedJSON:  map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
-		Metadata:    map[string]any{"source": "test-fixture"},
-	}, runtimedata.Catalog{BundleHash: bundleHash}); err != nil {
+	if err := registerDurableDataCatalogForTest(ctx, selected, runtimedata.Catalog{BundleHash: bundleHash}); err != nil {
 		t.Fatalf("register durable data catalog %s: %v", bundleHash, err)
 	}
 }
@@ -37,16 +33,33 @@ func RequireDurableDataCatalog(t testing.TB, ctx context.Context, selected Durab
 // its exact declaration/static-data catalog as one selected-store fact.
 func RequireBundleDataCatalog(t testing.TB, ctx context.Context, selected DurableDataCatalogStore, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
-	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
 		t.Fatalf("build exact bundle data catalog: %v", err)
 	}
-	if _, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, ParsedJSON: projection.ParsedJSON,
-		DataBlob: projection.DataBlob, Metadata: projection.Metadata,
-	}, projection.DataCatalog); err != nil {
-		t.Fatalf("register exact bundle data catalog %s: %v", projection.BundleHash, err)
+	if _, err := selected.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
+		t.Fatalf("register exact source artifact and data catalog %s: %v", catalog.BundleHash, err)
 	}
+}
+
+func registerDurableDataCatalogForTest(ctx context.Context, selected any, catalog runtimedata.Catalog) error {
+	db := Database(selected)
+	if db == nil {
+		return fmt.Errorf("selected store database is required")
+	}
+	owner, err := durableDataOwnerForSelected(db, selected)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := storedurabledata.RegisterCatalogTx(owner, ctx, tx, catalog, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // MaterializeDataForkPins executes the production fork-pin owner against a
@@ -64,28 +77,9 @@ func MaterializeDataForkPins(
 	if db == nil {
 		return nil, fmt.Errorf("selected store database is required")
 	}
-	var owner *storedurabledata.Owner
-	switch selected.(type) {
-	case *store.PostgresStore:
-		backend, err := postgresbackend.New(db)
-		if err != nil {
-			return nil, err
-		}
-		owner, err = storedurabledata.NewPostgres(backend, func() error { return nil })
-		if err != nil {
-			return nil, err
-		}
-	case *store.SQLiteRuntimeStore:
-		backend, err := sqlitebackend.New(db)
-		if err != nil {
-			return nil, err
-		}
-		owner, err = storedurabledata.NewSQLite(backend, func() error { return nil }, time.Now)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("unsupported selected store %T", selected)
+	owner, err := durableDataOwnerForSelected(db, selected)
+	if err != nil {
+		return nil, err
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -102,4 +96,23 @@ func MaterializeDataForkPins(
 		return nil, err
 	}
 	return pins, nil
+}
+
+func durableDataOwnerForSelected(db *sql.DB, selected any) (*storedurabledata.Owner, error) {
+	switch selected.(type) {
+	case *store.PostgresStore:
+		backend, err := postgresbackend.New(db)
+		if err != nil {
+			return nil, err
+		}
+		return storedurabledata.NewPostgres(backend, func() error { return nil })
+	case *store.SQLiteRuntimeStore:
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			return nil, err
+		}
+		return storedurabledata.NewSQLite(backend, func() error { return nil }, time.Now)
+	default:
+		return nil, fmt.Errorf("unsupported selected store %T", selected)
+	}
 }

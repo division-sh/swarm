@@ -23,11 +23,11 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // EffectiveSourceIdentity names the complete admitted source used to compile
 // and execute one scenario. The base bundle fact alone is not this identity.
 type EffectiveSourceIdentity struct {
-	sourceFact runtimecorrelation.BundleSourceFact
+	sourceFact runtimecorrelation.SourceArtifactFact
 	digest     string
 }
 
-func NewEffectiveSourceIdentity(sourceFact runtimecorrelation.BundleSourceFact, digest string) (EffectiveSourceIdentity, error) {
+func NewEffectiveSourceIdentity(sourceFact runtimecorrelation.SourceArtifactFact, digest string) (EffectiveSourceIdentity, error) {
 	if err := sourceFact.Validate(); err != nil {
 		return EffectiveSourceIdentity{}, fmt.Errorf("effective source bundle fact: %w", err)
 	}
@@ -42,7 +42,7 @@ func (i EffectiveSourceIdentity) Validate() error {
 	return err
 }
 
-func (i EffectiveSourceIdentity) BundleSourceFact() runtimecorrelation.BundleSourceFact {
+func (i EffectiveSourceIdentity) SourceArtifactFact() runtimecorrelation.SourceArtifactFact {
 	return i.sourceFact
 }
 
@@ -56,11 +56,9 @@ func (i EffectiveSourceIdentity) CanonicalValue() (map[string]any, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	bundleHash, bundleSource := i.sourceFact.StorageValues()
 	return map[string]any{
 		"version":                 EffectiveSourceIdentityVersion,
-		"bundle_hash":             bundleHash,
-		"bundle_source":           bundleSource,
+		"bundle_hash":             i.sourceFact.BundleHash(),
 		"effective_source_digest": i.digest,
 	}, nil
 }
@@ -80,7 +78,6 @@ type profileDocument struct {
 
 type profileSourceDocument struct {
 	BundleHash            string `json:"bundle_hash"`
-	BundleSource          string `json:"bundle_source"`
 	EffectiveSourceDigest string `json:"effective_source_digest"`
 }
 
@@ -107,11 +104,10 @@ func NewProfile(identity EffectiveSourceIdentity, profileID string, responses []
 	if profileID != strings.TrimSpace(profileID) || profileID == "" {
 		return Profile{}, fmt.Errorf("scenario profile_id must be non-empty canonical text")
 	}
-	bundleHash, bundleSource := identity.BundleSourceFact().StorageValues()
 	doc := profileDocument{
 		Version: ExecutionProfileVersion,
 		Source: profileSourceDocument{
-			BundleHash: bundleHash, BundleSource: bundleSource, EffectiveSourceDigest: identity.Digest(),
+			BundleHash: identity.SourceArtifactFact().BundleHash(), EffectiveSourceDigest: identity.Digest(),
 		},
 		ProfileID:          profileID,
 		ConnectorResponses: make([]profileResponseDocument, 0, len(responses)),
@@ -174,7 +170,7 @@ func DecodeProfile(raw []byte, expectedDigest string) (Profile, error) {
 	if doc.Version != ExecutionProfileVersion {
 		return Profile{}, fmt.Errorf("unsupported scenario execution profile version %q", doc.Version)
 	}
-	sourceFact, err := runtimecorrelation.DecodeBundleSourceFact(doc.Source.BundleHash, doc.Source.BundleSource)
+	sourceFact, err := runtimecorrelation.DecodeSourceArtifactFact(doc.Source.BundleHash)
 	if err != nil {
 		return Profile{}, fmt.Errorf("decode scenario execution profile source: %w", err)
 	}

@@ -1,0 +1,34 @@
+name: telegram-ingress
+mode: singleton
+stages:
+  warming:
+    initial: true
+    timers:
+      - id: warmup
+        after: 100ms
+        advances_to: review
+  review:
+    gate:
+      decision: lifecycle_ready
+      title: Confirm lifecycle readiness
+      outcomes:
+        approve:
+          label: Continue
+          advances_to: serving
+        reject:
+          label: Retire
+          advances_to: retired
+  serving: {}
+  retired:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - event: inbound.telegram
+        source: external
+activation: standing
+ingress:
+  alias: chat
+  providers:
+    - provider: telegram
+      signing_secret: webhook_signing.telegram

@@ -277,9 +277,8 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		if fixture.dialect == authoractivityfixture.DialectSQLite {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_event_id,mode,
-					contracts_root,workflow_name,workflow_version,created_at
-				) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`,
+					binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at
+				) VALUES (?,?,?,?,'selected_contracts',?)`,
 				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
@@ -287,9 +286,8 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		} else {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_event_id,mode,
-					contracts_root,workflow_name,workflow_version,created_at
-				) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)`,
+					binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at
+				) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts',$5)`,
 				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
@@ -301,10 +299,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		if !ok {
 			t.Fatal("selected-fork atomicity fixture has no selected execution authority owner")
 		}
-		selection := runfork.RunForkContractSelection{
-			Mode: "selected_contracts", ContractsRoot: "/tmp/contracts",
-			WorkflowName: "workflow", WorkflowVersion: "v1",
-		}
+		selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 			Admission: runfork.RunForkSelectedContractExecutionAdmission{
 				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
@@ -323,7 +318,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		if err != nil {
 			t.Fatalf("issue selected execution authority: %v", err)
 		}
-		sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+		sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 		if !ok {
 			t.Fatal("selected-fork atomicity context has no bundle source fact")
 		}

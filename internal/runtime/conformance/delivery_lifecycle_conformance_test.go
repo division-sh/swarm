@@ -17,8 +17,8 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -146,10 +146,10 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("singular_handler_rule_selection_persists_and_replay_must_agree", func(t *testing.T) {
 				facts := []handlerselection.HandlerRuleSelectionFact{
-					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000101", "rules-label"),
-					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextOnComplete, "00000000-0000-4000-8000-000000000102", "complete-label"),
-					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinComplete, "00000000-0000-4000-8000-000000000103", "join-complete"),
-					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinTimeout, "00000000-0000-4000-8000-000000000104", "join-timeout"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[0]`, "rules-label"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextOnComplete, `nodes["conformance"].handlers["proof"].on_complete[0]`, "complete-label"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinComplete, `nodes["conformance"].handlers["proof"].join.on_complete[0]`, "join-complete"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinTimeout, `nodes["conformance"].handlers["proof"].join.timeout[0]`, "join-timeout"),
 					mustHandlerSelectionNoMatch(t, handlerselection.ContextRules),
 					mustHandlerSelectionNoMatch(t, handlerselection.ContextOnComplete),
 					handlerselection.NotApplicable(),
@@ -181,7 +181,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				firstFact := deliveryLifecycleEvaluationFailedFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000105", "failed-evaluation")
+				firstFact := deliveryLifecycleEvaluationFailedFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[1]`, "failed-evaluation")
 				failed, err := backend.store.SettleFailure(ctx, firstClaim.Claim, runtimedelivery.Settlement{
 					Disposition:   runtimedelivery.FailureRetry,
 					Failure:       testFailure("selection_retry"),
@@ -196,7 +196,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				contradiction := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000106", "changed")
+				contradiction := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[2]`, "changed")
 				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, contradiction); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("contradictory replay error = %v, want ErrConflict", err)
 				}
@@ -286,7 +286,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 				predecessor := claimed.Snapshot.Authority
 				successor, err := runtimedelivery.NewNormalExecutionAuthority(
-					predecessor.BundleSource(),
+					predecessor.SourceArtifact(),
 					"delivery-recovery-successor-"+backend.name,
 					predecessor.Generation()+1,
 				)
@@ -362,7 +362,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 
 				wrongAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-					pending.Authority.BundleSource(),
+					pending.Authority.SourceArtifact(),
 					"wrong-authority-"+backend.name,
 					pending.Authority.Generation(),
 				)
@@ -489,7 +489,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("snapshot pending inventory route: %v", err)
 				}
-				source := pendingSnapshot.Authority.BundleSource()
+				source := pendingSnapshot.Authority.SourceArtifact()
 				before, err := backend.store.InspectDeliveryRecovery(ctx, source)
 				if err != nil {
 					t.Fatalf("inspect initial delivery recovery inventory: %v", err)
@@ -527,8 +527,8 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("delivery recovery inventory for run %s = %#v, want %#v", event.RunID(), got, want)
 				}
 
-				foreignSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-					"bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				foreignSource, err := runtimecorrelation.NewSourceArtifactFact(
+					"bundle-v2:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 				)
 				if err != nil {
 					t.Fatal(err)
@@ -924,7 +924,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				fact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000107", "preserved")
+				fact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[3]`, "preserved")
 				failed, err := backend.store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry, Failure: testFailure("retry_before_terminalization"),
 					RetryBase: time.Hour, RuleSelection: fact,
@@ -1686,9 +1686,9 @@ func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConfo
 	}
 }
 
-func deliveryLifecycleSelectedRuleFact(t testing.TB, context handlerselection.Context, elementID, label string) handlerselection.HandlerRuleSelectionFact {
+func deliveryLifecycleSelectedRuleFact(t testing.TB, context handlerselection.Context, semanticPath, label string) handlerselection.HandlerRuleSelectionFact {
 	t.Helper()
-	ref, err := contractelementidentity.ParseContractElementRef("flows/conformance", elementID)
+	ref, err := runtimeidentity.AdmitDeclarationIdentity("conformance", "handler_rule", semanticPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1699,9 +1699,9 @@ func deliveryLifecycleSelectedRuleFact(t testing.TB, context handlerselection.Co
 	return fact
 }
 
-func deliveryLifecycleEvaluationFailedFact(t testing.TB, context handlerselection.Context, elementID, label string) handlerselection.HandlerRuleSelectionFact {
+func deliveryLifecycleEvaluationFailedFact(t testing.TB, context handlerselection.Context, semanticPath, label string) handlerselection.HandlerRuleSelectionFact {
 	t.Helper()
-	ref, err := contractelementidentity.ParseContractElementRef("flows/conformance", elementID)
+	ref, err := runtimeidentity.AdmitDeclarationIdentity("conformance", "handler_rule", semanticPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1723,15 +1723,15 @@ func mustHandlerSelectionNoMatch(t testing.TB, context handlerselection.Context)
 
 func loadDeliveryHandlerRuleSelectionFact(t testing.TB, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) handlerselection.HandlerRuleSelectionFact {
 	t.Helper()
-	query := `SELECT selection_context, disposition, COALESCE(package_coordinate, ''), COALESCE(element_id::text, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
+	query := `SELECT selection_context, disposition, COALESCE(flow_path, ''), COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
 	if !backend.postgres {
-		query = `SELECT selection_context, disposition, COALESCE(package_coordinate, ''), COALESCE(element_id, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
+		query = `SELECT selection_context, disposition, COALESCE(flow_path, ''), COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
 	}
-	var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
-	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw); err != nil {
+	var contextRaw, dispositionRaw, flowPathRaw, familyRaw, semanticPathRaw, labelRaw string
+	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowPathRaw, &familyRaw, &semanticPathRaw, &labelRaw); err != nil {
 		t.Fatalf("load handler rule selection %s: %v", deliveryID, err)
 	}
-	fact, err := handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	fact, err := handlerselection.Hydrate(contextRaw, dispositionRaw, flowPathRaw, familyRaw, semanticPathRaw, labelRaw)
 	if err != nil {
 		t.Fatalf("hydrate handler rule selection %s: %v", deliveryID, err)
 	}

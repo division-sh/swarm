@@ -52,7 +52,7 @@ type budgetThresholds struct {
 func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture) *BudgetTracker {
 	var terminalStates []string
 	if source != nil {
-		terminalStates = source.FlowTerminalStages("")
+		terminalStates = source.FlowTerminalStages(".")
 	}
 	return &BudgetTracker{
 		store:          store,

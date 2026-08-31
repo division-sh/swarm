@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -61,7 +62,7 @@ type workflowTimerStartupTopologyFailureOwner struct {
 	readiness runtimepipeline.DynamicFlowRuntimeReadiness
 }
 
-func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	if !o.readiness.OwningRunSource.Matches(source) {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 	}
@@ -70,7 +71,7 @@ func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadi
 	}, nil
 }
 
-func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	if strings.TrimSpace(runID) != o.readiness.Plan.RunID || !o.readiness.OwningRunSource.Matches(source) {
 		return nil, nil
 	}
@@ -125,15 +126,16 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
+			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			}
 
 			process := worklifetime.NewProcess()
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle(t))
+			source := semanticview.Wrap(bundle)
 			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{
 					Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
@@ -154,12 +156,12 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				PipelineObligations:          selected.PipelineObligations(),
 
 				Options: swarmruntime.RuntimeOptions{
-					SelfCheck:         false,
-					WorkflowModule:    newRuntimeTestWorkflowModule(t, source),
-					LLMRuntime:        workflowTimerStartupLLM{},
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-					BundleSourceFact:  authorActivityTestBundleSourceFact,
-					ProcessWorkOwner:  process,
+					SelfCheck:          false,
+					WorkflowModule:     newRuntimeTestWorkflowModule(t, source),
+					LLMRuntime:         workflowTimerStartupLLM{},
+					RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+					SourceArtifactFact: sourceFact,
+					ProcessWorkOwner:   process,
 				},
 			}))
 			if err != nil {
@@ -317,14 +319,15 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			genericRunID := uuid.NewString()
 			workflowEntityID := uuid.NewString()
 			genericEntityID := uuid.NewString()
-			ctx := testAuthorActivityContext(context.Background())
+			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "1s")
+			ctx := workflowTimerStartupContext(sourceFact)
 			workflowCtx := runtimecorrelation.WithRunID(ctx, workflowRunID)
 			genericCtx := runtimecorrelation.WithRunID(ctx, genericRunID)
 			for _, run := range []struct {
 				ctx   context.Context
 				runID string
 			}{{workflowCtx, workflowRunID}, {genericCtx, genericRunID}} {
-				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: run.runID, Source: authorActivityTestBundleSourceFact}
+				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: run.runID, Artifact: bundle.SourceArtifact}
 				if postgres {
 					runlifecyclefixture.RequirePostgres(t, run.ctx, db, fixture)
 				} else {
@@ -332,7 +335,6 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				}
 			}
 
-			bundle := workflowTimerStartupRecoveryBundleWithDelay(t, "1s")
 			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 			newRuntime := func(owner runtimepipeline.WorkflowPersistenceOwner) (*swarmruntime.Runtime, *worklifetime.Process) {
@@ -356,12 +358,12 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 					DeliveryStore:                selected,
 					PipelineObligations:          selected.PipelineObligations(),
 					Options: swarmruntime.RuntimeOptions{
-						SelfCheck:         false,
-						WorkflowModule:    module,
-						LLMRuntime:        workflowTimerStartupLLM{},
-						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-						BundleSourceFact:  authorActivityTestBundleSourceFact,
-						ProcessWorkOwner:  process,
+						SelfCheck:          false,
+						WorkflowModule:     module,
+						LLMRuntime:         workflowTimerStartupLLM{},
+						RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+						SourceArtifactFact: sourceFact,
+						ProcessWorkOwner:   process,
 					},
 				}))
 				if err != nil {
@@ -381,7 +383,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			occurredAt := time.Now().UTC()
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
-				WorkflowName: "workflow-timer-startup", WorkflowVersion: "1", CurrentState: "waiting",
+				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
 				Fields: map[string]any{
 					"run_id": workflowRunID, "entity_id": workflowEntityID,
 					"flow_path": workflowRunID, "instance_id": workflowRunID,
@@ -423,14 +425,14 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				return count
 			}
 
-			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+			bundleHash := sourceFact.BundleHash()
 			failureOwner := workflowTimerStartupTopologyFailureOwner{
 				WorkflowPersistenceOwner: selected,
 				readiness: runtimepipeline.DynamicFlowRuntimeReadiness{
-					InstancePath: "review/inst-1", OwningRunSource: authorActivityTestBundleSourceFact,
+					InstancePath: "review/inst-1", OwningRunSource: sourceFact,
 					RunStatus: "running", InstanceStatus: "active",
 					Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-						RunID: workflowRunID, BundleHash: bundleHash, BundleSource: bundleSource,
+						RunID: workflowRunID, BundleHash: bundleHash,
 						WorkflowVersion: source.WorkflowVersion() + "-stale", ExecutionMode: executionmode.Live,
 						Identity: runtimeflowidentity.Instance{
 							TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
@@ -511,14 +513,15 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
+			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			}
 
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle(t))
+			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
@@ -541,12 +544,12 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 					PipelineObligations:          selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
-						SelfCheck:         false,
-						WorkflowModule:    module,
-						LLMRuntime:        workflowTimerStartupLLM{},
-						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-						BundleSourceFact:  authorActivityTestBundleSourceFact,
-						ProcessWorkOwner:  process,
+						SelfCheck:          false,
+						WorkflowModule:     module,
+						LLMRuntime:         workflowTimerStartupLLM{},
+						RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+						SourceArtifactFact: sourceFact,
+						ProcessWorkOwner:   process,
 					},
 				}))
 				if err != nil {
@@ -566,8 +569,8 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
-				WorkflowName:    "workflow-timer-startup",
-				WorkflowVersion: "1",
+				WorkflowName:    source.WorkflowName(),
+				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
 				Fields: map[string]any{
 					"run_id":      runID,
@@ -643,16 +646,17 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "3s")
+			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 			}
 
 			// This proof owns restoration through Runtime.Start, not the separate
 			// overdue-timer versus pipeline-recovery ordering tracked by #2234.
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundleWithDelay(t, "3s"))
+			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
@@ -676,12 +680,12 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					PipelineObligations:          selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
-						SelfCheck:         false,
-						WorkflowModule:    module,
-						LLMRuntime:        workflowTimerStartupLLM{},
-						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-						BundleSourceFact:  authorActivityTestBundleSourceFact,
-						ProcessWorkOwner:  process,
+						SelfCheck:          false,
+						WorkflowModule:     module,
+						LLMRuntime:         workflowTimerStartupLLM{},
+						RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
+						SourceArtifactFact: sourceFact,
+						ProcessWorkOwner:   process,
 						BootProgress: func(event swarmruntime.BootProgressEvent) {
 							bootProgress = append(bootProgress, event)
 						},
@@ -705,8 +709,8 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
-				WorkflowName:    "workflow-timer-startup",
-				WorkflowVersion: "1",
+				WorkflowName:    source.WorkflowName(),
+				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
 				Fields: map[string]any{
 					"run_id":      runID,
@@ -796,21 +800,30 @@ func workflowTimerStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflow
 func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"package.yaml":  "name: workflow-timer-startup\nversion: 1\nplatform_version: '>=0.7.0 <0.8.0'\n",
-		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
+		"schema.yaml":   "name: workflow-timer-startup\nstages:\n  waiting:\n    initial: true\n    timers:\n      - id: timeout\n        after: " + delay + "\n        advances_to: done\n  done:\n    terminal: true\n",
 		"entities.yaml": "test_entity: {}\n",
+		"events.yaml":   "generic.tick:\n  swarm:\n    source: platform schedule\n",
 	})
-	bundle.Semantics = runtimecontracts.WorkflowSemanticView{
-		Name: "workflow-timer-startup", Version: "1", InitialStage: "waiting",
-		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}, TerminalStages: []string{"done"},
-		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: delay,
-		}},
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}
-	bundle.Platform.Platform.Name = "swarm"
-	bundle.Platform.Platform.Version = "0.7.0"
 	return bundle
+}
+
+func workflowTimerStartupRecoverySource(t *testing.T, delay string) (*runtimecontracts.WorkflowContractBundle, runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	bundle := workflowTimerStartupRecoveryBundleWithDelay(t, delay)
+	if bundle.SourceArtifact == nil {
+		t.Fatal("workflow timer startup fixture omitted admitted source artifact")
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatalf("construct workflow timer source artifact fact: %v", err)
+	}
+	return bundle, fact
+}
+
+func workflowTimerStartupContext(fact runtimecorrelation.SourceArtifactFact) context.Context {
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
+		authorActivityTestRuntimeInstanceID,
+		fact.BundleHash(),
+	))
 }

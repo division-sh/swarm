@@ -45,7 +45,7 @@ type directiveRecoveryTestBus struct {
 	order []string
 }
 
-func (*recoveryTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*recoveryTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 
@@ -204,7 +204,8 @@ func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req 
 
 func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	ensureManagerTestSemanticSource(am)
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(store.agents))
 	for i := range store.agents {
 		if err := am.resolveAgentModel(&store.agents[i].Config); err != nil {
@@ -224,7 +225,7 @@ func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *re
 	if err != nil {
 		t.Fatalf("construct recovery source set: %v", err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct recovery admission: %v", err)
 	}
@@ -246,12 +247,12 @@ func TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryRepla
 	am := newTestAgentManager(t, bus, nil, store)
 
 	ctx := testAuthorActivityContext(context.Background())
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +310,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 			}, store)
 			installRecoveryTestStaticTopology(t, am, store)
 			err := am.hydratePersistedAgentExecutions(context.Background())
-			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("Recover error = %v, want admission rejection", err)
 			}
 			if am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {

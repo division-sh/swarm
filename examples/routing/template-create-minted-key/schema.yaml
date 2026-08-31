@@ -1,1 +1,8 @@
 name: template-create-minted-key
+connect:
+  - event: validation.requested
+    from: producer
+    to: validator
+  - event: validation.started
+    from: validator
+    to: producer

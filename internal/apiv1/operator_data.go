@@ -643,10 +643,10 @@ func dataDeclarationRef(raw any) (durabledata.DeclarationRef, error) {
 	if !ok {
 		return durabledata.DeclarationRef{}, NewInvalidParamsError(map[string]any{"field": "declaration", "reason": "must be an object"})
 	}
-	if err := exactDataParams(object, "package_key", "event"); err != nil {
+	if err := exactDataParams(object, "flow_path", "event"); err != nil {
 		return durabledata.DeclarationRef{}, err
 	}
-	packageKey, err := dataString(object["package_key"], "declaration.package_key")
+	packageKey, err := dataString(object["flow_path"], "declaration.flow_path")
 	if err != nil {
 		return durabledata.DeclarationRef{}, err
 	}

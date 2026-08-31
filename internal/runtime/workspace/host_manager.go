@@ -6,38 +6,39 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type HostConfig struct {
-	WorkspaceRoot       string
-	SharedDataSource    string
-	DataMountPoint      string
-	ContractsSource     string
-	ContractsMountPoint string
-	BundleHash          string
-	BundleScope         string
+	WorkspaceRoot      string
+	SharedDataSource   string
+	DataMountPoint     string
+	SourceProjection   *sourceartifact.RuntimeProjection
+	SourceMountPoint   string
+	BundleHash         string
+	BundleScope        string
+	SourceProjectionID string
 }
 
 type HostManager struct {
-	cfg    HostConfig
-	source semanticview.Source
-	data   runtimedataaccess.Provider
+	cfg             HostConfig
+	source          semanticview.Source
+	data            runtimedataaccess.Provider
+	ownedProjection *sourceartifact.RuntimeProjection
 }
 
 func DefaultHostConfig() HostConfig {
 	return HostConfig{
-		WorkspaceRoot:       defaultHostWorkspaceRoot(),
-		SharedDataSource:    "",
-		DataMountPoint:      "/data",
-		ContractsSource:     "",
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    defaultHostWorkspaceRoot(),
+		SharedDataSource: "",
+		DataMountPoint:   "/data",
+		SourceMountPoint: "/opt/swarm/source",
 	}
 }
 
@@ -74,14 +75,88 @@ func (m *HostManager) SetDataProjectionProvider(provider runtimedataaccess.Provi
 	}
 }
 
-func (m *HostManager) SetBundleScope(bundleHash string) {
+func (m *HostManager) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (Lifecycle, error) {
 	if m == nil {
-		return
+		return nil, fmt.Errorf("host workspace manager is required")
+	}
+	if source == nil {
+		return nil, fmt.Errorf("workspace semantic source is required")
+	}
+	if projection == nil {
+		return nil, fmt.Errorf("workspace validation failed: runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return nil, err
 	}
 	cfg := m.cfg
-	cfg.BundleHash = strings.TrimSpace(bundleHash)
-	cfg.BundleScope = bundleScopeKey(bundleHash)
+	cfg.SourceProjection = projection
+	cfg.BundleHash = ""
+	cfg.BundleScope = ""
+	clone := NewHostManager()
+	clone.SetConfig(cfg)
+	clone.SetSemanticSource(source)
+	clone.SetDataProjectionProvider(m.data)
+	if err := clone.BindSourceProjection(projection); err != nil {
+		return nil, err
+	}
+	return clone, nil
+}
+
+func (m *HostManager) SourceProjectionBundleHash() string {
+	if m == nil || m.cfg.SourceProjection == nil {
+		return ""
+	}
+	return m.cfg.SourceProjection.BundleHash()
+}
+
+func (m *HostManager) SourceProjectionIdentity() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.cfg.SourceProjectionID)
+}
+
+func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimeProjection) error {
+	if m == nil {
+		return fmt.Errorf("host workspace manager is required")
+	}
+	if projection == nil {
+		return fmt.Errorf("runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return err
+	}
+	if strings.TrimSpace(projection.Identity()) == "" {
+		return fmt.Errorf("runtime source projection identity is required")
+	}
+	if m.ownedProjection != nil {
+		return fmt.Errorf("host workspace source projection is already bound")
+	}
+	ownedProjection, err := projection.Retain()
+	if err != nil {
+		return fmt.Errorf("retain runtime source projection: %w", err)
+	}
+	cfg := m.cfg
+	cfg.SourceProjection = projection
+	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
+	cfg.SourceProjectionID = strings.TrimSpace(projection.Identity())
+	cfg.BundleScope, err = durableBundleScopeKey(cfg.BundleHash)
+	if err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
 	m.cfg = cfg
+	m.ownedProjection = ownedProjection
+	return nil
+}
+
+func (m *HostManager) ReleaseSourceProjection(context.Context) error {
+	if m == nil || m.ownedProjection == nil {
+		return nil
+	}
+	projection := m.ownedProjection
+	m.ownedProjection = nil
+	return projection.Release()
 }
 
 func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Source) error {
@@ -126,23 +201,15 @@ func (m *HostManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	if err := m.EnsurePrereqs(ctx); err != nil {
 		return err
 	}
-	for _, name := range []string{"scaffold", "system"} {
+	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
+		name, err := durableWorkspaceBackingKey(m.cfg.BundleHash, kind, "")
+		if err != nil {
+			return err
+		}
 		if _, err := m.ensureHostWorkspaceDir(name); err != nil {
 			return err
 		}
 	}
-	return nil
-}
-
-func (m *HostManager) EnsureEntityWorkspace(_ context.Context, entityID string) error {
-	if strings.TrimSpace(entityID) == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	_, err := m.ensureHostWorkspaceDir(filepath.Join("entities", SanitizeSlug(entityID)))
-	return err
-}
-
-func (m *HostManager) StopEntityWorkspace(context.Context, string) error {
 	return nil
 }
 
@@ -164,9 +231,17 @@ func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentCo
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		return m.hostTarget("scaffold", "")
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceScaffold, "")
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, "")
 	case "system":
-		return m.hostTarget("system", "")
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceSystem, "")
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, "")
 	}
 	dataRoot := ""
 	if materializeData && m.data != nil {
@@ -185,17 +260,18 @@ func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentCo
 	}
 	switch scope {
 	case "per-flow-instance":
-		return m.hostTarget(filepath.Join("flows", SanitizeSlug(scopeKey)), dataRoot)
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceFlow, scopeKey)
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, dataRoot)
 	default:
-		return m.hostTarget(filepath.Join("agents", SanitizeSlug(scopeKey)), dataRoot)
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceAgent, scopeKey)
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, dataRoot)
 	}
-}
-
-func (m *HostManager) CleanupDevEntityContainers(context.Context) (runtimedestructivereset.ContainerResetResult, error) {
-	return runtimedestructivereset.ContainerResetResult{
-		OperationName: DevEntityCleanupOperationName,
-		AppliedAt:     time.Now().UTC(),
-	}, nil
 }
 
 func (m *HostManager) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
@@ -239,13 +315,14 @@ func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionM
 	if dataMount == "" {
 		dataMount = LogicalDataMount
 	}
-	contractsMount := strings.TrimSpace(m.cfg.ContractsMountPoint)
-	if contractsMount == "" {
-		contractsMount = LogicalContractsMount
+	sourceMount := strings.TrimSpace(m.cfg.SourceMountPoint)
+	if sourceMount == "" {
+		sourceMount = LogicalSourceMount
 	}
+	sourceProjectionPath, _ := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, HostPath: strings.TrimSpace(workdir), Access: MountAccessReadWrite},
-		{LogicalPath: contractsMount, HostPath: strings.TrimSpace(m.cfg.ContractsSource), Access: MountAccessReadOnly},
+		{LogicalPath: sourceMount, HostPath: sourceProjectionPath, Access: MountAccessReadOnly},
 	}
 	if strings.TrimSpace(dataRoot) != "" {
 		out = append(out, ExecutionMount{LogicalPath: dataMount, HostPath: strings.TrimSpace(dataRoot), Access: MountAccessReadOnly})
@@ -288,7 +365,7 @@ func (m *HostManager) hostRoot() (string, error) {
 		return "", err
 	}
 	if scope := strings.TrimSpace(m.cfg.BundleScope); scope != "" {
-		root = filepath.Join(root, SanitizeSlug(scope))
+		root = filepath.Join(root, scope)
 	}
 	return canonicalPathForOverlap(root, "host workspace root")
 }
@@ -297,12 +374,9 @@ func (m *HostManager) validateSharedMounts() error {
 	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
 		return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
 	}
-	contractsSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source")
+	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(filepath.Join(contractsSource, "package.yaml")); err != nil {
-		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", contractsSource)
 	}
 	root, err := m.hostRoot()
 	if err != nil {
@@ -311,7 +385,7 @@ func (m *HostManager) validateSharedMounts() error {
 	for _, source := range []struct {
 		name string
 		path string
-	}{{name: "/opt/swarm/contracts source", path: contractsSource}} {
+	}{{name: "/opt/swarm/source projection", path: sourceProjectionPath}} {
 		if pathsOverlap(root, source.path) {
 			return fmt.Errorf("workspace validation failed: host workspace root %s must not overlap %s %s", root, source.name, source.path)
 		}

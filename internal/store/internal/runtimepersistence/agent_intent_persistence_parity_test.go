@@ -105,14 +105,14 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 	}
 	coordinate := plan.Sources[0]
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: runtimeInstanceID, RuntimeGeneration: 1,
 		SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
 		t.Fatalf("issue generation grant: %v", err)
 	}
-	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func selectedStoreIntent(t testing.TB) runtimeagentintent.Resolved {
 	intent, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"flows/review/agents.yaml#agents.worker.intent",
+		"review/agents.yaml#agents.worker.intent",
 		"Perform only the declared review work.",
 	)
 	if err != nil {
@@ -175,7 +175,7 @@ func selectedStoreIntent(t testing.TB) runtimeagentintent.Resolved {
 
 func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 	t.Helper()
-	const owner = "swarm-test://flows/review/agents/worker"
+	const owner = "swarm-test://review/agents/worker"
 	entry := runtimecontracts.AgentRegistryEntry{
 		ID: "worker", Type: "managed", Role: "worker", Model: "regular",
 		ResolvedIntent: selectedStoreIntent(t), Criteria: []string{"quality"},
@@ -188,7 +188,7 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 	}}
 	flow := runtimecontracts.FlowContractView{
 		Path:      "review",
-		Paths:     runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Paths:     runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
 		Policy:    policy,
@@ -209,7 +209,7 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 		},
 	}
 	return selectedIntentSource{Source: semanticview.Wrap(bundle), flow: semanticview.FlowScope{
-		ID: "review", Path: "review", PackageKey: "flows/review", Mode: "static",
+		ID: "review", Path: "review", Mode: "static",
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
 		Policy:    policy,

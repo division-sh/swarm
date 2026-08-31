@@ -68,15 +68,15 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			workflowStore := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle)
 			lifecycle := agentfixture.Lifecycle(t, selected)
 			manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-				ExecutionPosture:  executionposture.Live,
-				BaseContext:       ctx,
-				BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
-				SemanticSource:    semanticview.Wrap(bundle),
-				WorkflowInstances: workflowStore,
-				LLMBackend:        "anthropic",
-				LifecycleStore:    lifecycle,
-				DeliveryStore:     selected,
-				WorkOwner:         storeTestWorkOwner(t),
+				ExecutionPosture:   executionposture.Live,
+				BaseContext:        ctx,
+				SourceArtifactFact: mustStoreTestSourceArtifactFact(authorActivityTestBundleHash),
+				SemanticSource:     semanticview.Wrap(bundle),
+				WorkflowInstances:  workflowStore,
+				LLMBackend:         "anthropic",
+				LifecycleStore:     lifecycle,
+				DeliveryStore:      selected,
+				WorkOwner:          storeTestWorkOwner(t),
 				PersistenceRoles: runtimemanager.PersistenceRoles{
 					AgentRoutes:    bus,
 					FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
@@ -357,7 +357,7 @@ func captureAgentFixtureAuthorityRows(t *testing.T, ctx context.Context, selecte
 	return counts
 }
 
-const agentFixtureTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const agentFixtureTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func rejectedAgentFixtureAdmissions(t *testing.T) []runtimeagenttopology.Admission {
 	t.Helper()
@@ -369,7 +369,7 @@ func rejectedAgentFixtureAdmissions(t *testing.T) []runtimeagenttopology.Admissi
 		{},
 		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
 			Kind:   runtimeagenttopology.AuthorityKind("future_authority"),
-			Static: &runtimeagenttopology.StaticDeclarationPlan{SourceSetRevision: "revision", BundleHash: agentFixtureTestBundleHash, BundleSource: "ephemeral"},
+			Static: &runtimeagenttopology.StaticDeclarationPlan{SourceSetRevision: "revision", BundleHash: agentFixtureTestBundleHash},
 		}},
 		{Lifetime: runtimeagenttopology.LifetimeDurableManaged, Authority: runtimeagenttopology.Authority{
 			Kind: runtimeagenttopology.AuthorityStaticDeclarationPlan, Static: &runtimeagenttopology.StaticDeclarationPlan{},
@@ -521,7 +521,7 @@ func seedExactAgentFixtureFlowState(
 			TemplateID: "review", ScopeKey: "review", InstanceID: "fixture", InstancePath: identity.FlowInstance(),
 			EntityID: uuid.NewString(), HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: plan.Sources[0].BundleHash, BundleSource: plan.Sources[0].BundleSource,
+		RunID: runID, BundleHash: plan.Sources[0].BundleHash,
 		WorkflowVersion: "1.0.0", ExecutionMode: runtimeexecutionmode.Live,
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{Identity: identity, ConfigRevision: revision}},
 	}).Normalized()
@@ -583,7 +583,7 @@ func captureAgentFixtureAuthority(t *testing.T, ctx context.Context, selected ag
 	})
 	binding := runtimemanager.ProcessExecutionBinding{}
 	for _, state := range states {
-		if state.ProcessBinding.BundleHash == agentFixtureTestBundleHash && state.ProcessBinding.BundleSource == "ephemeral" {
+		if state.ProcessBinding.BundleHash == agentFixtureTestBundleHash {
 			binding = state.ProcessBinding
 			break
 		}

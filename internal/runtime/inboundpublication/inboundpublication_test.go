@@ -151,7 +151,7 @@ func evidenceProofRequest(t *testing.T) Request {
 	return Request{
 		PublicationID: publicationID, Provider: "github", EntityID: entityID, ProviderEventID: "delivery-1",
 		RequestFingerprint: strings.Repeat("a", 64), RequestProjectionVersion: RequestSemanticProjectionVersion,
-		StableServiceID: uuid.NewString(), PackageKey: "proof", FlowID: "ingress", InstanceID: uuid.NewString(),
+		StableServiceID: uuid.NewString(), FlowPath: "ingress", InstanceID: uuid.NewString(),
 		TargetAlias: "github", TargetFlowInstance: "ingress/proof", ResolvedRunID: uuid.NewString(),
 		MarkerEventID: markerEventID, AcknowledgementMode: AcknowledgementAfterPublish,
 		OriginalReceivedAt: time.Unix(1, 0).UTC(), OriginalTransportMetadata: []byte(`{}`),

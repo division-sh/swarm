@@ -81,8 +81,8 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 }
 
 func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *testing.T) {
-	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -97,10 +97,10 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	persistence := &processIngressProofStore{}
 	eventsStore := &processIngressEventStore{}
 	persistence.store = eventsStore
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
-		BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(bundleHash),
+		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -134,7 +134,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", PackageKey: "telegram-package", FlowID: "telegram-chat",
+		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-chat",
 		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-chat/chat",
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002", Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: admission,
@@ -144,7 +144,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
-		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash), Source: source,
+		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), Source: source,
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
 			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}}, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
@@ -158,7 +158,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	learnedBinding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"learned-telegram", channelPlan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "channel.generated.signing"},
-		"ingress:telegram-package:telegram-chat:telegram",
+		"ingress:telegram-chat:telegram",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -168,11 +168,11 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundleHash, bundleSource := loadedContext.BundleSourceFact.StorageValues()
+	bundleHash = loadedContext.SourceArtifactFact.BundleHash()
 	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
 		Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 1,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "telegram@1.0.0#activation-readiness",
+			BundleHash: bundleHash, BundleIdentity: "telegram@1.0.0#activation-readiness",
 			PackInventoryGeneration: loadedContext.PackInventoryDigest, RuntimeInstanceID: loadedContext.RuntimeInstanceID,
 			ContextPublicationGeneration: loadedContext.PublicationGeneration,
 			PlanGeneration:               activationPlanGeneration, TargetGeneration: 1,
@@ -221,7 +221,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	readiness := runtimepublicingress.NewReadinessOwner(true)
 	startup := runtimestartupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "serve-owner",
-		ProcessBootID: uuid.NewString(), BundleHash: bundleHash, BundleSource: "ephemeral",
+		ProcessBootID: uuid.NewString(), BundleHash: bundleHash,
 		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "inbound-registration-test",
 		StateVersion: 3, State: runtimestartupownership.GrantAdmitted,
 	}
@@ -244,7 +244,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	onboardingID := uuid.NewString()
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: bundleHash, BundleSource: "persisted",
+		BundleHash:     bundleHash,
 		BundleIdentity: "bundle:test@sha256:inbound-registration", PackInventoryGeneration: "sha256:inbound-registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration, TargetGeneration: uint64(target.Generation),
@@ -254,8 +254,8 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:telegram-package:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
-			PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
+			Selector: "ingress:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
+			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
 			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
 		},
@@ -332,7 +332,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
@@ -341,7 +341,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	target := runtimepkg.StandingTarget{
 		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
-		PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: "chat", Provider: "telegram",
+		FlowPath: "telegram-chat", Alias: "chat", Provider: "telegram",
 		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-chat/chat",
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
@@ -355,8 +355,8 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash),
-		Source:           semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash),
+		Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner,
 			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}},
 		WorkOwner:                 workOwner,
@@ -372,7 +372,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot"},
-		"ingress:telegram-package:telegram-chat:telegram",
+		"ingress:telegram-chat:telegram",
 	)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)
@@ -382,11 +382,11 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundleHash, bundleSource := contextDef.BundleSourceFact.StorageValues()
+	bundleHash = contextDef.SourceArtifactFact.BundleHash()
 	compiled := channelonboarding.CompiledActivation{
 		Source: channelonboarding.ActivationSourceDeclared,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "test-bundle",
+			BundleHash: bundleHash, BundleIdentity: "test-bundle",
 			PackInventoryGeneration: "sha256:test", RuntimeInstanceID: contextDef.RuntimeInstanceID,
 			ContextPublicationGeneration: contextDef.PublicationGeneration,
 			PlanGeneration:               generation, TargetGeneration: 1,

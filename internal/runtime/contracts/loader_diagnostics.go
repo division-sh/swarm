@@ -91,26 +91,11 @@ func AsLoaderDiagnostic(err error) (*LoaderDiagnostic, bool) {
 	return nil, false
 }
 
-func NewContractsPathRequiredDiagnostic() *LoaderDiagnostic {
+func NewSourceArtifactRequiredDiagnostic() *LoaderDiagnostic {
 	return &LoaderDiagnostic{
-		Code:        "contract_loader.contracts_path_required",
-		Problem:     "a contracts directory is required.",
-		Remediation: "Pass a contracts directory with --contracts, or run from a project containing package.yaml.",
-	}
-}
-
-func NewMissingPackageDiagnostic(path string) *LoaderDiagnostic {
-	target := strings.TrimSpace(path)
-	if target == "" {
-		target = "."
-	}
-	return &LoaderDiagnostic{
-		Code:        "contract_loader.package_manifest_missing",
-		Problem:     fmt.Sprintf("no Swarm package manifest was found under %s.", target),
-		Remediation: "Create package.yaml and schema.yaml at the contracts root. Minimal package.yaml: `name: <flow-name>`; `version: 0.1.0`.",
-		Location: LoaderDiagnosticLocation{
-			File: target,
-		},
+		Code:        "contract_loader.source_artifact_required",
+		Problem:     "an admitted source artifact is required.",
+		Remediation: "Pass an explicit source directory to a source-aware command.",
 	}
 }
 
@@ -139,9 +124,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 func NewRetiredConnectDeliveryDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_connect_delivery",
-		"package.yaml.connect.delivery",
+		"schema.yaml.connect.delivery",
 		"connect.delivery is retired.",
-		"Remove delivery. For delivery: one, run 'swarm migrate-connect-delivery-one --contracts <bundle-root>'. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
+		"Remove delivery. A connect row declares one inter-flow edge; use multiple rows for static fan-out, and declare instance selection or cardinality on the receiver input resolution.",
 		nil,
 	)
 }
@@ -149,7 +134,7 @@ func NewRetiredConnectDeliveryDiagnostic() *LoaderDiagnostic {
 func NewRetiredConnectReplyDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_connect_reply",
-		"package.yaml.connect.reply",
+		"schema.yaml.connect.reply",
 		"connect.reply is retired.",
 		"Remove reply and declare receiver input resolution mode reply with replies_to; request and response remain separate connect edges.",
 		nil,
@@ -195,16 +180,6 @@ func NewYAMLParseDiagnostic(cause error) *LoaderDiagnostic {
 		"",
 		"contract YAML could not be parsed.",
 		"Fix the YAML syntax, then run the command again.",
-		cause,
-	)
-}
-
-func NewPackageDocumentMappingDiagnostic(cause error) *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.package_manifest_mapping",
-		"package.yaml",
-		"package.yaml must be a mapping.",
-		"Use a package.yaml mapping with fields like name, version, flows, and packages.",
 		cause,
 	)
 }
@@ -306,9 +281,6 @@ func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
 	if isYAMLParseError(raw) {
 		return NewYAMLParseDiagnostic(err), true
 	}
-	if strings.Contains(raw, "package.yaml must be a mapping") {
-		return NewPackageDocumentMappingDiagnostic(err), true
-	}
 	if strings.Contains(raw, "flow schema document must be a mapping") {
 		return NewSchemaDocumentMappingDiagnostic(err), true
 	}
@@ -323,15 +295,6 @@ func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
 	}
 	if strings.Contains(raw, "output event pin mapping requires a non-default sink") {
 		return NewOutputEventPinOptionsRequiredDiagnostic(err), true
-	}
-	if strings.Contains(raw, "ProjectFlowRef") {
-		return NewExpectedShapeDiagnostic(
-			"contract_loader.package_flows_shape",
-			"package.yaml.flows",
-			"package.yaml flows entries must be mappings with id, flow, and optional mode.",
-			"Use entries like `flows: [{id: child, flow: child, mode: child}]`.",
-			err,
-		), true
 	}
 	if isKnownContractLoaderShapeError(raw) {
 		return NewExpectedShapeDiagnostic(
@@ -386,8 +349,6 @@ func diagnoseLegacyUndefinedField(err error, raw string) (*LoaderDiagnostic, boo
 
 func loaderFieldOptionsForContext(context string) map[string]struct{} {
 	switch strings.TrimSpace(context) {
-	case "package.yaml":
-		return projectPackageDocumentFields
 	case "schema":
 		return flowSchemaDocumentFields
 	case "stage":
@@ -440,10 +401,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return entitySelectionFieldOptions
 	case "agent":
 		return agentRegistryEntryFieldOptions
-	case "requires":
-		return flowPackageRequiresFieldOptions
-	case "bind":
-		return flowPackageBindFieldOptions
 	case "connector_packs":
 		return connectorPackFieldOptions
 	case "connector_packs.imports":
@@ -452,10 +409,8 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return providerTriggerEventFieldOptions
 	case "provider_trigger_events.imports":
 		return providerTriggerEventImportFieldOptions
-	case "requires.policy":
-		return flowPackageRequiresPolicyFieldOptions
 	case "connect":
-		return flowPackageConnectFieldOptions
+		return flowConnectFieldOptions
 	case "type catalog":
 		return typeCatalogFieldOptions
 	case "type metadata":

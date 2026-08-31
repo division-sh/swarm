@@ -13,7 +13,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
-func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.T) {
+func TestRunServeRuntimeRejectsRetiredConfiguredContractPathBeforeBundleLoad(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := repoRootForTest()
 	configContracts := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
@@ -32,22 +32,26 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), repo, cliapp.ServeOptions{
-		StoreMode:          "postgres",
-		APIListenAddr:      defaultAPIListenAddr,
-		MCPListenAddr:      defaultMCPListenAddr,
-		ShutdownGrace:      runtime.DefaultShutdownGrace,
-		SelfCheck:          true,
-		RequireBundleMatch: true,
-		Verbose:            true,
-		Output:             &out,
+		StoreMode:     "postgres",
+		APIListenAddr: defaultAPIListenAddr,
+		MCPListenAddr: defaultMCPListenAddr,
+		ShutdownGrace: runtime.DefaultShutdownGrace,
+		SelfCheck:     true,
+		Verbose:       true,
+		Output:        &out,
 	})
 	if code == 0 {
 		t.Fatalf("serve unexpectedly succeeded: %s", out.String())
 	}
-	if !strings.Contains(out.String(), "contracts="+configContracts) {
-		t.Fatalf("serve boot output did not use config paths.contracts_path %q:\n%s", configContracts, out.String())
+	for _, want := range []string{
+		`config key "paths.contracts_path" is recognized but not yet supported`,
+		`RETIRED: authored source roots are positional command inputs; remove paths.contracts_path`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve boot output missing retired path rejection %q:\n%s", want, out.String())
+		}
 	}
-	if !strings.Contains(out.String(), "bundle_load") || !strings.Contains(out.String(), "FAILED") {
-		t.Fatalf("serve did not reach bundle_load failure proof:\n%s", out.String())
+	if strings.Contains(out.String(), "bundle_load") {
+		t.Fatalf("serve reached bundle loading after retired config path rejection:\n%s", out.String())
 	}
 }

@@ -572,8 +572,9 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	originalSubscriptions := []string{"custom.snapshot"}
 	originalAdmission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: "agent-original", FlowPath: "flow-original", Subscriptions: []string{"custom.snapshot"},
+		AgentID: "agent-original", FlowPath: "flow-original", LocalEvents: testLocalSubscriptionEvents(originalSubscriptions), Subscriptions: originalSubscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit original snapshot recipient: %v", err)
@@ -1160,8 +1161,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	}
 	store := &directRecipientTransactionalStore{}
 	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.started": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"target-node": {ID: "target-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
 		},
@@ -1554,7 +1556,7 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 			0,
 			eventtest.UUID("direct-intent-missing-route-run"),
 			"",
-			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: "root"}),
 			time.Now().UTC(),
 		),
 
@@ -1575,7 +1577,7 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 		routes: map[string][]events.DeliveryRoute{intent.Event.ID(): {{
 			Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-only")),
 			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-				FlowID: "root", FlowInstance: "root",
+				FlowID: ".", FlowInstance: "root",
 			}),
 		}}},
 	}

@@ -81,12 +81,12 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 	if !builder.finalized {
 		return runtimeinbound.Record{}, errors.New("inbound publication proof did not finalize")
 	}
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return runtimeinbound.Record{}, errors.New("inbound publication proof bundle source fact is required")
 	}
 	eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
-		BundleSourceFact: sourceFact, ProviderOutputVerifier: inboundPublicationProofAuthorizationVerifier{},
+		SourceArtifactFact: sourceFact, ProviderOutputVerifier: inboundPublicationProofAuthorizationVerifier{},
 	})
 	if err != nil {
 		return runtimeinbound.Record{}, err
@@ -159,20 +159,20 @@ func TestInboundEvidencePersistsTypedNoSubscriberByDesign(t *testing.T) {
 
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
-	packageKey := "publication-proof"
-	flowID := "ingress"
-	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
+	artifact := storeTestSourceArtifact("inbound-publication-proof")
+	flowPath := "publication-proof/ingress"
+	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	instanceID := uuid.NewString()
 	entityID := uuid.NewString()
 	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID: serviceID, PackageKey: packageKey, FlowID: flowID, InstanceID: instanceID, EntityID: entityID,
-		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
+		ServiceID: serviceID, FlowPath: flowPath, InstanceID: instanceID, EntityID: entityID,
+		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
-	ctx := runtimecorrelation.WithBundleSourceFact(
+	ctx := runtimecorrelation.WithSourceArtifactFact(
 		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
 		candidate.Source,
 	)
-	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+	seedStoreTestPersistedArtifact(t, db, artifact)
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {
 		t.Fatalf("inbound publication proof store %T cannot register author activity catalog", store)
@@ -723,8 +723,8 @@ func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.Stan
 	return runtimeinbound.Request{
 		PublicationID: publicationID, Provider: "github", EntityID: candidate.EntityID, ProviderEventID: providerEventID,
 		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
-		StableServiceID: candidate.ServiceID, PackageKey: candidate.PackageKey, FlowID: candidate.FlowID,
-		InstanceID: candidate.InstanceID, TargetAlias: "github", TargetFlowInstance: candidate.FlowID + "/" + candidate.InstanceID,
+		StableServiceID: candidate.ServiceID, FlowPath: candidate.FlowPath,
+		InstanceID: candidate.InstanceID, TargetAlias: "github", TargetFlowInstance: candidate.FlowPath + "/" + candidate.InstanceID,
 		ExpectedPublicationSequence: sequence, ExpectedGeneration: generation,
 		ResolvedRunID: runID, MarkerEventID: markerEventID,
 		AcknowledgementMode: runtimeinbound.AcknowledgementDurableBeforeDispatch,

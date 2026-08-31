@@ -135,7 +135,7 @@ func partiallyMockedRuntimeAgentMemorySource(t *testing.T, unmockedCount int) se
 func mockAgentMemorySource(t *testing.T, unmockedCount int) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryDirectFlow)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -146,14 +146,9 @@ func mockAgentMemorySource(t *testing.T, unmockedCount int) semanticview.Source 
 		entries map[string]runtimecontracts.AgentRegistryEntry
 	}
 	declarations := []declaration{}
-	for _, view := range bundle.ProjectViews() {
-		for id := range view.Agents {
-			declarations = append(declarations, declaration{label: "project " + view.Paths.Key + " agent " + id, localID: id, entries: view.Agents})
-		}
-	}
 	for _, view := range bundle.FlowViews() {
 		for id := range view.Agents {
-			declarations = append(declarations, declaration{label: "flow " + view.Paths.ID + " agent " + id, localID: id, entries: view.Agents})
+			declarations = append(declarations, declaration{label: "flow " + view.Paths.FlowPath + " agent " + id, localID: id, entries: view.Agents})
 		}
 	}
 	if len(declarations) == 0 {

@@ -229,9 +229,8 @@ func (am *AgentManager) ResolveAgentConfig(agentID, flowInstance string) (runtim
 }
 
 type AgentFrameConfig struct {
-	Config       runtimeactors.AgentConfig
-	BundleHash   string
-	BundleSource string
+	Config     runtimeactors.AgentConfig
+	BundleHash string
 }
 
 // ResolveAgentFrameConfig performs exact operator inspection selection. Root
@@ -262,8 +261,7 @@ func (am *AgentManager) ResolveAgentFrameConfig(agentID, flowInstance string, ro
 	if err := fact.Validate(); err != nil {
 		return AgentFrameConfig{}, fmt.Errorf("agent frame bundle source: %w", err)
 	}
-	bundleHash, bundleSource := fact.StorageValues()
-	return AgentFrameConfig{Config: matches[0], BundleHash: bundleHash, BundleSource: bundleSource}, nil
+	return AgentFrameConfig{Config: matches[0], BundleHash: fact.BundleHash()}, nil
 }
 
 func (am *AgentManager) getAgentConfigIdentity(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
@@ -458,7 +456,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if am.bus == nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("event bus is not configured")
 	}
-	ctx, err = am.bus.AdmitBundleSourceFact(ctx)
+	ctx, err = am.bus.AdmitSourceArtifactFact(ctx)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -1354,12 +1352,6 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		hasPlatformResetEvent = true
 	}
 
-	entities := map[string]struct{}{}
-	for _, cfg := range am.lifecycle.executionConfigs() {
-		if entityID := cfg.EffectiveEntityID(); entityID != "" {
-			entities[entityID] = struct{}{}
-		}
-	}
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[poisonPanicKey]int)
 	am.poisonMu.Unlock()
@@ -1368,11 +1360,6 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		am.resetRuntimeOwnedState()
 	}
 
-	for entityID := range entities {
-		if am.workspaces != nil {
-			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), entityID)
-		}
-	}
 	if hasPlatformResetEvent {
 		if err := am.bus.Publish(am.runtimeContext(), platformResetEvent); err != nil {
 			return stateCleared, fmt.Errorf("publish platform.reset: %w", err)
@@ -1793,7 +1780,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							route := delivery.HandoffRoute()
 							evtCtx, closeEvtCtx, contextErr := agentDeliveryExecutionContext(
 								eventWork.Context(), executionLease.Context, token, deliveryOwner, evt, route, am.receiverExecution,
-								am.bus.AdmitBundleSourceFact,
+								am.bus.AdmitSourceArtifactFact,
 							)
 							if contextErr != nil {
 								if am.bus != nil {
@@ -2018,22 +2005,22 @@ func agentDeliveryExecutionContext(
 	evt events.Event,
 	route events.DeliveryRoute,
 	variant eventreceiver.ExecutionVariant,
-	admitBundleSourceFact func(context.Context) (context.Context, error),
+	admitSourceArtifactFact func(context.Context) (context.Context, error),
 ) (context.Context, func(), error) {
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
-	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(deliveryCtx)
+	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
 	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
 	fail := func(err error) (context.Context, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	if admitBundleSourceFact == nil {
+	if admitSourceArtifactFact == nil {
 		return fail(errors.New("agent receiver requires the EventBus bundle source owner"))
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, bundleSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceArtifactFact)
 	var err error
-	ctx, err = admitBundleSourceFact(ctx)
+	ctx, err = admitSourceArtifactFact(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("admit agent receiver bundle source: %w", err))
 	}

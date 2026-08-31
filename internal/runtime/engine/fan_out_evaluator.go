@@ -117,7 +117,8 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 func (e *Executor) resolveFanOutPlan(want runtimecontracts.FanOutPlanRef) (runtimecontracts.FanOutCompiledPlan, error) {
 	plan, ok := e.deps.Source.FanOutPlanForElement(want.ElementRef)
 	if !ok {
-		return runtimecontracts.FanOutCompiledPlan{}, fmt.Errorf("fan-out pinned element %s/%s is unavailable", want.ElementRef.PackageKey, want.ElementRef.ElementID)
+		identity, _ := want.ElementRef.DeclarationIdentity()
+		return runtimecontracts.FanOutCompiledPlan{}, fmt.Errorf("fan-out pinned declaration %s is unavailable", identity.Key())
 	}
 	if plan.Ref != want {
 		return runtimecontracts.FanOutCompiledPlan{}, fmt.Errorf("fan-out pinned plan disagrees with loaded bundle: persisted=%s/%s loaded=%s/%s", want.BundleHash, want.SemanticDigest, plan.Ref.BundleHash, plan.Ref.SemanticDigest)

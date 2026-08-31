@@ -17,7 +17,7 @@ These directories are the positive authoring owners for supported routing patter
 Verify any example with:
 
 ```sh
-swarm verify --contracts examples/routing/<example>
+swarm verify examples/routing/<example>
 ```
 
 A successful command prints the verified bundle summary and exits zero. Built-in packs come from the binary's embedded inventory; use `swarm packs list` to inspect the exact selection and `swarm import <pack-id>` for an editable project-owned copy. If it reports routing invalidity, do not add producer `target` or `broadcast`; compare the bundle to the applicable directory above.

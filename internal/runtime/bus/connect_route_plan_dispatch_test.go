@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -57,11 +58,33 @@ func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.
 	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.authorizations)
 }
 
+func (s providerOutputAuthorizedTestSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	if entry, key, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
+		return entry, key, true
+	}
+	eventType = strings.TrimSpace(eventType)
+	for _, authorization := range s.authorizations {
+		if authorization.Event() != eventType {
+			continue
+		}
+		entry, ok := s.Source.EventEntry(eventType)
+		return entry, eventType, ok
+	}
+	return runtimecontracts.EventCatalogEntry{}, "", false
+}
+
 type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
 	flowInstances               []ActiveFlowInstanceDescriptor
 	flowInstanceDescriptorCalls int
 	flowInstanceDescriptorErr   error
+	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	workflowVersion             string
+}
+
+func (s *connectRoutePlanDescriptorStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
+	s.sourceArtifactFact = fact
+	s.workflowVersion = workflowVersion
 }
 
 type connectRoutePlanMutationStore struct {
@@ -175,7 +198,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
 				outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
-			}}, []runtimecontracts.FlowPackageConnect{{Event: "deploy.done", From: "producer", To: "missing"}}))
+			}}, []runtimecontracts.FlowConnect{{Event: "deploy.done", From: "producer", To: "missing"}}))
 			graph := runtimepinrouting.CompileConnectGraph(source)
 			issues := graph.Issues()
 			if len(issues) != 1 || issues[0].Failure != runtimepinrouting.ConnectFailureReceiverFlowMissing {
@@ -188,7 +211,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		})
 	}
 	diagnosticOnlyIssue := runtimepinrouting.ConnectRoutePlanIssue{
-		Connect: runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "missing"},
+		Connect: runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "missing"},
 		Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
 	}
 	diagnosticEvent := connectRoutePlanStaticProducerEvent("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
@@ -258,13 +281,13 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 							identity := agentidentity.Identity{}
 							recipient := events.MustNodeDeliveryRecipient(rootReceiverNode)
 							if subscriberType == "agent" {
-								identity = connectRoutePlanTestDeclaredAgentIdentity(t, source, "", "receiver", "")
+								identity = connectRoutePlanTestDeclaredAgentIdentity(t, source, ".", "receiver", "")
 								recipient = events.MustAgentDeliveryRecipient("receiver")
 							}
 							subscriber := Subscriber{
 								Recipient:     recipient,
 								MatchPattern:  localEvent,
-								routeSource:   subscriberRouteSourceRootInputProject,
+								routeSource:   subscriberRouteSourceRootInputFlow,
 								AgentIdentity: identity,
 							}
 							if subscriber.Recipient.IsNode() {
@@ -275,7 +298,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 								}
 							}
 							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], subscriber)
-							if err := routeTable.addConnectRecipientLocked("", nil, localEvent, subscriber, ""); err != nil {
+							if err := routeTable.addConnectRecipientLocked(".", nil, localEvent, subscriber, ""); err != nil {
 								t.Fatalf("admit root receiver: %v", err)
 							}
 						}
@@ -302,7 +325,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						if rootReceiver {
 							flowPath = ""
 						}
-						identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, map[bool]string{false: "consumer", true: ""}[rootReceiver], "receiver", flowPath)
+						identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, map[bool]string{false: "consumer", true: "."}[rootReceiver], "receiver", flowPath)
 						admission := testAgentSubscriptionAdmissionForFlow(t, "receiver", flowPath, "work.accepted", "work.audited")
 						if ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, receiverEntityID); ch == nil {
 							t.Fatal("install typed root-agent subscription")
@@ -598,7 +621,7 @@ func mixedPubsubConnectStaticSource() semanticview.Source {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	}}))
 }
@@ -628,7 +651,7 @@ func mixedPubsubConnectNoMatchSource() semanticview.Source {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	}}))
 }
@@ -646,7 +669,7 @@ func mixedPubsubConnectFailureSource() semanticview.Source {
 			},
 		},
 		{id: "consumer", mode: "static"},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "missing",
 	}}))
 }
@@ -722,7 +745,7 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		id: "producer", mode: producerMode,
 		outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 	}
-	connects := []runtimecontracts.FlowPackageConnect{
+	connects := []runtimecontracts.FlowConnect{
 		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted"},
 		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited"},
 	}
@@ -751,18 +774,23 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		connects[index].To = "."
 	}
 	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer}, connects)
-	bundle.Package.Name = "root-receiver-collision"
-	bundle.PackageTree[0].Manifest.Name = bundle.Package.Name
-	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}}}
+	rootSchema := runtimecontracts.FlowSchemaDocument{
+		Name:    "root-receiver-collision",
+		Mode:    runtimecontracts.FlowModeStatic,
+		Pins:    runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
+		Connect: append([]runtimecontracts.FlowConnect(nil), bundle.FlowTree.Root.Schema.Connect...),
+	}
+	bundle.RootSchema = &rootSchema
 	bundle.Nodes = consumer.nodes
 	bundle.Agents = consumer.agents
+	bundle.FlowTree.Root.Schema = *bundle.RootSchema
 	bundle.FlowTree.Root.Nodes = consumer.nodes
 	bundle.FlowTree.Root.Agents = consumer.agents
 	for logicalID := range consumer.agents {
 		ref := runtimecontracts.ContractURIRef{
-			Kind: "agent", LocalID: logicalID, Full: "test://root/" + logicalID,
+			Kind: "agent", FlowID: ".", LocalID: logicalID, Path: ".", Full: "test://root/" + logicalID,
 		}
-		bundle.URIRegistry.Agents[logicalID] = ref
+		bundle.URIRegistry.Agents["./"+logicalID] = ref
 		bundle.URIRegistry.ByURI[ref.Full] = ref
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
@@ -776,7 +804,7 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{Event: "work.accepted"},
 		{Event: "work.audited"},
 	}
-	connects := []runtimecontracts.FlowPackageConnect{
+	connects := []runtimecontracts.FlowConnect{
 		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted"},
 		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited"},
 	}
@@ -802,7 +830,7 @@ func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(cont
 	if s.flowInstanceDescriptorErr != nil {
 		return nil, s.flowInstanceDescriptorErr
 	}
-	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
+	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact), nil
 }
 
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -836,7 +864,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.flowInstanceDescriptorCalls++
-	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
+	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact), nil
 }
 
 func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error) {
@@ -932,7 +960,7 @@ func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, e
 }
 
 func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1011,7 +1039,7 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforePersistence(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1074,7 +1102,7 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1236,7 +1264,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	rootTarget := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
+		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
@@ -1296,7 +1324,7 @@ func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBefore
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	currentTarget := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
+		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
@@ -1328,7 +1356,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	rootTarget := events.RouteIdentity{
-		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
+		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
@@ -1417,7 +1445,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 		t.Fatalf("matching connect plans = %#v, want one child-to-root plan", plans)
 	}
 	evaluation := routeTable.evaluateConnectPlan(plans[0], []events.RouteIdentity{{
-		EntityID: eventtest.UUID("selected-root-owner"),
+		FlowID: ".", FlowInstance: "selected-root", EntityID: eventtest.UUID("selected-root-owner"),
 	}})
 	if !evaluation.Matched() || evaluation.RequiresRuntimeResolution() {
 		t.Fatalf("materialized connect evaluation = %#v, want one exact root receiver", evaluation)
@@ -1429,7 +1457,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 	}
 
 	local := routeTable.Resolve("worker/work.completed")
-	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowID() != "worker" {
+	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowPath() != "worker" {
 		t.Fatalf("same-flow recipients = %#v, want only exact child observer", local)
 	}
 }
@@ -1439,10 +1467,6 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle.FlowTree.Root == nil {
 		t.Fatal("connect source requires a root flow")
-	}
-	bundle.FlowTree.Root.Schema.Name = "authored-root"
-	if source.WorkflowName() == semanticview.RootExecutionFlowID(source) {
-		t.Fatalf("test requires authored root identity to differ from display name %q", source.WorkflowName())
 	}
 	store := newTargetRouteMemoryStore()
 	runID := uuid.NewString()
@@ -1612,7 +1636,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 }
 
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1646,7 +1670,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *
 }
 
 func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	plans := graph.Plans()
 	if len(plans) != 1 {
@@ -1715,7 +1739,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 }
 
 func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-kind-matrix")}
 	staticSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
@@ -1794,7 +1818,7 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 		{id: "consumer-b", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-b-node": {ID: "consumer-b-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
 		}},
-	}, []runtimecontracts.FlowPackageConnect{
+	}, []runtimecontracts.FlowConnect{
 		{Event: "work.done", From: "producer", To: "consumer-a"},
 		{Event: "work.done", From: "producer", To: "consumer-b"},
 	}))
@@ -1881,7 +1905,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
@@ -1917,7 +1941,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 		},
 	}
 
-	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	})).Plans()
 	if len(staticPlans) != 1 {
@@ -1940,7 +1964,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -1974,7 +1998,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 }
 
 func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -4095,7 +4119,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 				Event: "deploy.completed",
 			}},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -4173,7 +4197,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 			mode:   "static",
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -4226,7 +4250,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 			mode:   "static",
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{
+	}, []runtimecontracts.FlowConnect{{
 		Event:  "deploy.done",
 		From:   "producer",
 		To:     "consumer",
@@ -4372,13 +4396,12 @@ func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
 		{name: "select-or-create", mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate, wantActivation: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := context.Background()
 			source := connectRoutePlanTemplateInstanceSource(t, tc.mode, false)
 			bundle, ok := semanticview.Bundle(source)
 			if !ok {
 				t.Fatal("template route source has no contract bundle")
 			}
-			bundle.Package.Connect = nil
 			bundle.Semantics.CompositionConnects = nil
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -4447,13 +4470,12 @@ func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t
 		{name: "dispatch admission"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := context.Background()
 			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
 			bundle, ok := semanticview.Bundle(source)
 			if !ok {
 				t.Fatal("template route source has no contract bundle")
 			}
-			bundle.Package.Connect = nil
 			bundle.Semantics.CompositionConnects = nil
 			lifecycleStore := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()},
@@ -4564,7 +4586,7 @@ func TestPublicInputAdmissionFailsClosedNegativeMatrix(t *testing.T) {
 					uuid.NewString(), events.EventType(endpoint.Event.Canonical), "operator-api", "",
 					json.RawMessage(`{"vertical_id":"missing"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 				)
-				return eventBus.PublishPublicInputAcknowledged(testAuthorActivityContext(context.Background()), evt, endpoint)
+				return eventBus.PublishPublicInputAcknowledged(context.Background(), evt, endpoint)
 			},
 			want: "not routable",
 		},
@@ -4731,7 +4753,7 @@ func mustBusTemplateInstanceField(t testing.TB, raw string) runtimecontracts.Tem
 	return field
 }
 
-func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) semanticview.Source {
+func connectRoutePlanStaticSource(connect runtimecontracts.FlowConnect) semanticview.Source {
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
 			id:   "producer",
@@ -4753,7 +4775,7 @@ func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) s
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{connect}))
+	}, []runtimecontracts.FlowConnect{connect}))
 }
 
 func connectRoutePlanRootProducerStaticSource(t testing.TB) semanticview.Source {
@@ -4796,23 +4818,39 @@ func newConnectRoutePlanStaticStore() *targetRouteMemoryStore {
 	return store
 }
 
-func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {
-	connects = append([]runtimecontracts.FlowPackageConnect(nil), connects...)
-	for i := range connects {
-		connects[i].SourceFile = "package.yaml"
-		connects[i].SourceLine = i + 1
+func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
+	views := map[string]runtimecontracts.FlowContractView{
+		".": {
+			Paths:  runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
+			Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Path:   ".",
+		},
 	}
-	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
-	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
-	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))
+	flowSources := map[string]runtimecontracts.FlowSource{
+		".": {FlowPath: ".", Schema: "schema.yaml"},
+	}
+	flowSchemas := map[string]runtimecontracts.FlowSchemaDocument{}
 	agentRefs := map[string]runtimecontracts.ContractURIRef{}
 	agentRefsByURI := map[string]runtimecontracts.ContractURIRef{}
 	workflowName := ""
 	rootEntities := runtimecontracts.EntityContractsDocument{}
 	for _, flow := range flows {
-		flowPath := strings.Trim(strings.TrimSpace(flow.path), "/")
+		flowPath := strings.TrimSpace(flow.path)
 		if flowPath == "" {
 			flowPath = flow.id
+		}
+		flowPath = connectRoutePlanFixturePath(flowPath)
+		for ancestor := flowPath; ancestor != "." && ancestor != ""; ancestor = connectRoutePlanFixtureParent(ancestor) {
+			if _, ok := views[ancestor]; !ok {
+				schemaFile := filepath.Join(ancestor, "schema.yaml")
+				views[ancestor] = runtimecontracts.FlowContractView{
+					Paths:  runtimecontracts.FlowContractPaths{FlowPath: ancestor, SchemaFile: schemaFile},
+					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+					Path:   ancestor,
+				}
+				flowSources[ancestor] = runtimecontracts.FlowSource{FlowPath: ancestor, Schema: schemaFile}
+				flowSchemas[ancestor] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic}
+			}
 		}
 		schema := runtimecontracts.FlowSchemaDocument{
 			Mode: flow.mode,
@@ -4821,61 +4859,123 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
 			},
 		}
-		view := runtimecontracts.FlowContractView{
-			Paths: runtimecontracts.FlowContractPaths{
-				ID:         flow.id,
-				Flow:       flow.id,
-				PackageKey: ".",
-				SchemaFile: filepath.Join("flows", flow.id, "schema.yaml"),
-				EventsFile: filepath.Join("flows", flow.id, "events.yaml"),
-			},
-			Schema: schema,
-			Path:   flowPath,
-			Agents: flow.agents,
-			Nodes:  flow.nodes,
-			Events: map[string]runtimecontracts.EventCatalogEntry{},
+		view := views[flowPath]
+		view.Paths = runtimecontracts.FlowContractPaths{
+			FlowPath: flowPath, SchemaFile: filepath.Join(flowPath, "schema.yaml"), EventsFile: filepath.Join(flowPath, "events.yaml"),
+		}
+		view.Schema = schema
+		view.Path = flowPath
+		view.Agents = flow.agents
+		view.Nodes = flow.nodes
+		view.Events = map[string]runtimecontracts.EventCatalogEntry{}
+		for _, pin := range flow.inputs {
+			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
 		}
 		for _, pin := range flow.outputs {
-			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{}
+			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
 		}
-		children = append(children, view)
-		viewCopy := view
-		byID[flow.id] = &viewCopy
-		flowSchemas[flow.id] = schema
+		declareExact := func(eventType string) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" || strings.ContainsAny(eventType, "*/") {
+				return
+			}
+			view.Events[eventType] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
+		}
+		for _, agent := range flow.agents {
+			for _, subscription := range agent.Subscriptions {
+				declareExact(subscription)
+			}
+		}
+		for _, node := range flow.nodes {
+			for _, subscription := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
+				declareExact(subscription)
+			}
+		}
+		views[flowPath] = view
+		flowSchemas[flowPath] = schema
+		flowSources[flowPath] = runtimecontracts.FlowSource{FlowPath: flowPath, Schema: view.Paths.SchemaFile}
 		for logicalID := range flow.agents {
 			ref := runtimecontracts.ContractURIRef{
-				Kind:    "agent",
-				FlowID:  flow.id,
-				LocalID: logicalID,
-				Path:    flowPath,
-				Full:    "test://" + flow.id + "/" + logicalID,
+				Kind: "agent", FlowID: flowPath, LocalID: logicalID, Path: flowPath,
+				Full: "test://" + flowPath + "/" + logicalID,
 			}
-			agentRefs[flow.id+"/"+logicalID] = ref
+			agentRefs[flowPath+"/"+logicalID] = ref
 			agentRefsByURI[ref.Full] = ref
 		}
 		if len(flow.entityFields) > 0 && workflowName == "" {
-			workflowName = flow.id
+			workflowName = flowPath
 			rootEntities["test_entity"] = runtimecontracts.EntityContract{Fields: flow.entityFields}
 		}
 	}
-	root := runtimecontracts.FlowContractView{Children: children}
+	for index, authored := range connects {
+		connect := authored
+		from := connectRoutePlanFixturePath(connect.From)
+		to := connectRoutePlanFixturePath(connect.To)
+		owner := connectRoutePlanFixtureLCA(from, to)
+		view, ok := views[owner]
+		if !ok {
+			panic(fmt.Sprintf("connect fixture owner %q is undeclared", owner))
+		}
+		connect.From = connectRoutePlanFixtureRelative(owner, from)
+		connect.To = connectRoutePlanFixtureRelative(owner, to)
+		connect.SourceFile = flowSources[owner].Schema
+		connect.SourceLine = index + 1
+		view.Schema.Connect = append(view.Schema.Connect, connect)
+		views[owner] = view
+		if owner != "." {
+			flowSchemas[owner] = view.Schema
+		}
+	}
+
+	childrenByParent := map[string][]string{}
+	for flowPath := range views {
+		if flowPath == "." {
+			continue
+		}
+		parent := connectRoutePlanFixtureParent(flowPath)
+		childrenByParent[parent] = append(childrenByParent[parent], flowPath)
+	}
+	for parent := range childrenByParent {
+		sort.Strings(childrenByParent[parent])
+		source := flowSources[parent]
+		source.Children = append([]string(nil), childrenByParent[parent]...)
+		flowSources[parent] = source
+	}
+	var buildView func(string) runtimecontracts.FlowContractView
+	buildView = func(flowPath string) runtimecontracts.FlowContractView {
+		view := views[flowPath]
+		for _, childPath := range childrenByParent[flowPath] {
+			view.Children = append(view.Children, buildView(childPath))
+		}
+		return view
+	}
+	root := buildView(".")
+	root.Schema.Name = workflowName
+	rootSchema := root.Schema
+	root.Schema = rootSchema
+	byID := make(map[string]*runtimecontracts.FlowContractView, len(views))
+	byPath := make(map[string]*runtimecontracts.FlowContractView, len(views))
+	var indexView func(*runtimecontracts.FlowContractView)
+	indexView = func(view *runtimecontracts.FlowContractView) {
+		byID[view.Paths.FlowPath] = view
+		byPath[view.Paths.FlowPath] = view
+		for childIndex := range view.Children {
+			indexView(&view.Children[childIndex])
+		}
+	}
+	indexView(&root)
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: workflowName, Version: "1.0.0"},
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key:   ".",
-			Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
-			Manifest: runtimecontracts.ProjectPackageDocument{
-				Name: workflowName, Version: "1.0.0", Connect: connects,
-			},
-		}},
+		RootSchema:   &rootSchema,
 		RootEntities: rootEntities,
+		FlowSources:  flowSources,
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: agentRefs,
 			ByURI:  agentRefsByURI,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: byID,
+			Root:   &root,
+			ByID:   byID,
+			ByPath: byPath,
 		},
 		FlowSchemas: flowSchemas,
 	}
@@ -4883,6 +4983,53 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 		panic(err)
 	}
 	return bundle
+}
+
+func connectRoutePlanFixturePath(raw string) string {
+	raw = strings.Trim(strings.TrimSpace(raw), "/")
+	if raw == "" || raw == "." {
+		return "."
+	}
+	return raw
+}
+
+func connectRoutePlanFixtureParent(flowPath string) string {
+	flowPath = connectRoutePlanFixturePath(flowPath)
+	if flowPath == "." || !strings.Contains(flowPath, "/") {
+		return "."
+	}
+	return flowPath[:strings.LastIndex(flowPath, "/")]
+}
+
+func connectRoutePlanFixtureLCA(left, right string) string {
+	left = connectRoutePlanFixturePath(left)
+	right = connectRoutePlanFixturePath(right)
+	if left == "." || right == "." {
+		return "."
+	}
+	leftParts := strings.Split(left, "/")
+	rightParts := strings.Split(right, "/")
+	limit := min(len(leftParts), len(rightParts))
+	common := make([]string, 0, limit)
+	for index := 0; index < limit && leftParts[index] == rightParts[index]; index++ {
+		common = append(common, leftParts[index])
+	}
+	if len(common) == 0 {
+		return "."
+	}
+	return strings.Join(common, "/")
+}
+
+func connectRoutePlanFixtureRelative(owner, endpoint string) string {
+	owner = connectRoutePlanFixturePath(owner)
+	endpoint = connectRoutePlanFixturePath(endpoint)
+	if endpoint == owner {
+		return "."
+	}
+	if owner == "." {
+		return endpoint
+	}
+	return strings.TrimPrefix(endpoint, owner+"/")
 }
 
 func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan *LocalDelivery, context string) {

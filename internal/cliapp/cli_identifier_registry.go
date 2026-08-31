@@ -8,27 +8,29 @@ import (
 type cliIdentifierFamily string
 
 const (
-	cliIdentifierFamilyNone            cliIdentifierFamily = "none"
-	cliIdentifierFamilyAgent           cliIdentifierFamily = "agent"
-	cliIdentifierFamilyBundle          cliIdentifierFamily = "bundle"
-	cliIdentifierFamilyRun             cliIdentifierFamily = "run"
-	cliIdentifierFamilyEntity          cliIdentifierFamily = "entity"
-	cliIdentifierFamilyEvent           cliIdentifierFamily = "event"
-	cliIdentifierFamilySession         cliIdentifierFamily = "session"
-	cliIdentifierFamilyTurn            cliIdentifierFamily = "turn"
-	cliIdentifierFamilyFork            cliIdentifierFamily = "fork"
-	cliIdentifierFamilyMailbox         cliIdentifierFamily = "mailbox"
-	cliIdentifierFamilyFlowInstance    cliIdentifierFamily = "flow_instance"
-	cliIdentifierFamilyContext         cliIdentifierFamily = "context"
-	cliIdentifierFamilySubscriber      cliIdentifierFamily = "subscriber"
-	cliIdentifierFamilyStanding        cliIdentifierFamily = "standing_service"
-	cliIdentifierFamilyPack            cliIdentifierFamily = "pack"
-	cliIdentifierFamilyOperatorChannel cliIdentifierFamily = "operator_channel"
+	cliIdentifierSourceNone            cliIdentifierCandidateSource = "none; exact admitted bundle_hash required"
+	cliIdentifierFamilyNone            cliIdentifierFamily          = "none"
+	cliIdentifierFamilyAgent           cliIdentifierFamily          = "agent"
+	cliIdentifierFamilyBundle          cliIdentifierFamily          = "bundle"
+	cliIdentifierFamilyRun             cliIdentifierFamily          = "run"
+	cliIdentifierFamilyEntity          cliIdentifierFamily          = "entity"
+	cliIdentifierFamilyEvent           cliIdentifierFamily          = "event"
+	cliIdentifierFamilySession         cliIdentifierFamily          = "session"
+	cliIdentifierFamilyTurn            cliIdentifierFamily          = "turn"
+	cliIdentifierFamilyFork            cliIdentifierFamily          = "fork"
+	cliIdentifierFamilyMailbox         cliIdentifierFamily          = "mailbox"
+	cliIdentifierFamilyFlowInstance    cliIdentifierFamily          = "flow_instance"
+	cliIdentifierFamilyContext         cliIdentifierFamily          = "context"
+	cliIdentifierFamilySubscriber      cliIdentifierFamily          = "subscriber"
+	cliIdentifierFamilyStanding        cliIdentifierFamily          = "standing_service"
+	cliIdentifierFamilyPack            cliIdentifierFamily          = "pack"
+	cliIdentifierFamilyOperatorChannel cliIdentifierFamily          = "operator_channel"
 )
 
 type cliIdentifierInputMode string
 
 const (
+	cliIdentifierScopeFullOnly       cliIdentifierScopeMode = "full_only"
 	cliIdentifierModeResolverBounded cliIdentifierInputMode = "resolver_bounded"
 	cliIdentifierModeResolverScoped  cliIdentifierInputMode = "resolver_scoped"
 	cliIdentifierModeFullOnly        cliIdentifierInputMode = "full_only"
@@ -39,17 +41,17 @@ const (
 type cliIdentifierSafetyMode string
 
 const (
-	cliIdentifierSafetyNone     cliIdentifierSafetyMode = ""
-	cliIdentifierSafetyMutating cliIdentifierSafetyMode = "mutating"
-	cliIdentifierSafetyCreation cliIdentifierSafetyMode = "creation"
-	cliIdentifierSafetyBoot     cliIdentifierSafetyMode = "boot"
+	cliIdentifierNormalizeNone  cliIdentifierNormalizationMode = "none"
+	cliIdentifierSafetyNone     cliIdentifierSafetyMode        = ""
+	cliIdentifierSafetyMutating cliIdentifierSafetyMode        = "mutating"
+	cliIdentifierSafetyCreation cliIdentifierSafetyMode        = "creation"
+	cliIdentifierSafetyBoot     cliIdentifierSafetyMode        = "boot"
 )
 
 type cliIdentifierCandidateSource string
 
 const (
 	cliIdentifierSourceAgentList    cliIdentifierCandidateSource = "/v1/rpc agent.list"
-	cliIdentifierSourceBundleList   cliIdentifierCandidateSource = "/v1/rpc bundle.list"
 	cliIdentifierSourceRunList      cliIdentifierCandidateSource = "/v1/rpc run.list"
 	cliIdentifierSourceEntityList   cliIdentifierCandidateSource = "/v1/rpc entity.list"
 	cliIdentifierSourceEventList    cliIdentifierCandidateSource = "/v1/rpc event.list"
@@ -120,11 +122,11 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 	},
 	cliIdentifierFamilyBundle: {
 		Family:            cliIdentifierFamilyBundle,
-		CandidateSource:   cliIdentifierSourceBundleList,
-		ScopeMode:         cliIdentifierScopeBoundedCatalog,
-		ScopeRule:         "bounded registered bundle catalog",
-		NormalizationMode: cliIdentifierNormalizeBundleDigest,
-		NormalizationRule: "canonical full-string or bare digest-hex prefix; lowercase hex folding",
+		CandidateSource:   cliIdentifierSourceNone,
+		ScopeMode:         cliIdentifierScopeFullOnly,
+		ScopeRule:         "No catalog enumeration or digest-prefix resolution is public in this slice.",
+		NormalizationMode: cliIdentifierNormalizeNone,
+		NormalizationRule: "bundle-v2 identity is exact lowercase ASCII",
 		DisplayProjection: cliIdentifierDisplayFull,
 	},
 	cliIdentifierFamilyRun: {
@@ -269,9 +271,6 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm conversation list", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm event replay", Selector: "flag:subscriber", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
-	{Command: "swarm bundle show", Selector: "arg:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeResolverBounded},
-	{Command: "swarm bundle agents", Selector: "arg:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeResolverBounded},
-	{Command: "swarm bundle delete", Selector: "arg:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm data import", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm data show", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm data prune", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
@@ -408,7 +407,7 @@ func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIden
 	case cliIdentifierFamilyAgent:
 		return cliIdentifierSourceAgentList, cliIdentifierScopeGlobalBounded, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyBundle:
-		return cliIdentifierSourceBundleList, cliIdentifierScopeBoundedCatalog, cliIdentifierNormalizeBundleDigest, true
+		return cliIdentifierSourceNone, cliIdentifierScopeFullOnly, cliIdentifierNormalizeNone, true
 	case cliIdentifierFamilyRun:
 		return cliIdentifierSourceRunList, cliIdentifierScopeUnboundedFull, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyEntity:

@@ -1,0 +1,17 @@
+name: child
+initial_state: waiting
+terminal_states: [completed]
+states: [waiting, completed]
+pins:
+  inputs:
+    events:
+      - work.begin
+      - task.done
+  outputs:
+    events:
+      - task.done
+connect:
+  - event: task.done
+    from: grandchild
+    to: .
+mode: static

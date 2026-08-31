@@ -21,18 +21,19 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+var authorActivityTestSourceArtifactFact = mustAuthorActivityTestSourceArtifactFact()
 
-func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	return mustAuthorActivityTestBundleSourceFactForHash("bundle-v1:sha256:" + strings.Repeat("e", 64))
+func mustAuthorActivityTestSourceArtifactFact() runtimecorrelation.SourceArtifactFact {
+	return mustAuthorActivityTestSourceArtifactFactForHash(sourceartifactfixture.BundleHash)
 }
 
-func mustAuthorActivityTestBundleSourceFactForHash(bundleHash string) runtimecorrelation.BundleSourceFact {
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+func mustAuthorActivityTestSourceArtifactFactForHash(bundleHash string) runtimecorrelation.SourceArtifactFact {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +55,7 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 	fixture := &pipelineExternalTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create pipeline test work owner: %v", err)
@@ -82,10 +83,10 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwner(t))
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash(),
+		authorActivityTestSourceArtifactFact.BundleHash(),
 	))
 }
 
@@ -123,8 +124,8 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if opts.BundleSourceFact.Validate() != nil {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwner(t)
@@ -134,7 +135,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			opts.BundleSourceFact,
+			opts.SourceArtifactFact,
 			authorActivityTestRuntimeInstanceID,
 			1,
 		)
@@ -171,7 +172,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		})
 	}
 	lease, err := eventStore.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash()), descriptors,
 	)
 	if err != nil {
 		return nil, err

@@ -115,19 +115,19 @@ func (s *RunLifecycleSQLiteOwner) ReviseSourceTx(ctx context.Context, tx *sql.Tx
 	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).ReviseSource(ctx, request)
 }
 
-func (s *RunLifecyclePostgresOwner) RequireActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecyclePostgresOwner) RequireActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActiveSource(ctx, runID)
 }
 
-func (s *RunLifecycleSQLiteOwner) RequireActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecycleSQLiteOwner) RequireActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActiveSource(ctx, runID)
 }
 
-func (s *RunLifecyclePostgresOwner) RequirePresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecyclePostgresOwner) RequirePresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
 }
 
-func (s *RunLifecycleSQLiteOwner) RequirePresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecycleSQLiteOwner) RequirePresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
 }
 
@@ -253,26 +253,26 @@ func (s *RunLifecycleSQLiteOwner) RequirePublicationRunActive(ctx context.Contex
 	})
 }
 
-func (s *RunLifecyclePostgresOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecyclePostgresOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.SourceArtifactFact, error) {
 		return mutation.RequirePresentSource(ctx, runID)
 	})
 }
 
-func (s *RunLifecycleSQLiteOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecycleSQLiteOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.SourceArtifactFact, error) {
 		return mutation.RequirePresentSource(ctx, runID)
 	})
 }
 
-func (s *RunLifecyclePostgresOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecyclePostgresOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.SourceArtifactFact, error) {
 		return mutation.RequireActiveSource(ctx, runID)
 	})
 }
 
-func (s *RunLifecycleSQLiteOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+func (s *RunLifecycleSQLiteOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.SourceArtifactFact, error) {
 		return mutation.RequireActiveSource(ctx, runID)
 	})
 }
@@ -393,19 +393,19 @@ func (m sqliteRunLifecycleMutation) RequireActive(ctx context.Context, runID str
 	return err
 }
 
-func (m postgresRunLifecycleMutation) RequirePresentSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m postgresRunLifecycleMutation) RequirePresentSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.loadSource(ctx, runID, false)
 }
 
-func (m sqliteRunLifecycleMutation) RequirePresentSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m sqliteRunLifecycleMutation) RequirePresentSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.loadSource(ctx, runID, false)
 }
 
-func (m postgresRunLifecycleMutation) RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m postgresRunLifecycleMutation) RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.loadSource(ctx, runID, true)
 }
 
-func (m sqliteRunLifecycleMutation) RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (m sqliteRunLifecycleMutation) RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return m.loadSource(ctx, runID, true)
 }
 
@@ -413,40 +413,40 @@ func (m postgresRunLifecycleMutation) loadSource(
 	ctx context.Context,
 	runID string,
 	requireActive bool,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	if m.tx == nil {
-		return runtimecorrelation.BundleSourceFact{}, errors.New("PostgreSQL run lifecycle mutation requires transaction")
+		return runtimecorrelation.SourceArtifactFact{}, errors.New("PostgreSQL run lifecycle mutation requires transaction")
 	}
 	runID = strings.TrimSpace(runID)
-	var state, bundleHash, bundleSource string
+	var state, bundleHash string
 	query := `
-		SELECT status, bundle_hash, bundle_source
+		SELECT status, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
 	`
 	if !m.readOnly {
 		query += ` FOR UPDATE`
 	}
-	err := m.tx.QueryRowContext(ctx, query, runID).Scan(&state, &bundleHash, &bundleSource)
+	err := m.tx.QueryRowContext(ctx, query, runID).Scan(&state, &bundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 	}
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("load PostgreSQL run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load PostgreSQL run lifecycle source: %w", err)
 	}
 	parsed, err := runtimerunlifecycle.ParseState(state)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	if requireActive && !parsed.Active() {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
 	}
-	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("decode PostgreSQL run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode PostgreSQL run lifecycle source: %w", err)
 	}
-	if err := m.requirePersistedSource(ctx, fact); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+	if err := m.requireSourceArtifact(ctx, fact); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return fact, nil
 }
@@ -455,73 +455,67 @@ func (m sqliteRunLifecycleMutation) loadSource(
 	ctx context.Context,
 	runID string,
 	requireActive bool,
-) (runtimecorrelation.BundleSourceFact, error) {
+) (runtimecorrelation.SourceArtifactFact, error) {
 	if m.tx == nil {
-		return runtimecorrelation.BundleSourceFact{}, errors.New("SQLite run lifecycle mutation requires transaction")
+		return runtimecorrelation.SourceArtifactFact{}, errors.New("SQLite run lifecycle mutation requires transaction")
 	}
 	runID = strings.TrimSpace(runID)
-	var state, bundleHash, bundleSource string
+	var state, bundleHash string
 	err := m.tx.QueryRowContext(ctx, `
-		SELECT status, bundle_hash, bundle_source
+		SELECT status, bundle_hash
 		FROM runs
 		WHERE run_id = ?
-	`, runID).Scan(&state, &bundleHash, &bundleSource)
+	`, runID).Scan(&state, &bundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 	}
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("load SQLite run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load SQLite run lifecycle source: %w", err)
 	}
 	parsed, err := runtimerunlifecycle.ParseState(state)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	if requireActive && !parsed.Active() {
-		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
+		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
 	}
-	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("decode SQLite run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode SQLite run lifecycle source: %w", err)
 	}
-	if err := m.requirePersistedSource(ctx, fact); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
+	if err := m.requireSourceArtifact(ctx, fact); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
 	}
 	return fact, nil
 }
 
-func (m postgresRunLifecycleMutation) requirePersistedSource(ctx context.Context, fact runtimecorrelation.BundleSourceFact) error {
-	if !fact.IsPersisted() {
-		return nil
-	}
+func (m postgresRunLifecycleMutation) requireSourceArtifact(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) error {
 	var exists bool
 	if err := m.tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)
+		SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)
 	`, fact.BundleHash()).Scan(&exists); err != nil {
-		return fmt.Errorf("validate PostgreSQL persisted run source: %w", err)
+		return fmt.Errorf("validate PostgreSQL run source artifact: %w", err)
 	}
 	if !exists {
-		return &runtimerunlifecycle.PersistedBundleUnavailableError{
-			BundleHash: fact.BundleHash(), BundleSource: "persisted",
-			Cause: "persisted_missing_bundle_row",
+		return &runtimerunlifecycle.SourceArtifactUnavailableError{
+			BundleHash: fact.BundleHash(),
+			Cause:      "missing_source_artifact",
 		}
 	}
 	return nil
 }
 
-func (m sqliteRunLifecycleMutation) requirePersistedSource(ctx context.Context, fact runtimecorrelation.BundleSourceFact) error {
-	if !fact.IsPersisted() {
-		return nil
-	}
+func (m sqliteRunLifecycleMutation) requireSourceArtifact(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) error {
 	var exists bool
 	if err := m.tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)
+		SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)
 	`, fact.BundleHash()).Scan(&exists); err != nil {
-		return fmt.Errorf("validate SQLite persisted run source: %w", err)
+		return fmt.Errorf("validate SQLite run source artifact: %w", err)
 	}
 	if !exists {
-		return &runtimerunlifecycle.PersistedBundleUnavailableError{
-			BundleHash: fact.BundleHash(), BundleSource: "persisted",
-			Cause: "persisted_missing_bundle_row",
+		return &runtimerunlifecycle.SourceArtifactUnavailableError{
+			BundleHash: fact.BundleHash(),
+			Cause:      "missing_source_artifact",
 		}
 	}
 	return nil
@@ -538,30 +532,30 @@ func (m postgresRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	if err := m.requirePersistedSourceForWrite(ctx, request.Source); err != nil {
+	if err := m.requireSourceArtifactForWrite(ctx, request.Source); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
 	var inserted bool
 	err := m.tx.QueryRowContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, origin_kind,
+			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_event_id,
 			started_at
 		)
 		VALUES (
-			$1::uuid, 'running', $2, $3, $4,
-			NULLIF($5, '')::uuid, NULLIF($6, ''),
-			NULLIF($7, '')::uuid, NULLIF($8, 0),
-			NULLIF($9, '')::uuid, NULLIF($10, '')::uuid,
-			$11
+			$1::uuid, 'running', $2, $3,
+			NULLIF($4, '')::uuid, NULLIF($5, ''),
+			NULLIF($6, '')::uuid, NULLIF($7, 0),
+			NULLIF($8, '')::uuid, NULLIF($9, '')::uuid,
+			$10
 		)
 		ON CONFLICT (run_id) DO NOTHING
 		RETURNING TRUE
-	`, request.RunID, bundleHash, bundleSource, origin.Kind(),
+	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC()).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -590,28 +584,28 @@ func (m sqliteRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	if err := m.requirePersistedSource(ctx, request.Source); err != nil {
+	if err := m.requireSourceArtifact(ctx, request.Source); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	origin := request.Origin
 	result, err := m.tx.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, origin_kind,
+			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
 			forked_from_run_id, forked_from_event_id,
 			started_at
 		)
 		VALUES (
-			?, 'running', ?, ?, ?,
+			?, 'running', ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, 0),
 			NULLIF(?, ''), NULLIF(?, ''),
 			?
 		)
 		ON CONFLICT (run_id) DO NOTHING
-	`, request.RunID, bundleHash, bundleSource, origin.Kind(),
+	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
 		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
 	if err != nil {
@@ -637,7 +631,7 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	forkRunID, sourceRunID, forkEventID string,
 	entityCount int,
 	startedAt time.Time,
-	identity runtimecorrelation.BundleSourceFact,
+	identity runtimecorrelation.SourceArtifactFact,
 ) error {
 	if tx == nil {
 		return errors.New("fork run lifecycle creation requires transaction")
@@ -649,10 +643,10 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		return errors.New("fork run lifecycle creation requires private story ownership")
 	}
 	mutation := postgresRunLifecycleMutation{store: s, tx: tx}
-	if err := mutation.requirePersistedSourceForWrite(ctx, identity); err != nil {
+	if err := mutation.requireSourceArtifactForWrite(ctx, identity); err != nil {
 		return err
 	}
-	bundleHash, bundleSource := identity.StorageValues()
+	bundleHash := identity.BundleHash()
 	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
 	if err != nil {
 		return err
@@ -661,11 +655,11 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
-			entity_count, event_count, started_at, bundle_hash, bundle_source
+			entity_count, event_count, started_at, bundle_hash
 		)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, 0, $7, $8, $9)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, 0, $7, $8)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
-		entityCount, startedAt.UTC(), bundleHash, bundleSource); err != nil {
+		entityCount, startedAt.UTC(), bundleHash); err != nil {
 		return fmt.Errorf("insert fork run lifecycle: %w", err)
 	}
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -689,7 +683,7 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	forkRunID, sourceRunID, forkEventID string,
 	entityCount int,
 	startedAt time.Time,
-	identity runtimecorrelation.BundleSourceFact,
+	identity runtimecorrelation.SourceArtifactFact,
 ) error {
 	if tx == nil {
 		return errors.New("fork run lifecycle creation requires transaction")
@@ -701,10 +695,10 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		return errors.New("fork run lifecycle creation requires private story ownership")
 	}
 	mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
-	if err := mutation.requirePersistedSource(ctx, identity); err != nil {
+	if err := mutation.requireSourceArtifact(ctx, identity); err != nil {
 		return err
 	}
-	bundleHash, bundleSource := identity.StorageValues()
+	bundleHash := identity.BundleHash()
 	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
 	if err != nil {
 		return err
@@ -713,11 +707,11 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
-			entity_count, event_count, started_at, bundle_hash, bundle_source
+			entity_count, event_count, started_at, bundle_hash
 		)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
-		entityCount, startedAt.UTC(), bundleHash, bundleSource); err != nil {
+		entityCount, startedAt.UTC(), bundleHash); err != nil {
 		return fmt.Errorf("insert fork run lifecycle: %w", err)
 	}
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -900,11 +894,11 @@ func classifyCreateExisting(
 	request runtimerunlifecycle.CreateRequest,
 	current runtimerunlifecycle.Snapshot,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	wantHash, wantSource := request.Source.StorageValues()
-	if strings.TrimSpace(current.BundleHash) != wantHash || strings.TrimSpace(current.BundleSource) != wantSource {
+	wantHash := request.Source.BundleHash()
+	if strings.TrimSpace(current.BundleHash) != wantHash {
 		return "", fmt.Errorf(
-			"run lifecycle source conflict for run_id=%s: stored=%s/%s requested=%s/%s",
-			request.RunID, current.BundleHash, current.BundleSource, wantHash, wantSource,
+			"run lifecycle source conflict for run_id=%s: stored=%s requested=%s",
+			request.RunID, current.BundleHash, wantHash,
 		)
 	}
 	if !current.State.Active() {
@@ -919,17 +913,14 @@ func classifyCreateExisting(
 	return runtimerunlifecycle.MutationExactNoop, nil
 }
 
-func (m postgresRunLifecycleMutation) requirePersistedSourceForWrite(
+func (m postgresRunLifecycleMutation) requireSourceArtifactForWrite(
 	ctx context.Context,
-	fact runtimecorrelation.BundleSourceFact,
+	fact runtimecorrelation.SourceArtifactFact,
 ) error {
-	if !fact.IsPersisted() {
-		return nil
-	}
 	if _, err := m.tx.ExecContext(ctx, `LOCK TABLE runs IN ROW EXCLUSIVE MODE`); err != nil {
-		return fmt.Errorf("serialize persisted PostgreSQL run source admission: %w", err)
+		return fmt.Errorf("serialize PostgreSQL run source admission: %w", err)
 	}
-	return m.requirePersistedSource(ctx, fact)
+	return m.requireSourceArtifact(ctx, fact)
 }
 
 func (m postgresRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
@@ -971,16 +962,16 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if current.Matches(request.Source) {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := m.requirePersistedSourceForWrite(ctx, request.Source); err != nil {
+	if err := m.requireSourceArtifactForWrite(ctx, request.Source); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	result, err := m.tx.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = $2, bundle_source = $3
+		SET bundle_hash = $2
 		WHERE run_id = $1::uuid
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, request.RunID, bundleHash, bundleSource)
+	`, request.RunID, bundleHash)
 	if err != nil {
 		return "", fmt.Errorf("revise PostgreSQL run lifecycle source: %w", err)
 	}
@@ -1004,16 +995,16 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	if current.Matches(request.Source) {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := m.requirePersistedSource(ctx, request.Source); err != nil {
+	if err := m.requireSourceArtifact(ctx, request.Source); err != nil {
 		return "", err
 	}
-	bundleHash, bundleSource := request.Source.StorageValues()
+	bundleHash := request.Source.BundleHash()
 	result, err := m.tx.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = ?, bundle_source = ?
+		SET bundle_hash = ?
 		WHERE run_id = ?
 		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, bundleHash, bundleSource, request.RunID)
+	`, bundleHash, request.RunID)
 	if err != nil {
 		return "", fmt.Errorf("revise SQLite run lifecycle source: %w", err)
 	}

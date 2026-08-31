@@ -67,7 +67,7 @@ func (c *checkerContext) inputPinWiring() []Finding {
 	}
 	c.inputPinLoaded = true
 
-	flowIDs := []string{""}
+	flowIDs := make([]string, 0, len(c.source.FlowSchemaEntries()))
 	for flowID := range c.source.FlowSchemaEntries() {
 		if flowID = strings.TrimSpace(flowID); flowID != "" {
 			flowIDs = append(flowIDs, flowID)
@@ -157,7 +157,7 @@ func (p inputPinProducerSourceProof) message(flowID, eventType, targetRefs strin
 	eventType = strings.TrimSpace(eventType)
 	targetRefs = strings.TrimSpace(targetRefs)
 	return fmt.Sprintf(
-		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target %s.\n\nChecked producer source classes:\n- Boundary external ingress: %s\n- Intrinsic ingress input pin: %s\n- Parent connect: %s\n- Validation-only harness input: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a parent package.yaml connect entry into %s\n- Mark the input event pin with source: external only when it is true intrinsic/external ingress\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing\n- For a validation fixture only, set source: harness on the input pin; this will remain non-production-valid\n\nDo not rely on events.yaml swarm.source as input-pin producer proof; event-level source metadata is non-input compatibility/documentation only.",
+		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target %s.\n\nChecked producer source classes:\n- Boundary external ingress: %s\n- Intrinsic ingress input pin: %s\n- Parent connect: %s\n- Validation-only harness input: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a connect entry in the nearest common ancestor schema.yaml into %s\n- Mark the input event pin with source: external only when it is true intrinsic/external ingress\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing\n- For a validation fixture only, set source: harness on the input pin; this will remain non-production-valid\n\nDo not rely on events.yaml swarm.source as input-pin producer proof; event-level source metadata is non-input compatibility/documentation only.",
 		flowID,
 		eventType,
 		targetRefs,
@@ -294,7 +294,7 @@ func (c *checkerContext) inputPinTargetRefs(flowID, eventType string) string {
 func inputPinTargetRef(flowID, pinName string) string {
 	flowID = strings.TrimSpace(flowID)
 	pinName = strings.TrimSpace(pinName)
-	if flowID == "" {
+	if flowID == "." {
 		return pinName
 	}
 	if pinName == "" {
@@ -654,41 +654,18 @@ type flowAcquisitionValidationScope struct {
 
 func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionValidationScope {
 	scopes := []flowAcquisitionValidationScope{}
-	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && bundle.RootSchema != nil {
-		rootNodes := map[string]runtimecontracts.SystemNodeContract{}
-		for _, view := range bundle.RootProjectViews() {
-			for nodeID, node := range view.Nodes {
-				nodeID = strings.TrimSpace(nodeID)
-				if nodeID != "" {
-					rootNodes[nodeID] = node
-				}
-			}
-		}
-		if len(rootNodes) > 0 {
-			schema := *bundle.RootSchema
-			scopes = append(scopes, flowAcquisitionValidationScope{
-				displayFlowID:  "root",
-				semanticFlowID: "",
-				schema:         schema,
-				stateful:       bootverifyFlowStateful(c.source, "", schema),
-				retiredStatic:  retiredStaticMultiEntityAcquisitionFlow(c.source, "", schema),
-				normalPrimary:  normalPrimaryEntityFlow(c.source, "", schema),
-				inputs:         normalizeStringSet(c.source.FlowInputEvents("")),
-				nodes:          rootNodes,
-			})
-		}
-	}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		scope, ok := c.source.FlowScopeByID(flowID)
+	for _, scope := range c.source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		schema, ok := c.source.FlowSchemaByID(flowID)
 		if !ok {
 			continue
 		}
+		displayFlowID := flowID
+		if flowID == "." {
+			displayFlowID = "root"
+		}
 		scopes = append(scopes, flowAcquisitionValidationScope{
-			displayFlowID:  flowID,
+			displayFlowID:  displayFlowID,
 			semanticFlowID: flowID,
 			schema:         schema,
 			stateful:       bootverifyFlowStateful(c.source, flowID, schema),

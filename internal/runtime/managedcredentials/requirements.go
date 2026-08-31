@@ -37,9 +37,6 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 		return index
 	}
 	appendToolRequirements(index, source, "", source.ToolEntries())
-	for _, scope := range source.ProjectScopes() {
-		appendToolRequirements(index, source, strings.TrimSpace(scope.OwningFlowID), scope.Tools)
-	}
 	for _, scope := range source.FlowScopes() {
 		appendToolRequirements(index, source, strings.TrimSpace(scope.ID), scope.Tools)
 	}

@@ -19,7 +19,7 @@ type pipelinePublicationClaim struct {
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 		panic("pipeline publication claim owner is required")
 	}
 	var err error
-	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	var err error
-	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) er
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	var err error
-	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}

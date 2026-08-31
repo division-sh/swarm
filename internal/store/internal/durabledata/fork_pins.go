@@ -137,9 +137,9 @@ func MaterializeForkPinsTx(
 	for _, pin := range pins {
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_version_pins
-			(run_id, package_key, event_name, schema_digest, version_id, selection, pinned_at)
+			(run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at)
 			VALUES (%s, %s, %s, %s, %s, %s, %s)
-		`, 7), pin.RunID, pin.Declaration.PackageKey, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now.UTC()); err != nil {
+		`, 7), pin.RunID, pin.Declaration.FlowPath, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now.UTC()); err != nil {
 			return nil, fmt.Errorf("insert fork resource pin: %w", err)
 		}
 	}
@@ -161,9 +161,9 @@ func (o *Owner) loadRunBundleHashTx(ctx context.Context, tx *sql.Tx, runID strin
 
 func (o *Owner) loadRunPinsTx(ctx context.Context, tx *sql.Tx, runID string) ([]runtimedata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT p.run_id, r.status, p.package_key, p.event_name, p.schema_digest, p.version_id, p.selection
+		SELECT p.run_id, r.status, p.flow_path, p.event_name, p.schema_digest, p.version_id, p.selection
 		FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
-		WHERE p.run_id = %s ORDER BY p.package_key, p.event_name
+		WHERE p.run_id = %s ORDER BY p.flow_path, p.event_name
 	`, 1), runID)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (o *Owner) loadRunPinsTx(ctx context.Context, tx *sql.Tx, runID string) ([]
 	pins := make([]runtimedata.Pin, 0)
 	for rows.Next() {
 		var pin runtimedata.Pin
-		if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.PackageKey, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
+		if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.FlowPath, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
 			return nil, err
 		}
 		pins = append(pins, pin)

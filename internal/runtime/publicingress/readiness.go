@@ -203,8 +203,7 @@ func sameRegistrationSelection(left, right RegistrationPair) bool {
 		left.Target.Selector == right.Target.Selector &&
 		left.Target.BundleHash == right.Target.BundleHash &&
 		left.Target.ServiceID == right.Target.ServiceID &&
-		left.Target.PackageKey == right.Target.PackageKey &&
-		left.Target.FlowID == right.Target.FlowID &&
+		left.Target.FlowPath == right.Target.FlowPath &&
 		left.Target.Alias == right.Target.Alias &&
 		left.Target.Provider == right.Target.Provider &&
 		left.Target.Generation == right.Target.Generation &&

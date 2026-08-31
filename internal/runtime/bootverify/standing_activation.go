@@ -3,6 +3,7 @@ package bootverify
 import (
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -15,14 +16,10 @@ func standingActivatedFlow(source semanticview.Source, flowID string) bool {
 	if !ok || bundle == nil {
 		return false
 	}
-	for _, scope := range source.ProjectScopes() {
-		for _, ref := range scope.Manifest.Flows {
-			if strings.TrimSpace(ref.ID) == flowID &&
-				ref.HasStandingActivation() {
-				_, err := bundle.ResolveFlowSingleton(flowID)
-				return err == nil
-			}
-		}
+	schema, ok := source.FlowSchemaByID(flowID)
+	if ok && strings.EqualFold(strings.TrimSpace(schema.Activation), runtimecontracts.FlowActivationStanding) {
+		_, err := bundle.ResolveFlowSingleton(flowID)
+		return err == nil
 	}
 	return false
 }

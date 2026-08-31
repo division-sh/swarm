@@ -18,7 +18,7 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 		name   string
 		mutate func(*ChannelRuntimeContextCoordinate)
 	}{
-		{name: "source", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleSource = "" }},
+		{name: "source", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "" }},
 		{name: "bundle identity", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "" }},
 		{name: "inventory", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "" }},
 		{name: "runtime instance", mutate: func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "" }},
@@ -59,8 +59,7 @@ func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurren
 		name   string
 		mutate func(*ChannelRuntimeContextCoordinate)
 	}{
-		{name: "bundle hash", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v1:sha256:" + strings.Repeat("b", 64) }},
-		{name: "bundle source", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleSource = "ephemeral" }},
+		{name: "bundle hash", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64) }},
 		{name: "bundle identity", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "bundle:changed@sha256:identity" }},
 		{name: "pack inventory", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "sha256:changed" }},
 		{name: "plan generation", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PlanGeneration = testPlanGeneration("changed") }},
@@ -138,7 +137,7 @@ func TestConnectedReadinessRejectsEveryMixedOrMissingFact(t *testing.T) {
 		mutate func(*ReadinessFacts)
 		want   ReadinessReason
 	}{
-		{name: "coordinate", mutate: func(f *ReadinessFacts) { f.Coordinate.BundleSource = "" }, want: ReadinessCoordinateInvalid},
+		{name: "coordinate", mutate: func(f *ReadinessFacts) { f.Coordinate.BundleHash = "" }, want: ReadinessCoordinateInvalid},
 		{name: "plan", mutate: func(f *ReadinessFacts) { f.PlanGeneration = testPlanGeneration("stale") }, want: ReadinessPlanUnavailable},
 		{name: "activation publication", mutate: func(f *ReadinessFacts) { f.ActivationGeneration = ChannelActivationGeneration{} }, want: ReadinessPlanUnavailable},
 		{name: "activation", mutate: func(f *ReadinessFacts) { f.ActivationCurrent = false }, want: ReadinessActivationUnavailable},
@@ -189,8 +188,7 @@ func TestConnectedReadinessRejectsEveryMixedOrMissingFact(t *testing.T) {
 
 func testCoordinate() ChannelRuntimeContextCoordinate {
 	return ChannelRuntimeContextCoordinate{
-		BundleHash:                   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		BundleSource:                 "persisted",
+		BundleHash:                   "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		BundleIdentity:               "bundle:customer-support@sha256:identity",
 		PackInventoryGeneration:      "sha256:inventory",
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",

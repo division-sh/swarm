@@ -43,7 +43,7 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	nodeID = strings.TrimSpace(nodeID)
 	flowID := strings.Split(flowInstance, "/")[0]
-	nodeID = identitytest.ExecutableNode(t, "flows/"+flowID, flowID, nodeID).Key()
+	nodeID = identitytest.ExecutableNode(t, flowID, nodeID).Key()
 	wantEntityID := runtimeflowidentity.EntityID(flowInstance)
 	var eventID, targetFlowInstance, targetEntityID, targetSet string
 	eventQuery := `

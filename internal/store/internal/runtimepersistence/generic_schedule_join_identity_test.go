@@ -27,8 +27,8 @@ func TestSystemJoinScheduleAdmissionAndHydrationRejectDeclarationDriftOnBothStor
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 			bases := map[string]runtimegenericschedule.AdmissionCommand{
-				"root": selectedStoreJoinScheduleCommand(t, runID, "", "", generation),
-				"flow": selectedStoreJoinScheduleCommand(t, runID, "orders", "orders/order-1", generation),
+				"root": selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation),
+				"flow": selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation),
 			}
 			hostiles := selectedStoreJoinScheduleHostileCases(generation)
 
@@ -159,9 +159,8 @@ func selectedStoreJoinScheduleHostileCases(generation attemptgeneration.Generati
 				t.Fatal(err)
 			}
 		}},
-		{name: "package_key_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "package_key") })},
+		{name: "flow_path_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "flow_path") })},
 		{name: "flow_id_runtime_alias", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["flow_id"] = "workflow-runtime-name" })},
-		{name: "flow_id_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "flow_id") })},
 		{name: "node_id", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["node_id"] = "other-node" })},
 		{name: "handler_event", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["handler_event"] = "other.completed" })},
 		{name: "stage", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["stage"] = "other-stage" })},
@@ -332,7 +331,7 @@ func TestJoinScheduleRestoreRejectsEarlyHydrationFailuresWithoutMutationOnBothSt
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-early", Attempt: 2}
 			for _, failure := range failures {
 				t.Run(failure.name, func(t *testing.T) {
-					command := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders/order-1", generation)
+					command := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
 					admitted, err := store.AdmitGenericSchedule(ctx, command)
 					if err != nil {
 						t.Fatal(err)
@@ -369,7 +368,7 @@ func TestJoinSchedulePostRegistrationPrepareRejectsMalformedRowWithoutMutationOn
 		t.Run(storeCase.name, func(t *testing.T) {
 			store, db, ctx := storeCase.open(t)
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-fire", Attempt: 2}
-			command := selectedStoreJoinScheduleCommand(t, runtimecorrelation.RunIDFromContext(ctx), "orders", "orders/order-1", generation)
+			command := selectedStoreJoinScheduleCommand(t, runtimecorrelation.RunIDFromContext(ctx), "orders", "orders", "orders/order-1", generation)
 			scheduler := &selectedStoreLifecycleScheduler{}
 			planner := &terminalSchedulePlannerProbe{}
 			dispatcher := &terminalScheduleDispatcherProbe{}
@@ -489,9 +488,9 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 			store, db, ctx := storeCase.open(t)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
-			root := selectedStoreJoinScheduleCommand(t, runID, "", "", generation)
-			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders/order-1", generation)
-			poison := selectedStoreJoinScheduleCommand(t, runID, "returns", "returns/order-1", generation)
+			root := selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation)
+			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
+			poison := selectedStoreJoinScheduleCommand(t, runID, "returns", "returns", "returns/order-1", generation)
 			rootResult, err := store.AdmitGenericSchedule(ctx, root)
 			if err != nil {
 				t.Fatal(err)
@@ -556,8 +555,8 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			store, db, ctx := storeCase.open(t)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
-			root := selectedStoreJoinScheduleCommand(t, runID, "", "", generation)
-			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders/order-1", generation)
+			root := selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation)
+			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
 			if _, err := store.AdmitGenericSchedule(ctx, root); err != nil {
 				t.Fatal(err)
 			}
@@ -592,10 +591,10 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 	}
 }
 
-func selectedStoreJoinScheduleCommand(t *testing.T, runID, flowID, flowInstance string, generation attemptgeneration.Generation) runtimegenericschedule.AdmissionCommand {
+func selectedStoreJoinScheduleCommand(t *testing.T, runID, declarationFlowPath, flowID, flowInstance string, generation attemptgeneration.Generation) runtimegenericschedule.AdmissionCommand {
 	t.Helper()
 	entityID := uuid.NewString()
-	ref, err := timeridentity.NewJoinRefForGeneration(mustPersistenceNode(flowID, "join-node"), "item.completed", "awaiting", "shared", "window-1", generation)
+	ref, err := timeridentity.NewJoinRefForGeneration(mustPersistenceNode(declarationFlowPath, "join-node"), "item.completed", "awaiting", "shared", "window-1", generation)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -50,7 +50,7 @@ func Write(t testing.TB, opts Options) string {
 
 func addLifecycleOverlay(t testing.TB, root string) {
 	t.Helper()
-	canonicalrouting.ApplyOverlay(t, root, "flows/account/schema.yaml",
+	canonicalrouting.ApplyOverlay(t, root, "account/schema.yaml",
 		"initial_state: pending\nstates: [pending, done]\nterminal_states: [done]\n")
 }
 

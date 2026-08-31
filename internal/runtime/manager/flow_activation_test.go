@@ -353,25 +353,28 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 	if activationOwner == nil {
 		activationOwner = flowActivationTestCommitter{instances: instances, routes: routes}
 	}
-	return newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
-		WorkflowInstances: instances,
-		LifecycleStore:    lifecycleStore,
-		WorkOwner:         newTestManagerWorkOwner(t),
-		BaseContext:       testAuthorActivityContext(context.Background()),
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
+	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		WorkflowInstances:  instances,
+		LifecycleStore:     lifecycleStore,
+		WorkOwner:          newTestManagerWorkOwner(t),
+		BaseContext:        testAuthorActivityContext(context.Background()),
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
 		PersistenceRoles: PersistenceRoles{
 			FlowActivation:  activationOwner,
 			FlowTermination: terminalOwner,
 		},
 	}, stores...)
+	manager.semanticSource = nil
+	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{}
+	return manager
 }
 
 func setFlowActivationManagerSemanticSource(
 	am *AgentManager,
 	source semanticview.Source,
-	facts ...runtimecorrelation.BundleSourceFact,
+	facts ...runtimecorrelation.SourceArtifactFact,
 ) {
-	fact := authorActivityTestBundleSourceFact
+	fact := authorActivityTestSourceArtifactFact
 	if len(facts) > 0 {
 		fact = facts[0]
 	}
@@ -393,8 +396,8 @@ func activateFlowInstanceForTest(
 	req runtimepipeline.FlowInstanceActivationRequest,
 ) error {
 	if am.semanticReadinessSource.source == nil {
-		fact := authorActivityTestBundleSourceFact
-		if contextFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		fact := authorActivityTestSourceArtifactFact
+		if contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
 			fact = contextFact
 		}
 		setFlowActivationManagerSemanticSource(am, req.ContractBundle, fact)
@@ -487,7 +490,7 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 		if s.readiness == nil {
 			s.readiness = map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}
 		}
-		owningSource, err := runtimecorrelation.DecodeBundleSourceFact(plan.BundleHash, plan.BundleSource)
+		owningSource, err := runtimecorrelation.DecodeSourceArtifactFact(plan.BundleHash)
 		if err != nil {
 			s.readinessMu.Unlock()
 			return runtimepipeline.WorkflowInitialMaterializationUnknown, err
@@ -545,7 +548,7 @@ func flowActivationReadinessKey(runID, instanceID string) string {
 	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(instanceID)
 }
 
-func reconcileDynamicFlowRuntimeStartupForTest(am *AgentManager, ctx context.Context, source runtimecorrelation.BundleSourceFact, replayAllowed bool) error {
+func reconcileDynamicFlowRuntimeStartupForTest(am *AgentManager, ctx context.Context, source runtimecorrelation.SourceArtifactFact, replayAllowed bool) error {
 	startup, err := am.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, source, replayAllowed)
 	if err != nil {
 		return err
@@ -654,7 +657,7 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 	return results, nil
 }
 
-func (s *flowActivationTestInstanceStore) dynamicFlowRuntimeReadinessForSource(source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *flowActivationTestInstanceStore) dynamicFlowRuntimeReadinessForSource(source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
 	out := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(s.readiness))
@@ -674,8 +677,8 @@ func (s *flowActivationTestInstanceStore) dynamicFlowRuntimeReadinessForSource(s
 
 func seedForeignMalformedDynamicFlowRuntimeReadiness(t *testing.T, store *flowActivationTestInstanceStore) string {
 	t.Helper()
-	foreignSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("f", 64),
+	foreignSource, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("f", 64),
 	)
 	if err != nil {
 		t.Fatalf("construct foreign readiness source: %v", err)
@@ -693,11 +696,11 @@ func seedForeignMalformedDynamicFlowRuntimeReadiness(t *testing.T, store *flowAc
 	return key
 }
 
-func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	items, err := s.dynamicFlowRuntimeReadinessForSource(source)
 	projection := runtimepipeline.DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range items {
-		planSource, sourceErr := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		planSource, sourceErr := runtimecorrelation.DecodeSourceArtifactFact(item.Plan.BundleHash)
 		if sourceErr != nil {
 			return projection, sourceErr
 		}
@@ -714,7 +717,7 @@ func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForS
 	return projection, err
 }
 
-func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	items, err := s.dynamicFlowRuntimeReadinessForSource(source)
 	if err != nil {
 		return nil, err
@@ -955,7 +958,7 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 
-func (*flowActivationTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+func (*flowActivationTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return admitManagerTestBusContext(ctx)
 }
 
@@ -1286,7 +1289,7 @@ func registerTestFlowAgentOwner(bundle *runtimecontracts.WorkflowContractBundle,
 func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	reviewFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -1384,7 +1387,10 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 	workerRef := testFlowAgentURIRef("grandchild", "worker")
 	grandchild := &runtimecontracts.FlowContractView{
 		Path:  "child/grandchild",
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.started": {},
+		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
 				ID:             "worker",
@@ -1398,7 +1404,7 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 	}
 	child := &runtimecontracts.FlowContractView{
 		Path:     "child",
-		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Children: []runtimecontracts.FlowContractView{*grandchild},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -1442,17 +1448,14 @@ func admitFlowActivationEntityContracts(
 		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
 	}
 	sort.Strings(flowIDs)
-	var packageFlows strings.Builder
 	for _, flowID := range flowIDs {
 		entityType := strings.TrimSpace(flowEntityTypes[flowID])
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		fmt.Fprintf(&packageFlows, "  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID)
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID))
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), fmt.Sprintf("%s: {}\n", entityType))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s: {}\n", entityType))
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf("name: flow-activation-test\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String()))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -1475,7 +1478,7 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	analyzerRef := testFlowAgentURIRef("analyzer-flow", "analyzer")
 	analysisFlow := &runtimecontracts.FlowContractView{
 		Path:  "analyzer-flow",
-		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "analyzer-flow"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyzer": {
 				Type:           "generic",
@@ -1488,7 +1491,7 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		AgentURIs: map[string]string{"analyzer": analyzerRef.Full},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Name: "manager-test", Version: "v-test"},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "manager-test", Version: "v-test"},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"analyzer-flow/analyzer": analyzerRef,
@@ -1978,14 +1981,14 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	registerTestFlowAgentOwner(currentBundle, "review", "editor")
 	oldSource := semanticview.Wrap(oldBundle)
 	currentSource := semanticview.Wrap(currentBundle)
-	currentFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("d", 64),
+	currentFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("d", 64),
 	)
 	if err != nil {
 		t.Fatalf("current bundle source fact: %v", err)
 	}
 	setFlowActivationManagerSemanticSource(am, currentSource, currentFact)
-	ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), currentFact)
+	ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), currentFact)
 	req := testActivationRequest(currentBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance current source: %v", err)
@@ -2102,14 +2105,14 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	intermediateSource := semanticview.Wrap(bundle)
 	revisedSource := semanticview.Wrap(bundle)
-	intermediateFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("b", 64),
+	intermediateFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("b", 64),
 	)
 	if err != nil {
 		t.Fatalf("intermediate bundle source fact: %v", err)
 	}
-	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("c", 64),
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("c", 64),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
@@ -2121,11 +2124,11 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	}
 	activationCtx, cancelActivation := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelActivation()
-	intermediateCtx := runtimecorrelation.WithBundleSourceFact(
+	intermediateCtx := runtimecorrelation.WithSourceArtifactFact(
 		testAuthorActivityContext(context.Background()),
 		intermediateFact,
 	)
-	successorCtx := runtimecorrelation.WithBundleSourceFact(
+	successorCtx := runtimecorrelation.WithSourceArtifactFact(
 		testAuthorActivityContext(context.Background()),
 		revisedFact,
 	)
@@ -2140,7 +2143,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			return
 		}
 		intermediate := completed
-		intermediate.BundleHash, intermediate.BundleSource = intermediateFact.StorageValues()
+		intermediate.BundleHash = intermediateFact.BundleHash()
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
 			observed,
@@ -2161,7 +2164,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			return
 		}
 		revised := intermediate
-		revised.BundleHash, revised.BundleSource = revisedFact.StorageValues()
+		revised.BundleHash = revisedFact.BundleHash()
 		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			successorCtx,
 			observed,
@@ -2239,10 +2242,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
 	}
-	revisedHash, revisedBundleSource := revisedFact.StorageValues()
+	revisedHash := revisedFact.BundleHash()
 	if readiness.Plan.WorkflowVersion != strings.TrimSpace(bundle.WorkflowVersion()) ||
 		readiness.Plan.BundleHash != revisedHash ||
-		readiness.Plan.BundleSource != revisedBundleSource ||
 		readiness.TopologyReadyAt.IsZero() ||
 		readiness.Pending() {
 		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
@@ -2277,8 +2279,8 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		t.Fatalf("initial readiness: found=%v err=%v readiness=%#v", found, err, initial)
 	}
 
-	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("d", 64),
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("d", 64),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
@@ -2286,7 +2288,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	setFlowActivationManagerSemanticSource(am, source, revisedFact)
 	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	revisedCtx := runtimecorrelation.WithRunID(
-		runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact),
+		runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact),
 		req.TriggerEvent.RunID(),
 	)
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
@@ -2304,10 +2306,9 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	if err != nil || !found {
 		t.Fatalf("load completed revised source: found=%v err=%v", found, err)
 	}
-	revisedHash, revisedSource := revisedFact.StorageValues()
+	revisedHash := revisedFact.BundleHash()
 	if completed.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
 		completed.Plan.BundleHash != revisedHash ||
-		completed.Plan.BundleSource != revisedSource ||
 		completed.Plan.ExecutionMode != executionmode.Mock ||
 		completed.TopologyReadyAt.IsZero() ||
 		completed.Pending() {
@@ -2350,15 +2351,15 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 
 	revisedBundle := testFlowBundleWithTwoAgents(t, "")
 	revisedSource := semanticview.Wrap(revisedBundle)
-	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("e", 64),
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("e", 64),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
 	}
 	setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
 	revisedCtx := runtimecorrelation.WithRunID(
-		runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact),
+		runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact),
 		req.TriggerEvent.RunID(),
 	)
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
@@ -2495,8 +2496,8 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 
 	sourceBBundle := testFlowRouteRevisionBundle(t, "task.revised")
 	sourceB := semanticview.Wrap(sourceBBundle)
-	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
-		"bundle-v1:sha256:" + strings.Repeat("d", 64),
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
+		"bundle-v2:sha256:" + strings.Repeat("d", 64),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
@@ -2517,7 +2518,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	}
 	managerB := newFlowActivationManager(t, busB, instances, agents)
 	setFlowActivationManagerSemanticSource(managerB, sourceB, revisedFact)
-	ctxB := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	ctxB := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	reqB := testActivationRequest(sourceBBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if created, err := managerB.EnsureFlowInstance(ctxB, reqB); err != nil {
 		t.Fatalf("ensure source B: %v", err)
@@ -2675,7 +2676,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(pendingCtx)
 	}()
 	go func() {
-		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, authorActivityTestBundleSourceFact, true)
+		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, authorActivityTestSourceArtifactFact, true)
 	}()
 	cancelEnsure()
 	cancelPending()
@@ -2791,15 +2792,15 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	path := "review/inst-1"
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	instances := &flowActivationTestInstanceStore{
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(runID, path): {
 				InstancePath:    path,
-				OwningRunSource: authorActivityTestBundleSourceFact,
+				OwningRunSource: authorActivityTestSourceArtifactFact,
 				RunStatus:       "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+					RunID: runID, BundleHash: bundleHash, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 					Identity: runtimeflowidentity.Instance{
 						TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 						InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -2824,7 +2825,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 }
 
 func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	runKinds := flowActivationStandingRestarts{
 		uuid.NewString(): runtimepipeline.StandingRestartOrdinary,
 		uuid.NewString(): runtimepipeline.StandingRestartActiveIntrinsic,
@@ -2837,10 +2838,10 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 		index++
 		path := fmt.Sprintf("review/standing-%d", index)
 		instances.readiness[flowActivationReadinessKey(runID, path)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath: path, OwningRunSource: authorActivityTestBundleSourceFact,
+			InstancePath: path, OwningRunSource: authorActivityTestSourceArtifactFact,
 			RunStatus: "running", InstanceStatus: "active",
 			Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-				RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+				RunID: runID, BundleHash: bundleHash,
 				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: fmt.Sprintf("standing-%d", index),
@@ -2851,7 +2852,7 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 	}
 	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
 	am.roles.StandingRestarts = runKinds
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestBundleSourceFact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
 	if err != nil {
 		t.Fatalf("inspect standing readiness: %v", err)
 	}
@@ -2891,7 +2892,7 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	restartBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, true); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
 		t.Fatalf("ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
@@ -2906,7 +2907,7 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	if len(restartBus.published) != 1 {
 		t.Fatalf("startup creation event count = %d, want one", len(restartBus.published))
 	}
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, true); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
 		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if len(restartBus.published) != 1 {
@@ -2928,7 +2929,7 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 		t.Fatalf("completed predecessor readiness: found=%v readiness=%#v err=%v", found, before, err)
 	}
 
-	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("d", 64))
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("d", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2936,7 +2937,7 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 	revisedBundle.Semantics.Version = "v-revised"
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false)
 	if err != nil {
 		t.Fatalf("canonicalize completed predecessor without replay: %v", err)
@@ -2954,8 +2955,8 @@ func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *te
 		t.Fatalf("complete successor topology without replay: %v", err)
 	}
 	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
-	wantHash, wantSource := revisedFact.StorageValues()
-	if err != nil || !found || after.Pending() || after.Plan.BundleHash != wantHash || after.Plan.BundleSource != wantSource || after.Plan.WorkflowVersion != "v-revised" {
+	wantHash := revisedFact.BundleHash()
+	if err != nil || !found || after.Pending() || after.Plan.BundleHash != wantHash || after.Plan.WorkflowVersion != "v-revised" {
 		t.Fatalf("canonical completed successor: found=%v readiness=%#v err=%v", found, after, err)
 	}
 	if !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
@@ -2979,7 +2980,7 @@ func TestSourceScopedStartupDerivesEntireTransitionSetBeforeWriting(t *testing.T
 		}
 	}
 
-	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2987,7 +2988,7 @@ func TestSourceScopedStartupDerivesEntireTransitionSetBeforeWriting(t *testing.T
 	revisedBundle.Semantics.Version = "v-transition-set"
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithBundleSourceFact(ctx, revisedFact)
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(ctx, revisedFact)
 
 	secondKey := flowActivationReadinessKey(requests[1].TriggerEvent.RunID(), requests[1].Instance.InstancePath)
 	instances.readinessMu.Lock()
@@ -3021,13 +3022,13 @@ func TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart(t *testin
 		t.Fatalf("activate predecessor source: %v", err)
 	}
 
-	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("b", 64))
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("b", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
 	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
 	revisedBundle.Semantics.Version = "v-post-batch"
-	revisedCtx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	canonicalizer := newFlowActivationManager(t, &flowActivationTestBus{routeStore: routeStore}, instances, agents)
 	setFlowActivationManagerSemanticSource(canonicalizer, semanticview.Wrap(revisedBundle), revisedFact)
 	if _, err := canonicalizer.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false); err != nil {
@@ -3083,7 +3084,7 @@ func TestSourceScopedStartupRequiresReplayForPendingPredecessor(t *testing.T) {
 		t.Fatal("predecessor activation unexpectedly completed")
 	}
 
-	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("c", 64))
+	revisedFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("c", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3092,7 +3093,7 @@ func TestSourceScopedStartupRequiresReplayForPendingPredecessor(t *testing.T) {
 	agents.failAgentID = ""
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
-	revisedCtx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), revisedFact)
 	_, err = restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false)
 	if !IsDynamicFlowRuntimeReadinessFinalizationError(err) || !strings.Contains(err.Error(), "requires recovery") {
 		t.Fatalf("pending predecessor without replay error = %v", err)
@@ -3143,10 +3144,10 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	plan, err := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance,
-		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash, BundleSource: bundleSource,
+		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash,
 		WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
 			Identity: runtimeagentidentity.Identity{
@@ -3179,7 +3180,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(plan.RunID, req.Instance.InstancePath): {
 				InstancePath: req.Instance.InstancePath, Plan: plan,
-				OwningRunSource: authorActivityTestBundleSourceFact,
+				OwningRunSource: authorActivityTestSourceArtifactFact,
 				RunStatus:       "cancelled", InstanceStatus: "terminated", InstanceTerminatedAt: terminatedAt,
 			},
 		},
@@ -3198,7 +3199,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	am := newFlowActivationManager(t, bus, instances, agents)
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(am, testAuthorActivityContext(context.Background()), authorActivityTestBundleSourceFact, false); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(am, testAuthorActivityContext(context.Background()), authorActivityTestSourceArtifactFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
@@ -4251,13 +4252,12 @@ func TestStaticFlowRequiredAgentMaterializationRegistersSubscriptions(t *testing
 
 func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
 	bundle := testStaticFlowBundle()
-	bundle.PackageTree = []runtimecontracts.LoadedProjectPackage{{
-		Key: "root",
-		Manifest: runtimecontracts.ProjectPackageDocument{Flows: []runtimecontracts.ProjectFlowRef{{
-			ID: "analyzer-flow", Flow: "analyzer-flow", Mode: runtimecontracts.FlowModeSingleton,
-			Activation: runtimecontracts.ProjectFlowActivationStanding,
-		}}},
-	}}
+	schema := bundle.FlowSchemas["analyzer-flow"]
+	schema.Mode = runtimecontracts.FlowModeSingleton
+	schema.Activation = runtimecontracts.FlowActivationStanding
+	bundle.FlowSchemas["analyzer-flow"] = schema
+	bundle.FlowTree.ByID["analyzer-flow"].Schema = schema
+	bundle.FlowTree.Root.Children[0].Schema = schema
 	source := semanticview.Wrap(bundle)
 
 	staticRecords, err := StaticAgentMaterializationRecords(source)
@@ -4278,17 +4278,17 @@ func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *test
 
 func TestStaticAgentMaterializationKeepsDistinctSameIDPhysicalDeclarations(t *testing.T) {
 	projectOwner := "test://agent-name/packages/support-extension/worker"
-	flowOwner := "test://agent-name/flows/support/worker"
+	flowOwner := "test://agent-name/support/worker"
 	projectEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "project-worker", Role: "project-worker"})
 	flowEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "flow-worker", Role: "flow-worker"})
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{
 		{
-			Paths: runtimecontracts.FlowContractPaths{ID: "support-extension", PackageKey: "packages/support-extension", AgentsFile: "packages/support-extension/agents.yaml"},
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "support-extension", AgentsFile: "packages/support-extension/agents.yaml"},
 			Path:  "support-extension", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": projectEntry}, AgentURIs: map[string]string{"worker": projectOwner},
 		},
 		{
-			Paths: runtimecontracts.FlowContractPaths{ID: "support", PackageKey: "flows/support", AgentsFile: "flows/support/agents.yaml"},
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "support", AgentsFile: "support/agents.yaml"},
 			Path:  "support", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": flowEntry}, AgentURIs: map[string]string{"worker": flowOwner},
 		},
@@ -4339,11 +4339,11 @@ func TestStaticFlowRequiredAgentMaterializationInfersFromOmittedRequiredAgents(t
 	}
 }
 
-func TestStaticFlowRequiredAgentMaterializationUsesFlowOwnedProjectDeclaration(t *testing.T) {
+func TestStaticFlowRequiredAgentMaterializationUsesFlowOwnedDeclaration(t *testing.T) {
 	source := loadNestedProjectStaticAgentSource(t)
 	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
-	if len(declarations) != 1 || declarations[0].Source.Layer != "project" {
-		t.Fatalf("support declarations = %#v, want one project declaration", declarations)
+	if len(declarations) != 1 || declarations[0].Source.FlowPath != "support" {
+		t.Fatalf("support declarations = %#v, want one flow-owned declaration", declarations)
 	}
 	records, err := StaticFlowRequiredAgentMaterializationRecords(source)
 	if err != nil {
@@ -4407,8 +4407,8 @@ func TestStaticAgentMaterializationRecordsRegistersRootAndFlowSubscriptions(t *t
 	}
 }
 
-func TestStaticAgentMaterialization_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t *testing.T) {
-	source := loadPackageBackedStaticAgentSource(t)
+func TestStaticAgentMaterialization_FilesystemFlowOwnedAgentsCarryCanonicalFlowPath(t *testing.T) {
+	source := loadFilesystemStaticAgentSource(t)
 	records, err := StaticAgentMaterializationRecords(source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
@@ -4417,11 +4417,11 @@ func TestStaticAgentMaterialization_PackageBackedFlowOwnedAgentsCarryCanonicalFl
 		t.Fatalf("materialized agents = %#v, want 1", records)
 	}
 	cfg := records[0].Config
-	if cfg.FlowPath != "support" {
-		t.Fatalf("FlowPath = %q, want support", cfg.FlowPath)
+	if cfg.FlowPath != "parent/child/support" {
+		t.Fatalf("FlowPath = %q, want parent/child/support", cfg.FlowPath)
 	}
-	if cfg.FlowID != "support" {
-		t.Fatalf("FlowID = %q, want support", cfg.FlowID)
+	if cfg.FlowID != "parent/child/support" {
+		t.Fatalf("FlowID = %q, want parent/child/support", cfg.FlowID)
 	}
 	if cfg.ID != "backend" {
 		t.Fatalf("ID = %q, want backend", cfg.ID)
@@ -4462,8 +4462,8 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadNestedProjectAgentSource(t, tc.mode)
 			declarations := semanticview.AgentDeclarations(source)
-			if len(declarations) != 1 || declarations[0].Source.Layer != "project" || declarations[0].OwnerFlowID != "support" {
-				t.Fatalf("declarations = %#v, want one project declaration owned by support", declarations)
+			if len(declarations) != 1 || declarations[0].Source.FlowPath != "support" || declarations[0].OwnerFlowID != "support" {
+				t.Fatalf("declarations = %#v, want one declaration owned by support", declarations)
 			}
 			bundle, ok := semanticview.Bundle(source)
 			if !ok {
@@ -4511,15 +4511,7 @@ func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: root-and-flow-static-agents
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: ops-flow
-    flow: ops-flow
-    mode: static
-`)
+
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned: {}\ntask.completed: {}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
@@ -4532,14 +4524,10 @@ test-agent:
   subscriptions: [task.assigned]
   emit_events: [task.completed]
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "package.yaml"), `
-name: ops-flow
-version: "1.0.0"
-flows: []
-`)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "schema.yaml"), "name: ops-flow\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "agents.yaml"), `
+
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "schema.yaml"), "name: ops-flow\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "ops-flow", "agents.yaml"), `
 operator:
   type: generic
   role: operator
@@ -4556,18 +4544,11 @@ operator:
 	return semanticview.Wrap(bundle)
 }
 
-func loadPackageBackedStaticAgentSource(t *testing.T) semanticview.Source {
+func loadFilesystemStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: parent
-`)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -4577,26 +4558,9 @@ item:
 item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-packages:
-  - path: child
-`)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "parent", "child", "package.yaml"), `
-name: child
-version: "1.0.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
-	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
-	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), `
-name: support
-version: "1.0.0"
-flows: []
-`)
+
+	flowRoot := filepath.Join(root, "parent", "child", "support")
+
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `
 name: support
 initial_state: waiting
@@ -4605,7 +4569,7 @@ states:
   - done
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), `
-support/item.created:
+item.created:
   entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
@@ -4616,7 +4580,7 @@ backend:
   model: regular
   memory: true
   subscriptions:
-    - support/item.created
+    - item.created
 `)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -4636,17 +4600,6 @@ func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
-name: session-scope-validation
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: flows/support/extras
-flows:
-  - id: support
-    flow: support
-    mode: %s
-`, mode))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
@@ -4656,23 +4609,19 @@ item:
 item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`
 name: support
+mode: %s
 initial_state: waiting
 states:
   - waiting
   - done
-`)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
-support/item.created:
+`, mode))
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
+item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "extras", "package.yaml"), `
-name: extras
-version: "1.0.0"
-flows: []
-`)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "extras", "agents.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
 backend:
   type: generic
   role: backend
@@ -4791,10 +4740,10 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
 			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}})
 			namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
-			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
-			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
 			}
 		})
@@ -4887,25 +4836,13 @@ func loadAgentPlatformDefaultsMaterializationSource(t *testing.T) semanticview.S
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: agent-defaults-materialization
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: static_support
-    flow: static_support
-    mode: static
-  - id: template_support
-    flow: template_support
-    mode: template
-`)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-defaults-materialization\n")
 
 	for _, flowID := range []string{"static_support", "template_support"} {
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
 	}
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "static_support", "agents.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "static_support", "agents.yaml"), `
 worker:
   intent: {inline: "Handle static support requests."}
   model: regular
@@ -4913,7 +4850,7 @@ worker:
     - static_support.requested
   emit_events: []
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "template_support", "agents.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "template_support", "agents.yaml"), `
 worker:
   id: worker
   intent: {inline: "Handle template support requests."}

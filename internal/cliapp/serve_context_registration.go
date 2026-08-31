@@ -19,7 +19,7 @@ type ServeProjectContextRegistration struct {
 	registered  bool
 }
 
-func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptions, resolvedPaths CLIContractPlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
+func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptions, resolvedPaths CLISourcePlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
 	if !opts.Dev || opts.LocalRun {
 		return nil, nil
 	}
@@ -27,11 +27,11 @@ func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptio
 	if err != nil {
 		return nil, err
 	}
-	contractsPath := strings.TrimSpace(resolvedPaths.ContractsPath)
-	if contractsPath == "" {
-		return nil, fmt.Errorf("serve --dev project context registration requires a resolved contracts path")
+	selectedRoot := strings.TrimSpace(resolvedPaths.SourceRoot)
+	if selectedRoot == "" {
+		return nil, fmt.Errorf("serve --dev project context registration requires a selected source root")
 	}
-	projectRoot := inferProjectRootFromContractsPath(contractsPath)
+	projectRoot := selectedRoot
 	canonical, _ := canonicalizeDoctorTargetPath(projectRoot)
 	canonical = strings.TrimSpace(canonical)
 	if canonical == "" {
@@ -50,7 +50,6 @@ func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptio
 	}
 	registry := newLocalContextRegistry(swarmDir.Path)
 	project := cliProjectResolution{
-		contractsPath:        contractsPath,
 		projectRoot:          projectRoot,
 		canonicalProjectRoot: canonical,
 	}
@@ -111,7 +110,7 @@ func (r *ServeProjectContextRegistration) Unregister() {
 	r.registered = false
 }
 
-func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, apiAddr net.Addr, apiAuth apiv1.AuthTokenResolution, resolvedPaths CLIContractPlatformSpecPaths, storeSelection storebackend.Selection, mountSources WorkspaceMountSources) error {
+func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, apiAddr net.Addr, apiAuth apiv1.AuthTokenResolution, resolvedPaths CLISourcePlatformSpecPaths, storeSelection storebackend.Selection, mountSources WorkspaceMountSources) error {
 	if r == nil {
 		return nil
 	}
@@ -147,7 +146,6 @@ func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, a
 		APIServer:         apiServer,
 		Auth:              auth,
 		ProjectRoot:       r.project.canonicalProjectRoot,
-		ContractsPath:     strings.TrimSpace(resolvedPaths.ContractsPath),
 		StorePath:         serveDescriptorStorePath(storeSelection),
 		PID:               currentProcessID(),
 		CreatedAt:         now,

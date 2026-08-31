@@ -139,7 +139,7 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	templateOwner := "test://template-support/worker"
 	staticFlow := runtimecontracts.FlowContractView{
 		Path:  "static-support",
-		Paths: runtimecontracts.FlowContractPaths{ID: "static-support", Flow: "static-support"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "static-support"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"static-worker": managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{ID: "static-worker"}),
 		},
@@ -147,7 +147,7 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	}
 	templateFlow := runtimecontracts.FlowContractView{
 		Path:  "template-support",
-		Paths: runtimecontracts.FlowContractPaths{ID: "template-support", Flow: "template-support"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "template-support"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "template-worker"}),
 		},

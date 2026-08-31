@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/packmodel"
@@ -31,7 +32,7 @@ func TestImportEmbeddedPackIsIdempotentAndPreservesEditedConflict(t *testing.T) 
 		t.Fatal(err)
 	}
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: demo\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: demo\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +70,7 @@ func TestImportEmbeddedPackIsIdempotentAndPreservesEditedConflict(t *testing.T) 
 
 func TestProjectPackTransactionSerializesSubprocessImports(t *testing.T) {
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: concurrent-imports\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: concurrent-imports\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gate := filepath.Join(t.TempDir(), "start")
@@ -125,7 +126,7 @@ func TestProjectPackSnapshotReaderSeesOnlyPredecessorOrSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := ImportEmbeddedPack(project, "provider.github", base); err != nil || !changed {
@@ -202,7 +203,7 @@ func TestProjectPackSnapshotReaderWaitsBeforeInitialPackDirectoryExists(t *testi
 		t.Fatal(err)
 	}
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: initial-snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: initial-snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	transaction, err := acquireProjectPackTransaction(project, true)
@@ -270,7 +271,7 @@ func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
 		t.Fatal("embedded Telegram pack missing")
 	}
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: rollback\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: rollback\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	transaction, err := acquireProjectPackTransaction(project, true)
@@ -296,7 +297,7 @@ func TestLoadProjectPackSetDoesNotMutateReadOnlyBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: read-only\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: read-only\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
@@ -389,6 +390,15 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
+func TestLoadProjectPackSetFSRejectsPopulatedTreeWithoutManifest(t *testing.T) {
+	source := fstest.MapFS{
+		"packs/provider.demo/envelope.yaml": {Data: []byte("id: provider.demo\n")},
+	}
+	if _, err := LoadProjectPackSetFS(source); err == nil || !strings.Contains(err.Error(), "project pack directory requires packs/manifest.yaml") {
+		t.Fatalf("LoadProjectPackSetFS missing manifest error = %v", err)
+	}
+}
+
 func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 	base, err := LoadPlatformPackInventoryFS(
 		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\n")),
@@ -415,7 +425,7 @@ func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 			if err := os.Remove(manifest); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(filepath.Join(project, "package.yaml"), manifest); err != nil {
+			if err := os.Symlink(filepath.Join(project, "schema.yaml"), manifest); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -454,7 +464,7 @@ func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 			if err := os.Remove(body); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(filepath.Join(project, "package.yaml"), body); err != nil {
+			if err := os.Symlink(filepath.Join(project, "schema.yaml"), body); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -571,7 +581,7 @@ func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			project := t.TempDir()
-			if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: demo\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: demo\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := ImportEmbeddedPack(project, "provider.demo", base); err != nil {
@@ -604,7 +614,7 @@ func TestProjectPackSnapshotRetainsTransactionRootAcrossPathReplacement(t *testi
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: original\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: original\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ImportEmbeddedPack(project, "provider.demo", base); err != nil {
@@ -624,7 +634,7 @@ func TestProjectPackSnapshotRetainsTransactionRootAcrossPathReplacement(t *testi
 	if err := os.Mkdir(outside, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outside, "package.yaml"), []byte("name: outside\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(outside, "schema.yaml"), []byte("name: outside\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, project); err != nil {
@@ -649,7 +659,7 @@ func TestProjectPackSnapshotRetainsTransactionRootAcrossPathReplacement(t *testi
 
 func TestProjectPackTransactionSerializesManifestReplacement(t *testing.T) {
 	project := t.TempDir()
-	manifest := filepath.Join(project, "package.yaml")
+	manifest := filepath.Join(project, "schema.yaml")
 	if err := os.WriteFile(manifest, []byte("name: original\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +669,7 @@ func TestProjectPackTransactionSerializesManifestReplacement(t *testing.T) {
 	}
 	if err := os.Rename(manifest, manifest+".old"); err != nil {
 		_ = first.close()
-		t.Skipf("package manifest replacement is unavailable: %v", err)
+		t.Skipf("schema document replacement is unavailable: %v", err)
 	}
 	if err := os.WriteFile(manifest, []byte("name: replacement\nversion: 1.0.0\n"), 0o644); err != nil {
 		_ = first.close()
@@ -680,7 +690,7 @@ func TestProjectPackTransactionSerializesManifestReplacement(t *testing.T) {
 			_ = got.transaction.close()
 		}
 		_ = first.close()
-		t.Fatalf("replacement package.yaml bypassed the active project transaction: %v", got.err)
+		t.Fatalf("replacement schema.yaml bypassed the active project transaction: %v", got.err)
 	case <-time.After(100 * time.Millisecond):
 	}
 	if err := first.close(); err != nil {
@@ -713,7 +723,7 @@ func TestProjectPackImportRetainsWriterRootAcrossPathReplacement(t *testing.T) {
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: original\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: original\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	transaction, err := acquireProjectPackTransaction(project, true)
@@ -728,7 +738,7 @@ func TestProjectPackImportRetainsWriterRootAcrossPathReplacement(t *testing.T) {
 	if err := os.Mkdir(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: replacement\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "schema.yaml"), []byte("name: replacement\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", entry, transaction); err != nil || !changed {

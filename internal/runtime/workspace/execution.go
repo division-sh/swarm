@@ -11,7 +11,7 @@ import (
 const (
 	LogicalWorkspaceMount = "/workspace"
 	LogicalDataMount      = "/data"
-	LogicalContractsMount = "/opt/swarm/contracts"
+	LogicalSourceMount    = "/opt/swarm/source"
 )
 
 type ExecutionMode string
@@ -177,7 +177,7 @@ func defaultLogicalExecutionMounts() []ExecutionMount {
 	return []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite},
 		{LogicalPath: LogicalDataMount, Access: MountAccessReadOnly},
-		{LogicalPath: LogicalContractsMount, Access: MountAccessReadOnly},
+		{LogicalPath: LogicalSourceMount, Access: MountAccessReadOnly},
 	}
 }
 

@@ -32,7 +32,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
 			newBusForSource := func(t *testing.T, source semanticview.Source, flowID, nodeID string) *runtimebus.EventBus {
 				t.Helper()
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, flowID, nodeID)
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, nodeID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -78,7 +78,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, competing.EntityID, competing.FlowInstance, "active", "payload-key")
 
 				source := stateOnlyAcquisitionSource(t, flowID)
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, flowID, "selector")
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, "selector")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -268,7 +268,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				childPath := parentID + "/" + childID + "/instance"
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, childPath, "active", accountID)
 				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, parentID, "selector")
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(parentID, "selector")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -388,8 +388,8 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 
 			t.Run("root flow admits authored mode and explicit run identity", func(t *testing.T) {
 				workflowName := "root-bundle-" + uuid.NewString()
-				flowID := "root-owner-" + uuid.NewString()
-				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(t, workflowName, flowID), flowID, runID)
+				rootFlowID := "."
+				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, runID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -397,26 +397,26 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				if owner.ScopeKey() != runID {
 					t.Fatalf("root owner query scope = %q, want exact run %q", owner.ScopeKey(), runID)
 				}
-				if !owner.Owns(runID) || owner.Owns(flowID) || owner.Owns(flowID+"/child") || owner.Owns(otherRunID) {
-					t.Fatalf("root owner route classification: run=%t authored=%t child=%t other_run=%t", owner.Owns(runID), owner.Owns(flowID), owner.Owns(flowID+"/child"), owner.Owns(otherRunID))
+				if !owner.Owns(runID) || owner.Owns(rootFlowID) || owner.Owns("child") || owner.Owns(otherRunID) {
+					t.Fatalf("root owner route classification: run=%t authored=%t child=%t other_run=%t", owner.Owns(runID), owner.Owns(rootFlowID), owner.Owns("child"), owner.Owns(otherRunID))
 				}
 			})
 
 			t.Run("root select reaches exact run state when authored id differs", func(t *testing.T) {
 				workflowName := "root-select-bundle-" + uuid.NewString()
-				flowID := "root-select-owner-" + uuid.NewString()
+				rootFlowID := "."
 				accountID := "root-select-key-" + uuid.NewString()
 				entityID := uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/child", "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), "child", "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, runID, "active", accountID)
 				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName, flowID), flowID, "selector")
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "selector")
 				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
 				if err != nil {
 					t.Fatalf("plan run-root select: %v", err)
 				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: runID, EntityID: entityID})
+				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: entityID})
 				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
 					t.Fatalf("run-root select routes = %#v, want %#v", plan.DeliveryRoutes, want)
 				}
@@ -428,11 +428,11 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 
 			t.Run("root select rejects authored scope without exact run owner", func(t *testing.T) {
 				workflowName := "root-select-authored-only-bundle-" + uuid.NewString()
-				flowID := "root-select-authored-only-" + uuid.NewString()
+				rootFlowID := "."
 				accountID := "root-select-authored-only-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
 				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName, flowID), flowID, "selector")
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "selector")
 				if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
 					t.Fatalf("root authored-only selection error = %v", err)
 				}
@@ -441,17 +441,17 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 
 			t.Run("root select or create materializes exact run route when authored id differs", func(t *testing.T) {
 				workflowName := "root-upsert-bundle-" + uuid.NewString()
-				flowID := "root-upsert-owner-" + uuid.NewString()
+				rootFlowID := "."
 				accountID := "root-upsert-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/child", "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), "child", "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
 				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName, flowID), flowID, "upserter")
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "upserter")
 				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
 				if err != nil {
 					t.Fatalf("plan run-root select-or-create: %v", err)
 				}
-				want := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: runID, EntityID: runID})
+				want := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: runID})
 				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
 					t.Fatalf("run-root select-or-create routes = %#v, want %#v", plan.DeliveryRoutes, want)
 				}
@@ -463,17 +463,17 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 
 			t.Run("root select or create preserves exact run owner over authored scope", func(t *testing.T) {
 				workflowName := "root-upsert-existing-bundle-" + uuid.NewString()
-				flowID := "root-upsert-existing-owner-" + uuid.NewString()
+				rootFlowID := "."
 				accountID := "root-upsert-existing-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, runID, runID, "active", accountID)
 				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName, flowID), flowID, "upserter")
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "upserter")
 				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
 				if err != nil {
 					t.Fatalf("plan existing run-root select-or-create: %v", err)
 				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: runID, EntityID: runID})
+				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: runID})
 				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
 					t.Fatalf("existing run-root select-or-create routes = %#v, want %#v", plan.DeliveryRoutes, want)
 				}
@@ -654,7 +654,7 @@ func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source
 func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) semanticview.Source {
 	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	flow := runtimecontracts.FlowContractView{
-		Path: flowID, Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: mode},
+		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: flowID, Mode: mode, InitialState: "active",
 			States: []string{"active", "done"}, TerminalStates: []string{"done"},
@@ -691,7 +691,7 @@ func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childI
 	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	flow := func(id, path, mode string) runtimecontracts.FlowContractView {
 		return runtimecontracts.FlowContractView{
-			Path: path, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id, Mode: mode},
+			Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: id},
 			Schema: runtimecontracts.FlowSchemaDocument{
 				Name: id, Mode: mode, InitialState: "active",
 				States: []string{"active", "done"}, TerminalStates: []string{"done"},
@@ -738,7 +738,7 @@ func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childI
 func stateOnlyAcquisitionFlow(flowID, path, mode string) runtimecontracts.FlowContractView {
 	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	return runtimecontracts.FlowContractView{
-		Path: path, Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: mode},
+		Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: flowID, Mode: mode, InitialState: "active",
 			States: []string{"active", "done"}, TerminalStates: []string{"done"},
@@ -813,19 +813,21 @@ func stateOnlyDeepAcquisitionSource(t *testing.T, parentID, childID, grandchildI
 	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{parentID, childID, grandchildID}))
 }
 
-func stateOnlyRootAcquisitionSource(t *testing.T, workflowName, flowID string) semanticview.Source {
-	root := stateOnlyAcquisitionFlow(flowID, flowID, runtimecontracts.FlowModeStatic)
+func stateOnlyRootAcquisitionSource(t *testing.T, workflowName string) semanticview.Source {
+	const rootFlowID = "."
+	root := stateOnlyAcquisitionFlow(rootFlowID, rootFlowID, runtimecontracts.FlowModeStatic)
+	root.Schema.Name = workflowName
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: workflowName, Version: "1",
-			FlowInitial:  map[string]string{flowID: "active"},
-			FlowStates:   map[string][]string{flowID: {"active", "done"}},
-			FlowTerminal: map[string][]string{flowID: {"done"}},
+			FlowInitial:  map[string]string{rootFlowID: "active"},
+			FlowStates:   map[string][]string{rootFlowID: {"active", "done"}},
+			FlowTerminal: map[string][]string{rootFlowID: {"done"}},
 		},
-		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root}},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: root.Schema},
+		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{rootFlowID: &root}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{rootFlowID: root.Schema},
 	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{flowID}))
+	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, nil))
 }
 
 func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontracts.WorkflowContractBundle, flowIDs []string) *runtimecontracts.WorkflowContractBundle {
@@ -840,11 +842,12 @@ func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontrac
 			t.Fatal("state-only acquisition contract requires nonblank flow ID")
 		}
 		fmt.Fprintf(&packageFlows, "  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID)
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", flowID))
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "review_item: {}\n")
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", flowID))
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), "review_item: {}\n")
 	}
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf("name: state-only-acquisition\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String()))
+
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "entities.yaml"), "review_item: {}\n")
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("load state-only acquisition entity contracts: %v", err)

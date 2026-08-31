@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -187,46 +186,4 @@ func jsonValueHasKey(value any, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestPostgresBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
-	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	parsedJSON, err := json.Marshal(map[string]any{
-		"projection_version": "swarm.bundle.catalog.v2",
-		"agents":             []map[string]any{apiTestCatalogAgentDefinition(t, "bundle-agent", "Handle the bundle catalog proof.")},
-	})
-	if err != nil {
-		t.Fatalf("encode postgres bundle catalog projection: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
-		VALUES ($1, $2, $3::jsonb, NULL, '{"source":"postgres-test"}'::jsonb, $4)
-	`, bundleHash, `agents:
-  bundle-agent:
-    intent:
-      inline: Handle the bundle catalog proof.
-    role: worker
-    model: regular
-    type: managed
-`, parsedJSON, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("seed postgres bundle catalog: %v", err)
-	}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{BundleCatalog: selected})})
-	for _, tc := range []struct {
-		method string
-		params string
-	}{
-		{method: "bundle.list", params: `{}`},
-		{method: "bundle.get", params: fmt.Sprintf(`{"bundle_hash":%q}`, bundleHash)},
-		{method: "bundle.agents", params: fmt.Sprintf(`{"bundle_hash":%q}`, bundleHash)},
-	} {
-		resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
-		if resp.Error != nil {
-			t.Fatalf("%s postgres error = %#v", tc.method, resp.Error)
-		}
-	}
 }

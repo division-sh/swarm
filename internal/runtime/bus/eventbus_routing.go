@@ -708,7 +708,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		return runtimedeliverycontinuation.Fatal(err)
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(err)
 	}
@@ -1263,7 +1263,7 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -1295,7 +1295,7 @@ func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.Runtim
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, entry.EventID, entry.EventType)
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}

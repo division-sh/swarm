@@ -49,18 +49,18 @@ func (o *Postgres) Load(ctx context.Context, runID string) (runtimerunbundle.Ava
 func loadPostgres(ctx context.Context, queryer rowQueryer, runID string) (runtimerunbundle.Availability, error) {
 	var row availabilityRow
 	err := queryer.QueryRowContext(ctx, `
-		SELECT run_id::text, status, bundle_hash, bundle_source
+		SELECT run_id::text, status, bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
 		FOR SHARE
-	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource)
+	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunbundle.Availability{}, fmt.Errorf("run %s not found: %w", runID, runtimerunbundle.ErrRunNotFound)
 	}
 	if err != nil {
 		return runtimerunbundle.Availability{}, fmt.Errorf("load postgres run bundle availability: %w", err)
 	}
-	if err := loadPostgresPersistedBundlePresence(ctx, queryer, &row); err != nil {
+	if err := loadPostgresSourceArtifactPresence(ctx, queryer, &row); err != nil {
 		return runtimerunbundle.Availability{}, err
 	}
 	return classify(row)
@@ -83,17 +83,17 @@ func (o *SQLite) Load(ctx context.Context, runID string) (runtimerunbundle.Avail
 func loadSQLite(ctx context.Context, queryer rowQueryer, runID string) (runtimerunbundle.Availability, error) {
 	var row availabilityRow
 	err := queryer.QueryRowContext(ctx, `
-		SELECT run_id, status, bundle_hash, bundle_source
+		SELECT run_id, status, bundle_hash
 		FROM runs
 		WHERE run_id = ?
-	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource)
+	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunbundle.Availability{}, fmt.Errorf("run %s not found: %w", runID, runtimerunbundle.ErrRunNotFound)
 	}
 	if err != nil {
 		return runtimerunbundle.Availability{}, fmt.Errorf("load sqlite run bundle availability: %w", err)
 	}
-	if err := loadSQLitePersistedBundlePresence(ctx, queryer, &row); err != nil {
+	if err := loadSQLiteSourceArtifactPresence(ctx, queryer, &row); err != nil {
 		return runtimerunbundle.Availability{}, err
 	}
 	return classify(row)
@@ -103,32 +103,24 @@ type rowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func loadPostgresPersistedBundlePresence(ctx context.Context, queryer rowQueryer, row *availabilityRow) error {
-	source, err := runtimerunbundle.DecodeAvailabilitySource(row.BundleSource)
-	if err != nil || !source.IsPersisted() {
-		return err
-	}
-	if err := queryer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, row.BundleHash).Scan(&row.BundleRowPresent); err != nil {
-		return fmt.Errorf("load postgres run bundle row presence: %w", err)
+func loadPostgresSourceArtifactPresence(ctx context.Context, queryer rowQueryer, row *availabilityRow) error {
+	if err := queryer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`, row.BundleHash).Scan(&row.SourceArtifactPresent); err != nil {
+		return fmt.Errorf("load postgres run source artifact presence: %w", err)
 	}
 	return nil
 }
 
-func loadSQLitePersistedBundlePresence(ctx context.Context, queryer rowQueryer, row *availabilityRow) error {
-	source, err := runtimerunbundle.DecodeAvailabilitySource(row.BundleSource)
-	if err != nil || !source.IsPersisted() {
-		return err
-	}
-	if err := queryer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)`, row.BundleHash).Scan(&row.BundleRowPresent); err != nil {
-		return fmt.Errorf("load sqlite run bundle row presence: %w", err)
+func loadSQLiteSourceArtifactPresence(ctx context.Context, queryer rowQueryer, row *availabilityRow) error {
+	if err := queryer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)`, row.BundleHash).Scan(&row.SourceArtifactPresent); err != nil {
+		return fmt.Errorf("load sqlite run source artifact presence: %w", err)
 	}
 	return nil
 }
 
 func (o *Postgres) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
 	rows, err := o.backend.QueryContext(ctx, `
-		SELECT run_id::text, status, bundle_hash, bundle_source,
-		       EXISTS (SELECT 1 FROM bundles b WHERE b.bundle_hash = runs.bundle_hash)
+		SELECT run_id::text, status, bundle_hash,
+		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN ($1, $2)
 		  AND NOT EXISTS (
@@ -145,8 +137,8 @@ func (o *Postgres) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundl
 
 func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
 	rows, err := o.backend.QueryContext(ctx, `
-		SELECT run_id, status, bundle_hash, bundle_source,
-		       EXISTS (SELECT 1 FROM bundles b WHERE b.bundle_hash = runs.bundle_hash)
+		SELECT run_id, status, bundle_hash,
+		       EXISTS (SELECT 1 FROM source_artifacts a WHERE a.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN (?, ?)
 		  AND NOT EXISTS (
@@ -162,11 +154,10 @@ func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.
 }
 
 type availabilityRow struct {
-	RunID            string
-	Status           string
-	BundleHash       string
-	BundleSource     string
-	BundleRowPresent bool
+	RunID                 string
+	Status                string
+	BundleHash            string
+	SourceArtifactPresent bool
 }
 
 type rowIterator interface {
@@ -179,7 +170,7 @@ func scanAvailabilities(rows rowIterator) ([]runtimerunbundle.Availability, erro
 	var result []runtimerunbundle.Availability
 	for rows.Next() {
 		var row availabilityRow
-		if err := rows.Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource, &row.BundleRowPresent); err != nil {
+		if err := rows.Scan(&row.RunID, &row.Status, &row.BundleHash, &row.SourceArtifactPresent); err != nil {
 			return nil, fmt.Errorf("scan active non-standing run bundle availability: %w", err)
 		}
 		availability, err := classify(row)
@@ -195,33 +186,20 @@ func scanAvailabilities(rows rowIterator) ([]runtimerunbundle.Availability, erro
 }
 
 func classify(row availabilityRow) (runtimerunbundle.Availability, error) {
-	source, err := runtimerunbundle.DecodeAvailabilitySource(row.BundleSource)
-	if err != nil {
-		return runtimerunbundle.Availability{}, err
-	}
 	availability := runtimerunbundle.Availability{
-		RunID:        strings.TrimSpace(row.RunID),
-		Status:       strings.TrimSpace(row.Status),
-		BundleHash:   row.BundleHash,
-		BundleSource: source,
+		RunID:                 strings.TrimSpace(row.RunID),
+		Status:                strings.TrimSpace(row.Status),
+		BundleHash:            row.BundleHash,
+		SourceArtifactPresent: row.SourceArtifactPresent,
 	}
 	if err := runtimebundleidentity.ValidateCanonicalHash(availability.BundleHash); err != nil {
 		availability.ErrorCode = runtimerunbundle.CodeBundleDataIntegrityError
 		availability.Cause = "invalid_bundle_hash"
 		return availability, nil
 	}
-	switch source {
-	case runtimerunbundle.AvailabilitySourcePersisted:
-		availability.BundleRowPresent = row.BundleRowPresent
-		if !row.BundleRowPresent {
-			availability.ErrorCode = runtimerunbundle.CodeBundleDataIntegrityError
-			availability.Cause = "persisted_missing_bundle_row"
-		}
-	case runtimerunbundle.AvailabilitySourceEphemeral, runtimerunbundle.AvailabilitySourceDeleted:
-		availability.ErrorCode = runtimerunbundle.CodeBundleUnavailable
-		availability.Cause = source.String()
-	default:
-		return runtimerunbundle.Availability{}, fmt.Errorf("unsupported bundle source %q", source)
+	if !row.SourceArtifactPresent {
+		availability.ErrorCode = runtimerunbundle.CodeBundleDataIntegrityError
+		availability.Cause = "missing_source_artifact"
 	}
 	return availability, nil
 }

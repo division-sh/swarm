@@ -8,8 +8,8 @@ import (
 
 func TestBundleScopeForSource(t *testing.T) {
 	runtimeID := "11111111-1111-1111-1111-111111111111"
-	bundleA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	bundleB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	bundleA := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	bundleB := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	tests := []struct {
 		name       string
 		ctx        context.Context
@@ -46,8 +46,8 @@ func TestBundleScopeForSource(t *testing.T) {
 
 func TestBundleScopeForTarget(t *testing.T) {
 	runtimeID := "11111111-1111-1111-1111-111111111111"
-	bundleA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	bundleB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	bundleA := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	bundleB := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	for _, tt := range []struct {
 		name    string
 		ctx     context.Context

@@ -1,0 +1,10 @@
+mode: template
+instance: task_id
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events:
+      - event: task.requested
+        source: external

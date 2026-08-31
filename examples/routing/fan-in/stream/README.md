@@ -3,8 +3,8 @@
 This recipe routes reports from independently created `operating` instances to the one `portfolio/default` coordinator. The input pin owns the stream window and deduplication key; `accumulate` only collects each accepted arrival and never waits for finite membership.
 
 ```sh
-swarm verify --contracts examples/routing/fan-in/stream
-swarm serve --contracts examples/routing/fan-in/stream
+swarm verify examples/routing/fan-in/stream
+swarm serve examples/routing/fan-in/stream
 swarm event publish operating.report.requested --payload-json '{"period_id":"2026-Q1","revenue":120}'
 ```
 

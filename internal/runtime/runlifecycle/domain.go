@@ -28,12 +28,6 @@ const (
 	StateForked    State = "forked"
 )
 
-const (
-	BundleSourcePersisted = "persisted"
-	BundleSourceEphemeral = "ephemeral"
-	BundleSourceDeleted   = "deleted"
-)
-
 type OriginKind string
 
 const (
@@ -305,10 +299,10 @@ func ParseTerminalState(raw string) (State, error) {
 }
 
 var (
-	ErrRunNotFound                = errors.New("run not found")
-	ErrRunNotActive               = errors.New("run is not active")
-	ErrPersistedBundleUnavailable = errors.New("persisted bundle source unavailable")
-	ErrForkSourceUnsupported      = errors.New("run lifecycle fork source transition is unsupported")
+	ErrRunNotFound               = errors.New("run not found")
+	ErrRunNotActive              = errors.New("run is not active")
+	ErrSourceArtifactUnavailable = errors.New("source artifact unavailable")
+	ErrForkSourceUnsupported     = errors.New("run lifecycle fork source transition is unsupported")
 )
 
 type RunNotFoundError struct {
@@ -342,22 +336,18 @@ func (e *RunNotActiveError) Unwrap() error {
 	return ErrRunNotActive
 }
 
-type PersistedBundleUnavailableError struct {
-	BundleHash   string
-	BundleSource string
-	Cause        string
+type SourceArtifactUnavailableError struct {
+	BundleHash string
+	Cause      string
 }
 
-func (e *PersistedBundleUnavailableError) Error() string {
+func (e *SourceArtifactUnavailableError) Error() string {
 	if e == nil {
-		return ErrPersistedBundleUnavailable.Error()
+		return ErrSourceArtifactUnavailable.Error()
 	}
-	parts := []string{ErrPersistedBundleUnavailable.Error()}
+	parts := []string{ErrSourceArtifactUnavailable.Error()}
 	if value := strings.TrimSpace(e.BundleHash); value != "" {
 		parts = append(parts, "bundle_hash="+value)
-	}
-	if value := strings.TrimSpace(e.BundleSource); value != "" {
-		parts = append(parts, "bundle_source="+value)
 	}
 	if value := strings.TrimSpace(e.Cause); value != "" {
 		parts = append(parts, "cause="+value)
@@ -365,8 +355,8 @@ func (e *PersistedBundleUnavailableError) Error() string {
 	return strings.Join(parts, " ")
 }
 
-func (e *PersistedBundleUnavailableError) Unwrap() error {
-	return ErrPersistedBundleUnavailable
+func (e *SourceArtifactUnavailableError) Unwrap() error {
+	return ErrSourceArtifactUnavailable
 }
 
 type MutationDisposition string
@@ -452,7 +442,7 @@ func (r ActiveTransitionRequest) Validate() error {
 type CreateRequest struct {
 	RunID     string
 	Origin    RunOrigin
-	Source    runtimecorrelation.BundleSourceFact
+	Source    runtimecorrelation.SourceArtifactFact
 	StartedAt time.Time
 }
 
@@ -474,7 +464,7 @@ func (r CreateRequest) Validate() error {
 
 type SourceRevisionRequest struct {
 	RunID  string
-	Source runtimecorrelation.BundleSourceFact
+	Source runtimecorrelation.SourceArtifactFact
 }
 
 func (r SourceRevisionRequest) Validate() error {
@@ -492,7 +482,6 @@ type Snapshot struct {
 	State            State
 	Origin           RunOrigin
 	BundleHash       string
-	BundleSource     string
 	EventCount       int
 	EntityCount      int
 	Failure          *runtimefailures.Envelope
@@ -513,11 +502,6 @@ func (s Snapshot) Validate() error {
 	}
 	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(s.BundleHash)); err != nil {
 		return fmt.Errorf("run lifecycle snapshot bundle_hash: %w", err)
-	}
-	switch strings.TrimSpace(s.BundleSource) {
-	case BundleSourcePersisted, BundleSourceEphemeral, BundleSourceDeleted:
-	default:
-		return fmt.Errorf("run lifecycle snapshot has invalid bundle_source %q", s.BundleSource)
 	}
 	if s.EventCount < 0 || s.EntityCount < 0 {
 		return errors.New("run lifecycle snapshot counters must be non-negative")
@@ -898,8 +882,8 @@ type CandidateOwner interface {
 type OperationOwner interface {
 	RequirePresentRun(context.Context, string) error
 	RequireActiveRun(context.Context, string) error
-	RequirePresentRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
-	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	RequirePresentRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 	CreateRun(context.Context, CreateRequest) (MutationDisposition, error)
 	RequestCompletionCandidate(context.Context, CandidateRequest) (CandidateRequestDisposition, error)
 	TransitionActiveRun(context.Context, ActiveTransitionRequest) (MutationDisposition, error)

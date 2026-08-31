@@ -333,12 +333,13 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", "")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", ".")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-1",
 		Identity:      toolTestRootAgentIdentity(t, "agent-emit-1"),
+		FlowID:        ".",
 		EntityID:      "entity-actor",
 		EmitEvents: []string{
 			"category.assessed",
@@ -417,12 +418,13 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "selected-agent", "")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "selected-agent", ".")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "selected-agent",
 		Identity:      toolTestRootAgentIdentity(t, "selected-agent"),
+		FlowID:        ".",
 		EntityID:      "entity-typed-lineage",
 		EmitEvents:    []string{"category.assessed"},
 	}
@@ -570,12 +572,13 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", "")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", ".")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-3",
 		Identity:      toolTestRootAgentIdentity(t, "agent-emit-3"),
+		FlowID:        ".",
 		EntityID:      eventtest.UUID("agent-emit-3-source"),
 		EmitEvents:    []string{"category.assessed"},
 	})

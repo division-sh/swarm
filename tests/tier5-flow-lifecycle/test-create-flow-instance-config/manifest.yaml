@@ -1,0 +1,4 @@
+name: test-create-flow-instance-config
+version: 1.0.0
+description: Create flow instance with config_from to pass configuration.
+platform_version: ">=0.7.0 <0.8.0"

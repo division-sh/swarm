@@ -61,7 +61,7 @@ func admitRegistrationTestGeneration(
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatalf("build registration source set: %v", err)
@@ -70,7 +70,7 @@ func admitRegistrationTestGeneration(
 		t.Fatalf("install registration source set: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -98,7 +98,7 @@ func rotateRegistrationTestGeneration(
 		t.Fatalf("retire predecessor registration generation: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: previous.BundleHash, BundleSource: previous.BundleSource,
+		BundleHash:        previous.BundleHash,
 		RuntimeInstanceID: previous.RuntimeInstanceID, RuntimeGeneration: previous.RuntimeGeneration + 1,
 		SourceSetRevision: previous.SourceSetRevision,
 	})
@@ -511,7 +511,7 @@ func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChan
 	}
 	onboardingID := uuid.NewString()
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: testCanonicalBundleHash, BundleSource: "persisted",
+		BundleHash:     testCanonicalBundleHash,
 		BundleIdentity: "bundle:test@sha256:selected-store-registration", PackInventoryGeneration: "sha256:selected-store-registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration, TargetGeneration: 1,
@@ -521,8 +521,8 @@ func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChan
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:support:telegram:telegram", BundleHash: testCanonicalBundleHash,
-			ServiceID: "selected-store-service", PackageKey: "support", FlowID: "telegram", Alias: "support", Provider: "telegram",
+			Selector: "ingress:support/telegram:telegram", BundleHash: testCanonicalBundleHash,
+			ServiceID: "selected-store-service", FlowPath: "support/telegram", Alias: "support", Provider: "telegram",
 			Generation: 1, PublicationSequence: 1,
 			AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("selected-store-registration-admission")),
 			SigningCredentialKey:    "signing",
@@ -663,7 +663,7 @@ func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.
 			if err != nil || authority.State != runtimestartupownership.StateActive {
 				t.Fatalf("active capability = %#v err=%v", authority, err)
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -672,7 +672,7 @@ func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.
 				t.Fatalf("InstallCompleteSourceSet: %v", err)
 			}
 			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-				BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+				BundleHash:        coordinate.BundleHash,
 				RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 			})
 			if err != nil {
@@ -787,7 +787,7 @@ func TestProcessAuthorityDiagnosticTimestampDoesNotInvalidateHeadParity(t *testi
 }
 
 func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendParity(t *testing.T) {
-	const secondBundleHash = "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	const secondBundleHash = "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	tests := []struct {
 		name  string
 		store func(*testing.T) startupAuthorityParityStore
@@ -810,8 +810,8 @@ func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendPari
 			}
 			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
-			firstSource := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
-			secondSource := runtimeagenttopology.SourceCoordinate{BundleHash: secondBundleHash, BundleSource: "persisted"}
+			firstSource := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+			secondSource := runtimeagenttopology.SourceCoordinate{BundleHash: secondBundleHash}
 			firstAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "source-agent", ""), Source: firstSource, ConfigRevision: "config-v1"}
 			secondAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "second-agent", ""), Source: secondSource, ConfigRevision: "config-v1"}
 			initial, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{firstSource}, []runtimeagenttopology.DesiredAgent{firstAgent})
@@ -880,7 +880,7 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 	if err != nil {
 		t.Fatalf("Evidence: %v", err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -889,7 +889,7 @@ func TestPostgresProcessCapabilitySessionLossRetiresAndAdmitsAtomicSuccessor(t *
 		t.Fatalf("InstallCompleteSourceSet: %v", err)
 	}
 	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
@@ -1066,7 +1066,7 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		if err != nil {
 			t.Fatalf("read child process authority: %v", err)
 		}
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
 		plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -1075,7 +1075,7 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 			t.Fatalf("install child source set: %v", err)
 		}
 		grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-			BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+			BundleHash:        coordinate.BundleHash,
 			RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 		})
 		if err != nil {
@@ -1625,7 +1625,7 @@ func TestAuthorityRepairParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("acquire predecessor: %v", err)
 			}
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -1802,7 +1802,7 @@ func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
 				t.Fatalf("acquire successor after repair: %v", err)
 			}
 			grant, err := successor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-				BundleHash: abandoned.Grant.BundleHash, BundleSource: abandoned.Grant.BundleSource,
+				BundleHash:        abandoned.Grant.BundleHash,
 				RuntimeInstanceID: successorRequest.RuntimeInstanceID, RuntimeGeneration: abandoned.Grant.RuntimeGeneration + 1,
 				SourceSetRevision: abandoned.Revision,
 			})
@@ -1902,7 +1902,7 @@ func TestProcessCapabilityOperationCancellationPreservesPossessionParity(t *test
 			}
 
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
-				BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral",
+				BundleHash: testCanonicalBundleHash,
 			}}, nil)
 			if err != nil {
 				t.Fatalf("construct cancellation source set: %v", err)

@@ -1,0 +1,4 @@
+name: test-cross-entity-concurrent
+version: 1.0.0
+description: Two events for different entities are processed concurrently and both succeed.
+platform_version: ">=0.7.0 <0.8.0"

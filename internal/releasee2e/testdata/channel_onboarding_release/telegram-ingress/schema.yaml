@@ -1,0 +1,12 @@
+mode: singleton
+activation: standing
+ingress:
+  alias: chat
+  providers:
+    - provider: telegram
+      signing_secret: webhook_signing.telegram
+pins:
+  inputs:
+    events:
+      - event: inbound.telegram
+        source: external

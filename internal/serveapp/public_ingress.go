@@ -127,7 +127,7 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			CredentialKeys:              credentialKeys,
 			Target: runtimepublicingress.RegistrationTarget{
 				Selector: rawSelector, BundleHash: target.BundleHash, ServiceID: target.ServiceID,
-				PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
+				FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
 				Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 				AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: signingCredentialKey,
 			},
@@ -174,7 +174,7 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 		Registration: registration, CredentialKeys: credentials,
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
-			PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
+			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
 			Generation: int64(target.Generation), PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionGeneration, SigningCredentialKey: credentials[intent.Candidate.SigningCredentialRole],
 		},
@@ -184,8 +184,8 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 func exactActivationContext(contexts []runtime.BundleContext, coordinate channelonboarding.ChannelRuntimeContextCoordinate) (runtime.BundleContext, error) {
 	matches := []runtime.BundleContext{}
 	for _, contextDef := range contexts {
-		bundleHash, bundleSource := contextDef.BundleSourceFact.StorageValues()
-		if bundleHash == coordinate.BundleHash && bundleSource == coordinate.BundleSource &&
+		bundleHash := contextDef.SourceArtifactFact.BundleHash()
+		if bundleHash == coordinate.BundleHash &&
 			contextDef.RuntimeInstanceID == coordinate.RuntimeInstanceID && contextDef.PublicationGeneration == coordinate.ContextPublicationGeneration {
 			matches = append(matches, contextDef)
 		}
@@ -203,7 +203,7 @@ func exactContextTarget(contextDef runtime.BundleContext, rawSelector string) (r
 	}
 	matches := []runtime.StandingTarget{}
 	for _, target := range contextDef.StandingTargets {
-		if strings.TrimSpace(target.PackageKey) == selector.PackageKey && strings.TrimSpace(target.FlowID) == selector.FlowID && strings.TrimSpace(target.Provider) == selector.Provider {
+		if strings.TrimSpace(target.FlowPath) == selector.FlowPath && strings.TrimSpace(target.Provider) == selector.Provider {
 			matches = append(matches, target)
 		}
 	}

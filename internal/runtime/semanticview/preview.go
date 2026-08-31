@@ -19,7 +19,7 @@ func CloneBundleForPreview(bundle *runtimecontracts.WorkflowContractBundle, poli
 	if bundle.FlowTree.Root != nil {
 		root, byPath, byID := flowmodel.CloneViewTree(
 			bundle.FlowTree.Root,
-			func(view *runtimecontracts.FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+			func(view *runtimecontracts.FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) },
 			func(view *runtimecontracts.FlowContractView) {
 				flowmodel.ApplyPolicyOverrides(&view.Policy, policyOverrides)
 			},

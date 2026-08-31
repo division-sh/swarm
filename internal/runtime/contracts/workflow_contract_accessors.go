@@ -136,6 +136,9 @@ func (b *WorkflowContractBundle) FlowSchemaByID(id string) (FlowSchemaDocument, 
 	if b == nil || id == "" {
 		return FlowSchemaDocument{}, false
 	}
+	if id == "." && b.RootSchema != nil {
+		return *b.RootSchema, true
+	}
 	schema, ok := b.FlowSchemas[id]
 	return schema, ok
 }
@@ -143,51 +146,13 @@ func (b *WorkflowContractBundle) HasFlow(id string) bool {
 	_, ok := b.FlowViewByID(id)
 	return ok
 }
-func (b *WorkflowContractBundle) ProjectViews() []ProjectContractView {
-	if b == nil || len(b.projectContracts) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(b.projectContracts))
-	for key := range b.projectContracts {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	views := make([]ProjectContractView, 0, len(keys))
-	for _, key := range keys {
-		views = append(views, b.projectContracts[key])
-	}
-	return views
-}
-func (b *WorkflowContractBundle) ProjectViewByKey(key string) (ProjectContractView, bool) {
-	key = strings.TrimSpace(key)
-	if b == nil || key == "" {
-		return ProjectContractView{}, false
-	}
-	view, ok := b.projectContracts[key]
-	return view, ok
-}
-func (b *WorkflowContractBundle) RootProjectViews() []ProjectContractView {
-	if b == nil || len(b.PackageTree) == 0 {
-		return nil
-	}
-	views := make([]ProjectContractView, 0, len(b.PackageTree))
-	for _, pkg := range b.PackageTree {
-		if strings.TrimSpace(pkg.ParentKey) != "" {
-			continue
-		}
-		if view, ok := b.ProjectViewByKey(pkg.Key); ok {
-			views = append(views, view)
-		}
-	}
-	return views
-}
 func (b *WorkflowContractBundle) FlowViews() []FlowContractView {
 	if b == nil {
 		return nil
 	}
 	return flowmodel.ViewsByPath(
 		b.FlowTree,
-		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) },
 		func(view *FlowContractView) string { return strings.TrimSpace(view.Path) },
 		flowViewChildren,
 	)
@@ -201,16 +166,7 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		return nil
 	}
 	if b.FlowTree.Root != nil {
-		records := scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
-		for index := range records {
-			if strings.TrimSpace(records[index].Source.FlowID) != "" && strings.TrimSpace(records[index].Source.Layer) == "flow" {
-				records[index].Source.PackageKey = b.executableFlowPackageKey(records[index].Source.FlowID)
-			}
-		}
-		return records
-	}
-	if len(b.projectContracts) > 0 {
-		return scopedNodeRecordsFromProjectViews(b.ProjectViews())
+		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
 	}
 	if len(b.scopedNodes) > 0 {
 		keys := make([]string, 0, len(b.scopedNodes))
@@ -222,12 +178,12 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		for _, key := range keys {
 			entry := b.scopedNodes[key]
 			source := b.scopedNodeSources[key]
-			logicalID := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(key, contractScopeKey(source, "")), "::"))
-			if logicalID == "" {
-				logicalID = strings.TrimSpace(entry.ID)
+			identity, err := runtimeidentity.ParseDeclarationIdentityKey(key)
+			if err != nil {
+				continue
 			}
 			out = append(out, ScopedNodeRecord{
-				LogicalID: logicalID,
+				LogicalID: identity.SemanticPath(),
 				Entry:     entry,
 				Source:    source,
 			})
@@ -246,8 +202,11 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		out := make([]ScopedNodeRecord, 0, len(keys))
 		for _, key := range keys {
 			source := b.nodeSources[key]
-			if strings.TrimSpace(source.Layer) == "" {
-				source.Layer = "project"
+			if strings.TrimSpace(source.FlowPath) == "" {
+				source.FlowPath = "."
+			}
+			if strings.TrimSpace(source.Family) == "" {
+				source.Family = "nodes"
 			}
 			out = append(out, ScopedNodeRecord{LogicalID: strings.TrimSpace(key), Entry: b.Nodes[key], Source: source})
 		}
@@ -269,55 +228,8 @@ func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNo
 	return ScopedNodeRecord{}, false
 }
 
-func (b *WorkflowContractBundle) executableFlowPackageKey(flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if b == nil || flowID == "" {
-		return runtimeidentity.RootPackageKey
-	}
-	view, ok := b.FlowViewByID(flowID)
-	if !ok {
-		for _, candidate := range b.FlowViews() {
-			if strings.TrimSpace(candidate.Paths.ID) == flowID {
-				view = &candidate
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return runtimeidentity.RootPackageKey
-		}
-	}
-	return b.executableFlowViewPackageKey(view)
-}
-
-func (b *WorkflowContractBundle) executableFlowViewPackageKey(view *FlowContractView) string {
-	if b == nil || view == nil {
-		return runtimeidentity.RootPackageKey
-	}
-	flowDir := filepath.Clean(strings.TrimSpace(view.Paths.Dir))
-	if flowDir != "" && flowDir != "." {
-		for _, pkg := range b.PackageTree {
-			if filepath.Clean(strings.TrimSpace(pkg.Paths.Dir)) != flowDir {
-				continue
-			}
-			if packageKey := strings.Trim(strings.TrimSpace(pkg.Key), "/"); packageKey != "" {
-				return packageKey
-			}
-		}
-	}
-	packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
-	if packageKey == "" {
-		return runtimeidentity.RootPackageKey
-	}
-	return packageKey
-}
-
-func (b *WorkflowContractBundle) ExecutableFlowViewPackageKey(view *FlowContractView) string {
-	return b.executableFlowViewPackageKey(view)
-}
-
 func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode, semanticScope ExecutableNodeSemanticScope) eventidentity.Scope {
-	if ref.FlowID() == "" {
+	if ref.FlowPath() == "." {
 		localEvents := b.rootLocalEvents()
 		if declaration, ok := semanticScope.DeclarationView(); ok {
 			for eventType := range declaration.Events {
@@ -326,16 +238,16 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 		}
 		return eventidentity.Scope{
 			LocalEvents:  normalizedStrings(localEvents),
-			InputEvents:  b.FlowInputEvents(""),
-			OutputEvents: b.FlowOutputEvents(""),
+			InputEvents:  b.FlowInputEvents("."),
+			OutputEvents: b.FlowOutputEvents("."),
 		}
 	}
 	view, ok := semanticScope.OwningFlow()
 	if !ok {
 		return eventidentity.Scope{}
 	}
-	inputEvents := b.FlowInputEvents(view.Paths.ID)
-	outputEvents := b.FlowOutputEvents(view.Paths.ID)
+	inputEvents := b.FlowInputEvents(view.Paths.FlowPath)
+	outputEvents := b.FlowOutputEvents(view.Paths.FlowPath)
 	localEvents := make([]string, 0, len(view.Events)+len(inputEvents)+len(outputEvents)+1)
 	for eventType := range view.Events {
 		localEvents = append(localEvents, strings.TrimSpace(eventType))
@@ -367,18 +279,15 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope Ex
 	if parentPath == "" {
 		return nil
 	}
-	declarationPackageKey := semanticScope.Node.PackageKey()
 	out := make([]eventidentity.DescendantScope, 0)
 	var walk func([]FlowContractView)
 	walk = func(children []FlowContractView) {
 		for index := range children {
 			candidate := children[index]
 			candidatePath := eventidentity.Normalize(candidate.Path)
-			candidatePackageKey := b.executableFlowViewPackageKey(&candidate)
-			packageVisible := candidatePackageKey == declarationPackageKey || strings.HasPrefix(candidatePackageKey, declarationPackageKey+"/")
-			if packageVisible && candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
-				inputEvents := b.FlowInputEvents(candidate.Paths.ID)
-				outputEvents := b.FlowOutputEvents(candidate.Paths.ID)
+			if candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
+				inputEvents := b.FlowInputEvents(candidate.Paths.FlowPath)
+				outputEvents := b.FlowOutputEvents(candidate.Paths.FlowPath)
 				localEvents := make([]string, 0, len(candidate.Events)+len(inputEvents)+len(outputEvents))
 				for eventType := range candidate.Events {
 					localEvents = append(localEvents, strings.TrimSpace(eventType))
@@ -458,24 +367,12 @@ func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(
 	if resolvedScope {
 		view, ok := resolution.semanticScope.OwningFlow()
 		if ok {
-			owningPackageKey := b.executableFlowViewPackageKey(view)
-			for current := view; current != nil; current = current.Parent {
-				packageKey := b.executableFlowViewPackageKey(current)
-				if packageKey != owningPackageKey {
-					continue
-				}
-				if entry, key, found := lookup(current.Events); found {
-					return entry, key, true
-				}
-			}
-		}
-		if project, ok := resolution.semanticScope.PackageView(); ok {
-			if entry, key, found := lookup(project.Events); found {
+			if entry, key, found := lookup(view.Events); found {
 				return entry, key, true
 			}
 		}
 	}
-	if ref.PackageKey() == runtimeidentity.RootPackageKey {
+	if ref.FlowPath() == "." {
 		if entry, key, found := lookup(b.Events); found {
 			return entry, key, true
 		}
@@ -495,7 +392,7 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeid
 	if !ok {
 		return pattern
 	}
-	resolved := strings.TrimSpace(resolution.eventScope.ResolveSubscriptionPattern(pattern, resolution.descendants))
+	resolved := strings.TrimSpace(resolution.eventScope.ResolveSubscriptionPattern(pattern, nil))
 	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
 		return resolved
 	}
@@ -560,9 +457,17 @@ func (b *WorkflowContractBundle) ExternalizeExecutableNodeHandler(ref runtimeide
 	return handler
 }
 
-func scopedNodeRecordsFromProjectViews(views []ProjectContractView) []ScopedNodeRecord {
+func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecord {
+	if root == nil {
+		return nil
+	}
 	out := make([]ScopedNodeRecord, 0)
-	for _, view := range views {
+	var walk func(*FlowContractView)
+	walk = func(view *FlowContractView) {
+		if view == nil {
+			return
+		}
+		flowPath := strings.TrimSpace(view.Paths.FlowPath)
 		nodeIDs := make([]string, 0, len(view.Nodes))
 		for nodeID := range view.Nodes {
 			nodeIDs = append(nodeIDs, nodeID)
@@ -572,84 +477,18 @@ func scopedNodeRecordsFromProjectViews(views []ProjectContractView) []ScopedNode
 			out = append(out, ScopedNodeRecord{
 				LogicalID: strings.TrimSpace(nodeID),
 				Entry:     view.Nodes[nodeID],
-				Source: ContractItemSource{
-					PackageKey: strings.TrimSpace(view.Paths.Key),
-					Layer:      "project",
-					File:       strings.TrimSpace(view.Paths.ProjectNodesFile),
-				},
-			})
-		}
-	}
-	return out
-}
-
-func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecord {
-	if root == nil {
-		return nil
-	}
-	out := make([]ScopedNodeRecord, 0)
-	declarationIndexes := map[string]int{}
-	appendRecord := func(record ScopedNodeRecord) {
-		declarationKey := scopedNodeDeclarationKey(record)
-		if declarationKey == "" {
-			out = append(out, record)
-			return
-		}
-		if index, exists := declarationIndexes[declarationKey]; exists {
-			// Package and explicit-flow views can project the same physical
-			// declaration. The flow view carries the more specific owner.
-			if strings.TrimSpace(out[index].Source.Layer) != "flow" && strings.TrimSpace(record.Source.Layer) == "flow" {
-				out[index] = record
-			}
-			return
-		}
-		declarationIndexes[declarationKey] = len(out)
-		out = append(out, record)
-	}
-	var walk func(*FlowContractView, string, string)
-	walk = func(view *FlowContractView, inheritedPackageKey, inheritedFlowID string) {
-		if view == nil {
-			return
-		}
-		packageKey := strings.TrimSpace(view.Paths.PackageKey)
-		if packageKey == "" {
-			packageKey = strings.TrimSpace(inheritedPackageKey)
-		}
-		declaredFlowID := strings.TrimSpace(view.Paths.ID)
-		flowID := declaredFlowID
-		if flowID == "" {
-			flowID = strings.TrimSpace(inheritedFlowID)
-		}
-		layer := "project"
-		if declaredFlowID != "" {
-			layer = "flow"
-		}
-		nodeIDs := make([]string, 0, len(view.Nodes))
-		for nodeID := range view.Nodes {
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-		sort.Strings(nodeIDs)
-		for _, nodeID := range nodeIDs {
-			appendRecord(ScopedNodeRecord{
-				LogicalID: strings.TrimSpace(nodeID),
-				Entry:     view.Nodes[nodeID],
-				Source: ContractItemSource{
-					PackageKey: packageKey,
-					FlowID:     flowID,
-					Layer:      layer,
-					File:       strings.TrimSpace(view.Paths.NodesFile),
-				},
+				Source:    ContractItemSource{FlowPath: flowPath, Family: "nodes", File: strings.TrimSpace(view.Paths.NodesFile)},
 			})
 		}
 		children := flowViewChildren(view)
 		sort.SliceStable(children, func(i, j int) bool {
-			return exportedFlowTreeViewOrderKey(children[i], packageKey) < exportedFlowTreeViewOrderKey(children[j], packageKey)
+			return exportedFlowTreeViewOrderKey(children[i]) < exportedFlowTreeViewOrderKey(children[j])
 		})
 		for _, child := range children {
-			walk(child, packageKey, flowID)
+			walk(child)
 		}
 	}
-	walk(root, "", "")
+	walk(root)
 	return out
 }
 
@@ -660,22 +499,17 @@ func scopedNodeDeclarationKey(record ScopedNodeRecord) string {
 	}
 	return strings.Join([]string{
 		filepath.Clean(sourceFile),
-		strings.TrimSpace(record.Source.FlowID),
+		strings.TrimSpace(record.Source.FlowPath),
 		strings.TrimSpace(record.LogicalID),
 	}, "\x00")
 }
 
-func exportedFlowTreeViewOrderKey(view *FlowContractView, inheritedPackageKey string) string {
+func exportedFlowTreeViewOrderKey(view *FlowContractView) string {
 	if view == nil {
 		return ""
 	}
-	packageKey := strings.TrimSpace(view.Paths.PackageKey)
-	if packageKey == "" {
-		packageKey = strings.TrimSpace(inheritedPackageKey)
-	}
 	return strings.Join([]string{
-		packageKey,
-		strings.TrimSpace(view.Paths.ID),
+		strings.TrimSpace(view.Paths.FlowPath),
 		strings.TrimSpace(view.Path),
 		strings.TrimSpace(view.Paths.NodesFile),
 	}, "\x00")
@@ -743,7 +577,7 @@ func (b *WorkflowContractBundle) ResolvedPolicyForFlow(flowID string) PolicyDocu
 		b.Policy,
 		b.FlowTree,
 		flowID,
-		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) },
 		func(view *FlowContractView) PolicyDocument { return view.Policy },
 		flowViewChildren,
 	)
@@ -757,15 +591,10 @@ func (b *WorkflowContractBundle) ResolvedPolicyForExecutableNode(node runtimeide
 	if err != nil {
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
-	if project, ok := scope.PackageView(); ok {
-		mergeContractPolicyDocument(&doc, project.Policy)
-	} else if declaration, ok := scope.DeclarationView(); ok && strings.TrimSpace(scope.Declaration.Source.Layer) == "project" {
-		mergeContractPolicyDocument(&doc, declaration.Policy)
-	}
 	if view, ok := scope.OwningFlow(); ok {
 		chain := make([]*FlowContractView, 0)
 		for current := view; current != nil; current = current.Parent {
-			if strings.TrimSpace(current.Paths.ID) != "" {
+			if strings.TrimSpace(current.Paths.FlowPath) != "" {
 				chain = append(chain, current)
 			}
 		}
@@ -844,20 +673,48 @@ func (b *WorkflowContractBundle) resolveAuthoredFlowEventCatalogEntry(flowID, ev
 	if b == nil {
 		return EventCatalogEntry{}, "", false
 	}
-	catalog := b.ResolvedEventCatalog()
+	flowID = strings.TrimSpace(flowID)
 	rawKey := eventidentity.Normalize(eventType)
-	if entry, ok := catalog[rawKey]; ok {
-		return entry, rawKey, true
+	if rawKey == "" {
+		return EventCatalogEntry{}, "", false
 	}
 	resolvedKey := b.ResolveFlowEventReference(flowID, eventType)
-	if resolvedKey == rawKey {
-		return EventCatalogEntry{}, "", false
+	entries := b.Events
+	if b.FlowTree.Root != nil {
+		view, ok := b.exactFlowEventDeclarationView(flowID)
+		if !ok || view == nil {
+			return EventCatalogEntry{}, "", false
+		}
+		entries = view.Events
 	}
-	entry, ok := catalog[resolvedKey]
-	if !ok {
-		return EventCatalogEntry{}, "", false
+	for _, localKey := range sortedContractKeys(entries) {
+		entry := entries[localKey]
+		localKey = eventidentity.Normalize(localKey)
+		canonicalKey := b.ResolveFlowEventReference(flowID, localKey)
+		if localKey == rawKey || localKey == resolvedKey || canonicalKey == rawKey || canonicalKey == resolvedKey {
+			return entry, canonicalKey, true
+		}
 	}
-	return entry, resolvedKey, true
+	if entry, ok := b.GeneratedActivityEventEntries()[rawKey]; ok {
+		return entry, rawKey, true
+	}
+	if resolvedKey != rawKey {
+		if entry, ok := b.GeneratedActivityEventEntries()[resolvedKey]; ok {
+			return entry, resolvedKey, true
+		}
+	}
+	return EventCatalogEntry{}, "", false
+}
+
+func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*FlowContractView, bool) {
+	if b == nil || b.FlowTree.Root == nil {
+		return nil, false
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" || flowID == "." {
+		return b.FlowTree.Root, true
+	}
+	return b.FlowViewByID(flowID)
 }
 func clonePolicyDocument(in PolicyDocument) PolicyDocument {
 	return flowmodel.ClonePolicyDocument(in)
@@ -895,14 +752,11 @@ func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {
 		return ""
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		return b.WorkflowInitialStage()
 	}
 	if initial := strings.TrimSpace(b.Semantics.FlowInitial[flowID]); initial != "" {
 		return initial
-	}
-	if flowID != "" && flowID == b.WorkflowName() {
-		return b.WorkflowInitialStage()
 	}
 	return ""
 }
@@ -911,7 +765,7 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		if b.RootSchema == nil {
 			return workflowSemanticRootStates(b.Semantics)
 		}
@@ -919,9 +773,6 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 	}
 	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
 		return append([]string{}, states...)
-	}
-	if flowID != "" && flowID == b.WorkflowName() {
-		return rootSchemaStates(b.RootSchema)
 	}
 	return nil
 }
@@ -958,7 +809,7 @@ func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
+	if flowID == "." {
 		if b.RootSchema == nil {
 			return append([]string{}, b.Semantics.TerminalStages...)
 		}
@@ -966,9 +817,6 @@ func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 	}
 	if terminal := b.Semantics.FlowTerminal[flowID]; len(terminal) > 0 {
 		return append([]string{}, terminal...)
-	}
-	if flowID != "" && flowID == b.WorkflowName() {
-		return rootSchemaTerminalStates(b.RootSchema)
 	}
 	return nil
 }
@@ -1057,11 +905,11 @@ func (b *WorkflowContractBundle) FlowOutputEventPin(flowID, pinName string) (Com
 	}
 	return CompiledFlowOutputPin{}, false
 }
-func (b *WorkflowContractBundle) CompositionConnects() []FlowPackageConnect {
+func (b *WorkflowContractBundle) CompositionConnects() []FlowConnect {
 	if b == nil {
 		return nil
 	}
-	return cloneFlowPackageConnects(b.Semantics.CompositionConnects)
+	return cloneFlowConnects(b.Semantics.CompositionConnects)
 }
 func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
 	if b == nil {
@@ -1102,7 +950,7 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 	if b == nil || strings.Contains(eventType, "/") {
 		return "", false
 	}
-	if flowID == "" {
+	if flowID == "." {
 		return eventType, eventType != ""
 	}
 	view, ok := b.FlowViewByID(flowID)
@@ -1131,11 +979,11 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 }
 func (b *WorkflowContractBundle) ResolveFlowEventPattern(flowID, pattern string) string {
 	scope := b.flowEventScope(flowID)
-	return scope.ResolveSubscriptionPattern(pattern, b.flowEventDescendants(flowID))
+	return scope.ResolveSubscriptionPattern(pattern, nil)
 }
 func (b *WorkflowContractBundle) FlowEventMatches(flowID, subscription, eventType string) bool {
 	scope := b.flowEventScope(flowID)
-	return scope.Matches(subscription, eventType, b.flowEventDescendants(flowID))
+	return scope.Matches(subscription, eventType, nil)
 }
 func (b *WorkflowContractBundle) FlowRequiredAgents(flowID string) []FlowRequiredAgent {
 	return FlowRequiredAgentsFromFacts(b.FlowRequiredAgentFacts(flowID))
@@ -1167,9 +1015,9 @@ func (b *WorkflowContractBundle) RootRequiredAgentFacts() []RequiredAgentFact {
 		return nil
 	}
 	if RequiredAgentsDeclared(*b.RootSchema) {
-		return explicitRequiredAgentFacts(b.RootSchema.RequiredAgents, b.Paths.RootSchemaFile)
+		return explicitRequiredAgentFacts(b.RootSchema.RequiredAgents, b.flowRequiredAgentSchemaFile("."))
 	}
-	return b.inferredRequiredAgentFacts("")
+	return b.inferredRequiredAgentFacts(".")
 }
 
 func (b *WorkflowContractBundle) inferredRequiredAgentFacts(ownerFlowID string) []RequiredAgentFact {
@@ -1278,7 +1126,7 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 		out = append(out, autoEmit)
 	}
 	for _, site := range b.ActivitySites() {
-		if site.Node.FlowID() != flowID {
+		if site.Node.FlowPath() != flowID {
 			continue
 		}
 		result := ActivityResultEventsForSite(site)
@@ -1301,11 +1149,12 @@ func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Sco
 	if b == nil {
 		return eventidentity.Scope{}
 	}
-	if flowID == "" {
+	if flowID == "." {
 		return eventidentity.Scope{
+			Path:         "",
 			LocalEvents:  b.rootLocalEvents(),
-			InputEvents:  b.FlowInputEvents(""),
-			OutputEvents: b.FlowOutputEvents(""),
+			InputEvents:  b.FlowInputEvents("."),
+			OutputEvents: b.FlowOutputEvents("."),
 		}
 	}
 	view, ok := b.FlowViewByID(flowID)
@@ -1338,18 +1187,20 @@ func (b *WorkflowContractBundle) rootLocalEvents() []string {
 		out = append(out, eventType)
 	}
 	if b.RootSchema != nil {
-		for _, eventType := range b.FlowInputEvents("") {
+		for _, eventType := range b.FlowInputEvents(".") {
 			appendEvent(eventType)
 		}
-		for _, eventType := range b.FlowOutputEvents("") {
+		for _, eventType := range b.FlowOutputEvents(".") {
 			appendEvent(eventType)
 		}
 		if autoEmit := strings.TrimSpace(b.RootSchema.AutoEmitOnCreate.Event); autoEmit != "" {
 			appendEvent(autoEmit)
 		}
 	}
-	for eventType := range b.Events {
-		appendEvent(eventType)
+	if root, ok := b.FlowViewByID("."); ok && root != nil {
+		for eventType := range root.Events {
+			appendEvent(eventType)
+		}
 	}
 	sort.Strings(out)
 	return out
@@ -1367,7 +1218,7 @@ func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []eventiden
 	}
 	out := make([]eventidentity.DescendantScope, 0)
 	for _, view := range b.FlowViews() {
-		descendantFlowID := strings.TrimSpace(view.Paths.ID)
+		descendantFlowID := strings.TrimSpace(view.Paths.FlowPath)
 		if descendantFlowID == "" || descendantFlowID == flowID {
 			continue
 		}

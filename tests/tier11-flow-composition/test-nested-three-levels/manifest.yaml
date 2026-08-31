@@ -1,0 +1,4 @@
+name: test-nested-three-levels
+version: 1.0.0
+description: Root declares child, child declares grandchild. Event routing works across 3 levels.
+platform_version: ">=0.7.0 <0.8.0"

@@ -52,7 +52,7 @@ func TestPlatformSpecProviderTriggerTargetAuthorityMatchesStandingIngress(t *tes
 			t.Fatalf("provider trigger authority retains retired owner %q", retired)
 		}
 	}
-	for _, want := range []string{"package.yaml flows[].ingress.providers[].signing_secret", "deployment credential-store entry", "Flow-instance config"} {
+	for _, want := range []string{"schema.yaml ingress.providers[].signing_secret", "target-scoped credential reference owner", "source never carries the secret value"} {
 		if !strings.Contains(contract.SecretBinding, want) {
 			t.Fatalf("provider trigger secret authority lacks %q:\n%s", want, contract.SecretBinding)
 		}

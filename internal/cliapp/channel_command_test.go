@@ -56,7 +56,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		operation["principal_id"] = "principal-1"
 		operation["interface"] = row["identity"].(map[string]any)["interface"]
 		operation["coordinate"] = operatorChannelCLIReadiness(false)["coordinate"]
-		operation["target_selector"] = "ingress:support:telegram:telegram"
+		operation["target_selector"] = "ingress:support:telegram"
 		operation["activation_posture"] = "webhook_registration"
 		operation["identity_ceremony"] = "authenticated_text_challenge"
 		operation["save_proof"] = true
@@ -133,9 +133,9 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	})
 
 	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
-		firstBundle := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-		secondBundle := "bundle-v1:sha256:" + strings.Repeat("c", 64)
-		firstTarget, secondTarget := "ingress:workflow:support-a:telegram", "ingress:workflow:support-b:telegram"
+		firstBundle := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+		secondBundle := "bundle-v2:sha256:" + strings.Repeat("c", 64)
+		firstTarget, secondTarget := "ingress:workflow/support-a:telegram", "ingress:workflow/support-b:telegram"
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			if request.Method != "channel.list" {
 				t.Fatalf("method = %q, want channel.list", request.Method)
@@ -158,8 +158,8 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			switch request.Method {
 			case "channel.list":
 				return map[string]any{"principal_id": "principal-1", "channels": []any{
-					operatorChannelCLIActivationReadback("activation-a", "bundle-v1:sha256:"+strings.Repeat("b", 64), "ingress:workflow:support-a:telegram"),
-					operatorChannelCLIActivationReadback("activation-b", "bundle-v1:sha256:"+strings.Repeat("c", 64), "ingress:workflow:support-b:telegram"),
+					operatorChannelCLIActivationReadback("activation-a", "bundle-v2:sha256:"+strings.Repeat("b", 64), "ingress:workflow/support-a:telegram"),
+					operatorChannelCLIActivationReadback("activation-b", "bundle-v2:sha256:"+strings.Repeat("c", 64), "ingress:workflow/support-b:telegram"),
 				}}
 			case "channel.unbind":
 				if request.Params["interface"] != operatorChannelCLISelector || request.Params["expected_revision"] != float64(1) {
@@ -284,12 +284,12 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			methods = append(methods, request.Method)
-			if request.Params["bundle"] != "bundle-v1:sha256:"+strings.Repeat("b", 64) || request.Params["interface"] != operatorChannelCLISelector || request.Params["target"] != "ingress:support:telegram:telegram" {
+			if request.Params["bundle"] != "bundle-v2:sha256:"+strings.Repeat("b", 64) || request.Params["interface"] != operatorChannelCLISelector || request.Params["target"] != "ingress:support:telegram" {
 				t.Fatalf("exact selectors = %#v", request.Params)
 			}
 			return channelOnboardingCLIResult("succeeded", "bound", true)
 		})
-		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "reconnect", "telegram", "--bundle", "bundle-v1:sha256:"+strings.Repeat("b", 64), "--interface", operatorChannelCLISelector, "--target", "ingress:support:telegram:telegram")
+		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "reconnect", "telegram", "--bundle", "bundle-v2:sha256:"+strings.Repeat("b", 64), "--interface", operatorChannelCLISelector, "--target", "ingress:support:telegram")
 		if code != 0 || stderr != "" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -545,7 +545,7 @@ func channelOnboardingCLIResult(phase, identityState string, ready bool) map[str
 		"candidate": map[string]any{
 			"provider":  "telegram",
 			"interface": map[string]any{"selector": operatorChannelCLISelector},
-			"target":    map[string]any{"selector": "ingress:support:telegram:telegram"},
+			"target":    map[string]any{"selector": "ingress:support:telegram"},
 		},
 		"readiness": operatorChannelCLIReadiness(ready),
 	}
@@ -598,7 +598,7 @@ func operatorChannelCLIReadiness(ready bool) map[string]any {
 	return map[string]any{
 		"ready": ready, "reason": map[bool]string{true: "ready", false: "activation_not_current"}[ready],
 		"coordinate": map[string]any{
-			"bundle_hash": "bundle-v1:sha256:" + strings.Repeat("b", 64), "bundle_source": "persisted",
+			"bundle_hash":     "bundle-v2:sha256:" + strings.Repeat("b", 64),
 			"bundle_identity": "operator-channel-cli@1.0.0#fixture", "pack_inventory_generation": "pack-generation",
 			"context_publication_generation": 1, "plan_generation": "sha256:" + strings.Repeat("c", 64), "target_generation": 1,
 		},

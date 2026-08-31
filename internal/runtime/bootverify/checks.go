@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -122,9 +121,6 @@ type checkerContext struct {
 	nodeStateSchemaLoaded   bool
 	nodeStateSchemaFindings []Finding
 
-	flowPackageImportLoaded   bool
-	flowPackageImportFindings []Finding
-
 	accumulatorProjectionLoaded   bool
 	accumulatorProjectionFindings []Finding
 	accumulatorSafetyLoaded       bool
@@ -204,7 +200,6 @@ var bootCheckRegistry = []Check{
 	{ID: "declared_agent_name_valid", Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
 	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
-	{ID: semanticview.TypedPubSubFailureAuthorizationAmbiguous, Severity: SeverityHardInvalidity, Run: checkTypedPubSubAuthorization},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "legacy_qualified_subscription", Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
@@ -250,7 +245,6 @@ var bootCheckRegistry = []Check{
 	{ID: "workspace_class_exists", Severity: "error", Run: checkWorkspaceClassExists},
 	{ID: "credential_key_exists", Severity: "warning", Run: checkCredentialKeyExists},
 	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
-	{ID: "platform_version_compatibility", Severity: SeverityHardInvalidity, Run: checkPlatformVersionCompatibility},
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
@@ -266,10 +260,6 @@ var bootCheckRegistry = []Check{
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
-	{ID: "flow_package_import_completeness", Severity: SeverityHardInvalidity, Run: checkFlowPackageImportCompleteness},
-	{ID: "flow_package_dependency_binding", Severity: SeverityHardInvalidity, Run: checkFlowPackageDependencyBinding},
-	{ID: "flow_package_pin_bind_alias_validation", Severity: SeverityHardInvalidity, Run: checkFlowPackagePinBindAliasValidation},
-	{ID: "flow_package_wildcard_observe_grant", Severity: SeverityHardInvalidity, Run: checkFlowPackageWildcardObserveGrant},
 	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
@@ -381,10 +371,7 @@ func checkMCPServerReachable(c *checkerContext) []Finding         { return c.mcp
 func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
-func checkPlatformMetadataValidation(c *checkerContext) []Finding { return c.platformMetadata() }
-func checkPlatformVersionCompatibility(c *checkerContext) []Finding {
-	return c.platformVersionCompatibility()
-}
+func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.platformMetadata() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
 func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
 func checkCrossSurfaceNamedTypeUse(c *checkerContext) []Finding {
@@ -513,21 +500,20 @@ func (c *checkerContext) policyConflicts() []Finding {
 		return c.policyFindings
 	}
 	c.policyLoaded = true
-	projectScopes := c.source.ProjectScopes()
-	if len(projectScopes) == 0 {
-		return nil
-	}
-	root := rootPolicyScope(projectScopes)
-	if len(root.Policy.Values) == 0 {
+	root := c.source.ResolvedPolicyForFlow(".")
+	if len(root.Values) == 0 {
 		return nil
 	}
 	for _, flow := range c.source.FlowScopes() {
+		if strings.TrimSpace(flow.Path) == "." {
+			continue
+		}
 		for key, value := range flow.Policy.Values {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue
 			}
-			rootValue, ok := root.Policy.Values[key]
+			rootValue, ok := root.Values[key]
 			if !ok {
 				continue
 			}
@@ -623,35 +609,8 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 	for _, record := range c.source.ExecutableNodeRecords() {
 		c.appendInvalidExecutableNodeFindings(record)
 	}
-	for _, scope := range c.source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		if strings.TrimSpace(scope.Manifest.Name) == "" {
-			c.invalidFindings = append(c.invalidFindings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("project package %s missing required field name", scopeLabel),
-				Location: scopeLabel,
-			})
-		}
-		if strings.TrimSpace(scope.Manifest.Version) == "" {
-			c.invalidFindings = append(c.invalidFindings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("project package %s missing required field version", scopeLabel),
-				Location: scopeLabel,
-			})
-		}
-	}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
-		if strings.TrimSpace(schema.Name) == "" {
-			c.invalidFindings = append(c.invalidFindings, Finding{
-				CheckID:  "invalid_field_detection",
-				Severity: "error",
-				Message:  fmt.Sprintf("flow schema %s missing required field name", flowID),
-				Location: flowID,
-			})
-		}
 		if len(schema.States) == 0 && strings.TrimSpace(schema.InitialState) != "" {
 			c.invalidFindings = append(c.invalidFindings, Finding{
 				CheckID:  "invalid_field_detection",
@@ -693,17 +652,12 @@ func agentDeclarationScopeLabel(source semanticview.Source, declaration semantic
 	if strings.TrimSpace(declaration.OwnerFlowID) != "" {
 		return flowScopeLabel(declaration.OwnerFlowID, source.FlowPath(declaration.OwnerFlowID))
 	}
-	return projectScopeLabel(declaration.Source.PackageKey, "")
+	return flowScopeLabel(declaration.Source.FlowPath, declaration.Source.FlowPath)
 }
 
 func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontracts.ScopedNodeRecord) {
 	nodeID := strings.TrimSpace(record.LogicalID)
-	scopeLabel := strings.TrimSpace(record.Source.PackageKey)
-	if flowID := strings.TrimSpace(record.Source.FlowID); flowID != "" {
-		scopeLabel = flowScopeLabel(flowID, flowID)
-	} else {
-		scopeLabel = projectScopeLabel(scopeLabel, "")
-	}
+	scopeLabel := flowScopeLabel(record.Source.FlowPath, record.Source.FlowPath)
 	if nodeID == "" {
 		c.invalidFindings = append(c.invalidFindings, Finding{
 			CheckID: "invalid_field_detection", Severity: "error",
@@ -832,7 +786,7 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		flowID := entry.flowID
 		schema := entry.schema
 		c.stateFindings = append(c.stateFindings, stageDeclarationCoherenceFindings(flowID, schema)...)
-		if strings.TrimSpace(flowID) == "" && !schema.UsesAuthoredStages() {
+		if strings.TrimSpace(flowID) == "." && !schema.UsesAuthoredStages() {
 			continue
 		}
 		states := stringSet(c.source.FlowStates(flowID))
@@ -854,7 +808,7 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 			continue
 		}
 		nodeID := node.Key()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		declaredStates := declaredStatesForFlow(c.source, flowID)
 		if len(declaredStates) == 0 {
 			continue
@@ -888,7 +842,7 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		}
 	}
 	for _, transition := range c.source.DerivedHandlerTransitions() {
-		flowID := transition.Node.FlowID()
+		flowID := transition.Node.FlowPath()
 		target := strings.TrimSpace(transition.AdvancesTo)
 		if target == "" {
 			continue
@@ -1008,13 +962,6 @@ func (c *checkerContext) platformNamespace() []Finding {
 		eventType = strings.TrimSpace(eventType)
 		addEventCatalogClaim(eventType, eventType)
 	}
-	for _, scope := range c.source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		for eventType := range scope.Events {
-			eventType = strings.TrimSpace(eventType)
-			addEventCatalogClaim(eventType, scopedObjectLabel(scopeLabel, eventType))
-		}
-	}
 	for _, scope := range c.source.FlowScopes() {
 		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
 		for eventType := range scope.Events {
@@ -1048,7 +995,7 @@ func (c *checkerContext) platformNamespace() []Finding {
 	for _, endpoint := range census.OutputPins() {
 		flowID := strings.TrimSpace(endpoint.FlowID)
 		location := flowID
-		if flowID == "" {
+		if flowID == "." {
 			location = "root schema"
 		}
 		if finding, ok := platformProducerClaimFinding(
@@ -1056,13 +1003,13 @@ func (c *checkerContext) platformNamespace() []Finding {
 			endpoint.Event.Authored,
 			location,
 			func(eventType string) string {
-				if flowID == "" {
+				if flowID == "." {
 					return fmt.Sprintf("root schema pins.outputs.events references platform-emitted event %s; platform owns this event", eventType)
 				}
 				return fmt.Sprintf("flow %s pins.outputs.events references platform-emitted event %s; platform owns this event", flowID, eventType)
 			},
 			func(eventType string) string {
-				if flowID == "" {
+				if flowID == "." {
 					return fmt.Sprintf("root schema pins.outputs.events references reserved platform.* namespace event %s", eventType)
 				}
 				return fmt.Sprintf("flow %s pins.outputs.events references reserved platform.* namespace event %s", flowID, eventType)
@@ -1233,19 +1180,6 @@ func scopedObjectLabel(scopeLabel, objectID string) string {
 	return scopeLabel + "/" + objectID
 }
 
-func rootPolicyScope(scopes []semanticview.ProjectScope) semanticview.ProjectScope {
-	if len(scopes) == 0 {
-		return semanticview.ProjectScope{}
-	}
-	root := scopes[0]
-	for _, scope := range scopes[1:] {
-		if scope.Depth < root.Depth {
-			root = scope
-		}
-	}
-	return root
-}
-
 func stringSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -1294,13 +1228,8 @@ func declaredStatesForFlow(source semanticview.Source, flowID string) map[string
 	flowID = strings.TrimSpace(flowID)
 	var states []string
 	var terminals []string
-	if flowID == "" {
-		states = source.FlowStates("")
-		terminals = source.FlowTerminalStages("")
-	} else {
-		states = source.FlowStates(flowID)
-		terminals = source.FlowTerminalStages(flowID)
-	}
+	states = source.FlowStates(flowID)
+	terminals = source.FlowTerminalStages(flowID)
 	out := stringSet(states)
 	for _, terminal := range terminals {
 		if terminal = strings.TrimSpace(terminal); terminal != "" {
@@ -1315,26 +1244,22 @@ type lifecycleFlowSchemaEntry struct {
 	schema runtimecontracts.FlowSchemaDocument
 }
 
-type rootFlowSchemaProvider interface {
-	RootFlowSchema() (runtimecontracts.FlowSchemaDocument, bool)
-}
-
 func lifecycleFlowSchemas(source semanticview.Source) []lifecycleFlowSchemaEntry {
 	if source == nil {
 		return nil
 	}
-	out := make([]lifecycleFlowSchemaEntry, 0, len(source.FlowSchemaEntries())+1)
-	if provider, ok := source.(rootFlowSchemaProvider); ok {
-		if schema, ok := provider.RootFlowSchema(); ok {
-			out = append(out, lifecycleFlowSchemaEntry{flowID: "", schema: schema})
+	entries := source.FlowSchemaEntries()
+	flowIDs := make([]string, 0, len(entries))
+	for flowID := range entries {
+		flowID = strings.TrimSpace(flowID)
+		if flowID != "" {
+			flowIDs = append(flowIDs, flowID)
 		}
 	}
-	for flowID, schema := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		out = append(out, lifecycleFlowSchemaEntry{flowID: flowID, schema: schema})
+	sort.Strings(flowIDs)
+	out := make([]lifecycleFlowSchemaEntry, 0, len(flowIDs))
+	for _, flowID := range flowIDs {
+		out = append(out, lifecycleFlowSchemaEntry{flowID: flowID, schema: entries[flowID]})
 	}
 	return out
 }
@@ -1392,7 +1317,7 @@ func stageDeclarationCoherenceFindings(flowID string, schema runtimecontracts.Fl
 }
 
 func validationFlowLabel(flowID string) string {
-	if strings.TrimSpace(flowID) == "" {
+	if strings.TrimSpace(flowID) == "." {
 		return "root"
 	}
 	return strings.TrimSpace(flowID)
@@ -1583,48 +1508,6 @@ func normalizeStringSliceLocal(items []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func eventExists(source semanticview.Source, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return false
-	}
-	if runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), eventType) || strings.HasPrefix(eventType, "platform.") {
-		return true
-	}
-	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
-		return true
-	}
-	if _, ok := source.EventEntry(eventType); ok {
-		return true
-	}
-	if !strings.Contains(eventType, "*") {
-		return false
-	}
-	for _, candidate := range runtimecontracts.PlatformEventCatalogNames(source.PlatformSpec()) {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	for candidate := range source.ResolvedEventCatalog() {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	for candidate := range source.EventEntries() {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	return false
-}
-
-func routeMatchesLocal(pattern, eventType string) bool {
-	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func stringValueLocal(v any) string {

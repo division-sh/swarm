@@ -11,7 +11,6 @@ func validateWorkflowCriteriaContracts(bundle *WorkflowContractBundle) []error {
 		return nil
 	}
 	errs := []error{}
-	errs = append(errs, validateProjectPolicyCriteriaUnsupported(bundle)...)
 	errs = append(errs, validateFlowPolicyCriteriaSets(bundle)...)
 	errs = append(errs, validateAgentCriteriaReferences(bundle)...)
 	errs = append(errs, validateEventCriteriaCitationFields(bundle)...)
@@ -19,24 +18,11 @@ func validateWorkflowCriteriaContracts(bundle *WorkflowContractBundle) []error {
 	return errs
 }
 
-func validateProjectPolicyCriteriaUnsupported(bundle *WorkflowContractBundle) []error {
-	errs := []error{}
-	for _, view := range bundle.ProjectViews() {
-		if len(view.Policy.Criteria) == 0 {
-			continue
-		}
-		errs = append(errs, fmt.Errorf("%w: project policy %s declares criteria; criteria must be declared in flow policy.yaml", ErrInvalidField, strings.TrimSpace(view.Paths.Key)))
-	}
-	return errs
-}
-
 func validateFlowPolicyCriteriaSets(bundle *WorkflowContractBundle) []error {
 	errs := []error{}
-	for _, flowID := range sortedFlowSchemaIDs(bundle.FlowSchemas) {
-		view, ok := bundle.FlowViewByID(flowID)
-		if !ok || view == nil {
-			continue
-		}
+	for _, value := range bundle.FlowViews() {
+		view := value
+		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		policy := bundle.ResolvedPolicyForFlow(flowID)
 		setNames := sortedCriteriaSetNames(view.Policy.Criteria)
 		for _, setName := range setNames {
@@ -148,7 +134,7 @@ func validateAgentCriteriaReferences(bundle *WorkflowContractBundle) []error {
 			continue
 		}
 		source := bundle.scopedAgentSources[scopedKey]
-		flowID := strings.TrimSpace(source.FlowID)
+		flowID := strings.TrimSpace(source.FlowPath)
 		if flowID == "" {
 			errs = append(errs, fmt.Errorf("%w: agent %s criteria refs require a flow-scoped agent", ErrInvalidField, scopedKey))
 			continue
@@ -203,7 +189,7 @@ func validateEventCriteriaCitationFields(bundle *WorkflowContractBundle) []error
 				errs = append(errs, fmt.Errorf("%w: %s requires text/string or list-of-text field type, got %q", ErrInvalidField, fieldContext, strings.TrimSpace(field.Type)))
 			}
 			criteriaName := strings.TrimSpace(field.Citation.Criteria)
-			flowID := strings.TrimSpace(source.FlowID)
+			flowID := strings.TrimSpace(source.FlowPath)
 			if criteriaName == "" {
 				continue
 			}
@@ -236,7 +222,7 @@ func validateAgentCriteriaCitationConsumption(bundle *WorkflowContractBundle) []
 			continue
 		}
 		source := bundle.scopedAgentSources[scopedKey]
-		flowID := strings.TrimSpace(source.FlowID)
+		flowID := strings.TrimSpace(source.FlowPath)
 		if flowID == "" {
 			continue
 		}

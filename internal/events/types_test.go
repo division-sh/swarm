@@ -437,8 +437,8 @@ func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
 }
 
 func TestDeliveryRoutesAndConnectClaimsPreserveSameFlowPackageOwners(t *testing.T) {
-	first := identitytest.ExecutableNode(t, "packages/a", "review", "shared")
-	second := identitytest.ExecutableNode(t, "packages/b", "review", "shared")
+	first := identitytest.ExecutableNode(t, "a/review", "shared")
+	second := identitytest.ExecutableNode(t, "b/review", "shared")
 	digest := sha256.Sum256([]byte("connect-edge"))
 	pinDigest := sha256.Sum256([]byte("receiver-pin"))
 	routes := make([]DeliveryRoute, 0, 2)

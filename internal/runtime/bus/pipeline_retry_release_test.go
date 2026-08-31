@@ -177,7 +177,7 @@ func (q *recordingRunRecoveryQueue) PreflightRunQueue(ctx context.Context, runID
 func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			serviceID := runtimeflowidentity.StandingServiceID("standing-recovery-proof", backend)
+			serviceID := runtimeflowidentity.StandingServiceID(backend)
 			origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
 			if err != nil {
 				t.Fatal(err)
@@ -204,7 +204,7 @@ func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t 
 			process := worklifetime.NewProcess()
 			runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 				RuntimeInstanceID: uuid.NewString(),
-				BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+				BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
 			})
 			if err != nil {
 				t.Fatal(err)

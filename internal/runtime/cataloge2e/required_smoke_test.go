@@ -34,7 +34,7 @@ func runCatalogRequiredSmokeFixture(t *testing.T, fixtureRoot string, startRunti
 	t.Helper()
 
 	var expected catalogExpectedDocument
-	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
+	loadYAML(t, catalogExpectedPath(fixtureRoot), &expected)
 
 	h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 	h.seedEntityFields(expected)

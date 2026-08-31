@@ -19,7 +19,7 @@ func ResolveExecutableNodeDeclaration(source Source, flowID, nodeID string) (run
 	count := 0
 	for _, record := range source.ExecutableNodeRecords() {
 		candidate, err := record.Identity()
-		if err != nil || candidate.FlowID() != flowID || candidate.NodeID() != nodeID {
+		if err != nil || candidate.FlowPath() != flowID || candidate.NodeID() != nodeID {
 			continue
 		}
 		found = candidate

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -21,6 +22,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type diagnosticRuntimeLogFixtureStore interface {
@@ -687,9 +689,23 @@ func semanticEventFixtureContext(ctx context.Context, selectedStore any, event e
 	if !ok {
 		return ctx, func() {}, fmt.Errorf("semantic event fixture store %T has no author activity catalog", selectedStore)
 	}
+	source, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !hasSource || source.BundleHash() == sourceartifactfixture.BundleHash {
+		writer, ok := selectedStore.(sourceartifactfixture.Writer)
+		if !ok {
+			return ctx, func() {}, fmt.Errorf("semantic event fixture store %T has no source artifact writer", selectedStore)
+		}
+		if err := sourceartifactfixture.Ensure(ctx, writer); err != nil {
+			return ctx, func() {}, fmt.Errorf("persist semantic event fixture source: %w", err)
+		}
+		if !hasSource {
+			source = sourceartifactfixture.Fact()
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
+		}
+	}
 	scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !scoped || scope.Kind != runtimeauthoractivity.ScopeBundle {
-		scope = runtimeauthoractivity.BundleScope(event.ID(), "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		scope = runtimeauthoractivity.BundleScope(event.ID(), source.BundleHash())
 		ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	}
 	if store.AuthorActivityEventCatalogRegistered(scope) {

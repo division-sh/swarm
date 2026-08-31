@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestParseDeclarationRejectsMissingOrNonTextIdentityFields(t *testing.T) {
@@ -59,15 +61,22 @@ func TestLoadDeclarationsConsumesOnlySupportedScenarioRoots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("flows/work/fixtures/invalid.yaml", "not: [valid")
-	write("flows/work/tests/smoke.yaml", "name: smoke\nderive:\n  flow: work\n  input: message\n  payload:\n    generate: true\n")
+	write("work/data/not-a-scenario.yaml", "not: a scenario\n")
+	write("data/tests/root-fixture.yaml", "name: wrong-root\nderive:\n  flow: root\n  input: request\n  payload:\n    generate: true\n")
+	write("mocks/tests/root-case.yaml", "name: wrong-mock\nderive:\n  flow: root\n  input: request\n  payload:\n    generate: true\n")
+	write("work/data/tests/child-fixture.yaml", "name: wrong-child\nderive:\n  flow: work\n  input: message\n  payload:\n    generate: true\n")
+	write("work/tests/smoke.yaml", "name: smoke\nderive:\n  flow: work\n  input: message\n  payload:\n    generate: true\n")
 	write("tests/root.yaml", "name: root\nderive:\n  flow: root\n  input: request\n  payload:\n    generate: true\n")
 
-	declarations, err := LoadDeclarations(root)
+	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(declarations) != 2 || declarations[0].Declaration.Name != "smoke" || declarations[1].Declaration.Name != "root" {
+	declarations, err := LoadDeclarations(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(declarations) != 2 || declarations[0].Path != "tests/root.yaml" || declarations[0].Declaration.Name != "root" || declarations[1].Path != "work/tests/smoke.yaml" || declarations[1].Declaration.Name != "smoke" {
 		t.Fatalf("declarations = %#v", declarations)
 	}
 }

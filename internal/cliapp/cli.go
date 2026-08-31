@@ -109,8 +109,8 @@ with 'swarm verify', start the local runtime with 'swarm serve --dev', then
 start work with 'swarm run start' or 'swarm event publish' and watch it
 with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		Example: `  swarm doctor                                      # check local prerequisites
-  swarm verify --contracts ./contracts              # validate contracts before boot
-  swarm serve --dev                                 # start a local development runtime
+  swarm verify ./contracts                           # validate authored source before boot
+  swarm serve . --dev                               # start a local development runtime
   swarm run start --event <event-name> --payload payload.json
   swarm run trace <run-id>                          # see what a run did`,
 		SilenceUsage:  true,
@@ -150,14 +150,10 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	)
 	addToGroup(commandGroupAuthor,
 		newVerifyCommand(ctx, root, opts),
-		newMintElementIDsCommand(root),
-		newMigrateConnectDeliveryOneCommand(root),
-		newMigrateProducerRoutingCommand(root),
 		newTestCommand(root, opts),
 		newDescribeCommand(ctx, root, opts),
 		newPacksCommand(ctx, root, opts),
 		newImportPackCommand(root, opts),
-		newBundleCommand(root, opts),
 		newSecretsCommand(ctx, root),
 		newConnectionsCommand(ctx, root),
 	)
@@ -287,37 +283,30 @@ func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet b
 func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRunner) *cobra.Command {
 	opts := DefaultServeOptions()
 	cmd := &cobra.Command{
-		Use:   "serve",
+		Use:   "serve [directory]",
 		Short: "Start the Swarm runtime (server): engine, API, health, and MCP.",
-		Example: `  swarm serve --dev                      # local development runtime
-  swarm serve --contracts ./contracts    # serve a specific contract bundle`,
-		Args: cobra.NoArgs,
+		Example: `  swarm serve . --dev
+  swarm serve --bundle-hash bundle-v2:sha256:<hash>`,
+		Args: argcount.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return err
 			}
-			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
-				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
-			}
-			if opts.Dev && cmd.Flags().Changed("require-bundle-match") && opts.RequireBundleMatch {
-				return fmt.Errorf("--dev cannot be combined with --require-bundle-match")
-			}
 			if cmd.Flags().Changed("bundle-hash") {
+				if len(args) != 0 {
+					return fmt.Errorf("--bundle-hash is mutually exclusive with a local source directory")
+				}
 				hashes, err := ServeBundleHashes(opts)
 				if err != nil {
 					return err
 				}
 				opts.BundleHash = hashes[0]
 				opts.BundleHashes = append([]string(nil), hashes[1:]...)
-				if cmd.Flags().Changed("contracts") {
-					return fmt.Errorf("--bundle-hash is mutually exclusive with --contracts")
-				}
 				if opts.Dev {
 					return fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
 				}
-				if cmd.Flags().Changed("store") && !strings.EqualFold(strings.TrimSpace(opts.StoreMode), "postgres") {
-					return fmt.Errorf("--bundle-hash requires --store postgres")
-				}
+			} else if len(args) == 1 {
+				opts.SourceRoot = args[0]
 			}
 			if cmd.Flags().Changed("workspace-backend") {
 				backend, err := normalizeWorkspaceBackend(opts.WorkspaceBackend, "--workspace-backend")
@@ -325,12 +314,6 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 					return err
 				}
 				opts.WorkspaceBackend = backend
-			}
-			if opts.Dev {
-				opts.NoRequireBundleMatch = true
-			}
-			if opts.NoRequireBundleMatch {
-				opts.RequireBundleMatch = false
 			}
 			opts.StoreModeSet = cmd.Flags().Changed("store")
 			opts.WorkspaceBackendSet = cmd.Flags().Changed("workspace-backend")
@@ -387,9 +370,8 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	}
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
-	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend preference for local serve: docker, or host for explicit trusted/unsafe local-dev opt-in")
-	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
+	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted admitted source artifact by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, RuntimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
@@ -401,9 +383,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().StringVar(&opts.PublicWebhookListen, "public-webhook-listen", opts.PublicWebhookListen, "Stable loopback ingress-only listener used by the external public origin")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
-	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: abandon active runs, skip bundle-match admission, use concise boot output, and clean up dev entity containers on shutdown")
-	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs have unavailable bundle source state")
-	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs have unavailable bundle source state")
+	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: replace local scratch state and use concise boot output")
 	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
 	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence after startup succeeds or fails")
 	cmd.Flags().BoolVar(&opts.NoFeed, "no-feed", opts.NoFeed, "Disable the development author story feed after readiness")
@@ -414,9 +394,10 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
-		Use:     "verify",
+		Use:     "verify [directory]",
 		Short:   "Validate contract files before boot.",
-		Example: `  swarm verify --contracts ./contracts`,
+		Example: `  swarm verify .`,
+		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -427,8 +408,8 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			if len(args) > 0 {
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			if len(args) == 1 {
+				opts.sourceRoot = args[0]
 			}
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
@@ -440,7 +421,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)

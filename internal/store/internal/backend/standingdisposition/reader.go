@@ -30,7 +30,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run_id: %w", err)
 	}
 	query := `
-		SELECT ss.service_id, ss.package_key, ss.flow_id, ss.instance_id, ss.entity_id,
+		SELECT ss.service_id, ss.flow_path, ss.instance_id, ss.entity_id,
 		       ss.current_run_id, ss.current_generation,
 		       ss.declaration_present, ss.effective_state, ss.operator_override,
 		       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
@@ -48,7 +48,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	args := []any{runID, runID}
 	if postgres {
 		query = `
-			SELECT ss.service_id::text, ss.package_key, ss.flow_id, ss.instance_id, ss.entity_id::text,
+			SELECT ss.service_id::text, ss.flow_path, ss.instance_id, ss.entity_id::text,
 			       ss.current_run_id::text, ss.current_generation,
 			       ss.declaration_present, ss.effective_state, ss.operator_override,
 			       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
@@ -66,11 +66,11 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		args = []any{runID}
 	}
 	var fact runtimepipeline.StandingRestartFact
-	var packageKey, flowID, instanceID, entityID, originKind, originServiceID string
+	var flowPath, instanceID, entityID, originKind, originServiceID string
 	var originGeneration int64
 	var owners, generationRelations int
 	err := q.QueryRowContext(ctx, query, args...).Scan(
-		&fact.ServiceID, &packageKey, &flowID, &instanceID, &entityID,
+		&fact.ServiceID, &flowPath, &instanceID, &entityID,
 		&fact.RunID, &fact.Generation, &fact.DeclarationPresent,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 		&originKind, &originServiceID, &originGeneration, &owners, &generationRelations,
@@ -84,13 +84,13 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	if owners != 1 {
 		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has %d exact current owners", runID, owners)
 	}
-	if strings.TrimSpace(packageKey) == "" || strings.TrimSpace(flowID) == "" || strings.TrimSpace(instanceID) == "" {
+	if strings.TrimSpace(flowPath) == "" || strings.TrimSpace(instanceID) == "" {
 		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has incomplete service identity", runID)
 	}
-	wantServiceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
+	wantServiceID := runtimeflowidentity.StandingServiceID(flowPath)
 	if fact.ServiceID != wantServiceID {
 		return runtimepipeline.StandingRestartDisposition{}, fmt.Errorf(
-			"standing restart run %s service identity %s does not match package/flow owner %s",
+			"standing restart run %s service identity %s does not match flow_path owner %s",
 			runID,
 			fact.ServiceID,
 			wantServiceID,

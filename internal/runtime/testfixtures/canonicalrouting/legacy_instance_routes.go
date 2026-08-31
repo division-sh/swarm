@@ -83,22 +83,13 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		secondPin = "      - event: " + secondEvent + "\n        resolution:\n          mode: " + mode + resolutionFrom + "\n"
 	}
 
-	writeClosedVariantFile(t, root, "package.yaml", `name: template-instance-route
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: producer
-    flow: producer
-    mode: static
-  - id: consumer
-    flow: consumer
-    mode: template
+	writeClosedVariantFile(t, root, "schema.yaml", `name: template-instance-route
 connect:
   - event: deploy.done
     from: producer
     to: consumer
 `+secondConnect)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: template-instance-route\n")
+	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 mode: static
 pins:
@@ -121,6 +112,7 @@ pins:
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
 		t.Fatalf("unsupported template instance consumer %d", opts.Consumer)
 	}
+	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: template
 instance: vertical_id
@@ -135,7 +127,7 @@ pins:
 		"deployment:\n  vertical_id:\n    type: string\n",
 		consumerNodes)
 	if consumerAgents != "" {
-		writeClosedVariantFile(t, root, "flows/consumer/agents.yaml", consumerAgents)
+		writeClosedVariantFile(t, root, "consumer/agents.yaml", consumerAgents)
 	}
 	return root
 }
@@ -194,7 +186,7 @@ deploy.done:
 
 func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, nodes string) {
 	t.Helper()
-	base := filepath.ToSlash(filepath.Join("flows", id))
+	base := filepath.ToSlash(filepath.Join(id))
 	writeClosedVariantFile(t, root, base+"/schema.yaml", schema)
 	if strings.TrimSpace(events) != "" {
 		writeClosedVariantFile(t, root, base+"/events.yaml", events)

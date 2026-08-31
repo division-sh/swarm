@@ -22,7 +22,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -36,7 +36,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 		TemplateInstancePlanner:   templateInstancePlanner,
 		FlowActivationFinalizer:   flowActivationFinalizer,
 		PayloadValidator:          payloadValidator,
-		BundleSourceFact:          bundleSourceFact,
+		SourceArtifactFact:        sourceArtifactFact,
 		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
 		WorkOwner:                 workOwner,
 		ReceiverExecution:         eventreceiver.NormalExecution(),

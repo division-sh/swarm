@@ -56,8 +56,7 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 		if err := current.Validate(); err != nil {
 			return fmt.Errorf("persisted lifecycle process binding for %s is invalid: %w", identity.Description(), err)
 		}
-		if strings.TrimSpace(current.BundleHash) != strings.TrimSpace(target.BundleHash) ||
-			strings.TrimSpace(current.BundleSource) != strings.TrimSpace(target.BundleSource) {
+		if strings.TrimSpace(current.BundleHash) != strings.TrimSpace(target.BundleHash) {
 			continue
 		}
 		if current.Equal(target) {

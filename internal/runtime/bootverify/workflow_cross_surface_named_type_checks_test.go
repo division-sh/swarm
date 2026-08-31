@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func TestRun_ReportsCrossSurfaceExactDuplicateShapesAsLintEvidence(t *testing.T) {
 	bundle := crossSurfaceNamedTypeUseBundle()
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 	lint := report.LintEvidence()
 
 	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "identical shape {summary:text, supporting_routes:[text]}") {
@@ -26,7 +26,7 @@ func TestRun_ReportsCrossSurfaceExactDuplicateShapesAsLintEvidence(t *testing.T)
 	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "entity root.proposal") {
 		t.Fatalf("expected entity contract surface in lint evidence, got %#v", lint)
 	}
-	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "policy root permission_bundles.coordinator") {
+	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "policy flow . permission_bundles.coordinator") {
 		t.Fatalf("expected policy object surface in lint evidence, got %#v", lint)
 	}
 	if reportContains(report.HardInvalidities(), crossSurfaceNamedTypeUseCheckID, "") {
@@ -56,7 +56,7 @@ func TestRun_DoesNotReportLowSignalTwoByTwoExactDuplicateShape(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.LintEvidence(), crossSurfaceNamedTypeUseCheckID, "identical shape {category:text, priority:text}") {
 		t.Fatalf("expected low-signal 2x2 exact duplicate shape to be ignored, got %#v", report.LintEvidence())
@@ -87,7 +87,7 @@ func TestRun_ReportsTwoCandidateThreeFieldExactDuplicateShape(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.LintEvidence(), crossSurfaceNamedTypeUseCheckID, "identical shape {category:text, confidence:numeric, priority:text}") {
 		t.Fatalf("expected 2-candidate 3-field exact duplicate lint evidence, got %#v", report.LintEvidence())
@@ -119,7 +119,7 @@ func TestRun_ReportsConservativeNearDuplicateShapeAsLintEvidence(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 	lint := report.LintEvidence()
 
 	if !reportContains(lint, crossSurfaceNamedTypeUseCheckID, "near-duplicate shapes share 4/5 field/type pairs") {
@@ -152,7 +152,7 @@ func TestRun_DoesNotReportLowConfidenceSmallNearDuplicateShape(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.LintEvidence(), crossSurfaceNamedTypeUseCheckID, "near-duplicate") {
 		t.Fatalf("expected low-confidence small overlap to be ignored, got %#v", report.LintEvidence())

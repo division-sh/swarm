@@ -2,8 +2,6 @@ package semanticview
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -72,10 +70,11 @@ func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubs
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}}},
 		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 	}
 
 	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
-	if got := endpointCount(census.Consumers(), EventEndpointNodeHandler, "", "work.requested"); got != 1 {
+	if got := endpointCount(census.Consumers(), EventEndpointNodeHandler, ".", "work.requested"); got != 1 {
 		t.Fatalf("compiled handler consumers = %d, want 1: %#v", got, census.Consumers())
 	}
 }
@@ -123,18 +122,28 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"external.received":  {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"work.requested":     {},
+			"analysis.requested": {},
+			"review.requested":   {},
+			"timer.started":      {},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
 		},
 	}
-	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{"": {{Event: "flow.completed"}}})
-	source := endpointCensusRootAgentSource{Source: base, scope: ProjectScope{
-		Key: ".", Agents: bundle.Agents,
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: *bundle.RootSchema,
+		Nodes: bundle.Nodes, Agents: bundle.Agents, Events: bundle.Events,
 		AgentURIs: map[string]string{"analyst": "test://endpoint-census/analyst"},
-	}}
-	census := BuildAuthoredEventEndpointCensus(source)
+	}
+	bundle.FlowTree = runtimecontracts.FlowTree{
+		Root:   &root,
+		ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
+		ByID:   map[string]*runtimecontracts.FlowContractView{".": &root},
+	}
+	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{".": {{Event: "flow.completed"}}})
+	census := BuildAuthoredEventEndpointCensus(base)
 	producerKinds := endpointKindSet(census.Producers())
 	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
 		if !producerKinds[kind] {
@@ -150,15 +159,6 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	if len(census.InputPins()) != 1 || len(census.OutputPins()) != 1 {
 		t.Fatalf("interface endpoints = inputs %#v outputs %#v", census.InputPins(), census.OutputPins())
 	}
-}
-
-type endpointCensusRootAgentSource struct {
-	Source
-	scope ProjectScope
-}
-
-func (s endpointCensusRootAgentSource) ProjectScopes() []ProjectScope {
-	return []ProjectScope{s.scope}
 }
 
 func TestResolveDeclaredInputEndpointUsesAllDeclaredIdentitiesAndFailsClosed(t *testing.T) {
@@ -215,7 +215,7 @@ func TestResolveFanInInputForHandlerUsesExactEventIdentity(t *testing.T) {
 		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn},
 	}})
 	census := BuildAuthoredEventEndpointCensus(source)
-	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/worker", "worker", "worker-node")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("worker", "worker-node")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,6 @@ func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T)
 		nodeID    string
 	}{
 		{name: "root wildcard", fixture: filepath.Join("tests", "tier5-flow-lifecycle", "test-wildcard-subscription"), eventType: "task.completed", pattern: "*.completed", nodeID: "test-node"},
-		{name: "deep imported scope", fixture: filepath.Join("tests", "tier11-flow-composition", "test-wildcard-deep-subscription"), eventType: "child/grandchild/task.done", pattern: "**/task.done", nodeID: "collector"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -262,7 +261,7 @@ func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T)
 	}
 }
 
-func TestAuthoredEventEndpointCensusResolvesImportedWildcardAsTypedRelation(t *testing.T) {
+func TestAuthoredEventEndpointCensusDoesNotTreatNestedConnectAsTypedPubSub(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -279,24 +278,13 @@ func TestAuthoredEventEndpointCensusResolvesImportedWildcardAsTypedRelation(t *t
 		if producer.Event.Canonical != "child/grandchild/task.done" {
 			continue
 		}
-		matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+		matches := census.ResolveTypedPubSubConsumerMatches(producer)
 		for _, match := range matches {
 			if match.Consumer.NodeID == "collector" {
-				if match.Kind != TypedPubSubMatchPattern || match.Boundary != TypedPubSubBoundaryImportBoundary || match.Authorization == nil {
-					t.Fatalf("typed match = %#v, want authorized import-boundary pattern", match)
-				}
-				return
+				t.Fatalf("typed matches = %#v, cross-flow wildcard must not acquire delivery authority", matches)
 			}
 		}
-		var collector AuthoredEventEndpoint
-		for _, consumer := range census.Consumers() {
-			if consumer.NodeID == "collector" {
-				collector = consumer
-				break
-			}
-		}
-		resolution := ResolveImportBoundaryWildcardSubscriptionForRelation(source, collector.PackageKey, collector.FlowID, "", nil, collector.Event.Authored)
-		t.Fatalf("typed matches = %#v issues = %#v collector = %#v resolution = %#v", matches, issues, collector, resolution)
+		return
 	}
 	t.Fatal("task.done producer not found")
 }
@@ -312,9 +300,9 @@ func TestAuthoredEventEndpointCensusConsumesScopedLocalWildcardAdmission(t *test
 				FlowID:    "child",
 				Event:     ResolveFlowEventProof(source, "child", "task.done"),
 			}
-			matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
-			if len(issues) != 0 || endpointCountFromMatches(matches, "listener") != 1 {
-				t.Fatalf("typed relation = matches %#v issues %#v, want one local listener", matches, issues)
+			matches := census.ResolveTypedPubSubConsumerMatches(producer)
+			if endpointCountFromMatches(matches, "listener") != 1 {
+				t.Fatalf("typed relation = matches %#v, want one local listener", matches)
 			}
 			localConsumers := census.MatchingConsumers("child", "child/task.done")
 			if got := endpointCountForNode(localConsumers, "listener"); got != 1 {
@@ -335,9 +323,9 @@ func TestAuthoredEventEndpointCensusConsumesScopedLocalWildcardAdmission(t *test
 				t.Fatalf("sibling event matched child-local wildcard: endpoint %#v proof %#v", listener, siblingProof)
 			}
 			siblingProducer := AuthoredEventEndpoint{ID: "sibling-producer", Direction: EventEndpointProducer, FlowID: "sibling", Event: siblingProof}
-			siblingMatches, siblingIssues := census.ResolveTypedPubSubConsumerMatches(siblingProducer)
-			if endpointCountFromMatches(siblingMatches, "listener") != 0 || len(siblingIssues) != 0 {
-				t.Fatalf("sibling typed relation = matches %#v issues %#v, want no child listener", siblingMatches, siblingIssues)
+			siblingMatches := census.ResolveTypedPubSubConsumerMatches(siblingProducer)
+			if endpointCountFromMatches(siblingMatches, "listener") != 0 {
+				t.Fatalf("sibling typed relation = matches %#v, want no child listener", siblingMatches)
 			}
 		})
 	}
@@ -353,12 +341,12 @@ func TestAuthoredEventEndpointCensusTypedRelationClassifiesSameFlowExactlyOnce(t
 	}
 	consumer := AuthoredEventEndpoint{ID: "exact", Direction: EventEndpointConsumer, FlowID: "worker", Event: ResolveFlowEventProof(source, "worker", "work.completed")}
 	census := AuthoredEventEndpointCensus{source: source, consumers: []AuthoredEventEndpoint{consumer}}
-	matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
-	if len(issues) != 0 || len(matches) != 1 {
-		t.Fatalf("matches = %#v issues = %#v, want one match", matches, issues)
+	matches := census.ResolveTypedPubSubConsumerMatches(producer)
+	if len(matches) != 1 {
+		t.Fatalf("matches = %#v, want one match", matches)
 	}
-	if matches[0].Kind != TypedPubSubMatchExact || matches[0].Boundary != TypedPubSubBoundarySameFlow || matches[0].Authorization != nil {
-		t.Fatalf("match = %#v, want exact/same_flow without import proof", matches[0])
+	if matches[0].Kind != TypedPubSubMatchExact || matches[0].Boundary != TypedPubSubBoundarySameFlow {
+		t.Fatalf("match = %#v, want exact/same_flow", matches[0])
 	}
 }
 
@@ -372,7 +360,7 @@ func TestAuthoredEventEndpointCensusClassifiesImportedPackageOwnPatternAsSameFlo
 	if err != nil {
 		t.Fatalf("load wildcard fixture: %v", err)
 	}
-	worker := bundle.FlowTree.ByID["grandchild"]
+	worker := bundle.FlowTree.ByID["child/grandchild"]
 	if worker == nil {
 		t.Fatal("grandchild flow missing")
 	}
@@ -388,67 +376,43 @@ func TestAuthoredEventEndpointCensusClassifiesImportedPackageOwnPatternAsSameFlo
 
 	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
 	for _, producer := range census.Producers() {
-		if producer.FlowID != "grandchild" || producer.Event.Canonical != "child/grandchild/task.done" {
+		if producer.FlowID != "child/grandchild" || producer.Event.Canonical != "child/grandchild/task.done" {
 			continue
 		}
-		matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+		matches := census.ResolveTypedPubSubConsumerMatches(producer)
 		for _, match := range matches {
-			if match.Consumer.FlowID == "grandchild" && match.Consumer.Event.Authored == "task.*" {
-				if len(issues) != 0 || match.Kind != TypedPubSubMatchPattern || match.Boundary != TypedPubSubBoundarySameFlow || match.Authorization != nil {
-					t.Fatalf("match = %#v issues = %#v, want pattern/same_flow", match, issues)
+			if match.Consumer.FlowID == "child/grandchild" && match.Consumer.Event.Authored == "task.*" {
+				if match.Kind != TypedPubSubMatchPattern || match.Boundary != TypedPubSubBoundarySameFlow {
+					t.Fatalf("match = %#v, want pattern/same_flow", match)
 				}
 				return
 			}
 		}
-		t.Fatalf("matches = %#v issues = %#v, want imported package's own pattern", matches, issues)
+		t.Fatalf("matches = %#v, want imported package's own pattern", matches)
 	}
 	t.Fatal("grandchild task.done producer missing")
 }
 
-func TestAuthoredEventEndpointCensusTypedRelationRejectsCrossFlowExactEquality(t *testing.T) {
+func TestAuthoredEventEndpointCensusRejectsCrossFlowCanonicalEquality(t *testing.T) {
 	source := endpointCensusFixture(t, nil)
 	producer := AuthoredEventEndpoint{ID: "producer", Direction: EventEndpointProducer, FlowID: "worker", Event: ResolveFlowEventProof(source, "worker", "work.completed")}
 	consumer := AuthoredEventEndpoint{ID: "root-consumer", Direction: EventEndpointConsumer, FlowID: "", Event: producer.Event}
 	census := AuthoredEventEndpointCensus{source: source, consumers: []AuthoredEventEndpoint{consumer}}
 
-	matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
-	if len(matches) != 0 || len(issues) != 0 {
-		t.Fatalf("cross-flow exact relation = matches %#v issues %#v, want no authorization and no edge", matches, issues)
-	}
-}
-
-func TestTypedPubSubCrossFlowRelationDeduplicatesProofAndFailsClosedOnAmbiguity(t *testing.T) {
-	producer := AuthoredEventEndpoint{ID: "producer", FlowID: "producer"}
-	consumer := AuthoredEventEndpoint{ID: "consumer", FlowID: "consumer", Pattern: true}
-	proof := FlowEventProof{FlowID: "producer", Canonical: "producer/task.done"}
-	first := TypedPubSubAuthorizationProof{ParentPackageKey: ".", ChildPackageKey: "flows/consumer", ImportLabel: "consumer", Source: "producer", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "import_boundary_wildcard_grant"}
-	duplicate := first
-	second := first
-	second.ImportLabel = "consumer-shadow"
-
-	deduplicated := matchingTypedPubSubAuthorizations([]ImportBoundaryWildcardPattern{
-		{ParentPackageKey: first.ParentPackageKey, ChildPackageKey: first.ChildPackageKey, ImportLabel: first.ImportLabel, Source: first.Source, EventPattern: first.EventPattern, MatchPattern: first.MatchPattern, LocalizedEvent: first.LocalizedEvent, RouteSource: first.RouteSource},
-		{ParentPackageKey: duplicate.ParentPackageKey, ChildPackageKey: duplicate.ChildPackageKey, ImportLabel: duplicate.ImportLabel, Source: duplicate.Source, EventPattern: duplicate.EventPattern, MatchPattern: duplicate.MatchPattern, LocalizedEvent: duplicate.LocalizedEvent, RouteSource: duplicate.RouteSource},
-	}, proof)
-	match, issue := resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, deduplicated)
-	if match == nil || issue != nil || match.AuthorizationProof != first.Identity() {
-		t.Fatalf("duplicate proof relation = match %#v issue %#v, want one deterministic edge", match, issue)
-	}
-
-	match, issue = resolveTypedPubSubCrossFlowRelation(producer, consumer, proof, []TypedPubSubAuthorizationProof{first, second})
-	if match != nil || issue == nil || issue.Failure != TypedPubSubFailureAuthorizationAmbiguous || len(issue.Authorizations) != 2 {
-		t.Fatalf("distinct proof relation = match %#v issue %#v, want ambiguity and no edge", match, issue)
+	matches := census.ResolveTypedPubSubConsumerMatches(producer)
+	if len(matches) != 0 {
+		t.Fatalf("cross-flow exact relation = matches %#v, want no typed pub/sub edge", matches)
 	}
 }
 
 func TestInvalidAuthoredSubscriptionsRejectConsumerRelativeDescendantIdentity(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
 		Path:   "child/grandchild",
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 	}
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {ID: "listener", SubscribesTo: []string{"grandchild/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"grandchild/task.done": {}}},
@@ -476,12 +440,12 @@ func TestInvalidAuthoredSubscriptionsRejectConsumerRelativeDescendantIdentity(t 
 
 func TestInvalidAuthoredSubscriptionsRejectAbsoluteSiblingIdentity(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "flows/producer"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Path:   "producer",
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "flows/consumer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {ID: "listener", SubscribesTo: []string{"producer/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}}},
@@ -508,6 +472,8 @@ func TestInvalidAuthoredSubscriptionsRejectAbsoluteSiblingIdentity(t *testing.T)
 
 func TestInvalidAuthoredSubscriptionsRejectFullURIWithoutFlowPathResolution(t *testing.T) {
 	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
 				ID:            "listener",
@@ -548,27 +514,9 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 	if afterCensus := yamlsource.DefaultStats().ParseCount; afterCensus != afterBundle {
 		t.Fatalf("census reparsed authoritative YAML: parse count %d -> %d", afterBundle, afterCensus)
 	}
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", filepath.Join(fixture, "nodes.yaml"), 14)
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", filepath.Join(fixture, "agents.yaml"), 6)
-	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 8)
-}
-
-func TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nodes.yaml")
-	body := fmt.Sprintf("# unique source: %s\nworker-node:\n  event_handlers:\n    work.requested: {}\n", path)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bundle := endpointCensusBundle(nil)
-	bundle.FlowTree.Root.Children[0].Paths.NodesFile = path
-	source := Wrap(bundle)
-	before := yamlsource.DefaultStats()
-	census := BuildAuthoredEventEndpointCensus(source)
-	after := yamlsource.DefaultStats()
-	if delta := after.ParseCount - before.ParseCount; delta != 1 {
-		t.Fatalf("endpoint census canonical-owner parse delta = %d, want 1", delta)
-	}
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "worker-node", "", "work.requested", path, 4)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", "nodes.yaml", 14)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", "agents.yaml", 6)
+	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", "agents.yaml", 8)
 }
 
 func assertEndpointSourceLine(t *testing.T, endpoints []AuthoredEventEndpoint, kind EventEndpointKind, nodeID, agentID, eventType, sourceFile string, sourceLine int) {
@@ -600,6 +548,31 @@ func TestInvalidAuthoredSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 	}
 }
 
+func TestInvalidAuthoredSubscriptionsRejectAncestorSameNameWithoutReceiverDeclaration(t *testing.T) {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		Path:  "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.started": {}}},
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Events:   map[string]runtimecontracts.EventCatalogEntry{"root.started": {}},
+		Children: []runtimecontracts.FlowContractView{child},
+	}
+	source := Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+	}})
+	invalid := BuildAuthoredEventEndpointCensus(source).InvalidAuthoredSubscriptions()
+	if len(invalid) != 1 {
+		t.Fatalf("invalid subscriptions = %#v, want one child listener", invalid)
+	}
+	if invalid[0].Consumer.FlowID != "child" || invalid[0].Consumer.NodeID != "listener" || invalid[0].Admission.Failure() != AuthoredSubscriptionFailureReceiverEventMissing {
+		t.Fatalf("invalid subscription = %#v", invalid[0])
+	}
+}
+
 func endpointCensusFixture(t testing.TB, inputPins []runtimecontracts.FlowInputEventPin) Source {
 	t.Helper()
 	return withCompiledTestPins(t, Wrap(endpointCensusBundle(inputPins)), map[string][]runtimecontracts.FlowInputEventPin{"worker": inputPins}, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed"}}})
@@ -617,7 +590,7 @@ func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runti
 		},
 	}
 	worker := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker", PackageKey: "flows/worker"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: inputPins},
@@ -639,7 +612,7 @@ func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runti
 
 func localWildcardEndpointCensusSource(authored string) Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.done": {},
@@ -649,7 +622,7 @@ func localWildcardEndpointCensusSource(authored string) Source {
 		},
 	}
 	sibling := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "sibling", Flow: "sibling", PackageKey: "flows/sibling"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "sibling"},
 		Path:   "sibling",
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 	}

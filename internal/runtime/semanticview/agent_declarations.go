@@ -29,7 +29,7 @@ func (d AgentDeclaration) Label(qualified bool) string {
 }
 
 // AgentDeclarations projects the contracts-owned physical declaration census.
-// Raw project and flow maps are loader views, not declaration authority.
+// The admitted filesystem flow tree is the declaration authority.
 func AgentDeclarations(source Source) []AgentDeclaration {
 	if source == nil {
 		return nil
@@ -41,11 +41,8 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 	records := bundle.AgentDeclarationRecords()
 	entries := make([]AgentDeclaration, 0, len(records))
 	for _, record := range records {
-		scopeKind := strings.TrimSpace(record.Source.Layer)
-		scopeID := strings.TrimSpace(record.Source.PackageKey)
-		if scopeKind == "flow" {
-			scopeID = strings.TrimSpace(record.Source.FlowID)
-		}
+		scopeKind := "flow"
+		scopeID := strings.TrimSpace(record.Source.FlowPath)
 		entries = append(entries, AgentDeclaration{
 			ScopeKind:   scopeKind,
 			ScopeID:     scopeID,
@@ -61,7 +58,7 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 }
 
 // AgentDeclarationsForOwner returns the complete declaration set owned by one
-// semantic flow, or by the explicit root when ownerFlowID is empty.
+// semantic flow. The explicit root is ".".
 func AgentDeclarationsForOwner(source Source, ownerFlowID string) []AgentDeclaration {
 	ownerFlowID = strings.TrimSpace(ownerFlowID)
 	declarations := AgentDeclarations(source)

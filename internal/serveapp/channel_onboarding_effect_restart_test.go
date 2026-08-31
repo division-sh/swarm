@@ -39,16 +39,16 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 	provider := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(provider)
 	t.Cleanup(telegram.Close)
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
-	disableChannelOnboardingBusinessConsumers(t, contractsRoot)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
 	publicListen := reserveChannelOnboardingListenAddress(t)
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		SelfCheck: true, RequireBundleMatch: false, AbandonActiveRuns: true, Verbose: true,
+		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true,
 	}
 	switch backend {

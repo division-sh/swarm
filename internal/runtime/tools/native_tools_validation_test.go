@@ -348,8 +348,8 @@ func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(
 		t.Fatal("ValidateNativeToolBootConfig unexpectedly ignored scoped native-tool agents")
 	}
 	for _, want := range []string{
-		"project packages/project-a agent shared-worker",
-		"project packages/project-b agent shared-worker",
+		"flow departments/project-a agent shared-worker",
+		"flow departments/project-b agent shared-worker",
 		"flow flow-a agent shared-worker",
 		"flow flow-b agent shared-worker",
 	} {
@@ -380,15 +380,17 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	source := scopedFlowWorkspaceNativeToolFixture(t)
 	root := filepath.Join(t.TempDir(), "workspaces")
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
-		t.Fatalf("write contracts package: %v", err)
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
+		t.Fatalf("write flow schema: %v", err)
 	}
+	projection := toolTestRuntimeSourceProjection(t, contractsDir)
 	workspaces := workspace.NewHostManager()
 	workspaces.SetConfigForTest(workspace.HostConfig{
-		WorkspaceRoot:       root,
-		ContractsSource:     contractsDir,
-		ContractsMountPoint: "/opt/swarm/contracts",
+		WorkspaceRoot:    root,
+		SourceProjection: projection,
+		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindToolTestHostProjection(t, workspaces, projection)
 	workspaces.SetSemanticSource(source)
 
 	warnings, err := ValidateNativeToolBootConfig(
@@ -404,7 +406,12 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
 	}
-	if info, err := os.Stat(filepath.Join(root, "flows", "review")); err != nil || !info.IsDir() {
+	backingKey, err := workspace.DurableBackingKey(projection.BundleHash(), workspace.DurableBackingFlow, "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleScope := "bundle-" + strings.TrimPrefix(projection.BundleHash(), "bundle-v2:sha256:")
+	if info, err := os.Stat(filepath.Join(root, bundleScope, backingKey)); err != nil || !info.IsDir() {
 		t.Fatalf("scoped flow workspace stat = info:%#v err:%v, want directory", info, err)
 	}
 }
@@ -439,29 +446,14 @@ func TestValidateNativeToolBootConfigResolvesProjectOwnersWithinOneFlow(t *testi
 func sameFlowScopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: same-flow-scoped-native-tool-census
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: static
-`)
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
-	flowDir := filepath.Join(root, "flows", "operating")
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "package.yaml"), `
-name: operating
-version: "1.0.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-flows: []
-`)
+	flowDir := filepath.Join(root, "operating")
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nmode: static\ninitial_state: active\nstates: [active]\n")
 	for _, project := range []string{"project-a", "project-b"} {
-		dir := filepath.Join(flowDir, "packages", project)
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		dir := filepath.Join(flowDir, "departments", project)
+
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -475,22 +467,14 @@ flows: []
 func scopedFlowWorkspaceNativeToolFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-flow-native-tool-workspace
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: review
-    flow: review
-    mode: static
-`)
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-flow-native-tool-workspace\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 workspace_classes:
   shared_flow:
     workspace_scope: per-flow-instance
 `)
-	flowDir := filepath.Join(root, "flows", "review")
+	flowDir := filepath.Join(root, "review")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\ninitial_state: active\nstates: [active]\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
 scoped-worker:
@@ -514,29 +498,15 @@ scoped-worker:
 func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: scoped-native-tool-census
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: packages/project-a
-  - path: packages/project-b
-flows:
-  - id: flow-a
-    flow: flow-a
-    mode: static
-  - id: flow-b
-    flow: flow-b
-    mode: static
-`)
+
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-native-tool-census\n")
 	for _, project := range []string{"project-a", "project-b"} {
-		dir := filepath.Join(root, "packages", project)
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		dir := filepath.Join(root, "departments", project)
+
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
-		dir := filepath.Join(root, "flows", flowID)
+		dir := filepath.Join(root, flowID)
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 	}

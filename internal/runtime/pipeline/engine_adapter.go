@@ -1082,7 +1082,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if currentState == "" {
 			return true, true, nil
 		}
-		flowID := execCtx.Request.Node.FlowID()
+		flowID := execCtx.Request.Node.FlowPath()
 		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, *state) {
 			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
 				return false, true, nil
@@ -1236,7 +1236,7 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 			return nil, err
 		}
 	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.Node.FlowID(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.Node.FlowPath(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1249,7 +1249,7 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 	}
 	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
 	if !resolution.HasSchema {
-		return nil
+		return fmt.Errorf("%w: event %s has no resolvable payload schema in flow %s", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), strings.TrimSpace(flowID))
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
 		return fmt.Errorf("%w: event %s payload schema is unresolved: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)

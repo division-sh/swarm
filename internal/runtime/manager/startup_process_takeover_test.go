@@ -94,29 +94,28 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	}
 	otherTopology, err := runtimeagenttopology.StaticAdmission(
 		"other-source-revision",
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"persisted",
+		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("StaticAdmission for unrelated source: %v", err)
 	}
 	predecessor := startupProcessBinding(
-		managerTestTopologyBundleHash, "ephemeral",
+		managerTestTopologyBundleHash,
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		"cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 		"dddddddd-dddd-4ddd-8ddd-dddddddddddd", 1,
 	)
 	successor := startupProcessBinding(
-		managerTestTopologyBundleHash, "ephemeral",
+		managerTestTopologyBundleHash,
 		"11111111-1111-4111-8111-111111111111",
 		"22222222-2222-4222-8222-222222222222",
 		"33333333-3333-4333-8333-333333333333",
 		"44444444-4444-4444-8444-444444444444", 2,
 	)
 	unrelated := startupProcessBinding(
-		otherTopology.Authority.Static.BundleHash, otherTopology.Authority.Static.BundleSource,
+		otherTopology.Authority.Static.BundleHash,
 		"55555555-5555-4555-8555-555555555555",
 		"66666666-6666-4666-8666-666666666666",
 		"77777777-7777-4777-8777-777777777777",
@@ -197,11 +196,11 @@ func startupTakeoverAgent(t testing.TB, id string, topology runtimeagenttopology
 	}
 }
 
-func startupProcessBinding(bundleHash, bundleSource, authorityID, bootID, grantID, runtimeID string, generation uint64) ProcessExecutionBinding {
+func startupProcessBinding(bundleHash, authorityID, bootID, grantID, runtimeID string, generation uint64) ProcessExecutionBinding {
 	return ProcessExecutionBinding{
 		ProcessAuthorityID: authorityID, ProcessOwnerID: "startup-process-owner",
 		ProcessBootID: bootID, GenerationGrantID: grantID,
-		BundleHash: bundleHash, BundleSource: bundleSource,
+		BundleHash:        bundleHash,
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: generation,
 	}
 }

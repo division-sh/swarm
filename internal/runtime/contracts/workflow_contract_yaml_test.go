@@ -20,88 +20,8 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
-
-	var doc ProjectPackageDocument
-	snippet := canonicalrouting.PackageRequiresBindConnectSnippet(t)
-	if err := snippet.Decode(&doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := strings.Join(doc.Requires.Inputs, ","); got != "work.requested" {
-		t.Fatalf("Requires.Inputs = %q", got)
-	}
-	if got := strings.Join(doc.Requires.Outputs, ","); got != "work.completed" {
-		t.Fatalf("Requires.Outputs = %q", got)
-	}
-	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold" {
-		t.Fatalf("Requires.Policy = %q", got)
-	}
-	if got := strings.Join(doc.Requires.Credentials, ","); got != "provider_token" {
-		t.Fatalf("Requires.Credentials = %q", got)
-	}
-	if got := doc.Requires.PlatformVersion; got != ">=0.7.0 <0.8.0" {
-		t.Fatalf("Requires.PlatformVersion = %q", got)
-	}
-	if got := doc.Flows[0].Bind.Inputs["work.requested"]; got != "parent.work_requested" {
-		t.Fatalf("flow bind input = %q", got)
-	}
-	if got := doc.Flows[0].Bind.Outputs["work.completed"]; got != "parent.work_completed" {
-		t.Fatalf("flow bind output = %q", got)
-	}
-	if got := doc.Flows[0].Bind.Policy["provider.threshold"]; got != "parent.policy.threshold" {
-		t.Fatalf("flow bind policy = %q", got)
-	}
-	if got := doc.Flows[0].Bind.Credentials["provider_token"]; got != "parent_provider_token" {
-		t.Fatalf("flow bind credential = %q", got)
-	}
-	if got := doc.Packages[0].Bind.Inputs["child.requested"]; got != "parent.child_requested" {
-		t.Fatalf("package bind input = %q", got)
-	}
-	if len(doc.Connect) != 1 {
-		t.Fatalf("Connect len = %d, want 1", len(doc.Connect))
-	}
-	if got, want := doc.Connect[0].Event, "parent.work_completed"; got != want {
-		t.Fatalf("Connect[0].Event = %q, want %q", got, want)
-	}
-	if got, want := doc.Connect[0].From, "worker"; got != want {
-		t.Fatalf("Connect[0].From = %q, want %q", got, want)
-	}
-	if got, want := doc.Connect[0].To, "worker"; got != want {
-		t.Fatalf("Connect[0].To = %q, want %q", got, want)
-	}
-	if got, want := doc.Connect[0].Rename, "parent.work_requested"; got != want {
-		t.Fatalf("Connect[0].Rename = %q, want %q", got, want)
-	}
-}
-
-func TestProjectPackageDocumentDecodeRejectsRetiredChildPackageSpellings(t *testing.T) {
-	tests := []struct {
-		name string
-		yaml string
-		want string
-	}{
-		{name: "children only", yaml: "children: []\n", want: "children is no longer supported"},
-		{name: "subpackages only", yaml: "subpackages: []\n", want: "subpackages is no longer supported"},
-		{name: "equal dual collection", yaml: "packages: [{id: child, path: child}]\nchildren: [{id: child, path: child}]\n", want: "children is no longer supported"},
-		{name: "conflicting dual collection", yaml: "packages: [{id: child, path: child}]\nsubpackages: [{id: other, path: other}]\n", want: "subpackages is no longer supported"},
-		{name: "package location", yaml: "packages: [{id: child, package: child}]\n", want: "child reference package is no longer supported"},
-		{name: "dir location", yaml: "packages: [{id: child, dir: child}]\n", want: "child reference dir is no longer supported"},
-		{name: "equal dual location", yaml: "packages: [{id: child, path: child, package: child}]\n", want: "child reference package is no longer supported"},
-		{name: "conflicting dual location", yaml: "packages: [{id: child, path: child, dir: other}]\n", want: "child reference dir is no longer supported"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var doc ProjectPackageDocument
-			err := yaml.Unmarshal([]byte("name: test\n"+tc.yaml), &doc)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
-	var connect FlowPackageConnect
+func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
+	var connect FlowConnect
 	if err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted\n"), &connect); err != nil {
 		t.Fatalf("decode canonical connect row: %v", err)
 	}
@@ -134,7 +54,7 @@ func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var invalid FlowPackageConnect
+			var invalid FlowConnect
 			err := yaml.Unmarshal([]byte(tc.yaml), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
@@ -163,35 +83,6 @@ http:
 	}
 	if !strings.Contains(err.Error(), "duplicate header") {
 		t.Fatalf("yaml.Unmarshal error = %v, want duplicate header rejection", err)
-	}
-}
-
-func TestProjectPackageDocumentDecode_PreservesPolicyRequiresDefaults(t *testing.T) {
-	var doc ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte(`
-name: package-boundary
-requires:
-  policy:
-    provider.threshold:
-      type: number
-      description: Non-secret provider threshold.
-      default: 0.8
-    provider.mode: {}
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold,provider.mode" {
-		t.Fatalf("Requires.Policy = %q", got)
-	}
-	threshold, ok := doc.Requires.PolicyDefaults["provider.threshold"]
-	if !ok {
-		t.Fatalf("provider.threshold default missing: %#v", doc.Requires.PolicyDefaults)
-	}
-	if got, ok := threshold.Value.(float64); !ok || got != 0.8 {
-		t.Fatalf("provider.threshold default = %#v, want 0.8", threshold.Value)
-	}
-	if _, ok := doc.Requires.PolicyDefaults["provider.mode"]; ok {
-		t.Fatalf("provider.mode unexpectedly has a default: %#v", doc.Requires.PolicyDefaults["provider.mode"])
 	}
 }
 
@@ -605,254 +496,6 @@ stages:
 	}
 }
 
-func TestProjectPackageDocumentDecode_ListPolicyRequiresAreRequiredNoDefault(t *testing.T) {
-	var doc ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte(`
-name: package-boundary
-requires:
-  policy: [provider.threshold]
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold" {
-		t.Fatalf("Requires.Policy = %q", got)
-	}
-	if len(doc.Requires.PolicyDefaults) != 0 {
-		t.Fatalf("PolicyDefaults = %#v, want none", doc.Requires.PolicyDefaults)
-	}
-}
-
-func TestProjectPackageDocumentDecode_PreservesStrictSelfFacts(t *testing.T) {
-	var doc ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte(`
-name: package-self-facts
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-author: platform-team
-description: Strict manifest metadata fixture.
-keywords:
-  - dedup-index
-  - catalog
-license: Apache-2.0
-repository: https://github.com/division-sh/swarm
-extra:
-  colony.division.sh/display_name: Dedup Index
-  colony.division.sh/owner_team: Runtime
-flows: []
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got, want := strings.Join(doc.Keywords, ","), "dedup-index,catalog"; got != want {
-		t.Fatalf("Keywords = %q, want %q", got, want)
-	}
-	if got, want := doc.License, "Apache-2.0"; got != want {
-		t.Fatalf("License = %q, want %q", got, want)
-	}
-	if got, want := doc.Repository, "https://github.com/division-sh/swarm"; got != want {
-		t.Fatalf("Repository = %q, want %q", got, want)
-	}
-	wantExtra := map[string]string{
-		"colony.division.sh/display_name": "Dedup Index",
-		"colony.division.sh/owner_team":   "Runtime",
-	}
-	if !reflect.DeepEqual(doc.Extra, wantExtra) {
-		t.Fatalf("Extra = %#v, want %#v", doc.Extra, wantExtra)
-	}
-}
-
-func TestProjectPackageDocumentDecode_RejectsStrictSelfFactDrift(t *testing.T) {
-	tests := []struct {
-		name    string
-		body    string
-		wantErr string
-	}{
-		{
-			name: "unknown category",
-			body: `
-name: invalid
-category: examples
-`,
-			wantErr: "not supported",
-		},
-		{
-			name: "unknown homepage",
-			body: `
-name: invalid
-homepage: https://division.sh
-`,
-			wantErr: "not supported",
-		},
-		{
-			name: "unknown capabilities",
-			body: `
-name: invalid
-capabilities: []
-`,
-			wantErr: "not supported",
-		},
-		{
-			name: "loose license alias",
-			body: `
-name: invalid
-license: Apache
-`,
-			wantErr: "SPDX",
-		},
-		{
-			name: "license expression",
-			body: `
-name: invalid
-license: MIT OR Apache-2.0
-`,
-			wantErr: "SPDX",
-		},
-		{
-			name: "ssh repository",
-			body: `
-name: invalid
-repository: git@github.com:division-sh/swarm.git
-`,
-			wantErr: "GitHub HTTPS",
-		},
-		{
-			name: "repository branch URL",
-			body: `
-name: invalid
-repository: https://github.com/division-sh/swarm/tree/master
-`,
-			wantErr: "https://github.com/{owner}/{repo}",
-		},
-		{
-			name: "repository git suffix",
-			body: `
-name: invalid
-repository: https://github.com/division-sh/swarm.git
-`,
-			wantErr: "https://github.com/{owner}/{repo}",
-		},
-		{
-			name: "uppercase keyword",
-			body: `
-name: invalid
-keywords: [Runtime]
-`,
-			wantErr: "lowercase slug",
-		},
-		{
-			name: "duplicate keyword",
-			body: `
-name: invalid
-keywords: [runtime, runtime]
-`,
-			wantErr: "duplicates",
-		},
-		{
-			name: "extra missing namespace",
-			body: `
-name: invalid
-extra:
-  display_name: Runtime
-`,
-			wantErr: "namespaced",
-		},
-		{
-			name: "extra non-string value",
-			body: `
-name: invalid
-extra:
-  colony.division.sh/enabled: true
-`,
-			wantErr: "must be a string",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var doc ProjectPackageDocument
-			err := yaml.Unmarshal([]byte(tc.body), &doc)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *testing.T) {
-
-	tests := []struct {
-		name    string
-		body    canonicalrouting.ParserSnippet
-		wantErr string
-	}{
-		{
-			name: "unknown policy requirement option",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-requires:
-  policy:
-    provider.threshold:
-      fallback: 0.8
-`),
-			wantErr: `requires.policy field "fallback" is not supported.`,
-		},
-		{
-			name: "policy requirement must be mapping",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-requires:
-  policy:
-    provider.threshold: 0.8
-`),
-			wantErr: "policy requirement must be a mapping",
-		},
-		{
-			name: "unknown requires field",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-requires:
-  inputz: [work.requested]
-`),
-			wantErr: `requires field "inputz" is not supported.`,
-		},
-		{
-			name: "bind inputs must be mapping",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-flows:
-  - id: worker
-    flow: worker
-    bind:
-      inputs: [work.requested]
-`),
-			wantErr: "bind.inputs",
-		},
-		{
-			name: "unknown bind field",
-			body: canonicalrouting.NewParserSnippet(t, `
-name: invalid
-packages:
-  - path: packages/child
-    bind:
-      credential: {}
-`),
-			wantErr: `bind field "credential" is not supported.`,
-		},
-		{
-			name:    "unknown connect field",
-			body:    canonicalrouting.InvalidPackageConnectFieldSnippet(t),
-			wantErr: `connect field "topic" is not supported.`,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var doc ProjectPackageDocument
-			err := tc.body.Decode(&doc)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
 func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing.T) {
 	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
 		canonicalrouting.RetiredInputAddressEmpty,
@@ -870,7 +513,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
+func TestFlowConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
 		canonicalrouting.RetiredConnectMapEmpty,
 		canonicalrouting.RetiredConnectMapMalformed,
@@ -878,7 +521,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 		canonicalrouting.RetiredConnectMapMixed,
 	} {
 		t.Run(string(specimen), func(t *testing.T) {
-			var doc ProjectPackageDocument
+			var doc FlowSchemaDocument
 			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
 			if err == nil || !strings.Contains(err.Error(), "retired connect.map") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.map rejection", err)
@@ -887,7 +530,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
+func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
 		canonicalrouting.RetiredConnectUsingEmpty,
 		canonicalrouting.RetiredConnectUsingMalformed,
@@ -896,7 +539,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testin
 		canonicalrouting.RetiredConnectUsingMixed,
 	} {
 		t.Run(string(specimen), func(t *testing.T) {
-			var doc ProjectPackageDocument
+			var doc FlowSchemaDocument
 			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
 			if err == nil || !strings.Contains(err.Error(), "retired connect.using.instance") {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.using.instance rejection", err)
@@ -1074,11 +717,11 @@ pins:
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
-	if _, ok := flowPackageConnectFieldOptions["delivery"]; ok {
+func TestFlowConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
+	if _, ok := flowConnectFieldOptions["delivery"]; ok {
 		t.Fatal("connect valid options retain retired delivery field")
 	}
-	if _, ok := flowPackageConnectFieldOptions["reply"]; ok {
+	if _, ok := flowConnectFieldOptions["reply"]; ok {
 		t.Fatal("connect valid options retain retired reply field")
 	}
 	tests := []struct {
@@ -1099,7 +742,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var connect FlowPackageConnect
+			var connect FlowConnect
 			err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\n"+tc.field+"\n"), &connect)
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired connect field rejection")
@@ -1929,15 +1572,12 @@ switch:
 func TestSystemNodeEventHandlerDecode_AllowsAbsentAndDuplicatePolicyDisplayLabels(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`rules:
-  - element_id: 00000000-0000-4000-8000-000000000431
-    when: payload.ok
+  - when: payload.ok
     advances_to: ok
-  - element_id: 00000000-0000-4000-8000-000000000432
-    id: repeated-label
+  - id: repeated-label
     when: payload.retry
     advances_to: retry
-  - element_id: 00000000-0000-4000-8000-000000000433
-    id: repeated-label
+  - id: repeated-label
     default: true
     advances_to: fallback
 `), &handler); err != nil {
@@ -1945,11 +1585,6 @@ func TestSystemNodeEventHandlerDecode_AllowsAbsentAndDuplicatePolicyDisplayLabel
 	}
 	if len(handler.Rules) != 3 || handler.Rules[0].ID != "" || handler.Rules[1].ID != handler.Rules[2].ID {
 		t.Fatalf("decoded labels = %#v", handler.Rules)
-	}
-	for index, rule := range handler.Rules {
-		if !rule.ElementID.Valid() {
-			t.Fatalf("rule %d lost authored element identity", index)
-		}
 	}
 }
 
@@ -1965,15 +1600,6 @@ func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t 
 			assert: func(t testing.TB, rule HandlerRuleEntry) {
 				if rule.Activity.Tool != "notify" {
 					t.Fatalf("activity = %#v", rule.Activity)
-				}
-			},
-		},
-		{
-			name: "identity plus activity",
-			raw:  "rules: {element_id: 00000000-0000-4000-8000-000000000434, activity: {tool: notify}}\n",
-			assert: func(t testing.TB, rule HandlerRuleEntry) {
-				if !rule.ElementID.Valid() || rule.Activity.Tool != "notify" {
-					t.Fatalf("identity/activity = %#v", rule)
 				}
 			},
 		},
@@ -2002,7 +1628,7 @@ func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t 
 
 func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *testing.T) {
 	labels := []string{
-		"element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate", "compute_module",
+		"id", "description", "condition", "when", "case", "range", "lookup", "validate", "compute_module",
 		"else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
 	}
 	for _, context := range []string{"rules"} {
@@ -2010,7 +1636,6 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
 			t.Run(context+"/"+label, func(t *testing.T) {
 				raw := fmt.Sprintf(`%s:
   %s:
-    element_id: 00000000-0000-4000-8000-000000000436
     condition: else
     advances_to: done
 `, context, label)
@@ -2022,7 +1647,7 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
 				if context == "on_complete" {
 					rows = handler.OnComplete
 				}
-				if len(rows) != 1 || rows[0].ID != label || rows[0].Condition != "else" || rows[0].AdvancesTo != "done" || !rows[0].ElementID.Valid() {
+				if len(rows) != 1 || rows[0].ID != label || rows[0].Condition != "else" || rows[0].AdvancesTo != "done" {
 					t.Fatalf("decoded keyed row = %#v", rows)
 				}
 			})
@@ -2101,13 +1726,12 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 
 func TestSystemNodeEventHandlerDecode_ResolvesAliasedRowsIndependentOfKeyLabel(t *testing.T) {
 	labels := []string{
-		"selected", "element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate",
+		"selected", "id", "description", "condition", "when", "case", "range", "lookup", "validate",
 		"compute_module", "else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
 	}
 	for _, label := range labels {
 		t.Run(label, func(t *testing.T) {
 			raw := fmt.Sprintf(`template: &rule
-  element_id: 00000000-0000-4000-8000-000000000437
   condition: else
   advances_to: done
 handler:
@@ -2121,7 +1745,7 @@ handler:
 				t.Fatal(err)
 			}
 			rules := document.Handler.Rules
-			if len(rules) != 1 || rules[0].ID != label || !rules[0].ElementID.Valid() || rules[0].AdvancesTo != "done" {
+			if len(rules) != 1 || rules[0].ID != label || rules[0].AdvancesTo != "done" {
 				t.Fatalf("aliased keyed row = %#v", rules)
 			}
 		})
@@ -2372,7 +1996,6 @@ func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		snippet canonicalrouting.W2MappingKeySnippet
-		project bool
 	}{
 		{name: "flow pins surrounding", snippet: canonicalrouting.W2FlowPinsSurroundingKey},
 		{name: "flow pins blank", snippet: canonicalrouting.W2FlowPinsBlankKey},
@@ -2384,18 +2007,12 @@ func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 		{name: "output event blank", snippet: canonicalrouting.W2OutputEventBlankKey},
 		{name: "resolution surrounding", snippet: canonicalrouting.W2ResolutionSurroundingKey},
 		{name: "resolution blank", snippet: canonicalrouting.W2ResolutionBlankKey},
-		{name: "connect surrounding", snippet: canonicalrouting.W2ConnectSurroundingKey, project: true},
-		{name: "connect blank", snippet: canonicalrouting.W2ConnectBlankKey, project: true},
+		{name: "connect surrounding", snippet: canonicalrouting.W2ConnectSurroundingKey},
+		{name: "connect blank", snippet: canonicalrouting.W2ConnectBlankKey},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var err error
-			if tc.project {
-				var project ProjectPackageDocument
-				err = canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&project)
-			} else {
-				var schema FlowSchemaDocument
-				err = canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&schema)
-			}
+			var schema FlowSchemaDocument
+			err := canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&schema)
 			if err == nil || !strings.Contains(err.Error(), "must be one exact non-empty canonical spelling") {
 				t.Fatalf("yaml.Unmarshal error = %v, want byte-exact W2 key rejection", err)
 			}
@@ -2733,7 +2350,7 @@ emit:
 	if got := diagnostic.Problem; got != `fan_out field "foreach" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown fan_out field problem", got)
 	}
-	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"as", "element_id", "emit", "identity", "items_from", "max_items"}) {
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"as", "emit", "identity", "items_from", "max_items"}) {
 		t.Fatalf("diagnostic valid options = %#v, want canonical fan_out options", diagnostic.ValidOptions)
 	}
 }

@@ -1,10 +1,8 @@
 package serveapp
 
 import (
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
@@ -15,14 +13,13 @@ import (
 type serveRuntimePersistence struct {
 	deps         runtime.RuntimeDeps
 	schema       store.SchemaBootstrapper
-	workspace    workspace.Lookup
-	bundleWriter bundlecatalog.ServeIngestWriter
+	sourceWriter sourceArtifactDataWriter
 	data         durabledata.ResourceAccessStore
 }
 
 func projectServeRuntimePersistence(owner *storeselected.Owner) serveRuntimePersistence {
 	return serveRuntimePersistence{
-		deps: owner.RuntimeDeps(), schema: owner.Schema(), workspace: owner.WorkspaceLookup(), bundleWriter: owner.ServeBundleIngestWriter(), data: owner.DataAccess(),
+		deps: owner.RuntimeDeps(), schema: owner.Schema(), sourceWriter: owner.SourceArtifactWriter(), data: owner.DataAccess(),
 	}
 }
 

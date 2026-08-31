@@ -142,9 +142,8 @@ jobs:
         run: |
           payload=$(mktemp)
           printf '{"item_id":"smoke-item"}\n' > "$payload"
-          ./swarm run start \
+          ./swarm run start examples/routing/root-ingress \
             --config .github/fixtures/sqlite-local-smoke.swarm.yaml \
-            --contracts examples/routing/root-ingress \
             --event item.received \
             --payload "$payload" \
             --api-port 18091

@@ -77,7 +77,7 @@ func TestChannelOnboardingEffectReconciliationSelectedStoreParity(t *testing.T) 
 						if state == runtimeeffects.StateAuthorized && (!outcome.LaunchRejected || outcome.Launched) {
 							t.Fatalf("prelaunch disposition=%#v, want launch-rejected without launch", outcome)
 						}
-						if outcome.BundleHash != coordinate.BundleHash || outcome.BundleSource != coordinate.BundleSource ||
+						if outcome.BundleHash != coordinate.BundleHash ||
 							outcome.BundleIdentity != coordinate.BundleIdentity || outcome.PackInventoryGeneration != coordinate.PackInventoryGeneration ||
 							outcome.RuntimeInstanceID != coordinate.RuntimeInstanceID ||
 							outcome.ContextPublicationGeneration != coordinate.ContextPublicationGeneration ||
@@ -123,7 +123,7 @@ func beginSelectedChannelEffect(
 			ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
 				IntentID: intentID, StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
 				OnboardingOperationID: onboardingID, OnboardingRevision: 1,
-				BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource, BundleIdentity: coordinate.BundleIdentity,
+				BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
 				PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
 				ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
 				TargetGeneration: coordinate.TargetGeneration,
@@ -141,7 +141,7 @@ func beginSelectedChannelEffect(
 			ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 				EffectOperationID: op.ConfirmationOperationID, OnboardingOperationID: op.OperationID, OnboardingRevision: op.Revision,
 				ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
-				PrincipalID: activation.PrincipalID, BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+				PrincipalID: activation.PrincipalID, BundleHash: coordinate.BundleHash,
 				BundleIdentity: coordinate.BundleIdentity, PackInventoryGeneration: coordinate.PackInventoryGeneration,
 				RuntimeInstanceID: coordinate.RuntimeInstanceID, ContextPublicationGeneration: coordinate.ContextPublicationGeneration,
 				PlanGeneration: coordinate.PlanGeneration, TargetGeneration: coordinate.TargetGeneration,
@@ -220,7 +220,7 @@ func selectedChannelConfirmationAuthorityFixture(
 	request := channelOnboardingStartRequest(principal.ID, now)
 	request.RequestKeyHash = "confirmation-key-" + string(state)
 	request.RequestHash = "confirmation-request-" + string(state)
-	request.TargetSelector += ":" + strings.ReplaceAll(string(state), "_", "-")
+	request.TargetSelector = "ingress:support/flow/" + strings.ReplaceAll(string(state), "_", "-") + ":telegram"
 	request.Coordinate.BundleIdentity = fmt.Sprintf("confirmation-%s", state)
 	op, err := selected.ReserveChannelOnboarding(context.Background(), request)
 	if err != nil {

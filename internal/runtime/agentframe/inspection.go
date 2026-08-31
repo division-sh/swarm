@@ -35,7 +35,6 @@ type InspectionSelector struct {
 
 type InspectionSession struct {
 	BundleHash     string                           `json:"bundle_hash"`
-	BundleSource   Presence[string]                 `json:"bundle_source"`
 	AgentID        string                           `json:"agent_id"`
 	AuthoredFlow   string                           `json:"authored_flow"`
 	AgentIdentity  Presence[agentidentity.Identity] `json:"agent_identity"`
@@ -70,7 +69,6 @@ type Inspection struct {
 
 type PreviewSeed struct {
 	BundleHash     string
-	BundleSource   string
 	AgentID        string
 	AuthoredFlow   string
 	AgentIdentity  *agentidentity.Identity
@@ -90,7 +88,6 @@ func InspectStatic(selector InspectionSelector, seed PreviewSeed) (Inspection, e
 	seed.AgentID = selector.AgentID
 	seed.AuthoredFlow = selector.Flow
 	seed.AgentIdentity = nil
-	seed.BundleSource = ""
 	return inspect(InspectionStatic, selector, seed)
 }
 
@@ -141,18 +138,12 @@ func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSee
 		return Inspection{}, err
 	}
 	session := InspectionSession{
-		BundleHash: seed.BundleHash, BundleSource: unresolved[string](), AgentID: strings.TrimSpace(seed.AgentID),
+		BundleHash: seed.BundleHash, AgentID: strings.TrimSpace(seed.AgentID),
 		AuthoredFlow: strings.Trim(strings.TrimSpace(seed.AuthoredFlow), "/"), Role: strings.TrimSpace(seed.Role), FlowID: strings.Trim(strings.TrimSpace(seed.FlowID), "/"),
 		AgentIdentity: unresolved[agentidentity.Identity](),
 		Intent:        Intent{Kind: string(seed.Intent.Kind), Coordinate: seed.Intent.Coordinate, Provenance: seed.Intent.Provenance, Content: seed.Intent.Content, ContentHash: seed.Intent.ContentHash, Identity: seed.Intent.Identity},
 		Criteria:      Criteria{References: append([]string{}, seed.Criteria...), Identity: criteriaIdentity},
 		Provider:      unresolved[Provider](), ProviderPrompt: seed.ProviderPrompt,
-	}
-	if seed.BundleSource != "" {
-		if seed.BundleSource != "persisted" && seed.BundleSource != "ephemeral" {
-			return Inspection{}, fmt.Errorf("bundle source must be persisted or ephemeral")
-		}
-		session.BundleSource = present(seed.BundleSource)
 	}
 	if seed.AgentIdentity != nil {
 		identity := seed.AgentIdentity.Normalize()

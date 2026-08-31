@@ -17,87 +17,12 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/flowownedprojectagent"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
-
-func TestFlowOwnedProjectAgentTemplateRoutesFollowCanonicalOwnerLifecycle(t *testing.T) {
-	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, false)
-	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
-	if len(declarations) != 1 || declarations[0].Source.Layer != "project" {
-		t.Fatalf("support declarations = %#v, want one project-layer declaration", declarations)
-	}
-	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("support", "one")}
-	routes, err := runtimebus.DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	assert := func(want int) {
-		t.Helper()
-		got := routes.Resolve("support/one/work.requested")
-		if len(got) != want {
-			t.Fatalf("resolved project-agent routes = %#v, want %d", got, want)
-		}
-		if want == 1 && (got[0].Recipient.ID() != "public-worker-left" || got[0].AgentIdentity.Name.Owner != declarations[0].OwnerURI) {
-			t.Fatalf("resolved project-agent route = %#v, want exact canonical declaration %#v", got[0], declarations[0])
-		}
-	}
-	if err := routes.AddFlowInstanceRoute(req); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	assert(1)
-	if err := routes.RemoveFlowInstanceRoute(req.Identity); err != nil {
-		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
-	}
-	assert(0)
-	if err := routes.AddFlowInstanceRoute(req); err != nil {
-		t.Fatalf("re-add FlowInstanceRoute: %v", err)
-	}
-	assert(1)
-
-	restarted, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("restart EventBus: %v", err)
-	}
-	if err := restarted.PublishPersistedFlowInstanceRoute(req); err != nil {
-		t.Fatalf("restore persisted flow-instance route: %v", err)
-	}
-	got := restarted.RouteTable().Resolve("support/one/work.requested")
-	if len(got) != 1 || got[0].AgentIdentity.Name.Owner != declarations[0].OwnerURI {
-		t.Fatalf("restored project-agent route = %#v, want exact canonical owner", got)
-	}
-}
-
-func TestFlowOwnedProjectAgentTemplateRoutesPreserveDistinctPhysicalDeclarations(t *testing.T) {
-	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, true)
-	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
-	if len(declarations) != 2 || declarations[0].OwnerURI == declarations[1].OwnerURI {
-		t.Fatalf("support declarations = %#v, want two distinct physical owners", declarations)
-	}
-	routes, err := runtimebus.DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("support", "one")}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	got := routes.Resolve("support/one/work.requested")
-	if len(got) != 2 {
-		t.Fatalf("resolved project-agent routes = %#v, want both physical declarations", got)
-	}
-	owners := map[string]bool{}
-	ids := map[string]bool{}
-	for _, subscriber := range got {
-		owners[subscriber.AgentIdentity.Name.Owner] = true
-		ids[subscriber.Recipient.ID()] = true
-	}
-	if len(owners) != 2 || !ids["public-worker-left"] || !ids["public-worker-right"] {
-		t.Fatalf("resolved owners/ids = %#v/%#v, want both exact declarations", owners, ids)
-	}
-}
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
@@ -194,7 +119,7 @@ func TestDeriveRouteTableRegistersNestedPhysicalAgentDeclarationExactlyOnce(t *t
 	if len(declarations) != 1 {
 		t.Fatalf("canonical declarations = %#v, want one physical declaration", declarations)
 	}
-	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath("support")), "/")
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath("parent/child/support")), "/")
 	if flowPath == "" {
 		t.Fatal("support flow path is empty")
 	}
@@ -224,28 +149,11 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 			t.Fatalf("WriteFile(%s): %v", path, err)
 		}
 	}
-	write(filepath.Join(root, "package.yaml"), `
-name: nested-agent-route
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - {path: parent}
-`)
+
 	write(filepath.Join(root, "schema.yaml"), "name: nested-agent-route\n")
-	write(filepath.Join(root, "parent", "package.yaml"), `
-name: parent
-version: "1.0.0"
-packages:
-  - {path: child}
-`)
-	write(filepath.Join(root, "parent", "child", "package.yaml"), `
-name: child
-version: "1.0.0"
-flows:
-  - {id: support, flow: support, mode: static}
-`)
-	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
-	write(filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+
+	flowRoot := filepath.Join(root, "parent", "child", "support")
+
 	write(filepath.Join(flowRoot, "schema.yaml"), `
 name: support
 mode: static
@@ -289,18 +197,18 @@ func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing
 					if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("orders", "one")}); err != nil {
 						t.Fatalf("AddFlowInstanceRoute: %v", err)
 					}
-					assertExactPackageRoute(t, routes.Resolve("orders/one/root.start"), "subscription", "flows/orders")
+					assertExactFlowRoute(t, routes.Resolve("orders/one/root.start"), "subscription", "orders")
 					return
 				}
 				resolved := routes.Resolve("orders/root.start")
-				assertExactPackageRoute(t, resolved, "subscription", "flows/orders")
-				assertExactPackageRoute(t, routes.Resolve("root.start"), "root_input_flow", "flows/orders")
+				assertExactFlowRoute(t, resolved, "subscription", "orders")
+				assertExactFlowRoute(t, routes.Resolve("root.start"), "root_input_flow", "orders")
 			})
 		}
 	}
 }
 
-func assertExactPackageRoute(t *testing.T, subscribers []runtimebus.Subscriber, routeSource, packageKey string) {
+func assertExactFlowRoute(t *testing.T, subscribers []runtimebus.Subscriber, routeSource, flowPath string) {
 	t.Helper()
 	matches := 0
 	for _, subscriber := range subscribers {
@@ -311,13 +219,13 @@ func assertExactPackageRoute(t *testing.T, subscribers []runtimebus.Subscriber, 
 		if !ok {
 			t.Fatalf("subscriber = %#v, want node recipient", subscriber)
 		}
-		if node.PackageKey() != packageKey || node.FlowID() != "orders" || node.NodeID() != "shared" {
-			t.Fatalf("subscriber owner = %q/%q/%q, want %q/orders/shared", node.PackageKey(), node.FlowID(), node.NodeID(), packageKey)
+		if node.FlowPath() != flowPath || node.NodeID() != "shared" {
+			t.Fatalf("subscriber owner = %q/%q, want %q/shared", node.FlowPath(), node.NodeID(), flowPath)
 		}
 		matches++
 	}
 	if matches != 1 {
-		t.Fatalf("%s routes = %#v, want one exact package owner", routeSource, subscribers)
+		t.Fatalf("%s routes = %#v, want one exact filesystem flow owner", routeSource, subscribers)
 	}
 }
 
@@ -325,7 +233,7 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	root := t.TempDir()
-	packages := []string{"flows/orders/addon-a", "flows/orders/addon-b"}
+	packages := []string{"orders/addon-a", "orders/addon-b"}
 	if reverse {
 		packages[0], packages[1] = packages[1], packages[0]
 	}
@@ -338,18 +246,7 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 			t.Fatalf("WriteFile(%s): %v", path, err)
 		}
 	}
-	write(filepath.Join(root, "package.yaml"), `
-name: exact-package-routes
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: `+packages[0]+`
-  - path: `+packages[1]+`
-flows:
-  - id: orders
-    flow: orders
-    mode: `+mode+`
-`)
+
 	write(filepath.Join(root, "schema.yaml"), `
 name: exact-package-routes
 pins:
@@ -357,8 +254,8 @@ pins:
     events: [root.start]
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start: {}\n")
-	write(filepath.Join(root, "flows", "orders", "package.yaml"), "name: orders\nversion: \"1.0.0\"\nflows: []\n")
-	write(filepath.Join(root, "flows", "orders", "schema.yaml"), `
+
+	write(filepath.Join(root, "orders", "schema.yaml"), `
 name: orders
 mode: `+mode+`
 initial_state: active
@@ -368,8 +265,8 @@ pins:
   inputs:
     events: [root.start]
 `)
-	write(filepath.Join(root, "flows", "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
-	write(filepath.Join(root, "flows", "orders", "nodes.yaml"), `
+	write(filepath.Join(root, "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
+	write(filepath.Join(root, "orders", "nodes.yaml"), `
 shared:
   id: shared
   execution_type: system_node
@@ -378,9 +275,10 @@ shared:
       advances_to: done
 `)
 	for _, name := range []string{"addon-a", "addon-b"} {
-		dir := filepath.Join(root, "flows", "orders", name)
-		write(filepath.Join(dir, "package.yaml"), "name: "+name+"\nversion: \"1.0.0\"\nflows: []\n")
+		dir := filepath.Join(root, "orders", name)
+
 		eventName := strings.ReplaceAll(name, "-", "_")
+		write(filepath.Join(dir, "events.yaml"), eventName+".start: {}\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
   id: shared
@@ -447,7 +345,7 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 	}
 	flow := runtimecontracts.FlowContractView{
 		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
 	}
@@ -456,11 +354,16 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 			"observer": {ID: "observer", Subscriptions: append([]string(nil), agentSubscriptions...)},
 		}
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Path:     ".",
+		Children: []runtimecontracts.FlowContractView{flow},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			Root:   &root,
+			ByID:   map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			ByPath: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
 		},
 	}
 	if len(agentSubscriptions) > 0 {
@@ -472,18 +375,25 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 }
 
 type routePersistenceTestStore struct {
-	routes           map[string]runtimebus.FlowInstanceRouteRecord
-	flowInstances    []runtimebus.ActiveFlowInstanceDescriptor
-	targetOwners     []runtimebus.ActiveTargetDescriptor
-	stagedRoutes     []runtimebus.FlowInstanceRouteRecord
-	deliveries       map[string][]string
-	upsertErr        error
-	deleteErr        error
-	rollbackCalls    []string
-	deleteCalls      []runtimeflowidentity.Route
-	replaceCalls     []runtimeflowidentity.Route
-	upsertCalls      int
-	upsertAfterWrite bool
+	routes             map[string]runtimebus.FlowInstanceRouteRecord
+	flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
+	targetOwners       []runtimebus.ActiveTargetDescriptor
+	stagedRoutes       []runtimebus.FlowInstanceRouteRecord
+	deliveries         map[string][]string
+	upsertErr          error
+	deleteErr          error
+	rollbackCalls      []string
+	deleteCalls        []runtimeflowidentity.Route
+	replaceCalls       []runtimeflowidentity.Route
+	upsertCalls        int
+	upsertAfterWrite   bool
+	sourceArtifactFact runtimecorrelation.SourceArtifactFact
+	workflowVersion    string
+}
+
+func (s *routePersistenceTestStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
+	s.sourceArtifactFact = fact
+	s.workflowVersion = workflowVersion
 }
 
 func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
@@ -491,15 +401,7 @@ func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context)
 }
 
 func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	out := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
-	for idx := range out {
-		if out[idx].BundleHash == "" {
-			out[idx].BundleHash = authorActivityTestBundleHash
-			out[idx].BundleSource = authorActivityTestBundleSource
-			out[idx].WorkflowVersion = "1.0.0"
-		}
-	}
-	return out, nil
+	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact), nil
 }
 
 func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
@@ -676,114 +578,8 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	}
 }
 
-func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopology(t *testing.T) {
-	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
-		WorkerMode:               "template",
-		ProducerMode:             "template",
-		ProducerStaticDescendant: true,
-		ObserveGrant:             "      observe:\n        - source: producer\n          events: [task.done]\n",
-	})
-	sourceIdentity := runtimeflowidentity.DeriveRoute("producer", "source-1")
-	consumerIdentity := runtimeflowidentity.DeriveRoute("worker", "consumer-1")
-	store := &routePersistenceTestStore{
-		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{InstanceID: sourceIdentity.InstanceID, FlowInstance: sourceIdentity.InstancePath, FlowTemplate: "producer"},
-			{InstanceID: consumerIdentity.InstanceID, FlowInstance: consumerIdentity.InstancePath, FlowTemplate: "worker"},
-			{InstanceID: "foreign-1", FlowInstance: "foreign/foreign-1", FlowTemplate: "foreign"},
-		},
-	}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: sourceIdentity,
-	}); err != nil {
-		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
-	}
-	var observerRouteFound bool
-	workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
-	for _, route := range store.stagedRoutes {
-		if route.Identity == consumerIdentity &&
-			route.EventPattern == "producer/source-1/task.done" &&
-			route.SubscriberID == workerNode.Key() {
-			observerRouteFound = true
-			break
-		}
-	}
-	if !observerRouteFound {
-		t.Fatalf("staged routes = %#v, want consumer-owned cross-instance observer route", store.stagedRoutes)
-	}
-	if eb.HasFlowInstanceRoute(sourceIdentity) || eb.HasFlowInstanceRoute(consumerIdentity) {
-		t.Fatal("complete staged topology became process-visible before readiness")
-	}
-}
-
-func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *testing.T) {
-	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
-		WorkerMode:               "template",
-		ProducerMode:             "template",
-		ProducerStaticDescendant: true,
-		ObserveGrant:             "      observe:\n        - source: producer\n          events: [task.done]\n",
-	})
-	sourceIdentity := runtimeflowidentity.DeriveRoute("producer", "source-1")
-	consumerIdentity := runtimeflowidentity.DeriveRoute("worker", "consumer-1")
-	for _, removed := range []runtimeflowidentity.Route{sourceIdentity, consumerIdentity} {
-		t.Run(removed.ScopeKey, func(t *testing.T) {
-			store := &routePersistenceTestStore{
-				flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-					{InstanceID: sourceIdentity.InstanceID, FlowInstance: sourceIdentity.InstancePath, FlowTemplate: "producer"},
-					{InstanceID: consumerIdentity.InstanceID, FlowInstance: consumerIdentity.InstancePath, FlowTemplate: "worker"},
-				},
-			}
-			eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			if err := eb.RouteTable().AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: sourceIdentity}); err != nil {
-				t.Fatalf("publish source route: %v", err)
-			}
-			if err := eb.RouteTable().AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: consumerIdentity}); err != nil {
-				t.Fatalf("publish consumer route: %v", err)
-			}
-			stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-			if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: sourceIdentity}); err != nil {
-				t.Fatalf("stage complete topology: %v", err)
-			}
-			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 1 {
-				t.Fatalf("observer route before removal = %#v, want one", got)
-			}
-
-			remaining := store.flowInstances[:0]
-			for _, descriptor := range store.flowInstances {
-				if descriptor.FlowInstance != removed.InstancePath {
-					remaining = append(remaining, descriptor)
-				}
-			}
-			store.flowInstances = remaining
-			if err := eb.RemoveFlowInstanceRouteContext(context.Background(), removed); err != nil {
-				t.Fatalf("RemoveFlowInstanceRouteContext: %v", err)
-			}
-			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 0 {
-				t.Fatalf("observer route after %s removal = %#v, want none", removed.ScopeKey, got)
-			}
-			workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
-			for _, route := range store.routes {
-				if route.EventPattern == "producer/source-1/task.done" &&
-					route.SubscriberID == workerNode.Key() {
-					t.Fatalf("obsolete observer row survived %s removal: %#v", removed.ScopeKey, route)
-				}
-			}
-		})
-	}
-}
-
 func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBeforeReplacement(t *testing.T) {
-	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
-		WorkerMode:   "template",
-		ProducerMode: "template",
-	})
+	source := routeMaterializationNodeSource("producer", runtimecontracts.SystemNodeContract{ID: "producer-{instance_id}"})
 	current := runtimeflowidentity.DeriveRoute("producer", "current")
 	foreign := runtimeflowidentity.DeriveRoute("producer", "foreign")
 	store := &routePersistenceTestStore{
@@ -791,8 +587,8 @@ func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBe
 			{InstanceID: current.InstanceID, FlowInstance: current.InstancePath, FlowTemplate: "producer"},
 			{
 				InstanceID: foreign.InstanceID, FlowInstance: foreign.InstancePath, FlowTemplate: "producer",
-				BundleHash:   "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-				BundleSource: "ephemeral", WorkflowVersion: "1.0.0",
+				BundleHash:      "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+				WorkflowVersion: "1.0.0",
 			},
 		},
 	}
@@ -1096,7 +892,7 @@ func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryPlanning(t *testing.T) {
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
-		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
@@ -1257,13 +1053,14 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 	}
 	flow := runtimecontracts.FlowContractView{
 		Path:   flowID,
-		Paths:  runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
 		Events: eventsByName,
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"materialized-node": node},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "route-materialization", Version: "1.0.0"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
@@ -1279,7 +1076,7 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 	}
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
-		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
@@ -1363,72 +1160,54 @@ func routeMaterializationAgentRoute(
 	return identity, admission
 }
 
-func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInstance(t *testing.T) {
+func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := t.TempDir()
-	writeRoutingFixtureFile(t, root, "package.yaml", `
-name: template-output-observer
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: component-scaffold
-    flow: component-scaffold
-    mode: template
-`)
-	writeRoutingFixtureFile(t, root, "schema.yaml", "name: template-output-observer\n")
-	writeRoutingFixtureFile(t, root, "nodes.yaml", `
-operating-accumulator:
-  id: operating-accumulator
-  execution_type: system_node
-  subscribes_to: ["component-scaffold/*/component.scaffolded"]
-  event_handlers:
-    "component-scaffold/*/component.scaffolded": {}
-`)
-	writeRoutingFixtureFile(t, root, "flows/component-scaffold/schema.yaml", `
-name: component-scaffold
-mode: template
-pins:
-  outputs:
-    events: [component.scaffolded]
-`)
-	writeRoutingFixtureFile(t, root, "flows/component-scaffold/events.yaml", "component.scaffolded: {}\n")
+	root := canonicalrouting.CopyTemplateOutputRootConnect(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
 		t.Fatalf("load template-output observer fixture: %v", err)
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	plans, issues := compiledConnectPlans(source)
+	if len(issues) != 0 || len(plans) != 1 {
+		t.Fatalf("template output connect plans = %#v issues = %#v, want one valid plan", plans, issues)
+	}
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	identity := runtimeflowidentity.DeriveRoute("component-scaffold", "component-a")
+	identity := runtimeflowidentity.DeriveRoute("producer", "component-a")
 	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
-	got := rt.Resolve("component-scaffold/component-a/component.scaffolded")
-	if len(got) != 1 {
-		t.Fatalf("resolved subscribers = %#v, want one operating-accumulator route", got)
+	if got := rt.Resolve("producer/component-a/deploy.done"); len(got) != 0 {
+		t.Fatalf("direct template output subscribers = %#v, connect dispatch must own the boundary edge", got)
 	}
-	if got[0].Recipient.LocalID() != "operating-accumulator" || !got[0].Recipient.IsNode() || got[0].MatchPattern != "component-scaffold/*/component.scaffolded" {
-		t.Fatalf("resolved subscriber = %#v, want operating-accumulator wildcard route", got[0])
+	got := rt.Resolve("deploy.done")
+	if len(got) != 1 {
+		t.Fatalf("receiver-local subscribers = %#v, want one root-receiver route", got)
+	}
+	if got[0].Recipient.LocalID() != "root-receiver" || !got[0].Recipient.IsNode() {
+		t.Fatalf("resolved subscriber = %#v, want root-receiver connect route", got[0])
 	}
 
 	if err := rt.RemoveFlowInstanceRoute(identity); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
 	}
-	if got := rt.Resolve("component-scaffold/component-a/component.scaffolded"); len(got) != 0 {
-		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
+	if got := rt.Resolve("deploy.done"); len(got) != 1 {
+		t.Fatalf("receiver-local subscribers after remove = %#v, want root-receiver", got)
 	}
-	if got := rt.Resolve("component-scaffold/component-b/component.scaffolded"); len(got) != 0 {
+	if got := rt.Resolve("producer/component-b/deploy.done"); len(got) != 0 {
 		t.Fatalf("resolved subscribers for never-added instance = %#v, want none", got)
 	}
 }
 
 func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -1437,13 +1216,14 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 		Path: "producer",
 	}
 	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "discovery",
+		Path:   "discovery",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
 				ID:           "scan-orchestrator",
@@ -1478,7 +1258,7 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 
 func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
@@ -1487,13 +1267,14 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		Path: "producer",
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "consumer",
+		Path:   "consumer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
 				ID: "consumer-node",
@@ -1608,7 +1389,7 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 			fixture:    filepath.Join("tests", "tier5-flow-lifecycle", "test-timer-fire"),
 			eventType:  "timer.check",
 			nodeID:     "test-node",
-			flowPath:   "",
+			flowPath:   ".",
 			routeMatch: "timer.check",
 		},
 	} {
@@ -1642,7 +1423,7 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 
 func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *testing.T) {
 	producerA := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer_a"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
@@ -1651,7 +1432,7 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Path: "producer_a",
 	}
 	producerB := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer_b", Flow: "producer_b"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer_b"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
@@ -1660,13 +1441,14 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Path: "producer_b",
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
-		Path: "consumer",
+		Path:   "consumer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"ticket.ready": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
 				ID: "consumer-node",
@@ -1708,7 +1490,7 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 
 func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "score.dimension_complete"}}},
@@ -1750,7 +1532,7 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot, canonicalrouting.CopyNestedPackageConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		repoRoot, canonicalrouting.CopyNestedFlowConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
 		t.Fatalf("load nested package connect fixture: %v", err)
@@ -1789,7 +1571,7 @@ func writeRoutingFixtureFile(t testing.TB, root, relative, body string) {
 
 func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 		},
@@ -1806,7 +1588,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		},
 	}
 	child := runtimecontracts.FlowContractView{
-		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:     "child",
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}

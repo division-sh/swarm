@@ -2,98 +2,94 @@ package contracts
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
-// QualifySystemNodeHandlerRuleRefs binds admitted authored element IDs to the
-// package that owns their node declaration. Local labels and indexes remain
-// presentation and ordering facts, never identity inputs.
-func QualifySystemNodeHandlerRuleRefs(node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) (SystemNodeEventHandler, error) {
+// QualifySystemNodeHandlerRuleRefsForEvent derives authored child identities
+// from the exact declaration position. Display labels never participate in identity.
+func QualifySystemNodeHandlerRuleRefsForEvent(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler) (SystemNodeEventHandler, error) {
 	if !node.Valid() {
 		return SystemNodeEventHandler{}, fmt.Errorf("qualify handler rules: executable node identity is required")
 	}
-	packageKey, err := runtimeidentity.ParsePackageKey(node.PackageKey())
-	if err != nil {
-		return SystemNodeEventHandler{}, err
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return SystemNodeEventHandler{}, fmt.Errorf("qualify handler rules: authored handler event is required")
 	}
-	qualify := func(context string, rule HandlerRuleEntry) (HandlerRuleEntry, error) {
+	base := "nodes[" + strconv.Quote(node.NodeID()) + "].handlers[" + strconv.Quote(eventType) + "]"
+	qualify := func(context string, index int, rule HandlerRuleEntry) (HandlerRuleEntry, error) {
 		if !rule.authored {
 			return rule, nil
 		}
-		if !rule.ElementID.Valid() {
-			return HandlerRuleEntry{}, fmt.Errorf("%s rule %q requires canonical element_id; run `swarm mint-element-ids --contracts <path>`", context, strings.TrimSpace(rule.ID))
-		}
-		ref, err := contractelementidentity.NewContractElementRef(packageKey, rule.ElementID)
+		identity, err := runtimeidentity.AdmitDeclarationIdentity(node.FlowPath(), "handler_rule", fmt.Sprintf("%s.%s[%d]", base, context, index))
 		if err != nil {
-			return HandlerRuleEntry{}, fmt.Errorf("%s rule %q: %w", context, strings.TrimSpace(rule.ID), err)
+			return HandlerRuleEntry{}, fmt.Errorf("%s rule %q identity: %w", context, strings.TrimSpace(rule.ID), err)
 		}
-		rule.elementRef = ref
+		rule.declarationIdentity = identity
 		return rule, nil
 	}
-	qualifyFanOut := func(context string, spec *FanOutSpec) (*FanOutSpec, error) {
+	qualifyFanOut := func(context string, index int, spec *FanOutSpec) (*FanOutSpec, error) {
 		if spec == nil {
 			return nil, nil
 		}
 		out := *spec
-		if !out.ElementID.Valid() {
-			return nil, fmt.Errorf("%s requires canonical element_id; run `swarm mint-element-ids --contracts <path>`", context)
-		}
-		ref, err := contractelementidentity.NewContractElementRef(packageKey, out.ElementID)
+		identity, err := runtimeidentity.AdmitDeclarationIdentity(node.FlowPath(), "fan_out", fmt.Sprintf("%s.%s[%d]", base, context, index))
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", context, err)
+			return nil, fmt.Errorf("%s identity: %w", context, err)
 		}
-		out.elementRef = ref
+		out.declarationIdentity = identity
 		return &out, nil
 	}
 	qualifyMany := func(context string, rules []HandlerRuleEntry) ([]HandlerRuleEntry, error) {
 		out := append([]HandlerRuleEntry(nil), rules...)
 		for index := range out {
-			out[index], err = qualify(context, out[index])
+			var err error
+			out[index], err = qualify(context, index, out[index])
 			if err != nil {
 				return nil, err
 			}
 		}
 		return out, nil
 	}
-	handler.Rules, err = qualifyMany("handler.rules", handler.Rules)
+	var err error
+	handler.Rules, err = qualifyMany("rules", handler.Rules)
 	if err != nil {
 		return SystemNodeEventHandler{}, err
 	}
-	handler.OnComplete, err = qualifyMany("handler.on_complete", handler.OnComplete)
+	handler.OnComplete, err = qualifyMany("on_complete", handler.OnComplete)
 	if err != nil {
 		return SystemNodeEventHandler{}, err
 	}
 	if handler.Join != nil {
 		join := *handler.Join
 		if join.OnCompleteFound {
-			join.OnComplete, err = qualify("handler.join.on_complete", join.OnComplete)
+			join.OnComplete, err = qualify("join.on_complete", 0, join.OnComplete)
 			if err != nil {
 				return SystemNodeEventHandler{}, err
 			}
 		}
 		if join.TimeoutFound {
-			join.Timeout.Outcome, err = qualify("handler.join.timeout", join.Timeout.Outcome)
+			join.Timeout.Outcome, err = qualify("join.timeout", 0, join.Timeout.Outcome)
 			if err != nil {
 				return SystemNodeEventHandler{}, err
 			}
 		}
 		handler.Join = &join
 	}
-	handler.FanOut, err = qualifyFanOut("handler.fan_out", handler.FanOut)
+	handler.FanOut, err = qualifyFanOut("fan_out", 0, handler.FanOut)
 	if err != nil {
 		return SystemNodeEventHandler{}, err
 	}
 	for index := range handler.Rules {
-		handler.Rules[index].FanOut, err = qualifyFanOut("handler.rules.fan_out", handler.Rules[index].FanOut)
+		handler.Rules[index].FanOut, err = qualifyFanOut("rules.fan_out", index, handler.Rules[index].FanOut)
 		if err != nil {
 			return SystemNodeEventHandler{}, err
 		}
 	}
 	for index := range handler.OnComplete {
-		handler.OnComplete[index].FanOut, err = qualifyFanOut("handler.on_complete.fan_out", handler.OnComplete[index].FanOut)
+		handler.OnComplete[index].FanOut, err = qualifyFanOut("on_complete.fan_out", index, handler.OnComplete[index].FanOut)
 		if err != nil {
 			return SystemNodeEventHandler{}, err
 		}

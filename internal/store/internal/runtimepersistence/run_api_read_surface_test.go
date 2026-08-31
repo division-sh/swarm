@@ -31,25 +31,25 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	middleEntity := uuid.NewString()
 	olderEventOnlyA := uuid.NewString()
 	olderEventOnlyB := uuid.NewString()
-	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	bundleA := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleB := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	failedRunFailure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_failed", nil)
 	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
 		{
-			RunID: newer, State: "running", BundleHash: bundleA, BundleSource: "persisted",
+			RunID: newer, State: "running", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
 			EntityCount: 3, EventCount: 2, StartedAt: now,
 		},
 		{
-			RunID: middle, State: "completed", BundleHash: bundleB, BundleSource: "persisted",
+			RunID: middle, State: "completed", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
 			EntityCount: 5, EventCount: 1,
 			StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-30 * time.Minute),
 		},
 		{
-			RunID: older, State: "failed", BundleHash: bundleA, BundleSource: "persisted",
+			RunID: older, State: "failed", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: olderEvent, TriggerEventType: "scan.failed",
 			EntityCount: 1, EventCount: 1, Failure: &failedRunFailure,

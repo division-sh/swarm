@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -48,14 +47,14 @@ type policySheetLookupRef struct {
 	EventType string
 	RuleIndex int
 	RuleID    string
-	RuleRef   contractelementidentity.ContractElementRef
+	RuleRef   runtimeidentity.DeclarationIdentity
 }
 
 func policySheetLookupFinding(ref policySheetLookupRef, detail string) Finding {
 	return Finding{
 		CheckID:  policySheetLookupCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.Node.FlowID()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.Node.FlowPath()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
 		Location: ref.Node.Key(),
 	}
 }
@@ -123,7 +122,7 @@ func policySheetLookupPathIsSimple(path runtimepaths.Path) bool {
 func policySheetLookupDomainsClosedAndExhaustive(source semanticview.Source, ref policySheetLookupRef, spec *runtimecontracts.ComputeLookupSpec, findings *[]Finding) bool {
 	domains := make([][]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, closed := policySheetLookupPathDomain(source, ref.Node.FlowID(), ref.EventType, path)
+		kind, closed := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
 		if kind == "" {
 			kind = "unknown"
 		}
@@ -186,7 +185,7 @@ func validatePolicySheetLookupKeyTypes(source semanticview.Source, ref policyShe
 	findings := make([]Finding, 0)
 	kinds := make([]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, _ := policySheetLookupPathDomain(source, ref.Node.FlowID(), ref.EventType, path)
+		kind, _ := policySheetLookupPathDomain(source, ref.Node.FlowPath(), ref.EventType, path)
 		kinds = append(kinds, kind)
 	}
 	for entryIdx, entry := range spec.Entries {

@@ -28,21 +28,21 @@ func TestStaticDataCatalogUsesExactOwningFlowAndFreezesBytes(t *testing.T) {
 	if items[0].ContentDigest != items[1].ContentDigest {
 		t.Fatalf("identical bytes produced different content digests: %#v", items)
 	}
-	if items[0].OwnerFlowID == items[1].OwnerFlowID || items[0].Ref.CanonicalInputLabel == items[1].Ref.CanonicalInputLabel {
+	if items[0].FlowPath == items[1].FlowPath || items[0].Ref.CanonicalInputLabel == items[1].Ref.CanonicalInputLabel {
 		t.Fatalf("static identities lost owning-flow/catalog coordinate: %#v", items)
 	}
 
 	for _, record := range bundle.AgentDeclarationRecords() {
-		grants := bundle.StaticDataForAgent(record.Source.PackageKey, record.OwnerFlowID, record.LogicalID)
-		if len(grants) != 1 || grants[0].OwnerFlowID != record.OwnerFlowID || !bytes.Equal(grants[0].Content, []byte("same bytes\n")) {
+		grants := bundle.StaticDataForAgent(record.OwnerFlowID, record.LogicalID)
+		if len(grants) != 1 || grants[0].FlowPath != record.OwnerFlowID || !bytes.Equal(grants[0].Content, []byte("same bytes\n")) {
 			t.Fatalf("agent %s/%s static grants = %#v", record.OwnerFlowID, record.LogicalID, grants)
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(root, "flows", "alpha", "data", "resume.md"), []byte("mutated\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "alpha", "data", "resume.md"), []byte("mutated\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(root, "flows", "beta", "data")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, "beta", "data")); err != nil {
 		t.Fatal(err)
 	}
 	for _, item := range bundle.StaticData() {
@@ -66,7 +66,7 @@ func TestStaticDataCatalogRejectsInvalidUTF8OnlyWhenReferenced(t *testing.T) {
 		t.Fatalf("unreferenced raw bytes should remain admissible: %v", err)
 	}
 	items := bundle.StaticData()
-	if len(items) != 1 || items[0].OwnerFlowID != "beta" {
+	if len(items) != 1 || items[0].FlowPath != "beta" {
 		t.Fatalf("compiled static projection = %#v, want only referenced beta file", items)
 	}
 }
@@ -74,30 +74,17 @@ func TestStaticDataCatalogRejectsInvalidUTF8OnlyWhenReferenced(t *testing.T) {
 func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: static-catalog-test
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: static
-  - id: beta
-    flow: beta
-    mode: static
-`)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: static-catalog-test\n")
-	writeStaticDataCatalogFlow(t, root, "alpha", "11111111-1111-4111-8111-111111111111", alpha, alphaAccess)
-	writeStaticDataCatalogFlow(t, root, "beta", "22222222-2222-4222-8222-222222222222", beta, true)
+	writeStaticDataCatalogFlow(t, root, "alpha", alpha, alphaAccess)
+	writeStaticDataCatalogFlow(t, root, "beta", beta, true)
 	return root
 }
 
-func writeStaticDataCatalogFlow(t *testing.T, root, flowID, agentID string, content []byte, access bool) {
+func writeStaticDataCatalogFlow(t *testing.T, root, flowID string, content []byte, access bool) {
 	t.Helper()
-	flowRoot := filepath.Join(root, "flows", flowID)
-	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: "+flowID+"\nversion: \"1.0.0\"\nflows: []\n")
+	flowRoot := filepath.Join(root, flowID)
 	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
-	agent := "worker:\n  id: " + agentID + "\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
+	agent := "worker:\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
 	if access {
 		agent += "  flow_data_access:\n    - resume.md\n"
 	}

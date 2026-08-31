@@ -1,8 +1,10 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,24 +15,25 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-const (
-	testDataBundle = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	testDataEvent  = "score.available"
-)
+var testDataSourceArtifact = durableDataTestSourceArtifact()
+
+var testDataBundle = testDataSourceArtifact.BundleHash()
+
+const testDataEvent = "score.available"
 
 type durableDataSelectedStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
-	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
@@ -617,13 +620,13 @@ func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) 
 		{name: "result operation", column: "result_json", mutate: func(value map[string]any) { value["operation"] = "import" }},
 		{name: "result outcome", column: "result_json", mutate: func(value map[string]any) { value["outcome"] = "validation_rejected" }},
 		{name: "result bundle", column: "result_json", mutate: func(value map[string]any) {
-			value["bundle_hash"] = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			value["bundle_hash"] = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 		}},
 		{name: "result schema", column: "result_json", mutate: func(value map[string]any) {
 			value["schema_digest"] = "resource-schema-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 		}},
 		{name: "result declaration", column: "result_json", mutate: func(value map[string]any) {
-			value["declaration"] = map[string]any{"package_key": ".", "event_name": "hostile.changed"}
+			value["declaration"] = map[string]any{"flow_path": ".", "event_name": "hostile.changed"}
 		}},
 		{name: "result expected head", column: "result_json", mutate: func(value map[string]any) {
 			candidate := value["candidate"].(map[string]any)
@@ -767,7 +770,7 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 				candidate := value["candidate"].(map[string]any)
 				candidate["version_id"] = other.VersionID
 				candidate["manifest"] = map[string]any{
-					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"package_key": ref.PackageKey, "event": ref.EventName},
+					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName},
 					"schema_digest": other.Manifest.SchemaDigest, "row_codec": other.Manifest.RowCodec,
 					"content_digest": other.Manifest.ContentDigest, "row_count": other.Manifest.RowCount,
 				}
@@ -826,7 +829,7 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 				candidate := value["candidate"].(map[string]any)
 				candidate["version_id"] = other.VersionID
 				candidate["manifest"] = map[string]any{
-					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"package_key": ref.PackageKey, "event": ref.EventName},
+					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName},
 					"schema_digest": other.Manifest.SchemaDigest, "row_codec": other.Manifest.RowCodec,
 					"content_digest": other.Manifest.ContentDigest, "row_count": other.Manifest.RowCount,
 				}
@@ -1025,7 +1028,7 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 		{name: "result invocation", column: "result_json", mutate: func(value map[string]any) { value["prune_invocation_id"] = uuid.NewString() }},
 		{name: "result outcome", column: "result_json", mutate: func(value map[string]any) { value["outcome"] = "already_pruned" }},
 		{name: "result declaration", column: "result_json", mutate: func(value map[string]any) {
-			value["declaration"] = map[string]any{"package_key": ".", "event_name": "hostile.changed"}
+			value["declaration"] = map[string]any{"flow_path": ".", "event_name": "hostile.changed"}
 		}},
 		{name: "result version", column: "result_json", mutate: func(value map[string]any) {
 			value["version_id"] = "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -1348,8 +1351,8 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		{name: "operation", column: "operation", value: func() any { return "check" }},
 		{name: "parent run", column: "parent_run_id", value: func() any { return uuid.NewString() }},
 		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
-		{name: "package", column: "package_key", value: func() any { return "hostile" }},
+		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
+		{name: "package", column: "flow_path", value: func() any { return "hostile" }},
 		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
 		{name: "observed head revision", column: "observed_head_revision", value: func() any { return 999 }},
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
@@ -1395,7 +1398,7 @@ func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		value        func() any
 	}{
 		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "package", column: "package_key", value: func() any { return "hostile" }},
+		{name: "package", column: "flow_path", value: func() any { return "hostile" }},
 		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
 		{name: "version", column: "version_id", value: func() any {
 			return "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -1496,13 +1499,13 @@ func rewriteSourceOperationCompletedAt(t testing.TB, ctx context.Context, select
 	provenanceUpdate := `UPDATE resource_version_provenance SET provenance_json = ?, committed_at = ? WHERE producer_kind = 'import' AND producer_id = ?`
 	historyUpdate := `UPDATE resource_head_history SET committed_at = ? WHERE operation_id = ?`
 	versionUpdate := `UPDATE resource_versions SET created_at = ? WHERE version_id = ?`
-	headUpdate := `UPDATE resource_heads SET updated_at = ? WHERE package_key = ? AND event_name = ?`
+	headUpdate := `UPDATE resource_heads SET updated_at = ? WHERE flow_path = ? AND event_name = ?`
 	if _, ok := selected.(*store.PostgresStore); ok {
 		receiptUpdate = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, completed_at = $3 WHERE source_invocation_id = $4::uuid`
 		provenanceUpdate = `UPDATE resource_version_provenance SET provenance_json = $1, committed_at = $2 WHERE producer_kind = 'import' AND producer_id = $3::uuid`
 		historyUpdate = `UPDATE resource_head_history SET committed_at = $1 WHERE operation_id = $2::uuid`
 		versionUpdate = `UPDATE resource_versions SET created_at = $1 WHERE version_id = $2`
-		headUpdate = `UPDATE resource_heads SET updated_at = $1 WHERE package_key = $2 AND event_name = $3`
+		headUpdate = `UPDATE resource_heads SET updated_at = $1 WHERE flow_path = $2 AND event_name = $3`
 	}
 	updates := []struct {
 		query string
@@ -1512,7 +1515,7 @@ func rewriteSourceOperationCompletedAt(t testing.TB, ctx context.Context, select
 		{provenanceUpdate, []any{provenanceJSON, completedAt, id}},
 		{historyUpdate, []any{completedAt, id}},
 		{versionUpdate, []any{completedAt, versionID}},
-		{headUpdate, []any{completedAt, ref.PackageKey, ref.EventName}},
+		{headUpdate, []any{completedAt, ref.FlowPath, ref.EventName}},
 	}
 	for _, update := range updates {
 		if _, err := tx.ExecContext(ctx, update.query, update.args...); err != nil {
@@ -1555,11 +1558,11 @@ func insertHostileImportProvenance(t testing.TB, ctx context.Context, selected d
 
 func insertHostileHeadHistory(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, ref durabledata.DeclarationRef, revision uint64, head durabledata.ExpectedHead, sourceInvocationID string, committedAt time.Time) {
 	t.Helper()
-	query := `INSERT INTO resource_head_history (package_key, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES (?, ?, ?, ?, ?, 'source_import', ?, ?)`
+	query := `INSERT INTO resource_head_history (flow_path, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES (?, ?, ?, ?, ?, 'source_import', ?, ?)`
 	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `INSERT INTO resource_head_history (package_key, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES ($1, $2, $3, $4, $5, 'source_import', $6::uuid, $7)`
+		query = `INSERT INTO resource_head_history (flow_path, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES ($1, $2, $3, $4, $5, 'source_import', $6::uuid, $7)`
 	}
-	if _, err := db.ExecContext(ctx, query, ref.PackageKey, ref.EventName, revision, head.VersionID, head.VersionID, sourceInvocationID, committedAt); err != nil {
+	if _, err := db.ExecContext(ctx, query, ref.FlowPath, ref.EventName, revision, head.VersionID, head.VersionID, sourceInvocationID, committedAt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1689,12 +1692,11 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 		for index := 0; index < pinCount; index++ {
 			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-				RunID:        runID,
-				State:        runtimerunlifecycle.StateRunning,
-				Origin:       storetest.ScenarioSetupOrigin(),
-				BundleHash:   testDataBundle,
-				BundleSource: runtimerunlifecycle.BundleSourceEphemeral,
-				StartedAt:    time.Unix(int64(index+1), 0).UTC(),
+				RunID:      runID,
+				State:      runtimerunlifecycle.StateRunning,
+				Origin:     storetest.ScenarioSetupOrigin(),
+				BundleHash: testDataBundle,
+				StartedAt:  time.Unix(int64(index+1), 0).UTC(),
 			})
 		}
 
@@ -1702,13 +1704,13 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pinInsert := `INSERT INTO resource_version_pins (run_id, package_key, event_name, schema_digest, version_id, selection, pinned_at) VALUES (?, ?, ?, ?, ?, 'explicit', ?)`
+		pinInsert := `INSERT INTO resource_version_pins (run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at) VALUES (?, ?, ?, ?, ?, 'explicit', ?)`
 		if postgres {
-			pinInsert = `INSERT INTO resource_version_pins (run_id, package_key, event_name, schema_digest, version_id, selection, pinned_at) VALUES ($1::uuid, $2, $3, $4, $5, 'explicit', $6)`
+			pinInsert = `INSERT INTO resource_version_pins (run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at) VALUES ($1::uuid, $2, $3, $4, $5, 'explicit', $6)`
 		}
 		for index := 0; index < pinCount; index++ {
 			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
-			if _, err := tx.ExecContext(ctx, pinInsert, runID, ref.PackageKey, ref.EventName, first.SchemaDigest, first.Candidate.VersionID, time.Unix(int64(index+1), 0).UTC()); err != nil {
+			if _, err := tx.ExecContext(ctx, pinInsert, runID, ref.FlowPath, ref.EventName, first.SchemaDigest, first.Candidate.VersionID, time.Unix(int64(index+1), 0).UTC()); err != nil {
 				_ = tx.Rollback()
 				t.Fatalf("insert pin evidence source %d: %v", index, err)
 			}
@@ -1799,13 +1801,34 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 }
 
 func registerDurableDataTestCatalog(ctx context.Context, selected durableDataSelectedStore, catalog durabledata.Catalog) error {
-	_, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-		BundleHash:  catalog.BundleHash,
-		ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
-		ParsedJSON:  map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
-		Metadata:    map[string]any{"source": "durable-data-test"},
-	}, catalog)
+	_, err := selected.EnsureSourceArtifactWithData(ctx, testDataSourceArtifact, catalog)
 	return err
+}
+
+func durableDataTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
+	const label = "schema.yaml"
+	const body = "name: durable-data-test\n"
+	var blob bytes.Buffer
+	blob.WriteString("swarm-bundle-v2\x00")
+	if err := binary.Write(&blob, binary.BigEndian, uint64(1)); err != nil {
+		panic(err)
+	}
+	if err := blob.WriteByte(byte(sourceartifact.DispositionDeclaration)); err != nil {
+		panic(err)
+	}
+	if err := binary.Write(&blob, binary.BigEndian, uint64(len(label))); err != nil {
+		panic(err)
+	}
+	blob.WriteString(label)
+	if err := binary.Write(&blob, binary.BigEndian, uint64(len(body))); err != nil {
+		panic(err)
+	}
+	blob.WriteString(body)
+	artifact, err := sourceartifact.DecodeLogical(blob.Bytes())
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func durableDataTestCatalog(t *testing.T) (durabledata.Catalog, durabledata.DeclarationRef) {

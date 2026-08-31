@@ -29,31 +29,27 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storebudgetspend "github.com/division-sh/swarm/internal/store/internal/budgetspend"
-	storebundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	storepreservation "github.com/division-sh/swarm/internal/store/internal/preservationpersistence"
 	storeroutingrules "github.com/division-sh/swarm/internal/store/internal/routingrules"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
+	storesourceartifact "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
-	storeworkspace "github.com/division-sh/swarm/internal/store/internal/workspace"
 )
 
 type PostgresStore struct {
 	agentPostgresOwner             *storeagent.AgentPostgresOwner
-	bundleDeletePostgresOwner      *storeadmin.BundleDeletePostgresOwner
 	destructiveResetPostgresOwner  *storeadmin.DestructiveResetPostgresOwner
 	activityPostgresOwner          *storeactivityjournal.ActivityPostgresOwner
 	activityResultPostgresOwner    *storeactivityresult.ActivityResultPostgresOwner
 	postgresOwner                  *storeapiidempotency.PostgresOwner
 	budgetPostgresOwner            *storebudgetspend.BudgetPostgresOwner
-	postgres                       *storebundlecatalog.Postgres
 	decisionPostgresOwner          *storedecision.DecisionPostgresOwner
 	deliveryPostgresOwner          *storedelivery.DeliveryPostgresOwner
 	entityPostgresOwner            *storeentity.EntityPostgresOwner
@@ -69,7 +65,6 @@ type PostgresStore struct {
 	operatorConversationPostgres   *storeoperatorsurface.ConversationPostgres
 	operatorObservabilityPostgres  *storeoperatorsurface.ObservabilityPostgres
 	pipelinePostgresOwner          *storepipeline.PipelinePostgresOwner
-	preservationPostgresOwner      *storepreservation.PreservationPostgresOwner
 	replyPostgresOwner             *storereplycontext.ReplyPostgresOwner
 	runForkPostgresOwner           *storerunfork.RunForkPostgresOwner
 	routingPostgresOwner           *storeroutingrules.RoutingPostgresOwner
@@ -79,13 +74,13 @@ type PostgresStore struct {
 	genericSchedulePostgresOwner   *storegenericschedule.PostgresOwner
 	operatorChannelPostgresOwner   *storeoperatorchannel.PostgresOwner
 	durableDataOwner               *storedurabledata.Owner
+	sourceArtifactOwner            *storesourceartifact.Postgres
 	channelOnboardingPostgresOwner *storechannelonboarding.PostgresOwner
 
 	backend               *postgresbackend.Backend
 	runBundles            *storerunbundle.Postgres
 	workflowEntityQueries *storeworkflowentityquery.Postgres
 	workflowRoutes        *storeworkflowroute.Postgres
-	workspaceLookups      *storeworkspace.Postgres
 	schemaOwner           *storeschema.Postgres
 
 	runLifecycleCandidates *storerunhandoff.CandidateCoordinator

@@ -1,5 +1,0 @@
-name: test-fan-out-count
-version: 1.0.0
-description: fan_out exposes the item count through handler-local fan_out.count.
-platform_version: ">=0.7.0 <0.8.0"
-flows: []

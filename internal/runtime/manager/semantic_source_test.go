@@ -9,9 +9,9 @@ import (
 )
 
 func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
-	const owner = "test://manager/flows/ops/agents/worker"
+	const owner = "test://manager/ops/agents/worker"
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "ops", Flow: "ops"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "ops"},
 		Path:  "ops",
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {Role: "worker", ManagerFallback: "control-injected"},

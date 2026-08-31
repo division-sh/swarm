@@ -162,7 +162,7 @@ func payloadFieldCoverageSites(source semanticview.Source) []payloadFieldCoverag
 			continue
 		}
 		nodeID := node.Key()
-		flowID := node.FlowID()
+		flowID := node.FlowPath()
 		for eventType, handler := range source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			add := func(scope string, accumulation runtimecontracts.WorkflowDataAccumulation) {

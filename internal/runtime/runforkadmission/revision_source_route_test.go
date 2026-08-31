@@ -19,10 +19,11 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const revisionSourceRouteBundleHash = "bundle-v1:sha256:abababababababababababababababababababababababababababababababab"
+const revisionSourceRouteBundleHash = sourceartifactfixture.BundleHash
 
 func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -83,7 +84,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	}
 
 	source := testContractFrontierTemplateConnectSource()
-	selection := SelectedContractSelection(source, "/tmp/contracts-a")
+	selection := SelectedContractSelection(source)
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
@@ -255,7 +256,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			}
 
 			source := tc.source()
-			selection := SelectedContractSelection(source, "/tmp/contracts-a")
+			selection := SelectedContractSelection(source)
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier: %v", err)

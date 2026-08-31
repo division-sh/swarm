@@ -263,15 +263,15 @@ func TestStandingRestartDispositionRejectsBrokenServiceIdentityParity(t *testing
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
 			created := fixture.create(t, ctx, "broken-service-identity")
-			query := `UPDATE standing_services SET package_key=? WHERE service_id=?`
-			args := []any{"corrupt-package", created.ServiceID}
+			query := `UPDATE standing_services SET flow_path=? WHERE service_id=?`
+			args := []any{"corrupt-flow", created.ServiceID}
 			if backend == "postgres" {
-				query = `UPDATE standing_services SET package_key=$1 WHERE service_id=$2::uuid`
+				query = `UPDATE standing_services SET flow_path=$1 WHERE service_id=$2::uuid`
 			}
 			if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 				t.Fatalf("break %s standing service identity: %v", backend, err)
 			}
-			if _, err := fixture.workflow.StandingRunRestartDisposition(ctx, created.RunID); err == nil || !strings.Contains(err.Error(), "does not match package/flow owner") {
+			if _, err := fixture.workflow.StandingRunRestartDisposition(ctx, created.RunID); err == nil || !strings.Contains(err.Error(), "does not match flow_path owner") {
 				t.Fatalf("broken %s standing service identity error = %v", backend, err)
 			}
 		})
@@ -509,7 +509,8 @@ func standingResultsByService(results []runtimepipeline.StandingServiceReconcili
 
 func openStandingDispositionParityFixture(t *testing.T, backend string) standingDispositionParityFixture {
 	t.Helper()
-	fixture := standingDispositionParityFixture{backend: backend, hash: "bundle-v1:sha256:" + strings.Repeat("9", 64)}
+	artifact := storeTestSourceArtifact("standing-restart-disposition-" + backend)
+	fixture := standingDispositionParityFixture{backend: backend, hash: artifact.BundleHash()}
 	if backend == "sqlite" {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		fixture.db, fixture.selected = store.backend.ConstructionHandle(), store
@@ -521,7 +522,7 @@ func openStandingDispositionParityFixture(t *testing.T, backend string) standing
 		fixture.db, fixture.selected = db, store
 		fixture.workflow = newPostgresWorkflowTestCoordinator(t, db, store)
 	}
-	seedStoreTestPersistedBundle(t, fixture.db, fixture.hash)
+	seedStoreTestPersistedArtifact(t, fixture.db, artifact)
 	return fixture
 }
 
@@ -536,35 +537,35 @@ func (f standingDispositionParityFixture) create(t *testing.T, ctx context.Conte
 }
 
 func (f standingDispositionParityFixture) candidate(name string) runtimepipeline.StandingServiceCandidate {
+	flowPath := "restart-disposition/" + f.backend + "-" + name
 	return runtimepipeline.StandingServiceCandidate{
-		ServiceID:  runtimeflowidentity.StandingServiceID("restart-disposition", f.backend+"-"+name),
-		PackageKey: "restart-disposition", FlowID: f.backend + "-" + name,
+		ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: mustStoreTestPersistedBundleSourceFact(f.hash),
+		Source: mustStoreTestSourceArtifactFact(f.hash),
 	}
 }
 
 func (f standingDispositionParityFixture) reviseCandidateSource(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, digit string) runtimepipeline.StandingServiceCandidate {
 	t.Helper()
-	hash := "bundle-v1:sha256:" + strings.Repeat(digit, 64)
-	seedStoreTestPersistedBundle(t, f.db, hash)
-	candidate.Source = mustStoreTestPersistedBundleSourceFact(hash)
+	artifact := storeTestSourceArtifact("standing-restart-revision-" + f.backend + "-" + digit)
+	seedStoreTestPersistedArtifact(t, f.db, artifact)
+	candidate.Source = mustStoreTestSourceArtifactFact(artifact.BundleHash())
 	return candidate
 }
 
 func (f standingDispositionParityFixture) assertRunSource(t *testing.T, ctx context.Context, runID, wantHash string) {
 	t.Helper()
-	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+	query := `SELECT bundle_hash FROM runs WHERE run_id=?`
 	args := []any{runID}
 	if f.backend == "postgres" {
-		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+		query = `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
 	}
-	var hash, source string
-	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&hash, &source); err != nil {
+	var hash string
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&hash); err != nil {
 		t.Fatalf("read %s run source for %s: %v", f.backend, runID, err)
 	}
-	if hash != wantHash || source != "persisted" {
-		t.Fatalf("%s run source for %s = %s/%s, want %s/persisted", f.backend, runID, hash, source, wantHash)
+	if hash != wantHash {
+		t.Fatalf("%s run source for %s = %s, want %s", f.backend, runID, hash, wantHash)
 	}
 }
 

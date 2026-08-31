@@ -134,14 +134,15 @@ func (k IntentKey) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(k.TriggeringDeliveryID)); err != nil {
 		return errors.New("fan-out intent requires canonical triggering delivery identity")
 	}
-	if _, err := k.ElementRef.ContractElementRef(); err != nil {
+	if _, err := k.ElementRef.DeclarationIdentity(); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (k IntentKey) String() string {
-	return strings.Join([]string{strings.TrimSpace(k.RunID), strings.TrimSpace(k.TriggeringDeliveryID), strings.TrimSpace(k.ElementRef.PackageKey), strings.TrimSpace(k.ElementRef.ElementID)}, "|")
+	identity, _ := k.ElementRef.DeclarationIdentity()
+	return strings.Join([]string{strings.TrimSpace(k.RunID), strings.TrimSpace(k.TriggeringDeliveryID), identity.Key()}, "|")
 }
 
 type IntentRequest struct {
@@ -363,8 +364,9 @@ type RunSummary struct {
 
 type BlockedIntentDiagnosis struct {
 	TriggeringDeliveryID string                   `json:"triggering_delivery_id"`
-	PackageKey           string                   `json:"package_key"`
-	ElementID            string                   `json:"element_id"`
+	FlowPath             string                   `json:"flow_path"`
+	Family               string                   `json:"family"`
+	SemanticPath         string                   `json:"semantic_path"`
 	Cursor               int                      `json:"cursor"`
 	Owed                 int                      `json:"owed"`
 	Failure              runtimefailures.Envelope `json:"failure"`
@@ -374,7 +376,7 @@ func (d BlockedIntentDiagnosis) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(d.TriggeringDeliveryID)); err != nil {
 		return errors.New("blocked fan-out diagnosis requires triggering delivery identity")
 	}
-	if _, err := (runtimecontracts.FanOutElementRef{PackageKey: d.PackageKey, ElementID: d.ElementID}).ContractElementRef(); err != nil {
+	if _, err := (runtimecontracts.FanOutElementRef{FlowPath: d.FlowPath, Family: d.Family, SemanticPath: d.SemanticPath}).DeclarationIdentity(); err != nil {
 		return err
 	}
 	if d.Cursor < 0 || d.Owed <= 0 {

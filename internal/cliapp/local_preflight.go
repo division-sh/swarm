@@ -23,6 +23,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/spf13/cobra"
 )
 
@@ -81,9 +82,10 @@ type LocalPreflightReport struct {
 
 type localPreflightRequest struct {
 	Mode                   string
+	SourceFree             bool
 	RepoRoot               string
 	Config                 *config.Config
-	ResolvedPaths          CLIContractPlatformSpecPaths
+	ResolvedPaths          CLISourcePlatformSpecPaths
 	DataSource             string
 	MountSources           WorkspaceMountSources
 	WorkspaceBackend       WorkspaceBackendSelection
@@ -133,8 +135,25 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	if req.CheckGatewayEnv {
 		report.checkGatewayEnv()
 	}
+	if req.SourceFree {
+		selection := req.WorkspaceBackend
+		if selection.Backend == "" {
+			report.add(localPreflightWorkspacePrerequisite, "workspace_backend_source_deferred", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "workspace backend capability selection requires an admitted source and is checked by verify or local startup", "")
+		} else {
+			severity := LocalPreflightSeverityInfo
+			code := "workspace_backend_configured"
+			remediation := ""
+			if selection.Backend == workspace.BackendHost {
+				severity = LocalPreflightSeverityWarning
+				code = "workspace_backend_host_configured"
+				remediation = "use Docker unless the selected source is trusted and local startup explicitly admits host capability"
+			}
+			report.add(localPreflightWorkspacePrerequisite, code, severity, LocalPreflightStatusOK, fmt.Sprintf("workspace backend %s is configured by %s", selection.Backend, selection.Source), remediation)
+		}
+		return report.finalize()
+	}
 
-	source, contractsRoot, ok := loadLocalPreflightCapabilitySource(ctx, req, &report)
+	source, sourceRoot, ok := loadLocalPreflightCapabilitySource(ctx, req, &report)
 	if !ok {
 		return report.finalize()
 	}
@@ -180,7 +199,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	claudeExecutionRequired := workspaceBackendHasReason(workspaceBackend.Reasons, WorkspaceReasonClaudeCLI)
 	if !claudeExecutionRequired {
 		report.add(localPreflightBackendPrerequisite, "backend_credential_skipped_no_claude_execution", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; provider credential resolution is not required", "")
-		report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, false)
+		report.checkWorkspace(ctx, req.Config, source, sourceRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, false)
 		return report.finalize()
 	}
 	providerCredentialStore, err := BuildProviderCredentialStore()
@@ -205,7 +224,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		}
 		report.add(localPreflightBackendPrerequisite, "backend_credential_present", LocalPreflightSeverityInfo, LocalPreflightStatusOK, message, "")
 	}
-	report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, true)
+	report.checkWorkspace(ctx, req.Config, source, sourceRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, true)
 	return report.finalize()
 }
 
@@ -258,10 +277,10 @@ func WriteWorkspacePrerequisiteFailure(out io.Writer, location string, err error
 
 func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightRequest, report *LocalPreflightReport) (semanticview.Source, string, bool) {
 	appendProviderTriggerCapabilitySubjects(report, req.ProviderTriggerPacks)
-	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths, req.PlatformPackBase)
+	source, sourceRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths, req.PlatformPackBase)
 	if err != nil {
 		message := err.Error()
-		remediation := "fix the selected --contracts and --platform-spec paths"
+		remediation := "fix the selected source directory or platform configuration"
 		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 			message = diagnostic.Problem
 			if strings.TrimSpace(diagnostic.Remediation) != "" {
@@ -283,13 +302,13 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected contract source")
 		return nil, "", false
 	}
-	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected contract source")
 		return nil, "", false
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
-		Source: source, BundleSourceFact: sourceFact,
+		Source: source, SourceArtifactFact: sourceFact,
 		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
 		ChannelPlans:           req.ChannelPacks.Plans,
 	})
@@ -301,7 +320,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
 	appendEffectiveProviderTriggerCapabilitySubjects(ctx, report, source, req.ProviderTriggerCatalog, req.ProviderCredentials)
 	appendChannelCapabilitySubjects(report, req.ChannelPacks)
-	return source, contractsRoot, true
+	return source, sourceRoot, true
 }
 
 func (r *LocalPreflightReport) add(category localPreflightCategory, code string, severity LocalPreflightSeverity, status LocalPreflightFindingStatus, message, remediation string) {
@@ -488,8 +507,19 @@ func appendContractSecretEffectReachability(message string, requiredBy []secretR
 	return runtimebootverify.AppendLiveEffectReachability(message, reachability, toolIDs)
 }
 
-func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string, claudeExecutionRequired bool) {
-	workspaces, err := ConfiguredWorkspaceLifecycleForServe(nil, cfg, contractsRoot, source, mountSources, backend)
+func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, sourceRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string, claudeExecutionRequired bool) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.SourceArtifact == nil {
+		r.add(localPreflightWorkspacePrerequisite, "workspace_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, "workspace validation failed: admitted source artifact is required", "fix the selected source directory")
+		return
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+	if err != nil {
+		r.add(localPreflightWorkspacePrerequisite, "workspace_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected source directory")
+		return
+	}
+	defer projection.Release()
+	workspaces, err := ConfiguredWorkspaceLifecycleForServe(cfg, projection, source, mountSources, backend)
 	if err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_config_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix workspace backend or mount configuration")
 		return
@@ -563,16 +593,16 @@ func workspacePrerequisiteDiagnostic(err error, fallbackRemediation string) (str
 	return message, remediation
 }
 
-func loadLocalPreflightSource(repo string, paths CLIContractPlatformSpecPaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
-	contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
+func loadLocalPreflightSource(repo string, paths CLISourcePlatformSpecPaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
+	sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
 		return nil, "", err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, contractsRoot, paths.PlatformSpecPath, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, paths.PlatformSpecPath, base)
 	if err != nil {
 		return nil, "", fmt.Errorf("load Swarm contracts: %w", err)
 	}
-	return semanticview.Wrap(bundle), contractsRoot, nil
+	return semanticview.Wrap(bundle), sourceRoot, nil
 }
 
 func sourceDeclaresAgents(source semanticview.Source) bool {
@@ -681,7 +711,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLIContractPlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,

@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/google/uuid"
@@ -32,7 +32,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Path to swarm.yaml config")
 	backend := fs.String("backend", "", "LLM backend profile for local runtime startup")
-	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
+	bundleHash := fs.String("bundle-hash", "", "Exact persisted source artifact hash for fork planning or selected-source execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), cliapp.RuntimeStoreBackendHelp)
 	runID := fs.String("run", "", "Source run ID to plan from")
@@ -66,10 +66,18 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 2
 	}
-	selectedContractsRequested := strings.TrimSpace(*contractsPath) != ""
-	if modeCount == 0 && !selectedContractsRequested {
+	selectedBundleRequested := strings.TrimSpace(*bundleHash) != ""
+	if selectedBundleRequested {
+		if err := sourceartifact.ValidateHash(strings.TrimSpace(*bundleHash)); err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: invalid --bundle-hash: %v\n", err)
+			}
+			return cliapp.CLIExitValidation
+		}
+	}
+	if modeCount == 0 && !selectedBundleRequested {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: mutating fork execution without --contracts is not implemented; use --dry-run, --materialize-only, --activate, or --contracts")
+			fmt.Fprintln(out, "fork failed: mutating fork execution requires --bundle-hash; use --dry-run, --materialize-only, --activate, or --bundle-hash")
 		}
 		return 2
 	}
@@ -154,6 +162,9 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
+	sourceLoader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Store: stores.SourceArtifactStore(),
+	}
 	if *activate {
 		result, err := runForkOwner.Activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 			ForkRunID:           strings.TrimSpace(*runID),
@@ -161,10 +172,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: cfg, ExecutionPosture: posture,
 			},
-			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
-				RepoRoot:         repo,
-				PlatformSpecPath: resolvedPlatformSpecPath,
-			},
+			SourceLoader: sourceLoader,
 		})
 		if err != nil {
 			if out != nil {
@@ -186,35 +194,23 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	if *materializeOnly {
 		var contractSelection *runfork.RunForkContractSelection
-		if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
-			contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, contracts))
+		if selectedBundleRequested {
+			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: strings.TrimSpace(*bundleHash)}
+			loaded, err := sourceLoader.LoadRunForkSelectedContractSource(ctx, selection)
 			if err != nil {
-				writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+				writeForkContractLoadError(out, "fork failed: load selected source artifact", err)
 				return cliapp.CLIExitValidation
 			}
-			_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, cliapp.ResolvePath(repo, *platformSpecPath))
-			if err != nil {
-				writeForkContractLoadError(out, "fork failed: load selected contracts", err)
-				return cliapp.CLIExitValidation
+			if loaded.Cleanup != nil {
+				defer loaded.Cleanup()
 			}
-			source := semanticview.Wrap(bundle)
-			selection := runtimerunforkadmission.SelectedContractSelection(source, contractsRoot)
 			contractSelection = &selection
-			bundleHash, err := runtimecontracts.BundleHash(bundle)
-			if err != nil {
-				writeForkContractLoadError(out, "fork failed: hash selected contracts", err)
-				return cliapp.CLIExitValidation
-			}
-			bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-			if err != nil {
-				writeForkContractLoadError(out, "fork failed: classify selected contracts", err)
-				return cliapp.CLIExitValidation
-			}
 			result, err := runForkOwner.Materialize(ctx, runfork.RunForkMaterializeRequest{
-				SourceRunID:       strings.TrimSpace(*runID),
-				At:                strings.TrimSpace(*at),
-				ContractSelection: contractSelection,
-				BundleSourceFact:  bundleSource,
+				SourceRunID:             strings.TrimSpace(*runID),
+				At:                      strings.TrimSpace(*at),
+				ContractSelection:       contractSelection,
+				SourceArtifactFact:      loaded.SourceArtifactFact,
+				EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
 			})
 			if err != nil {
 				if out != nil {
@@ -257,18 +253,32 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		printRunForkMaterialization(out, result)
 		return 0
 	}
-	if modeCount == 0 && selectedContractsRequested {
-		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, *contractsPath))
+	if modeCount == 0 && selectedBundleRequested {
+		selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: strings.TrimSpace(*bundleHash)}
+		loaded, err := sourceLoader.LoadRunForkSelectedContractSource(ctx, selection)
 		if err != nil {
-			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+			writeForkContractLoadError(out, "fork failed: load selected source artifact", err)
 			return cliapp.CLIExitValidation
 		}
-		_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, cliapp.ResolvePath(repo, *platformSpecPath))
+		if loaded.Cleanup != nil {
+			defer loaded.Cleanup()
+		}
+		record, err := stores.SourceArtifactStore().GetSourceArtifact(ctx, selection.BundleHash)
 		if err != nil {
-			writeForkContractLoadError(out, "fork failed: load selected contracts", err)
+			writeForkContractLoadError(out, "fork failed: read selected source artifact", err)
 			return cliapp.CLIExitValidation
 		}
-		source := semanticview.Wrap(bundle)
+		artifact, err := record.Decode()
+		if err != nil {
+			writeForkContractLoadError(out, "fork failed: decode selected source artifact", err)
+			return cliapp.CLIExitValidation
+		}
+		sourceProjection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+		if err != nil {
+			writeForkContractLoadError(out, "fork failed: materialize selected source", err)
+			return cliapp.CLIExitValidation
+		}
+		defer sourceProjection.Release()
 		credentialStore, err := cliapp.BuildCredentialStore()
 		if err != nil {
 			if out != nil {
@@ -299,7 +309,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		localState, err := cliapp.ResolveLocalRuntimeState(cliapp.LocalRuntimeStateOptions{
 			RepoRoot:                repo,
-			ResolvedPaths:           cliapp.CLIContractPlatformSpecPaths{ContractsPath: contractsRoot},
+			ResolvedPaths:           cliapp.CLISourcePlatformSpecPaths{SourceRoot: sourceProjection.PrivateRoot()},
 			SwarmDir:                swarmDir,
 			Config:                  cfg,
 			CreateDefaultDataSource: true,
@@ -318,26 +328,21 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+		workspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.Source)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: resolve workspace backend: %v\n", err)
 			}
 			return 1
 		}
-		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.WorkspaceLookup(), cfg, contractsRoot, source, mountSources, workspaceBackend)
+		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(cfg, sourceProjection, loaded.Source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
 			}
 			return 1
 		}
-		bundleHash, err := runtimecontracts.BundleHash(bundle)
-		if err != nil {
-			writeForkContractLoadError(out, "fork failed: hash selected contracts", err)
-			return cliapp.CLIExitValidation
-		}
-		executionCtx, settleExecution, err := runForkSelectedExecutionContext(ctx, bundleHash)
+		executionCtx, settleExecution, err := runForkSelectedExecutionContext(ctx, selection.BundleHash)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: create selected execution owner: %v\n", err)
@@ -346,13 +351,12 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		deps := stores.RuntimeDeps()
 		result, executionErr := runForkOwner.Execute(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
-			SourceRunID: strings.TrimSpace(*runID),
-			At:          strings.TrimSpace(*at),
-			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
-				RepoRoot:         repo,
-				PlatformSpecPath: resolvedPlatformSpecPath,
-			},
-			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+			SourceRunID:        strings.TrimSpace(*runID),
+			At:                 strings.TrimSpace(*at),
+			SourceLoader:       sourceLoader,
+			SourceArtifactFact: loaded.SourceArtifactFact,
+			ExpectedBundleHash: selection.BundleHash,
+			ContractSelection:  selection,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:              cfg,
 				ExecutionPosture:    posture,
@@ -396,7 +400,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
+	if selectedBundleRequested {
 		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 			plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
@@ -405,21 +409,19 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		plan.ReplayResumeAdmission = replayAdmission
 		plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
 
-		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, contracts))
+		selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: strings.TrimSpace(*bundleHash)}
+		loaded, err := sourceLoader.LoadRunForkSelectedContractSource(ctx, selection)
 		if err != nil {
-			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+			writeForkContractLoadError(out, "fork failed: load selected source artifact", err)
 			return cliapp.CLIExitValidation
 		}
-		_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, cliapp.ResolvePath(repo, *platformSpecPath))
-		if err != nil {
-			writeForkContractLoadError(out, "fork failed: load selected contracts", err)
-			return cliapp.CLIExitValidation
+		if loaded.Cleanup != nil {
+			defer loaded.Cleanup()
 		}
-		source := semanticview.Wrap(bundle)
 		admission, err := runtimerunforkadmission.AdmitContractFrontier(runtimerunforkadmission.ContractFrontierRequest{
 			Plan:              plan,
-			Source:            source,
-			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+			Source:            loaded.Source,
+			ContractSelection: runtimerunforkadmission.SelectedContractSelection(loaded.Source),
 		})
 		if err != nil {
 			if out != nil {
@@ -429,8 +431,8 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		routeAdmission, err := runtimerunforkadmission.AdmitSelectedContractRouteHistory(runtimerunforkadmission.SelectedContractRouteHistoryRequest{
 			Plan:              plan,
-			Source:            source,
-			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+			Source:            loaded.Source,
+			ContractSelection: runtimerunforkadmission.SelectedContractSelection(loaded.Source),
 			FrontierAdmission: admission,
 		})
 		if err != nil {
@@ -549,11 +551,10 @@ func printRunForkActivation(w io.Writer, result runfork.RunForkActivation) {
 		)
 	}
 	if result.SelectedContractBinding != nil {
-		fmt.Fprintf(w, "Selected Contract Binding: owner=%s contracts=%s workflow=%s@%s\n",
+		fmt.Fprintf(w, "Selected Contract Binding: owner=%s mode=%s bundle_hash=%s\n",
 			result.SelectedContractBinding.Owner,
-			result.SelectedContractBinding.ContractSelection.ContractsRoot,
-			result.SelectedContractBinding.ContractSelection.WorkflowName,
-			result.SelectedContractBinding.ContractSelection.WorkflowVersion,
+			result.SelectedContractBinding.ContractSelection.Mode,
+			result.SelectedContractBinding.ContractSelection.BundleHash,
 		)
 	}
 }
@@ -601,11 +602,10 @@ func printRunForkMaterialization(w io.Writer, result runfork.RunForkMaterializat
 		result.SourceRunStatusUnchanged,
 	)
 	if result.SelectedContractBinding != nil {
-		fmt.Fprintf(w, "Selected Contract Binding: owner=%s contracts=%s workflow=%s@%s\n",
+		fmt.Fprintf(w, "Selected Contract Binding: owner=%s mode=%s bundle_hash=%s\n",
 			result.SelectedContractBinding.Owner,
-			result.SelectedContractBinding.ContractSelection.ContractsRoot,
-			result.SelectedContractBinding.ContractSelection.WorkflowName,
-			result.SelectedContractBinding.ContractSelection.WorkflowVersion,
+			result.SelectedContractBinding.ContractSelection.Mode,
+			result.SelectedContractBinding.ContractSelection.BundleHash,
 		)
 	}
 }

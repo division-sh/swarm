@@ -228,7 +228,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	durable := candidate.Coordinate.DurableIdentity()
 	requestHash := operatorchannel.Hash(
 		"channel-onboarding-request-v2", principal.ID, string(input.Verb), candidate.Provider,
-		durable.BundleHash, durable.BundleSource, durable.BundleIdentity,
+		durable.BundleHash, durable.BundleIdentity,
 		durable.PackInventoryGeneration, durable.PlanGeneration.Diagnostic(),
 		candidate.Interface.Key(), candidate.Target.Selector, string(candidate.Posture), string(candidate.Ceremony),
 		candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.ConfirmationOperation,

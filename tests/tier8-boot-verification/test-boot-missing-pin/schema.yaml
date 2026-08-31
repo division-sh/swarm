@@ -7,3 +7,7 @@ pins:
     events:
       - task.requested
       - task.result
+connect:
+  - event: task.result
+    from: child
+    to: .

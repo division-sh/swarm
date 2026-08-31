@@ -278,7 +278,6 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(userfacing.HumanCodeDeliveryStatus)},
 		"agents.go\x00writeAgentDiagnosisResult":                       {string(userfacing.HumanCodeAgentLifecycleBlockingLayer), string(userfacing.HumanCodeAgentLifecycleState), string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeWatchdogAction), string(userfacing.HumanCodeWatchdogBlockingLayer), string(userfacing.HumanCodeWatchdogOutcome), string(userfacing.HumanCodeWatchdogState)},
 		"agents.go\x00writeAgentDetailResult":                          {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
-		"bundle.go\x00writeBundleAgentsHuman":                          {string(userfacing.HumanCodeMemorySource)},
 		"cli_identifier_resolver.go\x00newCLIIdentifierAmbiguousError": {"<dynamic>"},
 		"diagnostics.go\x00diagnosticRunStatusLabel":                   {string(userfacing.HumanCodeRunStatus)},
 		"diagnostics.go\x00writeDiagnosticRunDiagnosis":                {string(userfacing.HumanCodeDeliveryStatus), string(userfacing.HumanCodeOperationalState), string(userfacing.HumanCodeRunBlockingLayer), string(userfacing.HumanCodeRunBlockingReason)},
@@ -480,10 +479,6 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 	"agent_frame.go\x00writeAgentFrameResult": {
 		Names:  []string{"status"},
 		Reason: "execution-frame presence is a resolved/unresolved projection marker, not a registered runtime lifecycle status family",
-	},
-	"bundle.go\x00writeBundleDeleteHuman": {
-		Names:  []string{"status"},
-		Reason: "bundle.delete mutation outcome is not a registered run/agent/delivery status family",
 	},
 	"channel_command.go\x00writeChannelList": {
 		Names:  []string{"state", "status"},

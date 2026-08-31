@@ -1,6 +1,7 @@
 package canonicalrouting
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -52,13 +53,13 @@ func CopyTemplateSelectOrCreatePilot(t testing.TB) string {
 func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
-	applyClosedReplacement(t, filepath.Join(root, "flows/account/schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"),
 		"      - event: account.setup\n",
 		"      - event: account.create\n")
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"  - event: account.setup\n    from: producer\n    to: account\n  - event: account.ready\n    from: producer\n    to: account\n",
 		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n")
-	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
+	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
   id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.create]
@@ -79,14 +80,14 @@ account-ready-node:
 func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
-	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
+	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
   id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.setup]
   event_handlers:
     account.setup: {}
 `)
-	writeClosedVariantFile(t, root, "flows/account/agents.yaml", `account-agent:
+	writeClosedVariantFile(t, root, "account/agents.yaml", `account-agent:
   id: account-agent
   model: regular
   intent:
@@ -98,7 +99,7 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
 
 func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState string) {
 	t.Helper()
-	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
+	producerEvents := filepath.Join(root, "producer", "events.yaml")
 	for _, event := range []string{"account.requested", "account.ready"} {
 		key, fieldType := "", "text?"
 		if event == "account.ready" {
@@ -109,13 +110,13 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 			event+":\n"+key+"  account_id: "+fieldType+"\n",
 			event+":\n"+key+"  account_id: "+fieldType+"\n  score: text\n  decision: text\n")
 	}
-	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"),
 		"          account_id: payload.account_id\n",
 		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"),
 		"    _unused_reason: receiver instance identity\n",
 		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
 		"    account.ready: {}\n",
 		`    account.ready:
       data_accumulation:
@@ -143,11 +144,9 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 		t.Fatalf("unsupported select resolution mode %d", opts.Mode)
 	}
 	root := CopyExample(t, TemplateSelectExisting)
-	packageFile := filepath.Join(root, "package.yaml")
-	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
+	accountSchema := filepath.Join(root, "account", "schema.yaml")
+	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
 		"  id: account-node\n", "  id: account-node-{instance_id}\n")
-	applyClosedReplacement(t, packageFile, "  - event: account.setup\n    from: producer\n    to: account\n", "")
 	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
 		"      - event: account.ready\n        resolution:\n          mode: select\n",
@@ -159,22 +158,41 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 		applyClosedReplacement(t, accountSchema, selectedPin,
 			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.missing_account_id\n")
 	case SelectResolutionSourceTypeMismatch:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionStaticReceiver:
-		applyClosedReplacement(t, packageFile, "    mode: template\nconnect:\n", "    mode: static\nconnect:\n")
 		applyClosedReplacement(t, accountSchema, "mode: template\n", "mode: static\n")
 	case SelectResolutionExtraAggregation:
 		applyClosedReplacement(t, accountSchema, selectedPin,
 			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          aggregation: stream\n")
 	case SelectResolutionEntityTypeMismatch:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	case SelectResolutionSourceTypeMismatchWithoutCarryType:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionNumberSourceToIntegerReceiver:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: number\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: number\n")
+		applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported select resolution invalidity %d", opts.Invalidity)
+	}
+	return root
+}
+
+// CopyNestedProducerTemplateSelectResolution moves the producer into a real
+// nested flow and rewrites the authored connect to its canonical path.
+func CopyNestedProducerTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOptions) string {
+	t.Helper()
+	root := CopyTemplateSelectResolution(t, opts)
+	nestedProducer := filepath.Join(root, "left", "child", "producer")
+	if err := os.MkdirAll(filepath.Dir(nestedProducer), 0o755); err != nil {
+		t.Fatalf("create nested producer parent: %v", err)
+	}
+	if err := os.Rename(filepath.Join(root, "producer"), nestedProducer); err != nil {
+		t.Fatalf("move producer into nested flow: %v", err)
+	}
+	for _, event := range []string{"account.setup", "account.ready"} {
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+			"  - event: "+event+"\n    from: producer\n    to: account\n",
+			"  - event: "+event+"\n    from: left/child/producer\n    to: account\n")
 	}
 	return root
 }
@@ -188,10 +206,10 @@ func CopyTemplateSelectResolutionRenamedSource(t testing.TB, opts TemplateSelect
 	if opts.Mode == SelectResolutionSelectOrCreate {
 		mode = "select-or-create"
 	}
-	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "account", "schema.yaml"),
 		"event: account.ready\n        resolution:\n          mode: "+mode+"\n",
 		"event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.external_account_id\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 		"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text\n  external_account_id: text\n")
 	return root
 }
@@ -226,14 +244,14 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		opts.Mint = CreateMintUUID
 	}
 	root := CopyExample(t, TemplateCreateMintedKey)
-	validatorSchema := filepath.Join(root, "flows", "validator", "schema.yaml")
+	validatorSchema := filepath.Join(root, "validator", "schema.yaml")
 	switch opts.Mint {
 	case CreateMintUUID:
 	case CreateMintEventID:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: event.id\n")
 	case CreateMintPayload:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: payload.candidate\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 			"validation.requested:\n  candidate: text?\n",
 			"validation.requested:\n  key: candidate\n  candidate: text\n")
 	default:
@@ -246,20 +264,20 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateResolutionInvalidMint:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
 	case CreateResolutionProducerCollision:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: text?\n  validation_case_id: uuid\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: text?\n  validation_case_id: uuid\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
 		if opts.Mint == CreateMintPayload {
-			applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")
+			applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")
 		} else {
-			applyClosedReplacement(t, filepath.Join(root, "flows", "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
+			applyClosedReplacement(t, filepath.Join(root, "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
 		}
 	case CreateResolutionNumberSourceToIntegerReceiver:
 		if opts.Mint != CreateMintPayload {
 			t.Fatal("number-to-integer create fixture requires payload minting")
 		}
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: number\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: number\n")
+		applyClosedReplacement(t, filepath.Join(root, "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported create resolution invalidity %d", opts.Invalidity)
 	}

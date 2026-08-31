@@ -22,12 +22,12 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.fanOutObligations == nil {
 		return false, nil
 	}
-	if err := pc.bundleSourceFact.Validate(); err != nil {
+	if err := pc.sourceArtifactFact.Validate(); err != nil {
 		return false, fmt.Errorf("fan-out pump requires exact bundle source fact: %w", err)
 	}
 	owner := pc.workflowStore.fanOutObligations
 	intent, claim, found, err := owner.ClaimFanOutIntent(ctx, FanOutClaimRequest{
-		Owner: pc.fanOutOwnerID, BundleHash: pc.bundleSourceFact.BundleHash(), Now: now.UTC(), Lease: fanOutClaimLease,
+		Owner: pc.fanOutOwnerID, BundleHash: pc.sourceArtifactFact.BundleHash(), Now: now.UTC(), Lease: fanOutClaimLease,
 	})
 	if err != nil || !found {
 		return false, err
@@ -65,10 +65,10 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 	if err != nil {
 		return false, blockClaim("create_executor", -1, err, nil)
 	}
-	if intent.Request.PlanRef.BundleHash != pc.bundleSourceFact.BundleHash() {
+	if intent.Request.PlanRef.BundleHash != pc.sourceArtifactFact.BundleHash() {
 		return false, blockClaim("validate_plan_source", -1, fmt.Errorf("fan-out claimed plan bundle disagrees with admitted runtime source"), nil)
 	}
-	workCtx := runtimecorrelation.WithBundleSourceFact(ctx, pc.bundleSourceFact)
+	workCtx := runtimecorrelation.WithSourceArtifactFact(ctx, pc.sourceArtifactFact)
 	workCtx = runtimecorrelation.WithRunID(workCtx, intent.Request.Key.RunID)
 	workCtx = runtimecorrelation.WithInboundEvent(workCtx, input.Trigger)
 
@@ -183,8 +183,9 @@ func fanOutBlockedTurnCause(stage string, ordinal int, intent fanoutobligation.I
 	attributes := map[string]any{
 		"run_id":                 intent.Request.Key.RunID,
 		"triggering_delivery_id": intent.Request.Key.TriggeringDeliveryID,
-		"package_key":            intent.Request.Key.ElementRef.PackageKey,
-		"element_id":             intent.Request.Key.ElementRef.ElementID,
+		"flow_path":              intent.Request.Key.ElementRef.FlowPath,
+		"family":                 intent.Request.Key.ElementRef.Family,
+		"semantic_path":          intent.Request.Key.ElementRef.SemanticPath,
 		"cursor":                 intent.Cursor,
 		"cause":                  cause.Error(),
 	}

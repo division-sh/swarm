@@ -3,7 +3,7 @@ package contracts
 import (
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type HandlerAdvanceCarrierKind string
@@ -23,7 +23,7 @@ type HandlerAdvanceCarrier struct {
 	Rule       HandlerRuleEntry
 	RuleIndex  int
 	RuleID     string
-	RuleRef    contractelementidentity.ContractElementRef
+	RuleRef    runtimeidentity.DeclarationIdentity
 }
 
 // Source returns the stable source label used by verifier and authoring projections.
@@ -74,7 +74,7 @@ func handlerAdvanceCarriers(
 			if target == "" {
 				continue
 			}
-			ruleRef, _ := rule.ContractElementRef()
+			ruleRef, _ := rule.DeclarationIdentity()
 			out = append(out, HandlerAdvanceCarrier{
 				Kind:       kind,
 				AdvancesTo: target,

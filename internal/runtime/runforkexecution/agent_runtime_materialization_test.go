@@ -26,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -40,7 +41,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const selectedContractAgentTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func selectedContractTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
 	return selectedContractTestAgentIdentity(t, agentID, "")
@@ -75,13 +76,27 @@ func containsSelectedContractAgentID(identities []agentidentity.Identity, agentI
 	return false
 }
 
-func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.BundleSourceFact {
+func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(selectedContractAgentTestBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(selectedContractAgentTestBundleHash)
 	if err != nil {
 		t.Fatalf("construct selected-contract source fact: %v", err)
 	}
 	return fact
+}
+
+func selectedContractAgentTestSource(eventNames ...string) semanticview.Source {
+	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventNames))
+	for _, eventName := range eventNames {
+		events[eventName] = runtimecontracts.EventCatalogEntry{}
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Events: events}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+		},
+	})
 }
 
 func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.Admission {
@@ -89,7 +104,6 @@ func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.
 	topology, err := runtimeagenttopology.StaticAdmission(
 		"selected-contract-test-source-set-v1",
 		selectedContractAgentTestBundleHash,
-		"ephemeral",
 		runtimeagenttopology.LifetimeEphemeral,
 	)
 	if err != nil {
@@ -108,8 +122,8 @@ func selectedContractTestProcessCapability(
 	if selected == nil {
 		t.Fatal("selected-contract topology fixture requires a selected store")
 	}
-	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	bundleHash := loaded.SourceArtifactFact.BundleHash()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	records, err := selectedContractStaticAgentRecords(loaded.Source)
 	if err != nil {
 		t.Fatalf("compile selected-contract declaration records: %v", err)
@@ -174,9 +188,9 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		ExecutionPosture: executionposture.Live,
-		BundleSourceFact: selectedContractAgentTestSourceFact(t),
-		WorkOwner:        runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		SourceArtifactFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:          runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -247,8 +261,15 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 
 func selectedContractAgentRouteAdmission(t *testing.T, agentID string, subscriptions ...string) semanticview.FlowOwnedAgentSubscriptionAdmission {
 	t.Helper()
+	localEvents := make(map[string]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription = strings.TrimSpace(subscription); subscription != "" && !strings.Contains(subscription, "*") {
+			localEvents[subscription] = struct{}{}
+		}
+	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       agentID,
+		LocalEvents:   localEvents,
 		Subscriptions: subscriptions,
 	})
 	if err != nil {
@@ -324,9 +345,9 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
 	mockIdentity := selectedContractTestRootAgentIdentity(t, "mock-agent")
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		ExecutionPosture: executionposture.Live,
-		BundleSourceFact: selectedContractAgentTestSourceFact(t),
-		WorkOwner:        owner, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:   executionposture.Live,
+		SourceArtifactFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:          owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -433,7 +454,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	}
 	wantScope := runtimeauthoractivity.BundleScope(
 		"00000000-0000-0000-0000-000000000313",
-		"bundle-v1:sha256:3131313131313131313131313131313131313131313131313131313131313131",
+		"bundle-v2:sha256:3131313131313131313131313131313131313131313131313131313131313131",
 	)
 	initiatingCtx, cancel := context.WithCancel(context.Background())
 	ctx := selectedForkExecutionTestContext(t, initiatingCtx, authority)
@@ -452,10 +473,10 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 		t.Fatalf("construct selected-contract receiver execution: %v", err)
 	}
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		ExecutionPosture:  executionposture.Live,
-		BundleSourceFact:  selectedContractAgentTestSourceFact(t),
-		WorkOwner:         owner,
-		ReceiverExecution: receiverExecution,
+		ExecutionPosture:   executionposture.Live,
+		SourceArtifactFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:          owner,
+		ReceiverExecution:  receiverExecution,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -469,7 +490,6 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 			ProcessBootID:      "00000000-0000-0000-0000-000000000315",
 			GenerationGrantID:  "00000000-0000-0000-0000-000000000316",
 			BundleHash:         wantScope.BundleHash,
-			BundleSource:       "ephemeral",
 			RuntimeInstanceID:  wantScope.RuntimeInstanceID,
 			RuntimeGeneration:  1,
 		},
@@ -477,10 +497,14 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: selectedContractExecutionOwnerForTest(t, selected),
+		LoadedSource: LoadedSelectedContractSource{
+			Source:             selectedContractAgentTestSource("item.received"),
+			SourceArtifactFact: selectedContractAgentTestSourceFact(t),
+		},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
-				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
+				FlowID: ".", Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
 			}), Topology: selectedContractTestDeclarationTopology(t), ProcessBinding: probe.binding}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
@@ -514,8 +538,7 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "analysis",
-			Mode: runtimecontracts.FlowModeStatic,
+			FlowPath: "analysis",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

@@ -109,7 +109,6 @@ func (p Phase) Valid() bool {
 // target occurrences.
 type ChannelDurableContextIdentity struct {
 	BundleHash              string
-	BundleSource            string
 	BundleIdentity          string
 	PackInventoryGeneration string
 	PlanGeneration          plangeneration.Generation
@@ -117,7 +116,6 @@ type ChannelDurableContextIdentity struct {
 
 func (i ChannelDurableContextIdentity) Normalized() ChannelDurableContextIdentity {
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
-	i.BundleSource = strings.TrimSpace(i.BundleSource)
 	i.BundleIdentity = strings.TrimSpace(i.BundleIdentity)
 	i.PackInventoryGeneration = strings.TrimSpace(i.PackInventoryGeneration)
 	return i
@@ -125,7 +123,7 @@ func (i ChannelDurableContextIdentity) Normalized() ChannelDurableContextIdentit
 
 func (i ChannelDurableContextIdentity) Validate() error {
 	i = i.Normalized()
-	if _, err := runtimecorrelation.DecodeBundleSourceFact(i.BundleHash, i.BundleSource); err != nil {
+	if _, err := runtimecorrelation.DecodeSourceArtifactFact(i.BundleHash); err != nil {
 		return fmt.Errorf("channel durable context source: %w", err)
 	}
 	if i.BundleIdentity == "" || i.PackInventoryGeneration == "" || !i.PlanGeneration.Valid() {
@@ -161,7 +159,6 @@ func (o ChannelLiveRuntimeOccurrence) Matches(other ChannelLiveRuntimeOccurrence
 // with the exact live runtime occurrence currently admitted for execution.
 type ChannelRuntimeContextCoordinate struct {
 	BundleHash                   string                    `json:"bundle_hash"`
-	BundleSource                 string                    `json:"bundle_source"`
 	BundleIdentity               string                    `json:"bundle_identity"`
 	PackInventoryGeneration      string                    `json:"pack_inventory_generation"`
 	RuntimeInstanceID            string                    `json:"runtime_instance_id"`
@@ -173,7 +170,7 @@ type ChannelRuntimeContextCoordinate struct {
 func (c ChannelRuntimeContextCoordinate) DurableIdentity() ChannelDurableContextIdentity {
 	c = c.Normalized()
 	return ChannelDurableContextIdentity{
-		BundleHash: c.BundleHash, BundleSource: c.BundleSource, BundleIdentity: c.BundleIdentity,
+		BundleHash: c.BundleHash, BundleIdentity: c.BundleIdentity,
 		PackInventoryGeneration: c.PackInventoryGeneration, PlanGeneration: c.PlanGeneration,
 	}
 }
@@ -188,7 +185,6 @@ func (c ChannelRuntimeContextCoordinate) LiveOccurrence() ChannelLiveRuntimeOccu
 
 func (c ChannelRuntimeContextCoordinate) Normalized() ChannelRuntimeContextCoordinate {
 	c.BundleHash = strings.TrimSpace(c.BundleHash)
-	c.BundleSource = strings.TrimSpace(c.BundleSource)
 	c.BundleIdentity = strings.TrimSpace(c.BundleIdentity)
 	c.PackInventoryGeneration = strings.TrimSpace(c.PackInventoryGeneration)
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
@@ -472,7 +468,7 @@ type StartRequest struct {
 }
 
 func (r StartRequest) SlotKey() string {
-	return operatorchannel.Hash("channel-onboarding-slot-v1", r.Coordinate.BundleHash, r.Coordinate.BundleSource, r.Interface.Key(), r.TargetSelector, r.Provider)
+	return operatorchannel.Hash("channel-onboarding-slot-v1", r.Coordinate.BundleHash, r.Interface.Key(), r.TargetSelector, r.Provider)
 }
 
 func (r StartRequest) Validate() error {

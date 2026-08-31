@@ -8,7 +8,6 @@ import (
 
 type PlatformPackBaseResolver interface {
 	CurrentPlatformPackBase() (*PlatformPackInventory, error)
-	ResolvePlatformPackBase(PackSelectionReceipt) (*PlatformPackInventory, error)
 }
 
 // PlatformPackBaseGenerationOwner retains exactly the immutable bases selected
@@ -43,23 +42,6 @@ func (o *PlatformPackBaseGenerationOwner) CurrentPlatformPackBase() (*PlatformPa
 	base := o.generations[o.current]
 	if err := validatePlatformPackBase(base); err != nil {
 		return nil, fmt.Errorf("current platform pack base generation: %w", err)
-	}
-	return base, nil
-}
-
-func (o *PlatformPackBaseGenerationOwner) ResolvePlatformPackBase(receipt PackSelectionReceipt) (*PlatformPackInventory, error) {
-	if o == nil {
-		return nil, fmt.Errorf("platform pack base generation owner is required")
-	}
-	if err := receipt.Validate(); err != nil {
-		return nil, err
-	}
-	digest := strings.TrimSpace(receipt.BaseDigest)
-	o.mu.RLock()
-	base := o.generations[digest]
-	o.mu.RUnlock()
-	if base == nil || !receipt.MatchesBase(base) {
-		return nil, fmt.Errorf("pack selection receipt requires %s base %s but that generation is not retained by this process", receipt.BaseMode, digest)
 	}
 	return base, nil
 }

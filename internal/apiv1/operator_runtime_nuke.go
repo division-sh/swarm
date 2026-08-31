@@ -20,17 +20,17 @@ type DestructiveResetCoordinator interface {
 }
 
 type runtimeNukeResult struct {
-	OK             bool                                  `json:"ok"`
-	Status         string                                `json:"status"`
-	DryRun         bool                                  `json:"dry_run"`
-	IncludeBundles bool                                  `json:"include_bundles"`
-	OperationName  string                                `json:"operation_name"`
-	Plan           destructivereset.Result               `json:"plan"`
-	Quiescence     destructivereset.QuiescenceResult     `json:"quiescence"`
-	Cleanup        destructivereset.CleanupResult        `json:"cleanup"`
-	Containers     destructivereset.ContainerResetResult `json:"containers"`
-	PartialFailure bool                                  `json:"partial_failure"`
-	Errors         []runtimeNukePartialError             `json:"errors,omitempty"`
+	OK                     bool                                  `json:"ok"`
+	Status                 string                                `json:"status"`
+	DryRun                 bool                                  `json:"dry_run"`
+	IncludeSourceArtifacts bool                                  `json:"include_source_artifacts"`
+	OperationName          string                                `json:"operation_name"`
+	Plan                   destructivereset.Result               `json:"plan"`
+	Quiescence             destructivereset.QuiescenceResult     `json:"quiescence"`
+	Cleanup                destructivereset.CleanupResult        `json:"cleanup"`
+	Containers             destructivereset.ContainerResetResult `json:"containers"`
+	PartialFailure         bool                                  `json:"partial_failure"`
+	Errors                 []runtimeNukePartialError             `json:"errors,omitempty"`
 }
 
 type runtimeNukePartialError struct {
@@ -58,7 +58,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	if err != nil {
 		return nil, err
 	}
-	includeBundles, err := optionalBoolParam(req.Params, "include_bundles", true)
+	includeSourceArtifacts, err := optionalBoolParam(req.Params, "include_source_artifacts", true)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 		TTL:            runtimeNukeIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := performRuntimeNuke(ctx, req, opts, operationID, dryRun, includeBundles, now)
+		result, err := performRuntimeNuke(ctx, req, opts, operationID, dryRun, includeSourceArtifacts, now)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
@@ -102,30 +102,30 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	return stored, nil
 }
 
-func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, operationID string, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
+func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, operationID string, dryRun, includeSourceArtifacts bool, now time.Time) (runtimeNukeResult, error) {
 	execution, err := opts.Coordinator.Execute(ctx, destructivereset.Request{
-		OperationID:       operationID,
-		ActorTokenID:      req.ActorTokenID,
-		RequestHash:       req.RequestHash,
-		DryRun:            dryRun,
-		IncludeBundles:    includeBundles,
-		IncludeBundlesSet: true,
-		RequestedAt:       now,
+		OperationID:               operationID,
+		ActorTokenID:              req.ActorTokenID,
+		RequestHash:               req.RequestHash,
+		DryRun:                    dryRun,
+		IncludeSourceArtifacts:    includeSourceArtifacts,
+		IncludeSourceArtifactsSet: true,
+		RequestedAt:               now,
 	})
 	if err != nil {
 		return runtimeNukeResult{}, err
 	}
 	planResult := execution.Plan
 	result := runtimeNukeResult{
-		OK:             true,
-		Status:         "completed",
-		DryRun:         dryRun,
-		IncludeBundles: planResult.IncludeBundles,
-		OperationName:  strings.TrimSpace(planResult.OperationName),
-		Plan:           planResult,
-		Quiescence:     execution.Quiescence,
-		Cleanup:        execution.Cleanup,
-		Containers:     execution.Containers,
+		OK:                     true,
+		Status:                 "completed",
+		DryRun:                 dryRun,
+		IncludeSourceArtifacts: planResult.IncludeSourceArtifacts,
+		OperationName:          strings.TrimSpace(planResult.OperationName),
+		Plan:                   planResult,
+		Quiescence:             execution.Quiescence,
+		Cleanup:                execution.Cleanup,
+		Containers:             execution.Containers,
 	}
 	if result.OperationName == "" {
 		result.OperationName = destructivereset.DefaultOperationName

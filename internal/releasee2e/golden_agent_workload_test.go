@@ -75,7 +75,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-		"verify", "--config", configPath, "--contracts", contracts, "--json")
+		"verify", contracts, "--config", configPath, "--json")
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -93,14 +93,14 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 		possessionPath string
 	}{
 		{name: "non-dev", configPath: configPath, possessionPath: filepath.Join(root, "runtime.db.possession")},
-		{name: "dev", dev: true, possessionPath: filepath.Join(root, ".swarm", "stores", "dev-scratch.db.possession")},
+		{name: "dev", dev: true, possessionPath: filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db.possession")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			process := startReleaseServe(t, releaseProcessSpec{
 				BinaryPath: binaryPath,
 				WorkingDir: root,
 				ConfigPath: test.configPath,
-				Contracts:  contracts,
+				Source:     contracts,
 				Store:      store.name,
 				Dev:        test.dev,
 				APIPort:    freeReleaseTCPPort(t),
@@ -234,7 +234,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 			BinaryPath: binaryPath,
 			WorkingDir: root,
 			ConfigPath: configPath,
-			Contracts:  contracts,
+			Source:     contracts,
 			Store:      store.name,
 			Dev:        dev,
 			APIPort:    apiPort,
@@ -300,7 +300,8 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			env := goldenProcessEnv(t, test.root, "", 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 
-			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", "--json")
+			contracts := filepath.Join(test.root, "contracts")
+			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--json")
 			if verify.err != nil {
 				t.Fatalf("relative invocation-root verify failed: %v\n%s", verify.err, verify.output)
 			}
@@ -314,6 +315,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			process := startReleaseServe(t, releaseProcessSpec{
 				BinaryPath: binaryPath,
 				WorkingDir: test.root,
+				Source:     contracts,
 				Dev:        true,
 				APIPort:    freeReleaseTCPPort(t),
 				MCPPort:    freeReleaseTCPPort(t),
@@ -328,7 +330,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			}
 			cancel()
 			goldenServedBundleHash(t, process.rpc)
-			scratchPath := filepath.Join(test.root, ".swarm", "stores", "dev-scratch.db")
+			scratchPath := filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db")
 			if info, err := os.Stat(scratchPath); err != nil || !info.Mode().IsRegular() {
 				t.Fatalf("canonical dev scratch store %s: info=%v err=%v", scratchPath, info, err)
 			}
@@ -354,7 +356,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 		assertGoldenProcessHasNoExternalExecutables(t, invocationEnv)
 
 		refused := runReleaseCommand(t, goldenStartupTimeout, invocationRoot, invocationEnv, "", binaryPath,
-			"serve", "--dev", "--contracts", contracts,
+			"serve", contracts, "--dev",
 			"--backend", "claude_cli", "--workspace-backend", "host",
 			"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
 			"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
@@ -374,7 +376,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 		borrowed := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
 			WorkingDir: invocationRoot,
-			Contracts:  contracts,
+			Source:     contracts,
 			APIPort:    freeReleaseTCPPort(t),
 			MCPPort:    freeReleaseTCPPort(t),
 			TokenFile:  "api-token",
@@ -399,6 +401,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 		local := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
 			WorkingDir: projectRoot,
+			Source:     contracts,
 			Dev:        true,
 			APIPort:    freeReleaseTCPPort(t),
 			MCPPort:    freeReleaseTCPPort(t),
@@ -416,7 +419,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 		if err := local.stopAndWait(5 * time.Second); err != nil {
 			t.Fatalf("remediated local dev teardown: %v\n%s", err, local.output.String())
 		}
-		if _, err := os.Stat(filepath.Join(projectRoot, ".swarm", "stores", "dev-scratch.db")); err != nil {
+		if _, err := os.Stat(filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db")); err != nil {
 			t.Fatalf("remediated local dev scratch store: %v", err)
 		}
 	})
@@ -553,7 +556,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
-	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", "--config", configOperand, "--contracts", contractsOperand, "--json")
+	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -570,7 +573,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 			BinaryPath: binaryPath,
 			WorkingDir: projectRoot,
 			ConfigPath: configOperand,
-			Contracts:  contractsOperand,
+			Source:     contractsOperand,
 			Store:      store.name,
 			APIPort:    apiPort,
 			MCPPort:    mcpPort,
@@ -604,7 +607,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 	t.Helper()
 	root := filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload")
-	path := filepath.Join(root, "flows", "candidate", "agents.yaml")
+	path := filepath.Join(root, "candidate", "agents.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read golden child agent declaration: %v", err)
@@ -621,20 +624,20 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 		t.Fatal("golden child agent must not carry a redundant id; #2169 owns logical-key materialization")
 	}
 	for _, relativePath := range []string{
-		filepath.Join("mocks", "candidate.py"),
-		filepath.Join("mocks", "scout.py"),
+		filepath.Join("candidate", "mocks", "candidate.py"),
+		filepath.Join("scout", "mocks", "scout.py"),
 	} {
 		info, err := os.Stat(filepath.Join(root, relativePath))
 		if err != nil || !info.Mode().IsRegular() {
-			t.Fatalf("golden package-owned mock %s is not one regular file: info=%v err=%v", relativePath, info, err)
+			t.Fatalf("golden flow-owned mock %s is not one regular file: info=%v err=%v", relativePath, info, err)
 		}
 	}
 	packageManifest := strings.Join([]string{"package", "yaml"}, ".")
 	for _, relativePath := range []string{
-		filepath.Join("flows", "candidate", packageManifest),
-		filepath.Join("flows", "candidate", "mocks", "candidate.py"),
-		filepath.Join("flows", "scout", packageManifest),
-		filepath.Join("flows", "scout", "mocks", "scout.py"),
+		filepath.Join("candidate", packageManifest),
+		filepath.Join("scout", packageManifest),
+		filepath.Join("mocks", "candidate.py"),
+		filepath.Join("mocks", "scout.py"),
 	} {
 		if _, err := os.Stat(filepath.Join(root, relativePath)); err == nil {
 			t.Fatalf("obsolete nested golden mock owner returned at %s", relativePath)
@@ -742,8 +745,8 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
 		t.Fatal(err)
 	}
 	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != "mock_only" ||
-		health.Bundle.WorkflowName != "golden-agent-workload" || health.Bundle.WorkflowVersion != "1.0.0" || strings.TrimSpace(health.Bundle.BundleHash) == "" {
-		t.Fatalf("health.check = %#v, want ready golden-agent-workload@1.0.0 in mock_only posture", health)
+		health.Bundle.WorkflowName != "." || health.Bundle.WorkflowVersion != health.Bundle.BundleHash || strings.TrimSpace(health.Bundle.BundleHash) == "" {
+		t.Fatalf("health.check = %#v, want ready root flow at the exact admitted bundle hash in mock_only posture", health)
 	}
 	return health.Bundle.BundleHash
 }
@@ -1499,7 +1502,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 	payloadCandidateIDs := goldenPayloadCandidateIDs(candidateIDs)
 	search := goldenSingleNamedEvent(t, events, "search.requested")
 	assertGoldenExactPayload(t, search, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
-	assertGoldenSingleDelivery(t, search, "node", "search-intake", "materializing_entity", "golden-agent-workload", entities.root)
+	assertGoldenSingleDelivery(t, search, "node", "search-intake", "materializing_entity", ".", entities.root)
 
 	scoutRequested := goldenSingleNamedEvent(t, events, "scout.requested")
 	assertGoldenExactPayload(t, scoutRequested, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
@@ -1518,7 +1521,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 		t.Errorf("mixed scout completion = %#v, want two independently targeted deliveries and no singular entity projection", scoutCompleted)
 	}
 	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-completion", "existing_entity", "scout", entities.scout)
-	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-collector", "existing_entity", "golden-agent-workload", entities.root)
+	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-collector", "existing_entity", ".", entities.root)
 
 	candidateRequested := goldenNamedEvents(t, events, "candidate.requested", len(candidateIDs))
 	candidateWork := goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(candidateIDs))
@@ -1538,7 +1541,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 
 		completed := goldenSingleNamedEvent(t, events, entity.FlowInstance+"/candidate.completed")
 		assertGoldenCandidatePayload(t, completed, candidateID, true)
-		assertGoldenSingleDelivery(t, completed, "node", "candidate-collector", "existing_entity", "golden-agent-workload", entities.root)
+		assertGoldenSingleDelivery(t, completed, "node", "candidate-collector", "existing_entity", ".", entities.root)
 	}
 }
 
@@ -1677,8 +1680,8 @@ func goldenNodeDeliveryForTarget(t *testing.T, event goldenEvent, subscriberID, 
 
 func goldenCanonicalNodeID(key string) (string, error) {
 	parts := strings.Split(key, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("canonical node key has %d coordinates, want 3", len(parts))
+	if len(parts) != 2 {
+		return "", fmt.Errorf("canonical node key has %d coordinates, want flow path and node", len(parts))
 	}
 	decoded := make([]string, len(parts))
 	for index, coordinate := range parts {
@@ -1691,10 +1694,10 @@ func goldenCanonicalNodeID(key string) (string, error) {
 		}
 		decoded[index] = string(value)
 	}
-	if decoded[0] == "" || decoded[2] == "" {
-		return "", fmt.Errorf("canonical node key requires package and node identity")
+	if decoded[0] == "" || decoded[1] == "" {
+		return "", fmt.Errorf("canonical node key requires flow path and node identity")
 	}
-	return decoded[2], nil
+	return decoded[1], nil
 }
 
 func TestGoldenAgentWorkloadFixtureHasSingleMockOwner(t *testing.T) {

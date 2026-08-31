@@ -1,3 +1,0 @@
-grandchild.check:
-  score: integer?
-grandchild.passed: {}

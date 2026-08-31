@@ -113,33 +113,6 @@ func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *tes
 	}
 }
 
-func TestActiveHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
-	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, ""))
-	node := identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener")
-	active := activeHandlerResolution(source, node, "producer/task.done")
-	if active.AccumulatorName != "" || active.AuthoredEventType != "" || active.CanonicalEventType != "" {
-		t.Fatalf("active handler = %#v, want empty for ungranted sibling event", active)
-	}
-	if handlerEventMatches(source, node, "**/task.done", "producer/task.done", active) {
-		t.Fatal("handlerEventMatches accepted ungranted sibling event")
-	}
-}
-
-func TestActiveHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
-	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, "      observe:\n        - source: producer\n          events: [task.done]\n"))
-	node := identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener")
-	active := activeHandlerResolution(source, node, "producer/task.done")
-	if got := active.AccumulatorName; got != "tasks" {
-		t.Fatalf("ActiveAccumulatorName = %q, want tasks", got)
-	}
-	if got := active.AuthoredEventType; got != "**/task.done" {
-		t.Fatalf("ActiveAuthoredEventType = %q, want **/task.done", got)
-	}
-	if !handlerEventMatches(source, node, "**/task.done", "producer/task.done", active) {
-		t.Fatal("handlerEventMatches denied granted sibling event")
-	}
-}
-
 func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "tasks"}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -156,6 +129,41 @@ func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testin
 	}
 }
 
+func TestValidateEventTypedViewDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"score.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"score": {Type: "integer"}}}},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+	binding := Binding{
+		SourceNode:      identitytest.FlowNode(t, "child", "scorer"),
+		SourceEventType: "score.completed",
+		AccumulatorName: "scores",
+		SourceNamedType: runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+	}
+
+	issues := validateEventTypedView(semanticview.Wrap(bundle), runtimecontracts.TypeCatalogDocument{}, binding)
+	if !issuesContain(issues, "no event catalog entry exists") {
+		t.Fatalf("cross-flow event schema issues = %#v, want unknown source event", issues)
+	}
+}
+
 func issuesContain(issues []Issue, want string) bool {
 	for _, issue := range issues {
 		if strings.Contains(issue.Message, want) {
@@ -168,17 +176,9 @@ func issuesContain(issues []Issue, want string) bool {
 func loadProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
-	writeProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: projection-flow
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: static
-`)
+
 	writeProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 initial_state: discovered
 states: [discovered, scored]
@@ -188,25 +188,25 @@ pins:
     events:
       - score.dimension_complete
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "types.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
 types:
   DimensionScore:
     dimension: text
     score: integer
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 vertical:
   scores:
     type: "[DimensionScore]"
     initial: []
     materialize_from: scoring-node.dimensions_received
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
 score.dimension_complete:
   dimension: text
   score: integer
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
   id: scoring-node
   execution_type: system_node
@@ -217,78 +217,6 @@ scoring-node:
   state_schema:
     fields:
       dimensions_received: "[DimensionScore]"
-`)
-
-	repoRoot := repoRootForProjectionTest(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return bundle
-}
-
-func loadProjectionImportBoundaryWildcardBundle(t *testing.T, observeGrant string) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	root := t.TempDir()
-	workerBind := ""
-	if strings.TrimSpace(observeGrant) != "" {
-		workerBind = "    bind:\n" + observeGrant
-	}
-	writeProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: projection-import-boundary-wildcard
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-`+workerBind+`  - id: producer
-    flow: producer
-    mode: static
-`)
-	writeProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-import-boundary-wildcard\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
-name: worker
-mode: static
-initial_state: active
-states: [active, done]
-terminal_states: [done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), `
-task.done:
-  task_id: text
-`)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
-worker-listener:
-  id: worker-listener
-  execution_type: system_node
-  subscribes_to: ["**/task.done"]
-  event_handlers:
-    "**/task.done":
-      accumulate:
-        into: tasks
-  state_schema:
-    fields:
-      tasks: text
-`)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "package.yaml"), "name: producer\nversion: \"1.0.0\"\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-initial_state: active
-states: [active, done]
-terminal_states: [done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
-task.done:
-  task_id: text
 `)
 
 	repoRoot := repoRootForProjectionTest(t)

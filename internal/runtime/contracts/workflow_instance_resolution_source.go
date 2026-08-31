@@ -100,7 +100,7 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog
 	switch source.Kind {
 	case FlowInputInstanceSourcePayload:
 		sourceField := strings.TrimPrefix(source.Path, "payload.")
-		resolved, required, ok := resolveFlowInputInstanceEventFieldType(b, eventCatalog, flowID, pin.EventType(), sourceField)
+		resolved, required, ok := resolveFlowInputInstanceEventFieldType(b, eventCatalog, flowID, pin, sourceField)
 		if !ok {
 			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %s has no declared type on input event %s", source.Path, pin.EventType())
 		}
@@ -122,13 +122,23 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog
 	return evidence, nil
 }
 
-func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, eventCatalog FlowInputInstanceEventCatalog, flowID, eventType, field string) (CatalogTypeReference, bool, bool) {
+func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, eventCatalog FlowInputInstanceEventCatalog, flowID string, pin CompiledFlowInputPin, field string) (CatalogTypeReference, bool, bool) {
+	eventType := pin.EventType()
+	producerFlowID := strings.TrimSpace(flowID)
+	if producerSchema, ok := pin.ProducerEventSchema(); ok {
+		eventType = producerSchema.EventName()
+		if bundle != nil {
+			if resolvedFlowID := eventSchemaFlowIDForPath(bundle, producerSchema.FlowPath()); resolvedFlowID != "" {
+				producerFlowID = resolvedFlowID
+			}
+		}
+	}
 	var entry EventCatalogEntry
 	var ok bool
 	if eventCatalog != nil {
-		entry, _, ok = eventCatalog.ResolveFlowEventCatalogEntry(flowID, eventType)
+		entry, _, ok = eventCatalog.ResolveFlowEventCatalogEntry(producerFlowID, eventType)
 	} else if bundle != nil {
-		entry, _, ok = bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+		entry, _, ok = bundle.ResolveFlowEventCatalogEntry(producerFlowID, eventType)
 	}
 	if !ok {
 		return CatalogTypeReference{}, false, false
@@ -139,7 +149,7 @@ func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, even
 	}
 	var catalog TypeCatalogDocument
 	if bundle != nil {
-		catalog = bundle.ResolvedTypeCatalogForFlow(flowID)
+		catalog = bundle.ResolvedTypeCatalogForFlow(producerFlowID)
 	}
 	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, slices.Contains(entry.Payload.Required, strings.TrimSpace(field)), true
 }

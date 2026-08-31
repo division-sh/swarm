@@ -1,0 +1,4 @@
+name: test-atomicity-commit
+version: 1.0.0
+description: Handler advances_to, sets_gate, and emits all commit atomically together.
+platform_version: ">=0.7.0 <0.8.0"

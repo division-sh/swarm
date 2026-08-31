@@ -15,10 +15,7 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -95,10 +92,7 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{

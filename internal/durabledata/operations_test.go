@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const aggregateTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const aggregateTestBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestDeclarationSummaryClosesHeadAndInventoryStates(t *testing.T) {
 	ref, err := ParseDeclarationRef(".", "records.loaded")
@@ -374,8 +374,8 @@ func TestPermanentReceiptAggregateValidatorsRejectHostileContradictions(t *testi
 			r.Binding.Evidence.Items[1].Import.Operation = "check"
 		}},
 		{name: "bound import parent bundle", mutate: func(r *RunCreationOperationRecord) {
-			r.Evidence.RunBinding[1].Import.BundleHash = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-			r.Binding.Evidence.Items[1].Import.BundleHash = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			r.Evidence.RunBinding[1].Import.BundleHash = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			r.Binding.Evidence.Items[1].Import.BundleHash = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 		}},
 		{name: "event identity", mutate: func(r *RunCreationOperationRecord) { r.Summary.EventID = uuid.NewString() }},
 	} {

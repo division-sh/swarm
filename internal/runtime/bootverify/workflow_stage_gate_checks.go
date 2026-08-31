@@ -39,7 +39,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		}
 		states := normalizedGateSet(c.source.FlowStates(flowID))
 		terminal := normalizedGateSet(c.source.FlowTerminalStages(flowID))
-		if flowID == "" {
+		if flowID == "." {
 			states = normalizedGateSet(workflowStageIDs(c.source.WorkflowStages()))
 			terminal = normalizedGateSet(c.source.WorkflowTerminalStages())
 		}
@@ -103,9 +103,6 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 	}
 	eventType := strings.TrimSpace(outcome.Emit.EventType())
 	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(plan.FlowID, eventType)
-	if !ok {
-		entry, ok = c.source.EventEntry(eventType)
-	}
 	if !ok {
 		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s emits unknown event %s", verdict, eventType))}
 	}
@@ -231,7 +228,7 @@ func workflowStageIDs(stages []runtimecontracts.WorkflowStageContract) []string 
 }
 
 func stageGateLocation(flowID, stage, decision string) string {
-	if strings.TrimSpace(flowID) == "" {
+	if strings.TrimSpace(flowID) == "." {
 		flowID = "root"
 	}
 	return fmt.Sprintf("flow %s stage %s gate %s", flowID, stage, decision)

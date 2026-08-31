@@ -1,1 +1,5 @@
 name: template-select-or-create
+connect:
+  - event: account.ready
+    from: producer
+    to: account

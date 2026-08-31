@@ -43,30 +43,28 @@ func (p TeardownPhase) Terminal() bool { return p == TeardownSucceeded || p == T
 type TeardownScope struct {
 	Interface                    operatorchannel.InterfaceIdentity `json:"interface"`
 	BundleHash                   string                            `json:"bundle_hash,omitempty"`
-	BundleSource                 string                            `json:"bundle_source,omitempty"`
 	ContextPublicationGeneration uint64                            `json:"context_publication_generation,omitempty"`
 }
 
 func (s TeardownScope) normalized() TeardownScope {
 	s.Interface = s.Interface.Normalized()
 	s.BundleHash = strings.TrimSpace(s.BundleHash)
-	s.BundleSource = strings.TrimSpace(s.BundleSource)
 	return s
 }
 
 func (s TeardownScope) Validate(kind TeardownKind) error {
 	s = s.normalized()
 	if kind == TeardownContextRetirement {
-		if s.BundleHash == "" || (s.BundleSource != "persisted" && s.BundleSource != "ephemeral") || s.ContextPublicationGeneration == 0 {
-			return fmt.Errorf("%w: context retirement requires exact bundle source and publication identity", ErrInvalidRequest)
+		if s.BundleHash == "" || s.ContextPublicationGeneration == 0 {
+			return fmt.Errorf("%w: context retirement requires exact source artifact and publication identity", ErrInvalidRequest)
 		}
 		return nil
 	}
 	if err := s.Interface.Validate(); err != nil {
 		return fmt.Errorf("%w: teardown interface: %v", ErrInvalidRequest, err)
 	}
-	if (s.BundleHash == "") != (s.BundleSource == "") || (s.BundleHash == "") != (s.ContextPublicationGeneration == 0) {
-		return fmt.Errorf("%w: teardown bundle hash, source, and publication generation must be supplied together", ErrInvalidRequest)
+	if (s.BundleHash == "") != (s.ContextPublicationGeneration == 0) {
+		return fmt.Errorf("%w: teardown bundle hash and publication generation must be supplied together", ErrInvalidRequest)
 	}
 	return nil
 }
@@ -305,14 +303,14 @@ func (s *DestructiveService) exactTeardownReplay(ctx context.Context, kind Teard
 	return false, nil
 }
 
-func (s *DestructiveService) RetireContext(ctx context.Context, bundleHash, bundleSource string, publicationGeneration uint64, requestKey, requestHash, reason string) (TeardownOperation, error) {
+func (s *DestructiveService) RetireContext(ctx context.Context, bundleHash string, publicationGeneration uint64, requestKey, requestHash, reason string) (TeardownOperation, error) {
 	principal, err := s.identities.Principal()
 	if err != nil {
 		return TeardownOperation{}, err
 	}
 	op, err := s.store.ReserveChannelTeardown(ctx, ReserveTeardownRequest{
 		TeardownID: uuid.NewString(), RequestKeyHash: requestKey, RequestHash: requestHash, Kind: TeardownContextRetirement,
-		PrincipalID: principal.ID, Scope: TeardownScope{BundleHash: bundleHash, BundleSource: bundleSource, ContextPublicationGeneration: publicationGeneration}, RequestedAt: s.now().UTC(),
+		PrincipalID: principal.ID, Scope: TeardownScope{BundleHash: bundleHash, ContextPublicationGeneration: publicationGeneration}, RequestedAt: s.now().UTC(),
 	})
 	if err != nil {
 		return TeardownOperation{}, err
@@ -361,7 +359,7 @@ func (s *DestructiveService) Recover(ctx context.Context) error {
 		case TeardownInterfaceRetirement:
 			_, err = s.RetireInterface(resumeCtx, op.Scope.Interface, op.RequestKeyHash, op.RequestHash, "interface_retired")
 		case TeardownContextRetirement:
-			_, err = s.RetireContext(resumeCtx, op.Scope.BundleHash, op.Scope.BundleSource, op.Scope.ContextPublicationGeneration, op.RequestKeyHash, op.RequestHash, "runtime_context_retired")
+			_, err = s.RetireContext(resumeCtx, op.Scope.BundleHash, op.Scope.ContextPublicationGeneration, op.RequestKeyHash, op.RequestHash, "runtime_context_retired")
 		default:
 			err = fmt.Errorf("%w: unsupported teardown kind %q", ErrConflict, op.Kind)
 		}
@@ -421,7 +419,6 @@ func teardownScopeMatchesOperation(scope TeardownScope, operation Operation) boo
 		return scope.Interface.Normalized() == operation.Interface.Normalized()
 	}
 	return scope.BundleHash == operation.Coordinate.BundleHash &&
-		scope.BundleSource == operation.Coordinate.BundleSource &&
 		scope.ContextPublicationGeneration == operation.Coordinate.ContextPublicationGeneration
 }
 

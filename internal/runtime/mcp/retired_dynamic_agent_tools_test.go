@@ -92,7 +92,7 @@ func retiredToolConversationForkAuthority() runtimeeffects.Authority {
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
 			ForkTurnID:          forkTurnID,
 			ForkID:              uuid.NewString(),
-			BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
+			BundleHash:          "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			ActorTokenID:        "retired-tool-test",
 			RequestOccurrenceID: uuid.NewString(),
 			RequestHash:         "retired-tool-test",

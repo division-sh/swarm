@@ -13,10 +13,7 @@ func TestBuildSelectedContractRouteTopologyConsumesRouteAdmissionAsPrerequisite(
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -71,10 +68,7 @@ func TestBuildSelectedContractRouteTopologyFailsClosedOnDynamicFlowInstances(t *
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -112,10 +106,7 @@ func TestBuildSelectedContractRouteTopologyRequiresFrontierCorroborationForDynam
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -161,10 +152,7 @@ func TestBuildSelectedContractRouteTopologyProvesDynamicFlowInstancesFromForkLoc
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -227,10 +215,7 @@ func TestBuildSelectedContractRecipientPlanningConsumesRouteTopology(t *testing.
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -288,10 +273,7 @@ func TestBuildSelectedContractRecipientPlanningConsumesProvenDynamicTopology(t *
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -340,10 +322,7 @@ func TestBuildSelectedContractRecipientPlanningKeepsDynamicTopologyBlocked(t *te
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -380,10 +359,7 @@ func TestBuildSelectedContractExecutionModelConsumesRouteTopologyAsTruth(t *test
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -473,10 +449,7 @@ func TestBuildSelectedContractExecutionModelCarriesFrontierBlockers(t *testing.T
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -518,10 +491,7 @@ func TestBuildSelectedContractExecutionModelRequiresCanonicalRouteTopology(t *te
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	}
 	routeAdmission := testSelectedContractRouteAdmission(admission)
@@ -544,10 +514,7 @@ func TestBuildSelectedContractExecutionModelRejectsForgedDynamicRouteTopology(t 
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -583,10 +550,7 @@ func TestBuildSelectedContractExecutionModelRejectsForgedRouteAdmissionBlockerTo
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	}
 	routeAdmission := testSelectedContractRouteAdmission(admission)
@@ -609,10 +573,7 @@ func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFron
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
@@ -640,10 +601,7 @@ func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFlow
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/contracts",
-			WorkflowName:    "workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 		FrontierEventCount: 1,
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{

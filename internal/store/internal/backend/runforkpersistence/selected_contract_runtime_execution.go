@@ -57,7 +57,7 @@ type postgresDialect struct{}
 func (postgresDialect) placeholder(n int) string { return fmt.Sprintf("$%d", n) }
 func (postgresDialect) uuid(v string) string     { return v }
 func (postgresDialect) lockBindingSQL() string {
-	return `SELECT binding_id::text, source_run_id::text, fork_event_id::text, mode, COALESCE(contracts_root,''), COALESCE(bundle_hash,''), workflow_name, workflow_version FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1::uuid FOR UPDATE`
+	return `SELECT binding_id::text, source_run_id::text, fork_event_id::text, mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1::uuid FOR UPDATE`
 }
 func (postgresDialect) currentSQL() string {
 	return `SELECT execution_id::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND state <> 'closed'`
@@ -74,7 +74,7 @@ type sqliteDialect struct{}
 func (sqliteDialect) placeholder(n int) string { return "?" }
 func (sqliteDialect) uuid(v string) string     { return v }
 func (sqliteDialect) lockBindingSQL() string {
-	return `SELECT binding_id, source_run_id, fork_event_id, mode, COALESCE(contracts_root,''), COALESCE(bundle_hash,''), workflow_name, workflow_version FROM run_fork_selected_contract_bindings WHERE fork_run_id=?`
+	return `SELECT binding_id, source_run_id, fork_event_id, mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=?`
 }
 func (sqliteDialect) currentSQL() string {
 	return `SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=? AND state <> 'closed'`
@@ -103,15 +103,15 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if !req.ExecutionMode.Valid() {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance requires an exact execution mode")
 	}
-	var bindingID, sourceRunID, forkEventID, mode, contractsRoot, bundleHash, workflowName, workflowVersion string
+	var bindingID, sourceRunID, forkEventID, mode, bundleHash string
 	if err := tx.QueryRowContext(ctx, dialect.lockBindingSQL(), dialect.uuid(admission.ForkRunID)).Scan(
-		&bindingID, &sourceRunID, &forkEventID, &mode, &contractsRoot, &bundleHash, &workflowName, &workflowVersion,
+		&bindingID, &sourceRunID, &forkEventID, &mode, &bundleHash,
 	); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("lock selected-contract runtime binding: %w", err)
 	}
 	if sourceRunID != admission.SourceRunID || forkEventID != admission.ForkEventID ||
-		mode != admission.ContractSelection.Mode || strings.TrimSpace(contractsRoot) != strings.TrimSpace(admission.ContractSelection.ContractsRoot) ||
-		strings.TrimSpace(bundleHash) != strings.TrimSpace(admission.ContractSelection.BundleHash) || workflowName != admission.ContractSelection.WorkflowName || workflowVersion != admission.ContractSelection.WorkflowVersion {
+		mode != admission.ContractSelection.Mode ||
+		strings.TrimSpace(bundleHash) != strings.TrimSpace(admission.ContractSelection.BundleHash) {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime admission does not match durable binding")
 	}
 	var current string

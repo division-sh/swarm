@@ -42,7 +42,7 @@ const sqliteAgentRegistryQuery = `
 			       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
 			       lifecycle_process_authority_id, lifecycle_process_owner_id,
 			       lifecycle_process_boot_id, lifecycle_generation_grant_id,
-			       lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_bundle_hash,
 			       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 			       topology_admission
 		FROM agents
@@ -66,7 +66,7 @@ func scanSQLiteAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
 			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt, &rec.LifecycleEpoch, &lifecycleGeneration, &rec.LifecyclePhase, &rec.LifecycleRunMode,
 			&rec.ProcessBinding.ProcessAuthorityID, &rec.ProcessBinding.ProcessOwnerID,
 			&rec.ProcessBinding.ProcessBootID, &rec.ProcessBinding.GenerationGrantID,
-			&rec.ProcessBinding.BundleHash, &rec.ProcessBinding.BundleSource,
+			&rec.ProcessBinding.BundleHash,
 			&rec.ProcessBinding.RuntimeInstanceID, &rec.ProcessBinding.RuntimeGeneration,
 			&topologyRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent: %w", err)

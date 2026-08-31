@@ -13,7 +13,6 @@ type SourceSetOperation string
 const (
 	OperationInstallCompleteSourceSet      SourceSetOperation = "install_complete_source_set"
 	OperationRestoreSourceSet              SourceSetOperation = "restore_source_set"
-	OperationRemoveBundleSource            SourceSetOperation = "remove_bundle_source"
 	OperationApplyDestructiveResetTopology SourceSetOperation = "apply_destructive_reset_topology"
 )
 
@@ -22,13 +21,12 @@ type SourceSetCommitRequest struct {
 	OperationID      string             `json:"operation_id"`
 	ExpectedRevision string             `json:"expected_revision,omitempty"`
 	Plan             SourceSetPlan      `json:"plan"`
-	RemovedSource    *SourceCoordinate  `json:"removed_source,omitempty"`
 }
 
 func (r SourceSetCommitRequest) Validate() error {
 	switch r.Operation {
 	case OperationInstallCompleteSourceSet, OperationRestoreSourceSet,
-		OperationRemoveBundleSource, OperationApplyDestructiveResetTopology:
+		OperationApplyDestructiveResetTopology:
 	default:
 		return fmt.Errorf("agent topology source-set operation %q is invalid", r.Operation)
 	}
@@ -40,19 +38,12 @@ func (r SourceSetCommitRequest) Validate() error {
 	}
 	switch r.Operation {
 	case OperationInstallCompleteSourceSet:
-		if strings.TrimSpace(r.ExpectedRevision) != "" || r.RemovedSource != nil {
-			return errors.New("initial source-set installation cannot carry predecessor or removed-source facts")
-		}
-	case OperationRemoveBundleSource:
-		if strings.TrimSpace(r.ExpectedRevision) == "" || r.RemovedSource == nil {
-			return errors.New("bundle-source removal requires expected revision and exact removed source")
-		}
-		if err := r.RemovedSource.Validate(); err != nil {
-			return err
+		if strings.TrimSpace(r.ExpectedRevision) != "" {
+			return errors.New("initial source-set installation cannot carry a predecessor")
 		}
 	default:
-		if strings.TrimSpace(r.ExpectedRevision) == "" || r.RemovedSource != nil {
-			return fmt.Errorf("source-set operation %q requires one expected revision and no removed-source fact", r.Operation)
+		if strings.TrimSpace(r.ExpectedRevision) == "" {
+			return errors.New("source-set replacement requires one expected revision")
 		}
 	}
 	return nil

@@ -54,16 +54,16 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 	providers := providerRawSettlementCases()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db := openProviderRawSettlementStore(t, backend)
 			for providerIndex, provider := range providers {
 				t.Run(provider.provider, func(t *testing.T) {
+					selected, db := openProviderRawSettlementStore(t, backend)
 					runID := uuid.NewString()
 					entityID := uuid.NewString()
-					flowInstance := fmt.Sprintf("bounded-inbound-%s-%s", provider.provider, backend)
+					flowInstance := boundedProviderFlowID
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 					target := seedProviderRawSettlementRuntime(t, ctx, selected, db, runID, entityID, flowInstance, provider.provider, secret, "")
-					source := providerRawSettlementSemanticSource(target.FlowID, flowInstance, provider.eventName)
+					source := providerRawSettlementSemanticSource(target.FlowPath, provider.eventName)
 					for _, realSubscriber := range []bool{false, true} {
 						outcome := "zero_consumer"
 						if realSubscriber {
@@ -74,7 +74,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							agentID := ""
 							if realSubscriber {
 								agentID = provider.provider + "-" + backend + "-raw-subscriber"
-								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowID, flowInstance, entityID, agentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowPath, flowInstance, entityID, agentID, provider.eventName)
 							}
 							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, provider.eventName)
 							if err != nil {
@@ -82,7 +82,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							}
 							var deliveries <-chan *runtimebus.LocalDelivery
 							if realSubscriber {
-								deliveries = subscribeProviderRawSettlementAgent(t, bus, target.FlowID, flowInstance, agentID, provider.eventName)
+								deliveries = subscribeProviderRawSettlementAgent(t, bus, source, target.FlowPath, flowInstance, agentID, provider.eventName)
 							}
 							gateway := newTestInboundGateway(t, bus, nil, nil, selected)
 							response := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 								if got.ID() != rawEventID {
 									t.Fatalf("dispatched raw event = %s, want %s", got.ID(), rawEventID)
 								}
-								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowID, flowInstance, agentID))
+								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowPath, flowInstance, agentID))
 								waitForInboundBusQuiescence(t, bus)
 							} else {
 								waitForInboundBusQuiescence(t, bus)
@@ -127,15 +127,15 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 
 							if !realSubscriber {
 								replayAgentID := provider.provider + "-" + backend + "-current-topology-only"
-								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowID, flowInstance, entityID, replayAgentID, provider.eventName)
-								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, target.FlowID, flowInstance, replayAgentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowPath, flowInstance, entityID, replayAgentID, provider.eventName)
+								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, source, target.FlowPath, flowInstance, replayAgentID, provider.eventName)
 								if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 									Event: record.Events[0].Event, Scope: runtimepipelineobligation.ScopeSubscribed,
 								}, nil); err != nil {
 									t.Fatalf("RecoverPersistedPipeline: %v", err)
 								}
 								requireNoInboundBusEvent(t, replayDeliveries, "consumerless raw committed replay")
-								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowID, flowInstance, replayAgentID))
+								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowPath, flowInstance, replayAgentID))
 								waitForInboundBusQuiescence(t, bus)
 							}
 						})
@@ -240,9 +240,9 @@ func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected 
 	}
 }
 
-func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
+func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, source semanticview.Source, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID: agentID, FlowID: flowID, FlowPath: flowInstance, Subscriptions: []string{eventName},
 	})
 	if err != nil {
@@ -280,22 +280,24 @@ func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selecte
 	}
 }
 
-func providerRawSettlementSemanticSource(flowID, flowInstance, eventName string) semanticview.Source {
+func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.Source {
 	pin := runtimecontracts.FlowInputEventPin{Event: eventName, Source: runtimecontracts.FlowInputPinSourceExternal}
 	schema := runtimecontracts.FlowSchemaDocument{
 		Name: flowID, Mode: runtimecontracts.FlowModeStatic,
 		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{pin}}},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: runtimecontracts.FlowModeStatic},
-		Path:  flowInstance, Schema: schema,
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID}, Path: flowID, Schema: schema,
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	admittedFlow := &root.Children[0]
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Package:     runtimecontracts.ProjectPackageDocument{Name: "provider_raw_settlement", Version: "1.0.0"},
+		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "provider_raw_settlement", Version: "1.0.0"},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: schema},
 		FlowTree: runtimecontracts.FlowTree{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+			Root:   &root,
+			ByID:   map[string]*runtimecontracts.FlowContractView{flowID: admittedFlow},
+			ByPath: map[string]*runtimecontracts.FlowContractView{flowID: admittedFlow},
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {

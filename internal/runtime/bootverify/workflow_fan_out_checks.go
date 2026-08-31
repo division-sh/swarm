@@ -30,7 +30,7 @@ func (c *checkerContext) fanOutValidation() []Finding {
 }
 
 func (c *checkerContext) validateFanOutPlan(plan runtimecontracts.FanOutCompiledPlan) []Finding {
-	flowID := plan.Site.Node.FlowID()
+	flowID := plan.Site.Node.FlowPath()
 	nodeID := plan.Site.Node.Key()
 	eventType := strings.TrimSpace(plan.Site.EventType)
 	siteSource := fanOutPlanSiteSource(plan.Site)

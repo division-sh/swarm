@@ -17,7 +17,6 @@ import (
 func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	allowedWrites := map[string]bool{
-		"internal/store/internal/backend/runlifecycle/bundle_source.go":                  true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go":       true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go": true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_state_adapter.go":    true,

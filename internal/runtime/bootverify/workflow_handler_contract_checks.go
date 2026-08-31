@@ -159,7 +159,7 @@ func (c *checkerContext) validateWorkflowActionSpec(node runtimeidentity.Executa
 		findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox declaration requires action mailbox_write"))
 	}
 	if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
-		findings = append(findings, validateArtifactRepoActionSpec(c.source, node.FlowID(), nodeID, eventContext, action)...)
+		findings = append(findings, validateArtifactRepoActionSpec(c.source, node.FlowPath(), nodeID, eventContext, action)...)
 	} else if action.ArtifactRepo != nil {
 		findings = append(findings, handlerActionFinding(nodeID, eventContext, "artifact_repo declaration requires action artifact_repo_commit"))
 	}
@@ -188,7 +188,7 @@ func recordEvidenceMissingTargetMessage(c *checkerContext, node runtimeidentity.
 	if len(declared) > 0 {
 		targets = strings.Join(declared, ", ")
 	}
-	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", defaultFlowLabel(node.FlowID()), targets)
+	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", defaultFlowLabel(node.FlowPath()), targets)
 }
 
 // declaredEvidenceTargetsForFlow returns the sorted set of evidence_target
@@ -198,7 +198,7 @@ func (c *checkerContext) declaredEvidenceTargetsForFlow(owner runtimeidentity.Ex
 	declared := map[string]struct{}{}
 	for _, record := range c.source.ExecutableNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || node.PackageKey() != owner.PackageKey() || node.FlowID() != owner.FlowID() {
+		if err != nil || node.FlowPath() != owner.FlowPath() {
 			continue
 		}
 		for _, handler := range c.source.ExecutableNodeEventHandlers(node) {
@@ -599,12 +599,6 @@ func artifactRepoResultEventEntry(source semanticview.Source, flowID, resultEven
 		return runtimecontracts.EventCatalogEntry{}, false
 	}
 	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, resultEvent); ok {
-		return entry, true
-	}
-	if entry, ok := source.EventEntry(resultEvent); ok {
-		return entry, true
-	}
-	if entry, ok := source.ResolvedEventCatalog()[resultEvent]; ok {
 		return entry, true
 	}
 	return runtimecontracts.EventCatalogEntry{}, false

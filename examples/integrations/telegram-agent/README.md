@@ -1,21 +1,21 @@
 # Telegram Agent
 
-This example is one conversational Telegram bot. The `bot/` package runs locally with deterministic mock responses. The repository root adds signed standing webhook ingress for deployment. Both entrypoints use the same chat flow.
+This example is one conversational Telegram bot. The selected root contains the signed standing ingress and its `bot/telegram-chat` child flow. The mock configuration runs the complete flow tree locally with deterministic responses.
 
 ## Scaffold And Run
 
 ```sh
 swarm new webhook-responder --output telegram-agent
-cd telegram-agent/bot
-swarm verify --config ./swarm.yaml --contracts .
-swarm serve --config ./swarm.yaml --contracts .
+cd telegram-agent
+swarm verify . --config ./swarm.yaml
+swarm serve . --config ./swarm.yaml
 ```
 
 In another terminal:
 
 ```sh
-cd telegram-agent/bot
-swarm test --config ./swarm.yaml --contracts . ./tests/smoke.yaml
+cd telegram-agent
+swarm test . tests/smoke.yaml --config ./swarm.yaml
 ```
 
 The checked source uses `mock_only`, needs no LLM or Telegram credentials, and sends no network request. Its first reply is:
@@ -39,7 +39,7 @@ Mock turn 3: after restart
 
 ## Go Live
 
-Live graduation is one explicit source edit. In `bot/flows/telegram-chat/agents.yaml`, change `phrase-bot` from:
+Live graduation is one explicit source edit. In `bot/telegram-chat/agents.yaml`, change `phrase-bot` from:
 
 ```yaml
 phrase-bot:
@@ -68,15 +68,14 @@ phrase-bot:
 
 Removing that exact `mock:` block changes the agent from mock-authored to live-authored. Changing only `llm.backend` does not override an authored mock.
 
-Return to the scaffold root and store the three live credentials:
+Store the three live credentials at the scaffold root:
 
 ```sh
-cd ../
 printf '%s' "$WEBHOOK_SIGNING_SECRET" | swarm secrets set webhook_signing.telegram --stdin
 printf '%s' "$TELEGRAM_BOT_TOKEN" | swarm secrets set telegram_bot_token --stdin
 printf '%s' "$ANTHROPIC_API_KEY" | swarm secrets set ANTHROPIC_API_KEY --stdin
-swarm verify --config ./swarm.live.yaml --contracts .
-swarm serve --config ./swarm.live.yaml --contracts . --dev --expose
+swarm verify . --config ./swarm.live.yaml
+swarm serve . --config ./swarm.live.yaml --dev --expose
 ```
 
 Read the ready output for the public `/webhooks/chat/telegram` URL. Register that exact URL and the same signing secret with Telegram's `setWebhook` API. Telegram POSTs are rejected unless `X-Telegram-Bot-Api-Secret-Token` matches `webhook_signing.telegram`.

@@ -1,0 +1,12 @@
+trigger:
+  event: support/support.requested
+  payload:
+expected:
+
+  handler_outcome: success
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_data_access_tools

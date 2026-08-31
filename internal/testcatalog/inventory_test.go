@@ -335,9 +335,9 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	for _, changedPath := range []string{
 		"internal/runtime/engine.go",
 		"internal/releasee2e/golden_agent_workload_test.go",
-		"internal/releasee2e/testdata/golden_agent_workload/package.yaml",
+		"internal/releasee2e/testdata/golden_agent_workload/manifest.yaml",
 		"internal/testcatalog/inventory.go",
-		"tests/tier1-primitives/test-advances-to/expected.yaml",
+		"tests/tier1-primitives/test-advances-to/tests/expected.yaml",
 		"platform-spec.yaml",
 	} {
 		profile, _, err := policy.ResolveProfile("pull_request", []string{changedPath}, "")
@@ -454,7 +454,7 @@ func writeInventoryFixture(t *testing.T, claims, expected string, companion bool
 	spec := "test_specification:\n  internal_catalog_conformance:\n    claims:\n" + claims
 	writeCatalogTestFile(t, filepath.Join(root, "platform-spec.yaml"), spec)
 	fixtureRoot := filepath.Join(root, "tests", "tier1", "test-case")
-	writeCatalogTestFile(t, filepath.Join(fixtureRoot, "expected.yaml"), expected)
+	writeCatalogTestFile(t, filepath.Join(fixtureRoot, "tests", "expected.yaml"), expected)
 	if companion {
 		writeCatalogTestFile(t, filepath.Join(fixtureRoot, "tests", "visible-smoke.yaml"), "name: smoke\n")
 	}
@@ -470,7 +470,7 @@ func writeExternalProofInventory(t *testing.T, proof, expected string) string {
 	if expected == "" {
 		expected = fixtureMetadata("runtime", "pass", "claim.runtime")
 	}
-	writeCatalogTestFile(t, filepath.Join(root, "tests", "tier1", "test-case", "expected.yaml"), expected)
+	writeCatalogTestFile(t, filepath.Join(root, "tests", "tier1", "test-case", "tests", "expected.yaml"), expected)
 	if err := os.MkdirAll(filepath.Join(root, "examples", "external"), 0o755); err != nil {
 		t.Fatalf("create external source: %v", err)
 	}

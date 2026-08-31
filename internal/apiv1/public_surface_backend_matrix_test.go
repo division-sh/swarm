@@ -202,17 +202,6 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability",
 		},
 		{
-			name: "fail closed row requires executable proof",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				row := publicSurfaceMatrixRowByID(t, matrix, "bundle_hash_catalog_boot_postgres_only")
-				row.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "artifact", Path: "platform-spec.yaml"},
-					{Kind: "tracker", Issue: 1239, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
-				}
-			},
-			want: "bundle_hash_catalog_boot_postgres_only fail-closed row requires at least one go_test proof_ref",
-		},
-		{
 			name: "api idempotency row requires run.start proof",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "api_idempotency_selected_store")
@@ -382,7 +371,7 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
 				row.ProofRefs = []publicSurfaceProofRef{
 					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite"},
-					{Kind: "go_test", Name: "TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory"},
+					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres"},
 				}
 			},
 			want: "event_publish_dynamic_auto_emit_served_lifecycle missing required go_test proof_ref TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite",
@@ -411,24 +400,24 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 		{
 			name: "mutating api ledger rejects unclassified method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				matrix.MutatingLedger = publicSurfaceMutatingLedgerExcept(matrix.MutatingLedger, "bundle.register")
+				matrix.MutatingLedger = publicSurfaceMutatingLedgerExcept(matrix.MutatingLedger, "event.publish")
 			},
-			want: "mutating api parity ledger missing method bundle.register",
+			want: "mutating api parity ledger missing method event.publish",
 		},
 		{
 			name: "mutating api ledger rejects stale spec ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "bundle.register")
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.publish")
 				entry.Classification = "postgres_only_with_spec_ref"
 				entry.Backends = []string{"postgres_only"}
 				entry.SpecRef = "platform-spec.yaml#api_specification.missing_anchor"
 			},
-			want: "ledger method bundle.register spec_ref platform-spec.yaml#api_specification.missing_anchor does not resolve",
+			want: "ledger method event.publish spec_ref platform-spec.yaml#api_specification.missing_anchor does not resolve",
 		},
 		{
 			name: "mutating api ledger rejects broad postgres only publication ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "bundle.register")
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.publish")
 				entry.Classification = "postgres_only_with_spec_ref"
 				entry.Backends = []string{"postgres_only"}
 				entry.SpecRef = "platform-spec.yaml#api_specification.method_catalog"
@@ -436,7 +425,7 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 					{Kind: "artifact", Path: "platform-spec.yaml"},
 				}
 			},
-			want: "ledger method bundle.register postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
+			want: "ledger method event.publish postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
 		},
 		{
 			name: "mutating api ledger rejects stale issue ref",
@@ -1132,10 +1121,6 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.onboarding_get"},
 		},
-		"TestServedParityHarnessBundleRegisterLifecycle": {
-			Backends: []string{"default_sqlite", "explicit_postgres"},
-			Methods:  []string{"bundle.get"},
-		},
 		"TestServedParityHarnessOperatorChannelLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.list"},
@@ -1185,14 +1170,6 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 				"conversation.list",
 				"conversation.list_turns",
 			},
-		},
-		"TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface": {
-			Backends: []string{"default_sqlite"},
-			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
-		},
-		"TestPostgresBundleCatalogOwnerBacksSupportedAPISurface": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
 		},
 		"TestOperatorEntityHandlersServeContractEntityTypesFromSQLite": {
 			Backends: []string{"default_sqlite"},
@@ -1548,21 +1525,6 @@ func validatePublicSurfaceServedMutatingLifecycleRows(rowsByID map[string]public
 
 func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 	return map[string]publicSurfaceExpectedRowShape{
-		"bundle_register_served_lifecycle": {
-			Classification:       "add_to_matrix",
-			Tier:                 "required_smoke",
-			Backends:             []string{"default_sqlite", "explicit_postgres"},
-			APIMethods:           []string{"bundle.register"},
-			OpenRPCMatrixMethods: []string{"bundle.register"},
-			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
-			GoTestProofRefs: []string{
-				"TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders",
-				"TestServedParityHarnessBundleRegisterLifecycle",
-				"TestRunServeRuntimeBundleRegisterLifecycleDefaultSQLite",
-				"TestRunServeRuntimeBundleRegisterLifecyclePostgres",
-				"TestBundleCatalogWriteParity",
-			},
-		},
 		"api_idempotency_selected_store": {
 			Classification:       "already_covered_by_existing_proof",
 			Tier:                 "required_smoke",
@@ -1588,7 +1550,6 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
 			GoTestProofRefs: []string{
 				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
-				"TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory",
 				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite",
 				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres",
 			},
@@ -2120,10 +2081,10 @@ func publicSurfaceSortedStrings(values []string) []string {
 
 func requiredPublicSurfaceRows() map[string]struct{} {
 	return complianceStringSet([]string{
-		"serve_contracts_default_sqlite",
-		"serve_contracts_explicit_postgres",
-		"run_contracts_default_sqlite",
-		"run_contracts_explicit_postgres",
+		"serve_source_default_sqlite",
+		"serve_source_explicit_postgres",
+		"run_source_default_sqlite",
+		"run_source_explicit_postgres",
 		"entity_read_api",
 		"entity_read_cli",
 		"status_run_get_entity_count",
@@ -2138,7 +2099,6 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"mailbox_read_cli",
 		"local_runtime_abandon_active_runs",
 		"handler_static_create_entity_retirement",
-		"bundle_hash_catalog_boot_postgres_only",
 	})
 }
 

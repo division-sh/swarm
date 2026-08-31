@@ -31,7 +31,7 @@ type storedSourceReceipt struct {
 func (o *Owner) readStoredSourceReceipt(ctx context.Context, tx *sql.Tx, id string) (storedSourceReceipt, bool, error) {
 	var stored storedSourceReceipt
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT request_hash, operation, parent_run_id, actor, bundle_hash, package_key, event_name,
+		SELECT request_hash, operation, parent_run_id, actor, bundle_hash, flow_path, event_name,
 		       request_json, evaluation_json, result_json, evidence_json, observed_head_revision, completed_at
 		FROM resource_source_invocations WHERE source_invocation_id = %s
 	`, 1), id).Scan(&stored.requestHash, &stored.operation, &stored.parentRunID, &stored.actor, &stored.bundleHash,
@@ -58,7 +58,7 @@ func (o *Owner) validateStoredSourceReceipt(ctx context.Context, tx *sql.Tx, id 
 	}
 	completedAt, present, err := persistedTime(stored.completedAt)
 	if err != nil || !present || stored.operation != command.Operation || parentRunID != command.ParentRunID ||
-		stored.actor != command.Actor || stored.bundleHash != command.BundleHash || stored.packageKey != command.Declaration.PackageKey ||
+		stored.actor != command.Actor || stored.bundleHash != command.BundleHash || stored.packageKey != command.Declaration.FlowPath ||
 		stored.eventName != command.Declaration.EventName || stored.observedHeadRevision != record.Evaluation.Base.Head.Revision ||
 		!completedAt.Equal(record.Result.CompletedAt) {
 		return runtimedata.SourceOperationRecord{}, runtimedata.SourceCommand{}, fmt.Errorf("typed source receipt contradicts canonical operation")
@@ -120,8 +120,8 @@ func (o *Owner) loadImmutableVersionFact(ctx context.Context, tx *sql.Tx, ref ru
 	err := tx.QueryRowContext(ctx, o.query(`
 		SELECT sequence_alias, schema_digest, canonical_schema_bytes, COALESCE(business_key_field, ''),
 		       content_digest, row_codec, row_count, manifest_json
-		FROM resource_versions WHERE version_id = %s AND package_key = %s AND event_name = %s
-	`, 3), versionID, ref.PackageKey, ref.EventName).Scan(&fact.sequenceAlias, &schemaDigest, &fact.schema,
+		FROM resource_versions WHERE version_id = %s AND flow_path = %s AND event_name = %s
+	`, 3), versionID, ref.FlowPath, ref.EventName).Scan(&fact.sequenceAlias, &schemaDigest, &fact.schema,
 		&fact.businessKey, &contentDigest, &rowCodec, &rowCount, &manifestJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return immutableVersionFact{}, false, nil
@@ -272,8 +272,8 @@ func (o *Owner) loadHeadHistoryFact(ctx context.Context, tx *sql.Tx, ref runtime
 	history.Declaration = ref
 	err := tx.QueryRowContext(ctx, o.query(`
 		SELECT before_version_id, after_version_id, operation_kind, operation_id, committed_at
-		FROM resource_head_history WHERE package_key = %s AND event_name = %s AND revision = %s
-	`, 3), ref.PackageKey, ref.EventName, revision).Scan(&before, &after, &history.Operation, &history.OperationID, &committedAt)
+		FROM resource_head_history WHERE flow_path = %s AND event_name = %s AND revision = %s
+	`, 3), ref.FlowPath, ref.EventName, revision).Scan(&before, &after, &history.Operation, &history.OperationID, &committedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.HeadHistory{}, false, nil
 	}
@@ -349,7 +349,7 @@ type storedPruneReceipt struct {
 func (o *Owner) readStoredPruneReceipt(ctx context.Context, tx *sql.Tx, id string) (storedPruneReceipt, bool, error) {
 	var stored storedPruneReceipt
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT request_hash, actor, package_key, event_name, version_id, request_json, result_json, completed_at
+		SELECT request_hash, actor, flow_path, event_name, version_id, request_json, result_json, completed_at
 		FROM resource_prune_invocations WHERE prune_invocation_id = %s
 	`, 1), id).Scan(&stored.requestHash, &stored.actor, &stored.packageKey, &stored.eventName, &stored.versionID,
 		&stored.requestJSON, &stored.resultJSON, &stored.completedAt)
@@ -373,7 +373,7 @@ func (o *Owner) validateStoredPruneReceipt(ctx context.Context, tx *sql.Tx, id s
 		return runtimedata.PruneOperationResult{}, runtimedata.PruneCommand{}, nil, err
 	}
 	completedAt, present, err := persistedTime(stored.completedAt)
-	if err != nil || !present || stored.actor != command.Actor || stored.packageKey != command.Declaration.PackageKey ||
+	if err != nil || !present || stored.actor != command.Actor || stored.packageKey != command.Declaration.FlowPath ||
 		stored.eventName != command.Declaration.EventName || stored.versionID != string(command.VersionID) || !completedAt.Equal(result.CompletedAt) {
 		return runtimedata.PruneOperationResult{}, runtimedata.PruneCommand{}, nil, fmt.Errorf("typed prune receipt contradicts canonical operation")
 	}

@@ -53,7 +53,7 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		DryRun:        req.Result.DryRun,
 		AppliedAt:     req.RequestedAt,
 	}
-	for _, planned := range req.Result.Plan.EntityContainers {
+	for _, planned := range req.Result.Plan.ManagedContainers {
 		if strings.TrimSpace(planned.Name) == "" {
 			return ContainerResetResult{}, fmt.Errorf("%w: destructive reset container name is required", ErrInvalidRequest)
 		}
@@ -125,7 +125,6 @@ func containerRefFromIdentity(identity ContainerIdentity, action string) Contain
 		CreationSource: strings.TrimSpace(identity.CreationSource),
 		WorkspaceScope: strings.TrimSpace(identity.WorkspaceScope),
 		RunID:          strings.TrimSpace(identity.RunID),
-		EntityID:       strings.TrimSpace(identity.EntityID),
 		AgentIdentity:  identity.AgentIdentity.Normalize(),
 		FlowInstance:   strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
 	}
@@ -145,7 +144,6 @@ func withContainerAction(ref ContainerRef, action string) ContainerRef {
 	ref.CreationSource = strings.TrimSpace(ref.CreationSource)
 	ref.WorkspaceScope = strings.TrimSpace(ref.WorkspaceScope)
 	ref.RunID = strings.TrimSpace(ref.RunID)
-	ref.EntityID = strings.TrimSpace(ref.EntityID)
 	ref.AgentIdentity = ref.AgentIdentity.Normalize()
 	ref.FlowInstance = strings.Trim(strings.TrimSpace(ref.FlowInstance), "/")
 	return ref

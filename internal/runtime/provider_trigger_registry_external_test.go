@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"net/http"
 	stdruntime "runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storepkg "github.com/division-sh/swarm/internal/store"
@@ -127,26 +127,28 @@ func TestBoundedProviderDeliveryRequiresPreResolvedStandingTarget(t *testing.T) 
 	}
 }
 
-func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, flowInstance, provider string) runtimepkg.InboundTarget {
+func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, flowInstance, _ string) runtimepkg.InboundTarget {
 	t.Helper()
-	packageKey := "test.provider." + strings.ToLower(strings.TrimSpace(provider))
-	flowID := "bounded-inbound"
-	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
-	const bundleHash = "bundle-v1:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	const bundleSource = "ephemeral"
+	flowPath := boundedProviderFlowID
+	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok || source.Validate() != nil {
+		t.Fatal("bounded provider target requires an admitted source artifact fact")
+	}
+	bundleHash := source.BundleHash()
 
 	switch selected := persistence.(type) {
 	case *storepkg.PostgresStore:
-		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, flowPath, flowInstance, entityID, runID, bundleHash)
 	case *storepkg.SQLiteRuntimeStore:
-		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertSQLiteStandingFixture(t, ctx, selected, serviceID, flowPath, flowInstance, entityID, runID, bundleHash)
 	default:
 		t.Fatalf("unsupported bounded provider persistence %T", persistence)
 	}
 
 	return runtimepkg.InboundTarget{
-		BundleHash: bundleHash, ServiceID: serviceID, PackageKey: packageKey,
-		FlowID: flowID, RunID: runID, Generation: 1, PublicationSequence: 1,
+		BundleHash: bundleHash, ServiceID: serviceID, FlowPath: flowPath,
+		RunID: runID, Generation: 1, PublicationSequence: 1,
 		InstanceID: flowInstance, FlowInstance: flowInstance, EntityID: entityID,
 		EntitySlug: entityID, Alias: entityID,
 	}
@@ -157,10 +159,9 @@ const boundedProviderFlowID = "bounded_inbound"
 // boundedStandingConnectorBundle puts connector consumers in the exact static
 // flow path targeted by the bounded standing-ingress fixture. Process-served
 // tests separately prove real standing singleton materialization.
-func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if bundle == nil || flowInstance == "" {
+	if bundle == nil {
 		return bundle
 	}
 	inputs := []runtimecontracts.FlowInputEventPin(nil)
@@ -168,8 +169,7 @@ func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *r
 		inputs = append(inputs, bundle.RootSchema.Pins.Inputs.EventPins...)
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: boundedProviderFlowID, Flow: boundedProviderFlowID},
-		Path:  flowInstance,
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: boundedProviderFlowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeStatic,
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
@@ -179,49 +179,40 @@ func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *r
 		Agents: bundle.Agents,
 		Tools:  bundle.Tools,
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle.Nodes = nil
-	bundle.Events = nil
-	bundle.Agents = nil
-	bundle.Tools = nil
-	bundle.FlowTree = runtimecontracts.FlowTree{
-		Root: &root,
-		ByID: map[string]*runtimecontracts.FlowContractView{
-			boundedProviderFlowID: &root.Children[0],
-		},
-	}
-	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{
-		boundedProviderFlowID: flow.Schema,
-	}
 	admitted := loadRuntimeTempBundle(t, map[string]string{
-		"package.yaml":                        "name: bounded-standing-connector\nversion: 1.0.0\nflows:\n  - id: bounded_inbound\n    flow: bounded_inbound\n    mode: static\n",
-		"flows/bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\ninitial_state: active\nstates: [active]\n",
-		"flows/bounded_inbound/entities.yaml": "bounded_entity: {}\n",
+		"schema.yaml":                   "name: bounded-standing-connector\n",
+		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
 	})
 	admitted.RootSchema = bundle.RootSchema
-	admitted.Nodes = bundle.Nodes
-	admitted.Events = bundle.Events
-	admitted.Agents = bundle.Agents
-	admitted.Tools = bundle.Tools
-	admitted.FlowTree = bundle.FlowTree
-	admitted.FlowSchemas = bundle.FlowSchemas
+	admitted.FlowTree.Root.Schema = *bundle.RootSchema
+	admittedFlow, ok := admitted.FlowTree.ByPath[boundedProviderFlowID]
+	if !ok {
+		t.Fatalf("admitted bounded connector source omitted flow %q", boundedProviderFlowID)
+	}
+	admittedFlow.Schema = flow.Schema
+	admittedFlow.Nodes = flow.Nodes
+	admittedFlow.Events = flow.Events
+	admittedFlow.Agents = flow.Agents
+	admittedFlow.Tools = flow.Tools
+	admitted.FlowSchemas[boundedProviderFlowID] = flow.Schema
 	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
 		t.Fatalf("compile bounded standing connector semantics: %v", err)
 	}
 	return admitted
 }
 
-func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
+func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, flowPath, instanceID, entityID, runID, bundleHash string) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO standing_services (
-			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
-			operator_override, effective_state, current_bundle_hash, current_bundle_source,
+			service_id, flow_path, instance_id, entity_id, declaration_present,
+			operator_override, effective_state, current_bundle_hash,
 			revision_sequence, current_generation, current_run_id, publication_state,
 			publication_sequence, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'published', 1, now(), now())
+		) VALUES ($1::uuid, $2, $3, $4::uuid, TRUE, 'none', 'active', $5, 1, 1, $6::uuid, 'published', 1, now(), now())
 		ON CONFLICT (service_id) DO NOTHING
-	`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID); err != nil {
+	`, serviceID, flowPath, instanceID, entityID, bundleHash, runID); err != nil {
 		t.Fatalf("seed postgres standing service: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -233,7 +224,7 @@ func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB
 	}
 }
 
-func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
+func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, flowPath, instanceID, entityID, runID, bundleHash string) {
 	t.Helper()
 	now := time.Now().UTC()
 	db := storetest.DatabaseForTest(selected)
@@ -247,13 +238,13 @@ func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *st
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO standing_services (
-				service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
-				operator_override, effective_state, current_bundle_hash, current_bundle_source,
+				service_id, flow_path, instance_id, entity_id, declaration_present,
+				operator_override, effective_state, current_bundle_hash,
 				revision_sequence, current_generation, current_run_id, publication_state,
 				publication_sequence, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, 1, ?, 'published', 1, ?, ?)
+			) VALUES (?, ?, ?, ?, TRUE, 'none', 'active', ?, 1, 1, ?, 'published', 1, ?, ?)
 			ON CONFLICT(service_id) DO NOTHING
-		`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID, now, now); err != nil {
+		`, serviceID, flowPath, instanceID, entityID, bundleHash, runID, now, now); err != nil {
 		t.Fatalf("seed sqlite standing service: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

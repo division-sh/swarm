@@ -82,38 +82,29 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if expectedBundleHash == "" {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has no persisted bundle_hash", runbundle.CodeBundleDataIntegrityError, forkRunID)
 	}
-	expectedBundleSource := forkBundleIdentity.BundleSource
 	if forkBundleIdentity.DataIntegrityError() {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, forkBundleIdentity.DetailString())
 	}
-	if !expectedBundleSource.IsEphemeral() && !expectedBundleSource.IsPersisted() {
-		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has unavailable bundle_source %s", runbundle.CodeBundleUnavailable, forkRunID, expectedBundleSource)
-	}
-	var expectedSourceFact runtimecorrelation.BundleSourceFact
-	if expectedBundleSource.IsPersisted() {
-		expectedSourceFact, err = runtimecorrelation.NewPersistedBundleSourceFact(expectedBundleHash)
-	} else {
-		expectedSourceFact, err = runtimecorrelation.NewEphemeralBundleSourceFact(expectedBundleHash)
-	}
+	expectedSourceFact, err := runtimecorrelation.NewSourceArtifactFact(expectedBundleHash)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, forkRunID, err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, expectedSourceFact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, expectedSourceFact)
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:      binding.SourceRunID,
-		BundleHash:       expectedBundleHash,
-		BundleSourceFact: expectedSourceFact,
-		Selection:        binding.ContractSelection,
+		SourceRunID:        binding.SourceRunID,
+		BundleHash:         expectedBundleHash,
+		SourceArtifactFact: expectedSourceFact,
+		Selection:          binding.ContractSelection,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
 	}
 	defer cleanupLoadedSelectedContractSource(loadedSource)
-	if err := loadedSource.BundleSourceFact.Validate(); err != nil {
+	if err := loadedSource.SourceArtifactFact.Validate(); err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
 	}
-	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleSourceFact.BundleHash())
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.SourceArtifactFact.BundleHash())
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
 	}
@@ -177,7 +168,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:             forkRunID,
 		SourceRunID:           binding.SourceRunID,
-		BundleSourceFact:      expectedSourceFact,
+		SourceArtifactFact:    expectedSourceFact,
 		BindingReader:         req.Store,
 		SourceLoader:          req.SourceLoader,
 		FrontierAdmission:     frontier,

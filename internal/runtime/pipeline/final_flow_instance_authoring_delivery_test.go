@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -59,8 +58,9 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	)
 	seedFinalFlowInstanceAuthoringEvent(t, db, ctx, evt)
 	node := pipelineSourceNode(t, source, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateNodeID)
-	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), node, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+	route := workflowNodeStampedConnectRoute(t, source, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateInputPin, finalflowinstanceauthoring.TemplateNodeID)
+	route.Target = events.MustExistingEntityTarget(target)
+	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), route)
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
@@ -120,9 +120,16 @@ func seedFinalFlowInstanceAuthoringEvent(t *testing.T, db *sql.DB, ctx context.C
 	seedPipelineEventRecord(t, ctx, db, evt)
 }
 
-func seedFinalFlowInstanceAuthoringNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) {
+func seedFinalFlowInstanceAuthoringNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, route events.DeliveryRoute) {
 	t.Helper()
-	seedPipelineTestNodeDelivery(t, ctx, db, eventID, node, target)
+	owner := newPipelineTestDeliveryOwnerForDB(t, db)
+	event, err := owner.loadEvent(ctx, eventID)
+	if err != nil {
+		t.Fatalf("load final flow-instance authoring event %s: %v", eventID, err)
+	}
+	if err := owner.commitInitial(ctx, event, route); err != nil {
+		t.Fatalf("commit final flow-instance authoring delivery %s/%s: %v", eventID, route.Recipient.ID(), err)
+	}
 }
 
 func assertFinalFlowInstanceAuthoringDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

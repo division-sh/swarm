@@ -1,1 +1,8 @@
 name: fan-in-barrier
+connect:
+  - event: operating.report.requested
+    from: ingress
+    to: operating
+  - event: operating.reported
+    from: operating
+    to: portfolio

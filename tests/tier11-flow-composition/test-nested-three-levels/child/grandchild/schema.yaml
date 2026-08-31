@@ -1,0 +1,12 @@
+name: grandchild
+initial_state: ready
+terminal_states: [finished]
+states: [ready, finished]
+pins:
+  inputs:
+    events:
+      - micro.start
+  outputs:
+    events:
+      - micro.done
+mode: static

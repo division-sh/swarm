@@ -27,7 +27,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -135,11 +135,11 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 
-	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	removeExactCanonicalTelegramAgentMock(t, contractsRoot)
-	configPath := filepath.Join(contractsRoot, "swarm.live.yaml")
-	sqlitePath := filepath.Join(contractsRoot, ".swarm", "swarm.db")
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
+	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	removeExactCanonicalTelegramAgentMock(t, sourceRoot)
+	configPath := filepath.Join(sourceRoot, "swarm.live.yaml")
+	sqlitePath := filepath.Join(sourceRoot, ".swarm", "swarm.db")
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -159,8 +159,8 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	}
 
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), contractsRoot, []string{
-		"verify", "--config", configPath, "--contracts", contractsRoot,
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{
+		"verify", sourceRoot, "--config", configPath,
 	}, &verifyOut, &verifyErr, Run); code != 0 {
 		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
 	}
@@ -192,12 +192,12 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	})
 
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, Verbose: true,
+		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
-	process := startTelegramAgentServeRuntimeTestProcess(t, contractsRoot, opts)
+	process := startTelegramAgentServeRuntimeTestProcess(t, sourceRoot, opts)
 	process.waitForReadyLine()
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	diagnostics := func() string {
@@ -228,8 +228,8 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 		t.Fatalf("live graduation memory sessions = %#v, want one conversation owner", sessions)
 	}
 	for _, session := range sessions {
-		if session.AgentID != "phrase-bot" || session.FlowTemplate != "telegram-chat" || session.TurnCount != 2 {
-			t.Fatalf("live graduation memory session = %#v, want phrase-bot telegram-chat with two turns", session)
+		if session.AgentID != "phrase-bot" || session.FlowTemplate != "bot/telegram-chat" || session.TurnCount != 2 {
+			t.Fatalf("live graduation memory session = %#v, want phrase-bot bot/telegram-chat with two turns", session)
 		}
 	}
 }
@@ -279,10 +279,10 @@ func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any,
 	}
 }
 
-func removeExactCanonicalTelegramAgentMock(t testing.TB, contractsRoot string) {
+func removeExactCanonicalTelegramAgentMock(t testing.TB, sourceRoot string) {
 	t.Helper()
-	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "bot", "flows", "telegram-chat", "agents.yaml")
-	derivedPath := filepath.Join(contractsRoot, "bot", "flows", "telegram-chat", "agents.yaml")
+	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "bot", "telegram-chat", "agents.yaml")
+	derivedPath := filepath.Join(sourceRoot, "bot", "telegram-chat", "agents.yaml")
 	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
 		t.Fatalf("checked canonical phrase-bot mock count = %d, want 1", got)
 	}
@@ -395,8 +395,8 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
-	contractsRoot := writeStandingMemoryServeFixture(t, "")
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
+	sourceRoot := writeStandingMemoryServeFixture(t, "")
+	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -410,9 +410,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	var storeLocation string
 	var prepareRestart func()
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	switch backend {
@@ -441,7 +441,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -745,7 +745,7 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash,
 		"bundle_hash": bundleHash,
 		"limit":       500,
 	}, &runs)
-	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration("bot", "telegram-chat", "telegram-responder")
+	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration("bot/telegram-chat", "telegram-responder")
 	if err != nil {
 		t.Fatalf("admit package-backed responder identity: %v", err)
 	}
@@ -777,7 +777,7 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash,
 				}
 				matched++
 				target := delivery.Target
-				if target.Kind != "existing_entity" || target.FlowID != "telegram-chat" || target.FlowInstance == "" || target.EntityID == "" ||
+				if target.Kind != "existing_entity" || target.FlowID != "bot/telegram-chat" || target.FlowInstance == "" || target.EntityID == "" ||
 					target.EntityID != event.EntityID || delivery.Status != "delivered" || !delivery.Terminal {
 					t.Fatalf("reply event %s responder delivery = %#v event_entity=%q, want terminal exact existing owner", event.EventID, delivery, event.EntityID)
 				}
@@ -919,7 +919,7 @@ func requireStandingMemorySessionShape(t testing.TB, sessions map[string]standin
 	for _, row := range sessions {
 		counts[row.FlowTemplate]++
 	}
-	if len(sessions) != 2 || counts["telegram-chat"] != 2 {
+	if len(sessions) != 2 || counts["bot/telegram-chat"] != 2 {
 		t.Fatalf("memory sessions = %#v, want two isolated Telegram chat owners", sessions)
 	}
 }
@@ -937,7 +937,7 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 		switch delta {
 		case 0:
 		case 1:
-			if current.FlowTemplate != "telegram-chat" {
+			if current.FlowTemplate != "bot/telegram-chat" {
 				t.Fatalf("memory owner %q has unexpected flow template %q", key, current.FlowTemplate)
 			}
 			advancedTemplates++

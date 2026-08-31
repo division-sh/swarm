@@ -300,7 +300,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := "ingress:.:telegram-ingress:telegram"
+	target := "ingress:telegram-ingress:telegram"
 	declaredPlan, err := packs.NewOutboundBindingPlanWithRegistration(
 		"declared_ops", plan, "-100123", nil,
 		map[string]string{"telegram_bot_token": "telegram.provider", "webhook_signing_secret": "telegram.signing"}, target,
@@ -316,7 +316,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 		t.Fatal(err)
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
@@ -344,7 +344,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 		binding, bindingErr := packs.NewOutboundBindingPlanWithRegistration(
 			"telegram_ops", plan, destination, nil,
 			map[string]string{"telegram_bot_token": "telegram.provider", "webhook_signing_secret": "telegram.signing"},
-			"ingress:.:telegram-ingress:telegram",
+			"ingress:.:telegram",
 		)
 		if bindingErr != nil {
 			t.Fatal(bindingErr)
@@ -354,7 +354,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 	base := channelonboarding.CompiledActivation{
 		Source: channelonboarding.ActivationSourceDeclared,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+			BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 			BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 			RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 			ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 3,
@@ -640,16 +640,16 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 		t.Fatal(err)
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("a", 64),
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
 		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
 	}
-	target := "ingress:.:telegram-ingress:telegram"
+	target := "ingress:telegram-ingress:telegram"
 	candidate := channelonboarding.Candidate{
 		Provider: profile.Provider(), Interface: identity, Coordinate: coordinate,
 		Target: channelonboarding.CandidateTarget{
-			Selector: target, ServiceID: "telegram-ingress", PackageKey: ".", FlowID: "telegram-ingress",
+			Selector: target, ServiceID: "telegram-ingress", FlowPath: "telegram-ingress",
 			Alias: "telegram", Provider: profile.Provider(), Generation: 1, PublicationSequence: 1,
 			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("telegram-admission")), SigningCredentialKey: "telegram.signing",
 		},
@@ -783,7 +783,7 @@ func mockRegistrationStartupGrant(t *testing.T, owner string) startupownership.G
 	t.Helper()
 	grant := startupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: owner,
-		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), BundleSource: "ephemeral",
+		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64),
 		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "mock-registration-source-set",
 		StateVersion: 3, State: startupownership.GrantAdmitted,
 	}
@@ -844,7 +844,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	})
 	onboardingID := uuid.NewString()
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), BundleSource: "persisted",
+		BundleHash:     "bundle-v2:sha256:" + strings.Repeat("e", 64),
 		BundleIdentity: "bundle:test@sha256:mock-registration", PackInventoryGeneration: "sha256:mock-registration-inventory",
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration, TargetGeneration: 1,
@@ -854,16 +854,16 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:support:mock:mock", BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64),
-			ServiceID: uuid.NewString(), PackageKey: "support", FlowID: "mock", Alias: "support", Provider: "mock",
+			Selector: "ingress:support/mock:mock", BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64),
+			ServiceID: uuid.NewString(), FlowPath: "support/mock", Alias: "support", Provider: "mock",
 			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("mock-admission")),
 			SigningCredentialKey: "signing",
 		},
 	}
 	other := pair
 	other.BindingID = "mock-alerts"
-	other.Target.Selector = "ingress:alerts:mock:mock"
-	other.Target.PackageKey = "alerts"
+	other.Target.Selector = "ingress:alerts/mock:mock"
+	other.Target.FlowPath = "alerts/mock"
 	other.Target.Alias = "alerts"
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair, other}); err == nil || !strings.Contains(err.Error(), "selected by both") {
 		t.Fatalf("slot collision error = %v", err)

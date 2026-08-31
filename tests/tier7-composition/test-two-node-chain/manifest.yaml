@@ -1,0 +1,4 @@
+name: test-two-node-chain
+version: 1.0.0
+description: Node A emits event that Node B handles, advancing entity through both.
+platform_version: ">=0.7.0 <0.8.0"

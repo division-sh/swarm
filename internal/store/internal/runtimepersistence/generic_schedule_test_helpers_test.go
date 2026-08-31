@@ -14,6 +14,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -46,11 +47,8 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 
 func selectedScheduleTestContext(t *testing.T, runID string) context.Context {
 	t.Helper()
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("create selected schedule bundle source fact: %v", err)
-	}
-	return runtimecorrelation.WithBundleSourceFact(runtimecorrelation.WithRunID(context.Background(), runID), fact)
+	fact := sourceartifactfixture.Fact()
+	return runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(context.Background(), runID), fact)
 }
 
 func testAgentGenericScheduleCommand(t testing.TB, runID, agentID, flowInstance, entityID, key string, due runtimegenericschedule.DueBasis) runtimegenericschedule.AdmissionCommand {

@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,7 +41,7 @@ type sourceRegistryEntry struct {
 	Issue       int      `yaml:"issue"`
 }
 
-type goPackageBundleSource struct {
+type goPackageSourceArtifact struct {
 	File     string
 	Function string
 }
@@ -86,8 +87,8 @@ func TestCheckedYAMLRoutingArtifactRegistryEqualsLiveCensus(t *testing.T) {
 		default:
 			t.Fatalf("artifact %s has unknown disposition %q", entry.Root, entry.Disposition)
 		}
-		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(string(entry.Root)), "package.yaml")); err != nil {
-			t.Fatalf("artifact %s package: %v", entry.Root, err)
+		if _, err := sourceartifact.AdmitDirectory(filepath.Join(repo, filepath.FromSlash(string(entry.Root)))); err != nil {
+			t.Fatalf("admit artifact %s: %v", entry.Root, err)
 		}
 		if !pathQualifiedGoSymbol(entry.Proof) {
 			t.Fatalf("artifact %s proof %q must be path-qualified as *_test.go:TestXxx", entry.Root, entry.Proof)
@@ -127,7 +128,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 			if err := os.MkdirAll(root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "routing.yaml"), []byte(routing), 0o644); err != nil {
@@ -146,7 +147,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: adversarial\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("pins: {inputs: {events: [{name: ingress, event: ingress.received, source: external}]}}\n"), 0o644); err != nil {
@@ -432,53 +433,53 @@ func TestCanonicalRoutingRawPositiveBundleConstructionFailsClosed(t *testing.T) 
 		"unknown-helper": {"fixture_test.go": `package fixture
 func build() {
   saveArtifacts(map[string]string{
-    "package.yaml": "name: fixture",
+    "manifest.yaml": "name: fixture",
     "schema.yaml": "pins: {inputs: {events: [{source: external}]}}",
   })
 }`},
 		"cross-file": {
 			"names_test.go": `package fixture
-const packageFile = "package.yaml"
+const manifestFile = "manifest.yaml"
 const schemaFile = "schema.yaml"
 const pinsKey = "pins"
 `,
 			"bundle_test.go": `package fixture
 var bundleFiles = map[string]string{
-  packageFile: "name: fixture",
+  manifestFile: "name: fixture",
   schemaFile: pinsKey + ": {inputs: {events: [{source: external}]}}",
 }
 func build() { saveArtifacts(bundleFiles) }
 `,
 		},
 		"split-helper-returns": {"fixture_test.go": `package fixture
-func packageFiles() map[string]string {
-  return map[string]string{"package.yaml": "name: fixture"}
+func manifestFiles() map[string]string {
+  return map[string]string{"manifest.yaml": "name: fixture"}
 }
 func routingFiles() map[string]string {
   return map[string]string{"schema.yaml": "pins: {inputs: {events: [{source: external}]}}"}
 }
-func build() { saveArtifacts(mergeFiles(packageFiles(), routingFiles())) }
+func build() { saveArtifacts(mergeFiles(manifestFiles(), routingFiles())) }
 `},
 		"external-webhook": {"fixture_test.go": `package fixture
 var files = map[string]string{
-  "package.yaml": "name: fixture",
+  "manifest.yaml": "name: fixture",
   "schema.yaml": "pins: {inputs: {events: [{source: external webhook}]}}",
 }
 `},
 		"external-webhook-case-whitespace": {"fixture_test.go": `package fixture
 var files = map[string]string{
-  "package.yaml": "name: fixture",
+  "manifest.yaml": "name: fixture",
   "schema.yaml": "pins: {inputs: {events: [{source: '  ExTeRnAl webhook  '}]}}",
 }
 `},
 		"byte-map-helper-returns": {"fixture_test.go": `package fixture
-func packageFiles() map[string][]byte {
-  return map[string][]byte{"package.yaml": []byte("name: fixture")}
+func manifestFiles() map[string][]byte {
+  return map[string][]byte{"manifest.yaml": []byte("name: fixture")}
 }
 func routingFiles() map[string][]byte {
   return map[string][]byte{"schema.yaml": []byte("pins: {inputs: {events: [{source: external}]}}")}
 }
-func build() { saveArtifacts(mergeFiles(packageFiles(), routingFiles())) }
+func build() { saveArtifacts(mergeFiles(manifestFiles(), routingFiles())) }
 `},
 		"typed-artifact-slice": {"fixture_test.go": `package fixture
 type artifact struct {
@@ -487,19 +488,19 @@ type artifact struct {
 }
 func files() []artifact {
   return []artifact{
-    {name: "package.yaml", contents: []byte("name: fixture")},
+    {name: "manifest.yaml", contents: []byte("name: fixture")},
     {name: "schema.yaml", contents: []byte("pins: {inputs: {events: [{source: external}]}}")},
   }
 }
 func build() { saveArtifacts(files()) }
 `},
 		"string-helper-documents": {"fixture_test.go": `package fixture
-func packageDocument() string { return "name: fixture" }
+func manifestDocument() string { return "name: fixture" }
 func routingDocument() string {
   return "pins: {inputs: {events: [{source: external}]}}"
 }
 func build() {
-  writeFile("package.yaml", packageDocument())
+  writeFile("manifest.yaml", manifestDocument())
   writeFile("schema.yaml", routingDocument())
 }
 `},
@@ -508,7 +509,7 @@ type parserOwner struct{}
 func (parserOwner) NewParserSnippet(source string) {}
 var canonicalrouting parserOwner
 func build() {
-  canonicalrouting.NewParserSnippet("package.yaml")
+  canonicalrouting.NewParserSnippet("manifest.yaml")
   canonicalrouting.NewParserSnippet("schema.yaml")
   canonicalrouting.NewParserSnippet("pins: {inputs: {events: [{source: external}]}}")
 }
@@ -521,15 +522,15 @@ import (
   "gopkg.in/yaml.v3"
 )
 func build(t testing.TB) {
-  packageSnippet := canonicalrouting.NewParserSnippet(t, "name: fixture")
+  manifestSnippet := canonicalrouting.NewParserSnippet(t, "name: fixture")
   routingSnippet := canonicalrouting.NewParserSnippet(t, "pins: {inputs: {events: [{source: external}]}}")
-  var packageDocument any
+  var manifestDocument any
   var routingDocument any
-  _ = packageSnippet.Decode(&packageDocument)
+  _ = manifestSnippet.Decode(&manifestDocument)
   _ = routingSnippet.Decode(&routingDocument)
-  packageBytes, _ := yaml.Marshal(packageDocument)
+  manifestBytes, _ := yaml.Marshal(manifestDocument)
   routingBytes, _ := yaml.Marshal(routingDocument)
-  _ = os.WriteFile("package.yaml", packageBytes, 0o600)
+  _ = os.WriteFile("manifest.yaml", manifestBytes, 0o600)
   _ = os.WriteFile("schema.yaml", routingBytes, 0o600)
 }
 `},
@@ -570,7 +571,7 @@ func TestCanonicalRoutingRepositoryUsesClosedConstructionAPI(t *testing.T) {
 		if strings.HasPrefix(key, "internal/runtime/testfixtures/canonicalrouting:") {
 			continue
 		}
-		for _, source := range completeGoPackageRoutingBundleSources(files) {
+		for _, source := range completeGoPackageRoutingSourceArtifacts(files) {
 			violations = append(violations, key+":"+source.File+":"+source.Function+" contains a complete Go-authored routing bundle")
 		}
 	}
@@ -1052,10 +1053,10 @@ func repositoryGoPackages(repo string) (map[string]map[string]string, error) {
 }
 
 func goPackageContainsCompleteRoutingBundle(files map[string]string) bool {
-	return len(completeGoPackageRoutingBundleSources(files)) != 0
+	return len(completeGoPackageRoutingSourceArtifacts(files)) != 0
 }
 
-func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageBundleSource {
+func completeGoPackageRoutingSourceArtifacts(files map[string]string) []goPackageSourceArtifact {
 	fset := token.NewFileSet()
 	parsedFiles := make([]*ast.File, 0, len(files))
 	paths := make([]string, 0, len(files))
@@ -1066,7 +1067,7 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 	for _, path := range paths {
 		parsed, err := parser.ParseFile(fset, path, files[path], 0)
 		if err != nil {
-			return []goPackageBundleSource{{File: path, Function: "<unparseable>"}}
+			return []goPackageSourceArtifact{{File: path, Function: "<unparseable>"}}
 		}
 		parsedFiles = append(parsedFiles, parsed)
 	}
@@ -1094,15 +1095,13 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 		}
 	}
 
-	hasPackageFile := false
 	hasSchemaFile := false
 	hasRoutingAuthority := false
 	for value := range values {
-		hasPackageFile = hasPackageFile || strings.Contains(value, "package.yaml")
 		hasSchemaFile = hasSchemaFile || strings.Contains(value, "schema.yaml") || strings.Contains(value, "nodes.yaml")
 		hasRoutingAuthority = hasRoutingAuthority || yamlTextContainsCanonicalRoutingAuthority(value)
 	}
-	if !hasPackageFile || !hasSchemaFile || !hasRoutingAuthority {
+	if !hasSchemaFile || !hasRoutingAuthority {
 		return nil
 	}
 	evidenceFiles := make([]string, 0, len(routingEvidenceFiles))
@@ -1110,9 +1109,9 @@ func completeGoPackageRoutingBundleSources(files map[string]string) []goPackageB
 		evidenceFiles = append(evidenceFiles, path)
 	}
 	sort.Strings(evidenceFiles)
-	result := make([]goPackageBundleSource, 0, len(evidenceFiles))
+	result := make([]goPackageSourceArtifact, 0, len(evidenceFiles))
 	for _, path := range evidenceFiles {
-		result = append(result, goPackageBundleSource{File: path, Function: "package-scope"})
+		result = append(result, goPackageSourceArtifact{File: path, Function: "package-scope"})
 	}
 	return result
 }
@@ -1261,7 +1260,7 @@ func normalizeArtifactID(root ArtifactID) ArtifactID {
 func liveCheckedYAMLRoutingRoots(t testing.TB, repo string) map[ArtifactID]artifactRegistryEntry {
 	t.Helper()
 	live := map[ArtifactID]artifactRegistryEntry{}
-	for _, bundleRoot := range outerPackageRoots(t, repo) {
+	for _, bundleRoot := range outerManifestRoots(t, repo) {
 		err := filepath.Walk(filepath.Join(repo, filepath.FromSlash(bundleRoot)), func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -1282,9 +1281,9 @@ func liveCheckedYAMLRoutingRoots(t testing.TB, repo string) map[ArtifactID]artif
 	return live
 }
 
-func outerPackageRoots(t testing.TB, repo string) []string {
+func outerManifestRoots(t testing.TB, repo string) []string {
 	t.Helper()
-	packageDirs := map[string]struct{}{}
+	manifestDirs := map[string]struct{}{}
 	err := filepath.Walk(repo, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -1295,19 +1294,19 @@ func outerPackageRoots(t testing.TB, repo string) []string {
 			}
 			return nil
 		}
-		if info.Name() == "package.yaml" {
-			packageDirs[filepath.Dir(path)] = struct{}{}
+		if info.Name() == "manifest.yaml" {
+			manifestDirs[filepath.Dir(path)] = struct{}{}
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("discover package.yaml roots: %v", err)
+		t.Fatalf("discover manifest.yaml roots: %v", err)
 	}
 	var roots []string
-	for dir := range packageDirs {
+	for dir := range manifestDirs {
 		outer := true
 		for parent := filepath.Dir(dir); strings.HasPrefix(parent, repo); parent = filepath.Dir(parent) {
-			if _, exists := packageDirs[parent]; exists {
+			if _, exists := manifestDirs[parent]; exists {
 				outer = false
 				break
 			}
@@ -1320,7 +1319,7 @@ func outerPackageRoots(t testing.TB, repo string) []string {
 		}
 		rel, err := filepath.Rel(repo, dir)
 		if err != nil {
-			t.Fatalf("relative package root %s: %v", dir, err)
+			t.Fatalf("relative fixture root %s: %v", dir, err)
 		}
 		roots = append(roots, filepath.ToSlash(rel))
 	}

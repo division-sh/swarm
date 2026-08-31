@@ -3,7 +3,7 @@ package destructivereset
 const (
 	ContractRunDeliveryQuiescence = "active_run_delivery_quiescence"
 	ContractRunScopedTruncation   = "run_scoped_truncation_preservation"
-	ContractManagedContainers     = "managed_entity_container_selection_preservation"
+	ContractManagedContainers     = "managed_workspace_container_selection_preservation"
 	ContractPublicAPIWrapper      = "runtime_nuke_api_spec_wrapper"
 	ContractLegacyResetMigration  = "legacy_reset_seam_migration"
 )
@@ -79,6 +79,6 @@ func DefaultPreservedResources() PreservedResources {
 		OperatorManagedBoundary: "operator-managed containers are outside Swarm ownership and are not enumerable by this planner",
 		SchemaMigrations:        true,
 		AuthTokens:              true,
-		BundleContracts:         true,
+		SourceArtifacts:         true,
 	}
 }

@@ -25,7 +25,7 @@ func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testin
 	startupAuthority := runtimestartupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(),
 		ProcessOwnerID: "release-e2e-runtime-owner", ProcessBootID: uuid.NewString(),
-		BundleHash: runtimeTestBundleHash, BundleSource: "ephemeral",
+		BundleHash:        runtimeTestBundleHash,
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 7,
 		SourceSetRevision: "source-set-v7", StateVersion: 3,
 		State: runtimestartupownership.GrantProbeSettled,

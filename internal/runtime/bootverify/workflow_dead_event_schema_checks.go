@@ -92,27 +92,6 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 		return nil
 	}
 	out := make([]deadEventDeclaration, 0)
-	for _, scope := range semanticview.ProjectScopes(source) {
-		if strings.TrimSpace(scope.OwningFlowID) != "" {
-			continue
-		}
-		for eventName, entry := range scope.Events {
-			if strings.TrimSpace(entry.Source) == "provider_trigger_pack_raw" {
-				continue
-			}
-			canonical := eventidentity.Normalize(eventName)
-			if canonical == "" {
-				continue
-			}
-			out = append(out, deadEventDeclaration{
-				Canonical:  canonical,
-				PackageKey: scope.Key,
-				FlowID:     scope.OwningFlowID,
-				File:       deadEventProjectFileLabel(scope.Key),
-				Entry:      entry,
-			})
-		}
-	}
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowID := strings.TrimSpace(scope.ID)
 		for eventName, entry := range scope.Events {
@@ -120,32 +99,17 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 			if canonical == "" {
 				continue
 			}
-			out = append(out, deadEventDeclaration{
-				Canonical:  canonical,
-				PackageKey: scope.PackageKey,
-				FlowID:     flowID,
-				File:       deadEventSchemaFileLabel("", flowID),
-				Entry:      entry,
-			})
+			out = append(out, deadEventDeclaration{Canonical: canonical, FlowID: flowID, File: deadEventSchemaFileLabel("", flowID), Entry: entry})
 		}
 	}
 	return out
 }
 
-func deadEventProjectFileLabel(packageKey string) string {
-	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
-	if packageKey == "" || packageKey == "." {
-		return "events.yaml"
-	}
-	return fmt.Sprintf("%s/events.yaml", packageKey)
-}
-
 type deadEventDeclaration struct {
-	Canonical  string
-	PackageKey string
-	FlowID     string
-	File       string
-	Entry      runtimecontracts.EventCatalogEntry
+	Canonical string
+	FlowID    string
+	File      string
+	Entry     runtimecontracts.EventCatalogEntry
 }
 
 func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) deadEventSchemaUsage {
@@ -198,13 +162,12 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 
 func deadEventTypedConsumerMatches(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, decl deadEventDeclaration) []semanticview.TypedPubSubConsumerMatch {
 	producer := semanticview.AuthoredEventEndpoint{
-		ID:         "dead-event-schema:" + strings.TrimSpace(decl.PackageKey) + ":" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
-		Direction:  semanticview.EventEndpointProducer,
-		FlowID:     strings.TrimSpace(decl.FlowID),
-		PackageKey: strings.TrimSpace(decl.PackageKey),
+		ID:        "dead-event-schema:" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
+		Direction: semanticview.EventEndpointProducer,
+		FlowID:    strings.TrimSpace(decl.FlowID),
 	}
 	producer.Event = semanticview.ResolveFlowEventProof(source, decl.FlowID, decl.Canonical)
-	matches, _ := census.ResolveTypedPubSubConsumerMatches(producer)
+	matches := census.ResolveTypedPubSubConsumerMatches(producer)
 	return matches
 }
 
@@ -228,10 +191,14 @@ func deadEventSchemaFileLabel(path, flowID string) string {
 	if path != "" {
 		return path
 	}
-	if strings.TrimSpace(flowID) == "" {
+	if strings.TrimSpace(flowID) == "." {
 		return "events.yaml"
 	}
-	return fmt.Sprintf("flows/%s/events.yaml", strings.TrimSpace(flowID))
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "." {
+		return "events.yaml"
+	}
+	return fmt.Sprintf("%s/events.yaml", flowID)
 }
 
 func yesNoLocal(value bool) string {

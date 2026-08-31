@@ -17,7 +17,7 @@ import (
 type View struct {
 	WorkflowName    string              `json:"workflow_name,omitempty"`
 	WorkflowVersion string              `json:"workflow_version,omitempty"`
-	ContractsRoot   string              `json:"contracts_root,omitempty"`
+	SourceHash      string              `json:"source_hash"`
 	SourceAuthority string              `json:"source_authority"`
 	Root            RootView            `json:"root"`
 	Flows           []FlowView          `json:"flows"`
@@ -46,7 +46,6 @@ type RootView struct {
 type RootSourceFiles struct {
 	Schema   string `json:"schema,omitempty"`
 	Entities string `json:"entities,omitempty"`
-	Package  string `json:"package,omitempty"`
 	Agents   string `json:"agents,omitempty"`
 }
 
@@ -86,7 +85,6 @@ type StandingIngressProviderView struct {
 }
 
 type FlowSourceFiles struct {
-	Package  string `json:"package,omitempty"`
 	Schema   string `json:"schema,omitempty"`
 	Entities string `json:"entities,omitempty"`
 	Nodes    string `json:"nodes,omitempty"`
@@ -158,7 +156,7 @@ type StageGraphTimerView struct {
 type StageGraphJoinView struct {
 	ID              string `json:"id"`
 	Stage           string `json:"stage"`
-	PackageKey      string `json:"package_key"`
+	FlowPath        string `json:"flow_path"`
 	NodeID          string `json:"node_id"`
 	HandlerEvent    string `json:"handler_event"`
 	MembersFrom     string `json:"members_from"`
@@ -330,7 +328,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	view := View{
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
-		ContractsRoot:   strings.TrimSpace(bundle.Paths.ContractsRoot),
+		SourceHash:      bundle.SourceArtifact.BundleHash(),
 		SourceAuthority: "projection_only_existing_contract_owners",
 		Root:            root,
 		Flows:           flows,
@@ -369,7 +367,7 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []Appr
 		result := runtimecontracts.ActivityResultEventsForSite(site)
 		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		out = append(out, ApprovalPointView{
-			FlowID:       site.Node.FlowID(),
+			FlowID:       site.Node.FlowPath(),
 			NodeID:       site.Node.Key(),
 			HandlerEvent: strings.TrimSpace(site.HandlerEventKey),
 			Source:       strings.TrimSpace(site.Source),
@@ -410,21 +408,24 @@ func BuildRoutingTopologyWithReport(source semanticview.Source, bundle *runtimec
 }
 
 func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) (RootView, error) {
-	agents, err := agentViews(source, "")
+	rootFlow, ok := bundle.FlowViewByID(".")
+	if !ok || rootFlow == nil {
+		return RootView{}, fmt.Errorf("authoring view requires the admitted root flow")
+	}
+	agents, err := agentViews(source, ".")
 	if err != nil {
 		return RootView{}, err
 	}
 	out := RootView{
 		SourceFiles: RootSourceFiles{
-			Schema:   strings.TrimSpace(bundle.Paths.RootSchemaFile),
-			Entities: strings.TrimSpace(bundle.Paths.RootEntitiesFile),
-			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
-			Agents:   strings.TrimSpace(bundle.Paths.ProjectAgentsFile),
+			Schema:   strings.TrimSpace(rootFlow.Paths.SchemaFile),
+			Entities: strings.TrimSpace(rootFlow.Paths.EntitiesFile),
+			Agents:   strings.TrimSpace(rootFlow.Paths.AgentsFile),
 		},
 		Agents: agents,
 	}
 	if bundle.RootSchema != nil {
-		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), bundle.Paths.RootSchemaFile, bundle.Paths.ProjectAgentsFile)
+		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), rootFlow.Paths.SchemaFile, rootFlow.Paths.AgentsFile)
 	}
 	declared := ""
 	if bundle.RootSchema != nil {
@@ -438,7 +439,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 		out.PrimaryEntityError = err.Error()
 		return out, nil
 	}
-	out.PrimaryEntity = primaryEntityView(primary, bundle.Paths.RootEntitiesFile)
+	out.PrimaryEntity = primaryEntityView(primary, rootFlow.Paths.EntitiesFile)
 	return out, nil
 }
 
@@ -448,11 +449,13 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 	for _, demand := range runtimebootverify.BuildSingletonCoordinatorDemandProjection(source) {
 		demandsByFlow[demand.FlowID] = append(demandsByFlow[demand.FlowID], demand)
 	}
-	refsByFlow := packageFlowRefsByID(bundle)
 	views := bundle.FlowViews()
 	out := make([]FlowView, 0, len(views))
 	for _, flow := range views {
-		flowID := strings.TrimSpace(flow.Paths.ID)
+		flowID := strings.TrimSpace(flow.Paths.FlowPath)
+		if flowID == "." {
+			continue
+		}
 		schema := flow.Schema
 		agents, err := agentViews(source, flowID)
 		if err != nil {
@@ -460,9 +463,9 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		}
 		item := FlowView{
 			ID:          flowID,
-			Path:        strings.Trim(strings.TrimSpace(flow.Path), "/"),
+			Path:        flowID,
 			Mode:        strings.TrimSpace(schema.Mode),
-			SourceFiles: flowSourceFiles(bundle, flow),
+			SourceFiles: flowSourceFiles(flow),
 			Agents:      agents,
 			RequiredAgents: requiredAgentsView(
 				schema,
@@ -473,19 +476,13 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
-		if ref, ok := refsByFlow[flowID]; ok {
-			item.Activation = strings.TrimSpace(ref.Activation)
-			if ref.Ingress != nil {
-				alias := strings.TrimSpace(ref.Ingress.Alias)
-				if alias == "" {
-					alias = flowID
-				}
-				ingress := &StandingIngressView{Alias: alias}
-				for _, provider := range ref.Ingress.Providers {
-					ingress.Providers = append(ingress.Providers, standingIngressProviderView(provider))
-				}
-				item.Ingress = ingress
+		item.Activation = strings.TrimSpace(schema.Activation)
+		if schema.Ingress != nil {
+			ingress := &StandingIngressView{Alias: strings.TrimSpace(schema.Ingress.Alias)}
+			for _, provider := range schema.Ingress.Providers {
+				ingress.Providers = append(ingress.Providers, standingIngressProviderView(provider))
 			}
+			item.Ingress = ingress
 		}
 		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
 			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
@@ -542,35 +539,20 @@ func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressPro
 	return view
 }
 
-func packageFlowRefsByID(bundle *runtimecontracts.WorkflowContractBundle) map[string]runtimecontracts.ProjectFlowRef {
-	out := map[string]runtimecontracts.ProjectFlowRef{}
-	if bundle == nil {
-		return out
-	}
-	for _, pkg := range bundle.PackageTree {
-		for _, ref := range pkg.Manifest.Flows {
-			if id := strings.TrimSpace(ref.ID); id != "" {
-				out[id] = ref
-			}
-		}
-	}
-	return out
-}
-
 func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []StageGraphView {
 	if source == nil || bundle == nil {
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
+	if graph := buildStageGraphForFlow(source, ".", "root", "."); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(flow.Paths.ID)
-		if flowID == "" {
+		flowID := strings.TrimSpace(flow.Paths.FlowPath)
+		if flowID == "" || flowID == "." {
 			continue
 		}
-		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
+		path := flowID
 		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 			graphs = append(graphs, graph)
 		}
@@ -615,13 +597,13 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 	}
 	out := make([]StageGraphJoinView, 0)
 	for _, plan := range source.WorkflowJoins() {
-		if plan.Node.FlowID() != strings.TrimSpace(flowID) {
+		if plan.Node.FlowPath() != strings.TrimSpace(flowID) {
 			continue
 		}
 		item := StageGraphJoinView{
 			ID:              strings.TrimSpace(plan.Spec.EffectiveID()),
 			Stage:           strings.TrimSpace(plan.Spec.Stage),
-			PackageKey:      plan.Node.PackageKey(),
+			FlowPath:        plan.Node.FlowPath(),
 			NodeID:          plan.Node.NodeID(),
 			HandlerEvent:    strings.TrimSpace(plan.HandlerEvent),
 			MembersFrom:     strings.TrimSpace(plan.Spec.Members.From),
@@ -639,8 +621,8 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left := out[i].PackageKey + "\x00" + out[i].Stage + "\x00" + out[i].ID + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
-		right := out[j].PackageKey + "\x00" + out[j].Stage + "\x00" + out[j].ID + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
+		left := out[i].FlowPath + "\x00" + out[i].Stage + "\x00" + out[i].ID + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
+		right := out[j].FlowPath + "\x00" + out[j].Stage + "\x00" + out[j].ID + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
 		return left < right
 	})
 	return out
@@ -803,7 +785,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 	out := make([]StageGraphFanOutView, 0)
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
-		if err != nil || node.FlowID() != strings.TrimSpace(flowID) {
+		if err != nil || node.FlowPath() != strings.TrimSpace(flowID) {
 			continue
 		}
 		handlers := source.ExecutableNodeEventHandlers(node)
@@ -959,9 +941,8 @@ func addAgentField(fields map[string]AgentFieldView, entry runtimecontracts.Agen
 	}
 }
 
-func flowSourceFiles(bundle *runtimecontracts.WorkflowContractBundle, flow runtimecontracts.FlowContractView) FlowSourceFiles {
+func flowSourceFiles(flow runtimecontracts.FlowContractView) FlowSourceFiles {
 	return FlowSourceFiles{
-		Package:  packageSourceFile(bundle, flow.Paths.PackageKey),
 		Schema:   strings.TrimSpace(flow.Paths.SchemaFile),
 		Entities: strings.TrimSpace(flow.Paths.EntitiesFile),
 		Nodes:    strings.TrimSpace(flow.Paths.NodesFile),
@@ -1090,7 +1071,7 @@ func containedOperationsByFlow(source semanticview.Source, bundle *runtimecontra
 		if err != nil {
 			continue
 		}
-		appendContainedOperations(out, source, node.FlowID(), node.Key(), authoredFileForSource(bundle, record.Source), record.Entry)
+		appendContainedOperations(out, source, node.FlowPath(), node.Key(), authoredFileForSource(bundle, record.Source), record.Entry)
 	}
 	return out
 }
@@ -1208,7 +1189,10 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 	}
 	location := strings.TrimSpace(finding.Location)
 	if location == "" || location == "<root>" || location == "root" {
-		return firstNonEmpty(bundle.Paths.RootSchemaFile, bundle.Paths.ProjectPackageFile)
+		if root, ok := bundle.FlowViewByID("."); ok {
+			return strings.TrimSpace(root.Paths.SchemaFile)
+		}
+		return ""
 	}
 	if node, err := runtimeidentity.ParseExecutableNodeKey(location); err == nil {
 		if record, ok := bundle.ExecutableNode(node); ok {
@@ -1218,24 +1202,21 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 	if flow, ok := bundle.FlowViewByID(location); ok {
 		return strings.TrimSpace(flow.Paths.SchemaFile)
 	}
-	if project, ok := bundle.ProjectViewByKey(location); ok {
-		return strings.TrimSpace(project.Paths.PackageFile)
-	}
 	for _, flow := range bundle.FlowViews() {
-		if strings.Contains(location, strings.TrimSpace(flow.Paths.ID)) {
+		if strings.Contains(location, strings.TrimSpace(flow.Paths.FlowPath)) {
 			return strings.TrimSpace(flow.Paths.SchemaFile)
 		}
 	}
-	return firstNonEmpty(bundle.Paths.ProjectPackageFile, bundle.Paths.RootSchemaFile)
+	return ""
 }
 
 func authoredFileForSource(bundle *runtimecontracts.WorkflowContractBundle, source runtimecontracts.ContractItemSource) string {
 	if file := strings.TrimSpace(source.File); file != "" {
 		return file
 	}
-	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
+	if flowID := strings.TrimSpace(source.FlowPath); flowID != "" {
 		if flow, ok := bundle.FlowViewByID(flowID); ok {
-			switch strings.TrimSpace(source.Layer) {
+			switch strings.TrimSpace(source.Family) {
 			case "nodes", "node", "flow":
 				return firstNonEmpty(flow.Paths.NodesFile, flow.Paths.SchemaFile)
 			case "events", "event":
@@ -1245,23 +1226,7 @@ func authoredFileForSource(bundle *runtimecontracts.WorkflowContractBundle, sour
 			}
 		}
 	}
-	if packageKey := strings.TrimSpace(source.PackageKey); packageKey != "" {
-		return packageSourceFile(bundle, packageKey)
-	}
 	return ""
-}
-
-func packageSourceFile(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) string {
-	if bundle == nil {
-		return ""
-	}
-	packageKey = strings.TrimSpace(packageKey)
-	if packageKey != "" {
-		if project, ok := bundle.ProjectViewByKey(packageKey); ok {
-			return strings.TrimSpace(project.Paths.PackageFile)
-		}
-	}
-	return strings.TrimSpace(bundle.Paths.ProjectPackageFile)
 }
 
 func sortedEntityFields(fields map[string]runtimecontracts.EntityFieldDecl) []string {

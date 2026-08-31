@@ -35,6 +35,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type staticAgentRuntimeResolver struct {
@@ -51,7 +52,7 @@ func (r staticAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig
 	return llm.AgentRuntimeResolution{Actor: actor, Runtime: wrapAgentTestRuntime(r.runtime)}, nil
 }
 
-const agentTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const agentTestBundleHash = sourceartifactfixture.BundleHash
 
 type agentTestBehaviorRuntime interface {
 	llm.Runtime
@@ -179,13 +180,13 @@ func agentManagedTestContext(t testing.TB, agent *LLMAgent) context.Context {
 	if err != nil {
 		t.Fatalf("agent test admission: %v", err)
 	}
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(agentTestBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(agentTestBundleHash)
 	if err != nil {
 		t.Fatalf("agent test bundle source: %v", err)
 	}
 	ctx := runtimeeffects.WithLifecycleToken(context.Background(), token)
 	ctx = managedexecution.WithAdmission(ctx, admission)
-	return runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	return runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 }
 
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
@@ -246,7 +247,7 @@ func TestNewLLMAgent_ConsumesExactProviderPromptAssemblyWithoutConfigExpansion(t
 	if !strings.Contains(got, "Reference data: /data (read-only logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
 	}
-	if !strings.Contains(got, "Contracts: /opt/swarm/contracts (read-only logical path)") {
+	if !strings.Contains(got, "Source: /opt/swarm/source (read-only logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
 	}
 	if strings.Contains(got, "Trusted host bash starts in the workspace backing directory") {
@@ -680,11 +681,8 @@ func TestBoardStep_DrainedDirectiveStopsBeforeRemediation(t *testing.T) {
 	}
 	ctx = runtimeeffects.WithDirectiveCompletionOrigin(ctx, origin)
 	ctx, observation := runtimeeffects.WithCompletionSettlementObserver(ctx)
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("directive test bundle source: %v", err)
-	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	fact := sourceartifactfixture.Fact()
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
 	if !ok {
 		t.Fatal("directive completion authority missing")
@@ -984,6 +982,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Identity:      agentidentitytest.RootDeclared(t, "campaign-coordinator", "swarm-test://root/agents/campaign-coordinator"),
+		FlowID:        ".",
 		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
 		EmitEvents:    []string{"scan.requested"},
@@ -1030,8 +1029,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	const owner = "swarm-test://campaign-flow/agents/campaign-coordinator"
 	flow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "campaign-flow",
-			Flow: "campaign-flow",
+			FlowPath: "campaign-flow",
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.requested": {},
@@ -1044,6 +1042,9 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		AgentURIs: map[string]string{"campaign-coordinator": owner},
 		Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 		Path:      "campaign-flow",
+	}
+	root := &runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{*flow},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
@@ -1060,8 +1061,13 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 			},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: flow,
-			ByID: map[string]*runtimecontracts.FlowContractView{"campaign-flow": flow},
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"campaign-flow": &root.Children[0],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"campaign-flow": &root.Children[0],
+			},
 		},
 	}
 	rt := &directiveFactoryRuntime{
@@ -1247,7 +1253,7 @@ func TestNewLLMAgent_AuthoredEnvironmentPostambleMimicCannotSuppressGeneratedCon
 		"## Environment",
 		"Workspace: /workspace (read-write logical path)",
 		"Reference data: /data (read-only logical path)",
-		"Contracts: /opt/swarm/contracts (read-only logical path)",
+		"Source: /opt/swarm/source (read-only logical path)",
 		"Docker-backed command execution exposes these as OS paths.",
 		"Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.",
 		"This authored trailing sentence must remain before generated context.",

@@ -26,11 +26,10 @@ func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) str
 }
 
 func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
-	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
+	sourceRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -61,11 +60,10 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 }
 
 func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
-	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -75,7 +73,7 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatalf("decode standing describe json: %v\n%s", err, stdout.String())
 	}
-	if len(view.Flows) != 2 {
+	if len(view.Flows) != 3 {
 		t.Fatalf("standing describe flows = %#v", view.Flows)
 	}
 	var flow authoringview.FlowView
@@ -96,7 +94,7 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 		t.Fatalf("standing root input sources = %#v", view.RoutingTopology.RootInputSources)
 	}
 	source := view.RoutingTopology.RootInputSources[0]
-	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowID != "telegram-ingress" || source.Target.FlowPath != "telegram-ingress" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
+	if source.Kind != routingtopology.RootInputSourceStandingIngress || source.Alias != "chat" || source.Provider != "telegram" || source.Target.FlowPath != "telegram-ingress" || source.Admission.Kind != "pack-required" || source.Admission.PackID != "" {
 		t.Fatalf("standing root input source = %#v", source)
 	}
 	for _, edge := range view.RoutingTopology.Edges {
@@ -107,9 +105,9 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 }
 
 func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T) {
-	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	var jsonOut, jsonErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes --json code=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 	}
 	var topology routingtopology.Topology
@@ -121,7 +119,7 @@ func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T)
 	}
 
 	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stdout=%s stderr=%s", code, humanOut.String(), humanErr.String())
 	}
 	for _, want := range []string{"root input sources:", "[standing_ingress] chat/telegram -> flow telegram-ingress admission=pack-required"} {
@@ -132,10 +130,10 @@ func TestDescribeRoutesProjectsStandingIngressAsRootInputAdmission(t *testing.T)
 }
 
 func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T) {
-	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
+	sourceRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var routeJSON, routeErr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe", "routes", "--contracts", contractsRoot, "--json",
+		"describe", "routes", sourceRoot, "--json",
 	}, &routeJSON, &routeErr, defaultRootCommandOptions())
 	if code != 0 || routeErr.Len() != 0 {
 		t.Fatalf("describe routes --json code=%d stdout=%s stderr=%s", code, routeJSON.String(), routeErr.String())
@@ -153,7 +151,7 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 
 	var fullJSON, fullErr bytes.Buffer
 	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe", "--contracts", contractsRoot, "--json",
+		"describe", sourceRoot, "--json",
 	}, &fullJSON, &fullErr, defaultRootCommandOptions())
 	if code != 0 || fullErr.Len() != 0 {
 		t.Fatalf("describe --json code=%d stdout=%s stderr=%s", code, fullJSON.String(), fullErr.String())
@@ -169,15 +167,15 @@ func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T)
 
 func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
 
-	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
+	sourceRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
 	var firstJSON, firstHuman string
 	for i := 0; i < 5; i++ {
 		var jsonOut, jsonErr bytes.Buffer
-		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
 			t.Fatalf("iteration %d json code=%d stderr=%s", i, code, jsonErr.String())
 		}
 		var humanOut, humanErr bytes.Buffer
-		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 			t.Fatalf("iteration %d human code=%d stderr=%s", i, code, humanErr.String())
 		}
 		if i == 0 {
@@ -193,40 +191,10 @@ func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
 	}
 }
 
-func TestDescribeRoutesProjectsImportBoundaryWildcardProofOnHumanAndJSONSurfaces(t *testing.T) {
-	contractsRoot := filepath.Join(RepoRoot(), "tests", "tier11-flow-composition", "test-wildcard-deep-subscription")
-	var jsonOut, jsonErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
-		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
-	}
-	var topology routingtopology.Topology
-	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
-		t.Fatalf("decode topology: %v", err)
-	}
-	found := false
-	for _, edge := range topology.Edges {
-		if edge.Event.Canonical != "child/grandchild/task.done" || edge.Consumer.NodeID != "collector" {
-			continue
-		}
-		found = edge.Scope == routingtopology.DeliveryScopeTypedPubSub && edge.TypedPubSub != nil && edge.TypedPubSub.Match == "pattern" && edge.TypedPubSub.Boundary == "import_boundary" && edge.TypedPubSub.Authorization != nil
-	}
-	if !found {
-		t.Fatalf("topology edges = %#v, want import-boundary wildcard proof", topology.Edges)
-	}
-
-	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
-		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
-	}
-	if !strings.Contains(humanOut.String(), "typed pub/sub: match=pattern boundary=import_boundary") {
-		t.Fatalf("human routes omitted import proof:\n%s", humanOut.String())
-	}
-}
-
 func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
-	contractsRoot := filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-event-no-consumer")
+	sourceRoot := filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-event-no-consumer")
 	var jsonOut, jsonErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
 	}
 	var topology routingtopology.Topology
@@ -238,7 +206,7 @@ func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
 	}
 
 	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
 	for _, want := range []string{"event_consumer_exists [semantic_drift_warning]", "orphan.unconsumed", "route issues:"} {
@@ -249,12 +217,12 @@ func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
 }
 
 func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T) {
-	contractsRoot := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectMissingReceiverPin)
+	sourceRoot := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectMissingReceiverPin)
 	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"route issues:", "receiver_input_pin_missing", "package.yaml:"} {
+	for _, want := range []string{"route issues:", "receiver_input_pin_missing", "schema.yaml:"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human route issue missing %q:\n%s", want, humanOut.String())
 		}
@@ -262,9 +230,9 @@ func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T
 }
 
 func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T) {
-	contractsRoot := filepath.Join(RepoRoot(), "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
+	sourceRoot := filepath.Join(RepoRoot(), "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
 	var jsonOut, jsonErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
 	}
 	var topology routingtopology.Topology
@@ -282,7 +250,7 @@ func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T
 	}
 
 	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
 	for _, want := range []string{"[inter_flow_connect]", "connect: child.task.done -> .task.done"} {
@@ -296,9 +264,9 @@ func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T
 }
 
 func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
-	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
 	var jsonOut, jsonErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
 	}
 	var topology routingtopology.Topology
@@ -320,7 +288,7 @@ func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
 	}
 
 	var humanOut, humanErr bytes.Buffer
-	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", sourceRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
 	for _, want := range []string{"field=validation_case_id", "source_kind=generated_uuid", "source=generated.uuid", "derived_from="} {
@@ -334,12 +302,11 @@ func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
 }
 
 func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
-	contractsRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
+	sourceRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -372,8 +339,7 @@ func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
 		t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -396,24 +362,24 @@ func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
 	repo := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"describe"}, &stdout, &stderr, defaultRootCommandOptions())
+	missing := filepath.Join(repo, "missing-source")
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"describe", missing}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != CLIExitValidation {
 		t.Fatalf("describe missing contracts code = %d, want %d stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
 	}
 	if stdout.String() != "" {
 		t.Fatalf("describe missing contracts stdout = %q, want empty", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "ERROR: a contracts directory is required.") || !strings.Contains(got, "Remediation: Pass a contracts directory") {
+	if got := stderr.String(); !strings.Contains(got, missing) {
 		t.Fatalf("describe missing contracts stderr = %q", got)
 	}
 }
 
 func TestDescribeCommandRendersScalarTemplateInstanceIdentity(t *testing.T) {
-	contractsRoot := writeDescribeScalarTemplateInstanceContracts(t)
+	sourceRoot := writeDescribeScalarTemplateInstanceContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
 		t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -427,11 +393,10 @@ func TestDescribeCommandRendersScalarTemplateInstanceIdentity(t *testing.T) {
 }
 
 func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
-	contractsRoot := writeDescribeRootPrimaryEntityContracts(t)
+	sourceRoot := writeDescribeRootPrimaryEntityContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -456,11 +421,10 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 }
 
 func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
-	contractsRoot := writeDescribeStageGraphContracts(t)
+	sourceRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--graph",
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -541,8 +505,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"describe",
-		"--contracts", contractsRoot,
+		"describe", sourceRoot,
 		"--graph",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -569,12 +532,12 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 }
 
 func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
-	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier)
+	sourceRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier)
 
 	t.Run("json", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-			"describe", "--contracts", contractsRoot, "--graph", "--json",
+			"describe", sourceRoot, "--graph", "--json",
 		}, &stdout, &stderr, defaultRootCommandOptions())
 		if code != 0 {
 			t.Fatalf("describe barrier json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -603,7 +566,7 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 	t.Run("human", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-			"describe", "--contracts", contractsRoot, "--graph",
+			"describe", sourceRoot, "--graph",
 		}, &stdout, &stderr, defaultRootCommandOptions())
 		if code != 0 {
 			t.Fatalf("describe barrier code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -621,11 +584,10 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 }
 
 func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
-	contractsRoot := writeDescribeStageGraphContracts(t)
+	sourceRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify",
-		"--contracts", contractsRoot,
+		"verify", sourceRoot,
 		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -647,8 +609,8 @@ func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 }
 
 func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
-	contractsRoot := writeDescribeStageGraphContracts(t)
-	nodesPath := filepath.Join(contractsRoot, "flows", "support", "nodes.yaml")
+	sourceRoot := writeDescribeStageGraphContracts(t)
+	nodesPath := filepath.Join(sourceRoot, "support", "nodes.yaml")
 	nodes, err := os.ReadFile(nodesPath)
 	if err != nil {
 		t.Fatal(err)
@@ -661,8 +623,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify",
-		"--contracts", contractsRoot,
+		"verify", sourceRoot,
 		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -688,8 +649,8 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 }
 
 func TestVerifyCommandRejectsTypeInvalidNamedJoinResult(t *testing.T) {
-	contractsRoot := writeDescribeStageGraphContracts(t)
-	flowRoot := filepath.Join(contractsRoot, "flows", "support")
+	sourceRoot := writeDescribeStageGraphContracts(t)
+	flowRoot := filepath.Join(sourceRoot, "support")
 	writeDescribeTestFile(t, filepath.Join(flowRoot, "types.yaml"), `
 types:
   JoinResult:
@@ -714,7 +675,7 @@ types:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify", "--contracts", contractsRoot, "--config", writeTestVerifyRuntimeConfig(t), "--json",
+		"verify", sourceRoot, "--config", writeTestVerifyRuntimeConfig(t), "--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("verify --json code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
@@ -737,22 +698,14 @@ func reportContainsVerifyError(findings []verifyFindingOutput, checkID, message 
 func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
-name: defaulted-template-policy
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: template
-`)
+
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeDescribeTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 mode: template
 instance: account_id
 `)
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+	writeDescribeTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 account:
   account_id: uuid
 `)
@@ -767,12 +720,7 @@ func writeDescribeStageGraphContracts(t testing.TB) string {
 func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
-name: root-primary-entity
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
 	writeDescribeTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:

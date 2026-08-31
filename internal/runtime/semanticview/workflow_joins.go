@@ -28,7 +28,7 @@ func effectiveWorkflowJoins(source Source, plans []runtimecontracts.WorkflowJoin
 		if !ok {
 			continue
 		}
-		pin, ok := source.FlowInputEventPin(plan.Node.FlowID(), endpoint.PinName)
+		pin, ok := source.FlowInputEventPin(plan.Node.FlowPath(), endpoint.PinName)
 		if !ok || !strings.EqualFold(strings.TrimSpace(pin.Resolution().Aggregation), "barrier") {
 			continue
 		}
@@ -109,9 +109,9 @@ func WorkflowJoinPlanForRef(source Source, joinRef timeridentity.JoinRef) (runti
 		}
 	case timeridentity.JoinRefModeFanOutDelivery:
 		fanOut, found := joinRef.FanOutDelivery()
+		planDeclaration, declarationErr := plan.FanOut.FanOut.ElementRef.DeclarationIdentity()
 		if !found || plan.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery ||
-			plan.FanOut.FanOut.ElementRef.PackageKey != fanOut.PackageKey() ||
-			plan.FanOut.FanOut.ElementRef.ElementID != fanOut.ElementID() ||
+			declarationErr != nil || !planDeclaration.Equal(fanOut.DeclarationIdentity()) ||
 			plan.FanOut.FanOut.BundleHash != fanOut.BundleHash() ||
 			plan.FanOut.FanOut.SemanticDigest != fanOut.SemanticDigest() {
 			return runtimecontracts.WorkflowJoinPlan{}, false

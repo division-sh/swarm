@@ -123,7 +123,7 @@ func NewStageGateAnchor(in StageGateAnchor) (Anchor, error) {
 		return Anchor{}, fmt.Errorf("stage_gate anchor route is required")
 	}
 	for name, value := range map[string]string{
-		"entity_id": in.EntityID, "stage": in.Stage,
+		"flow_id": in.FlowID, "entity_id": in.EntityID, "stage": in.Stage,
 		"stage_activation_id": in.StageActivationID,
 	} {
 		if value == "" {
@@ -145,9 +145,7 @@ func NewStageGateAnchor(in StageGateAnchor) (Anchor, error) {
 		"stage":               in.Stage,
 		"stage_activation_id": in.StageActivationID,
 	}
-	if in.FlowID != "" {
-		values["flow_id"] = in.FlowID
-	}
+	values["flow_id"] = in.FlowID
 	data, err := canonicaljson.FromGo(values)
 	if err != nil {
 		return Anchor{}, fmt.Errorf("admit stage_gate anchor: %w", err)
@@ -226,7 +224,7 @@ func validateStageGateSourceOwner(in StageGateAnchor) error {
 	route := in.Source.Route()
 	switch in.Source.Kind() {
 	case events.RoutingSourceRoot:
-		if in.FlowID != "" || route != (events.RouteIdentity{EntityID: in.EntityID}.Normalized()) {
+		if in.FlowID != "." || route != (events.RouteIdentity{EntityID: in.EntityID}.Normalized()) {
 			return fmt.Errorf("root stage_gate anchor source does not match its project owner")
 		}
 	case events.RoutingSourceStaticFlow:
@@ -438,7 +436,7 @@ func (a Anchor) StageGate() (StageGateAnchor, error) {
 	if !ok {
 		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor must be an object")
 	}
-	if err := exactAnchorFields(values, "stage_gate", []string{"flow_scope_key", "flow_instance_id", "flow_instance", "entity_id", "routing_source", "stage", "stage_activation_id"}, []string{"flow_id"}); err != nil {
+	if err := exactAnchorFields(values, "stage_gate", []string{"flow_scope_key", "flow_instance_id", "flow_instance", "flow_id", "entity_id", "routing_source", "stage", "stage_activation_id"}, nil); err != nil {
 		return StageGateAnchor{}, err
 	}
 	out := StageGateAnchor{
@@ -447,7 +445,7 @@ func (a Anchor) StageGate() (StageGateAnchor, error) {
 			requiredAnchorString(values, "flow_instance_id"),
 			requiredAnchorString(values, "flow_instance"),
 		),
-		FlowID:            optionalAnchorString(values, "flow_id"),
+		FlowID:            requiredAnchorString(values, "flow_id"),
 		EntityID:          requiredAnchorString(values, "entity_id"),
 		Stage:             requiredAnchorString(values, "stage"),
 		StageActivationID: requiredAnchorString(values, "stage_activation_id"),
@@ -455,7 +453,7 @@ func (a Anchor) StageGate() (StageGateAnchor, error) {
 	if err := canonicaljson.ValueInto(values["routing_source"], &out.Source); err != nil {
 		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor routing_source: %w", err)
 	}
-	if !out.Route.Valid() || out.EntityID == "" || out.Stage == "" || out.StageActivationID == "" {
+	if !out.Route.Valid() || out.FlowID == "" || out.EntityID == "" || out.Stage == "" || out.StageActivationID == "" {
 		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor contains an empty required identity")
 	}
 	if err := validateAnchorExecutionSource(out.Source); err != nil {

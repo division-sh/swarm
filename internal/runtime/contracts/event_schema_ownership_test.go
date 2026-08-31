@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 	type manifestation struct {
 		bundle          string
 		from            string
@@ -92,7 +92,7 @@ func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 
 func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.T) {
 	repo := repoRootForContractsTest(t)
-	root := canonicalrouting.CopySealedParentConnect(t, canonicalrouting.SealedParentConnectOptions{})
+	root := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatal(err)
@@ -105,8 +105,8 @@ func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.
 		t.Fatalf("connected producer = flow:%q declaration:%q, want producer/work.ready", row.producerFlowID, row.producerName)
 	}
 	pins := bundle.FlowInputEventPins("consumer")
-	if len(pins) != 2 {
-		t.Fatalf("consumer input pins = %#v, want work.ready and control.start", pins)
+	if len(pins) != 1 {
+		t.Fatalf("consumer input pins = %#v, want exact work.ready input", pins)
 	}
 	for _, pin := range pins {
 		if pin.EventType() != "work.ready" {
@@ -192,7 +192,7 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("validation.requested:\n  wrong: text\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
+	producerEvents := filepath.Join(root, "producer", "events.yaml")
 	if err := os.WriteFile(producerEvents, []byte(`validation.triggered:
   candidate: text?
 validation.requested:
@@ -205,7 +205,7 @@ validation.requested:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "flows", "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -242,7 +242,7 @@ validation.requested:
 		}
 	}
 
-	node := identitytest.ExecutableNode(t, ".", "validator", "validator-node")
+	node := identitytest.ExecutableNode(t, "validator", "validator-node")
 	nodeEntry, _, ok := bundle.ResolveExecutableNodeEventCatalogEntry(node, "validation.requested")
 	if !ok || nodeEntry.Payload.Properties["validation_case_id"].Type != "uuid" {
 		t.Fatalf("executable-node proof missed effective carry: entry=%#v ok=%t", nodeEntry, ok)
@@ -306,7 +306,7 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 			},
 		}
 		return eventSchemaOwnershipRow{
-			packageKey: ".", producerEndpoint: endpoint, producerFlowID: endpoint,
+			ownerFlowPath: ".", producerEndpoint: endpoint, producerFlowID: endpoint,
 			producerEvent: "work.ready", producerName: "work.ready", producer: entry,
 			receiverEndpoint: "consumer", receiverFlowID: "consumer", receiverEvent: "work.ready",
 		}
@@ -331,7 +331,7 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 				}},
 				eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{"consumer": rows},
 			}
-			errs := validateIntraPackageEventSchemaOwnership(bundle)
+			errs := validateCompiledConnectEventSchemaOwnership(bundle)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), "multiple connected producer schema owners") || !strings.Contains(errs[0].Error(), "producer-a") || !strings.Contains(errs[0].Error(), "producer-b") {
 				t.Fatalf("ownership errors = %v, want deterministic distinct-producer rejection", errs)
 			}
@@ -364,57 +364,22 @@ func TestConnectedEventSchemaOwnershipPreservesSingleProducerFanIn(t *testing.T)
 	}
 }
 
-func TestConnectedEventSchemaOwnershipTreatsPackageRootAndOwningFlowAsOneProducer(t *testing.T) {
-	entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"value": {Type: "text"}}}}
-	bundle := &WorkflowContractBundle{
-		projectContracts: map[string]ProjectContractView{
-			"flows/child": {
-				Paths:  ProjectPackagePaths{Key: "flows/child", OwningFlowID: "child"},
-				Events: map[string]EventCatalogEntry{"work.ready": entry},
-			},
-		},
-		FlowTree: FlowTree{ByID: map[string]*FlowContractView{
-			"child":    {Paths: FlowContractPaths{ID: "child", PackageKey: "flows/child"}, Events: map[string]EventCatalogEntry{"work.ready": entry}},
-			"consumer": {Paths: FlowContractPaths{ID: "consumer", PackageKey: "flows/child"}},
-		}},
-		Semantics: WorkflowSemanticView{
-			CompositionConnects: []FlowPackageConnect{
-				{PackageKey: "flows/child", Event: "work.ready", From: ".", To: "consumer"},
-				{PackageKey: "flows/child", Event: "work.ready", From: "child", To: "consumer"},
-			},
-			flowInputEventPins: map[string][]CompiledFlowInputPin{
-				"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
-			},
-		},
-	}
-	rows := compileEventSchemaOwnershipRows(bundle)
-	if len(rows) != 2 {
-		t.Fatalf("ownership rows = %#v, want two routes", rows)
-	}
-	if !sameEventSchemaProducerOwner(rows[0], rows[1]) {
-		t.Fatalf("package root and owning flow resolved as distinct owners: %#v / %#v", rows[0], rows[1])
-	}
-	if errs := validateIntraPackageEventSchemaOwnership(bundle); len(errs) != 0 {
-		t.Fatalf("same canonical producer was rejected as ambiguous: %v", errs)
-	}
-}
-
-func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
+func TestCompiledConnectEventConsumerRestatementFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "parent-connect")
 	root := filepath.Join(t.TempDir(), "parent-connect")
 	copyTree(t, source, root)
-	consumerEvents := filepath.Join(root, "flows", "consumer", "events.yaml")
+	consumerEvents := filepath.Join(root, "consumer", "events.yaml")
 	if err := os.WriteFile(consumerEvents, []byte("work.ready:\n  work_id: text?\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err == nil || !contractErrorContains(err, "restates producer-owned schema") || !contractErrorContains(err, "remove the consumer declaration") {
-		t.Fatalf("load error = %v, want intra-package restatement teaching error", err)
+		t.Fatalf("load error = %v, want compiled-connect restatement teaching error", err)
 	}
 }
 
-func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionProvenance(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -432,7 +397,7 @@ func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
 	}
 }
 
-func TestIntraPackageEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := filepath.Join(repo, "examples", "routing", "template-select-existing")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -449,68 +414,6 @@ func TestIntraPackageEventConsumerProjectionUsesOnlyProducerProvenance(t *testin
 	alias, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.account_id.type")
 	if !ok || alias.RuleID != eventConsumerProjectionRule || len(alias.InputPaths) != 1 || !strings.Contains(alias.InputPaths[0], "fields.account_id.type") || strings.Contains(strings.Join(alias.InputPaths, " "), "carries") {
 		t.Fatalf("producer projection provenance = %#v, found=%t", alias, ok)
-	}
-}
-
-func TestCrossPackageBoundarySnapshotIsNotClassifiedAsConsumerRestatement(t *testing.T) {
-	bundle := &WorkflowContractBundle{
-		projectContracts: map[string]ProjectContractView{
-			".":       {Events: map[string]EventCatalogEntry{"work.ready": {}}},
-			"package": {Events: map[string]EventCatalogEntry{"work.ready": {}}},
-		},
-		Semantics: WorkflowSemanticView{CompositionConnects: []FlowPackageConnect{{
-			PackageKey: ".", Event: "work.ready", From: ".", To: "worker",
-		}}},
-		FlowTree: FlowTree{ByID: map[string]*FlowContractView{
-			"worker": {Paths: FlowContractPaths{ID: "worker", PackageKey: "package"}, Events: map[string]EventCatalogEntry{"work.ready": {}}},
-		}},
-	}
-	if errs := validateIntraPackageEventSchemaOwnership(bundle); len(errs) != 0 {
-		t.Fatalf("cross-package snapshot was rejected as a same-package restatement: %v", errs)
-	}
-}
-
-func TestCrossPackageBoundarySnapshotProvenanceCarriesPackageIdentity(t *testing.T) {
-	snapshot, err := admitEventCatalogEntryForTest(t, "work_id: uuid")
-	if err != nil {
-		t.Fatal(err)
-	}
-	internal, err := admitEventCatalogEntryForTest(t, "detail: text")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle := &WorkflowContractBundle{projectContracts: map[string]ProjectContractView{
-		"packages/worker": {
-			Paths: ProjectPackagePaths{Key: "packages/worker", ProjectEventsFile: "packages/worker/events.yaml"},
-			Manifest: ProjectPackageDocument{
-				Name: "worker", Version: "1.0.0",
-				Requires: FlowPackageRequires{Inputs: []string{"work.ready"}, Outputs: []string{"work.completed"}},
-			},
-			Events: map[string]EventCatalogEntry{
-				"work.ready":      snapshot,
-				"work.completed":  internal,
-				"worker.internal": internal,
-			},
-		},
-	}}
-	populateEffectiveEventProvenance(bundle)
-
-	prefix := effectiveEventProvenancePrefix("packages/worker", "work.ready")
-	for _, suffix := range []string{"declaration", "fields.work_id.type", "fields.work_id.is_optional", "payload.required"} {
-		provenance, ok := bundle.EffectiveProvenance().Lookup(prefix + "." + suffix)
-		if !ok || provenance.Origin != EffectiveValueOriginBoundarySnapshot || provenance.PackIdentity != "packages/worker" {
-			t.Fatalf("boundary provenance %s = %#v, found=%t", suffix, provenance, ok)
-		}
-	}
-	internalPrefix := effectiveEventProvenancePrefix("packages/worker", "worker.internal")
-	provenance, ok := bundle.EffectiveProvenance().Lookup(internalPrefix + ".declaration")
-	if !ok || provenance.Origin != EffectiveValueOriginAuthored || provenance.PackIdentity != "" {
-		t.Fatalf("package-local event misclassified as boundary snapshot: %#v, found=%t", provenance, ok)
-	}
-	outputPrefix := effectiveEventProvenancePrefix("packages/worker", "work.completed")
-	provenance, ok = bundle.EffectiveProvenance().Lookup(outputPrefix + ".declaration")
-	if !ok || provenance.Origin != EffectiveValueOriginAuthored || provenance.PackIdentity != "" {
-		t.Fatalf("producer-owned package output misclassified as boundary snapshot: %#v, found=%t", provenance, ok)
 	}
 }
 

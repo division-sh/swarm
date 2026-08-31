@@ -116,7 +116,7 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 		break
 	}
 	sourceRef := selected
-	sourceRef.BundleHash = "bundle-v1:sha256:" + strings.Repeat("0", 64)
+	sourceRef.BundleHash = "bundle-v2:sha256:" + strings.Repeat("0", 64)
 	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
 		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef}},
 	}}}
@@ -137,8 +137,8 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 
 	missing := plan
 	missing.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
-	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.ElementID = uuid.NewString()
-	if _, err := admitSelectedContractFanOutPlans(missing, source); err == nil || !strings.Contains(err.Error(), "missing pending fan_out element") {
+	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.SemanticPath = "missing." + uuid.NewString()
+	if _, err := admitSelectedContractFanOutPlans(missing, source); err == nil || !strings.Contains(err.Error(), "missing pending fan_out declaration") {
 		t.Fatalf("missing element error = %v", err)
 	}
 }

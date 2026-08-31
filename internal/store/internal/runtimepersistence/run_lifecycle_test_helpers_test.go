@@ -14,10 +14,12 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const semanticRunFixtureFlow = "semantic-run-fixture"
@@ -66,14 +68,14 @@ func (m sqliteRunLifecycleFixtureMutation) MarkTerminalRun(ctx context.Context, 
 }
 
 type semanticRunFixture struct {
-	RunID        string
-	State        runtimerunlifecycle.State
-	Origin       runtimerunlifecycle.RunOrigin
-	BundleHash   string
-	BundleSource string
-	StartedAt    time.Time
-	EndedAt      time.Time
-	Failure      *runtimefailures.Envelope
+	RunID      string
+	State      runtimerunlifecycle.State
+	Origin     runtimerunlifecycle.RunOrigin
+	BundleHash string
+	Artifact   *sourceartifact.AdmittedSourceArtifact
+	StartedAt  time.Time
+	EndedAt    time.Time
+	Failure    *runtimefailures.Envelope
 }
 
 func semanticScenarioSetupRunOriginForTest() runtimerunlifecycle.RunOrigin {
@@ -112,8 +114,19 @@ func materializeRunFixtureForTest(
 	if fixture.State == runtimerunlifecycle.StateForked {
 		return errors.New("semantic fork fixture requires the named fork operation")
 	}
-	ctx, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash, fixture.BundleSource)
+	if fixture.Artifact != nil {
+		artifactHash := fixture.Artifact.BundleHash()
+		if bundleHash := strings.TrimSpace(fixture.BundleHash); bundleHash != "" && bundleHash != artifactHash {
+			return fmt.Errorf("semantic run fixture bundle_hash %s contradicts artifact %s", bundleHash, artifactHash)
+		}
+		fixture.BundleHash = artifactHash
+	}
+	ctx, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
 	if err != nil {
+		return err
+	}
+	fixture.BundleHash = source.BundleHash()
+	if err := ensureRunFixtureSourceArtifactForTest(ctx, selected, fixture.BundleHash, fixture.Artifact); err != nil {
 		return err
 	}
 	err = materializeRunFixtureInCurrentMutationForTest(ctx, owner, fixture, source)
@@ -186,16 +199,11 @@ func materializeCompletedRunEntityForTest(
 func semanticRunFixtureContext(
 	ctx context.Context,
 	bundleHash string,
-	bundleSource string,
-) (context.Context, runtimecorrelation.BundleSourceFact, error) {
+) (context.Context, runtimecorrelation.SourceArtifactFact, error) {
 	bundleHash = strings.TrimSpace(bundleHash)
-	bundleSource = strings.TrimSpace(bundleSource)
-	if current, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		_, currentSource := current.StorageValues()
-		if (bundleHash == "" || current.BundleHash() == bundleHash) &&
-			(bundleSource == "" || currentSource == bundleSource) {
+	if current, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		if bundleHash == "" || current.BundleHash() == bundleHash {
 			bundleHash = current.BundleHash()
-			bundleSource = currentSource
 		}
 	}
 	if bundleHash == "" {
@@ -205,25 +213,13 @@ func semanticRunFixtureContext(
 		}
 	}
 	if bundleHash == "" {
-		bundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		bundleHash = sourceartifactfixture.BundleHash
 	}
-	var source runtimecorrelation.BundleSourceFact
-	var err error
-	switch bundleSource {
-	case "", runtimerunlifecycle.BundleSourceEphemeral:
-		source, err = runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-	case runtimerunlifecycle.BundleSourcePersisted:
-		source, err = runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-	default:
-		return ctx, runtimecorrelation.BundleSourceFact{}, fmt.Errorf(
-			"semantic run fixture forbids bundle_source %q",
-			bundleSource,
-		)
-	}
+	source, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
-		return ctx, runtimecorrelation.BundleSourceFact{}, err
+		return ctx, runtimecorrelation.SourceArtifactFact{}, err
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
 	runtimeInstanceID := "00000000-0000-4000-8000-000000000001"
 	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); ok &&
 		strings.TrimSpace(scope.RuntimeInstanceID) != "" {
@@ -240,7 +236,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 	ctx context.Context,
 	owner runLifecycleFixtureMutation,
 	fixture semanticRunFixture,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) error {
 	if fixture.StartedAt.IsZero() {
 		fixture.StartedAt = time.Now().UTC()
@@ -292,9 +288,9 @@ func requireRunFixtureInCurrentMutationForTest(
 		fixture.State = runtimerunlifecycle.StateRunning
 	}
 	if fixture.BundleHash == "" {
-		fixture.BundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		fixture.BundleHash = sourceartifactfixture.BundleHash
 	}
-	ctx, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash, fixture.BundleSource)
+	ctx, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
 	if err != nil {
 		t.Fatalf("construct semantic run fixture context: %v", err)
 	}
@@ -404,6 +400,42 @@ func requireRunFixtureForTest(
 	if err := materializeRunFixtureForTest(ctx, selected, fixture); err != nil {
 		t.Fatalf("materialize semantic run fixture %s: %v", fixture.RunID, err)
 	}
+}
+
+func ensureRunFixtureSourceArtifactForTest(
+	ctx context.Context,
+	selected any,
+	bundleHash string,
+	artifact *sourceartifact.AdmittedSourceArtifact,
+) error {
+	writer, ok := selected.(sourceartifactfixture.Writer)
+	if !ok {
+		return fmt.Errorf("semantic run fixture source writer is required, got %T", selected)
+	}
+	if artifact != nil {
+		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, artifact); err != nil {
+			return fmt.Errorf("persist semantic run fixture source artifact %s: %w", bundleHash, err)
+		}
+		return nil
+	}
+	if bundleHash == sourceartifactfixture.BundleHash {
+		if err := sourceartifactfixture.Ensure(ctx, writer); err != nil {
+			return fmt.Errorf("persist semantic run fixture source artifact %s: %w", bundleHash, err)
+		}
+		return nil
+	}
+	reader, ok := selected.(sourceartifactfixture.Reader)
+	if !ok {
+		return fmt.Errorf("semantic run fixture source reader is required, got %T", selected)
+	}
+	persisted, err := reader.GetSourceArtifact(ctx, bundleHash)
+	if err != nil {
+		return fmt.Errorf("semantic run fixture requires exact admitted source artifact %s: %w", bundleHash, err)
+	}
+	if err := persisted.Validate(); err != nil {
+		return fmt.Errorf("validate semantic run fixture source artifact %s: %w", bundleHash, err)
+	}
+	return nil
 }
 
 func requireRunningRunForTest(

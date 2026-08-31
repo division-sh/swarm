@@ -14,20 +14,10 @@ import (
 func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
-	packagePath := filepath.Join(root, "package.yaml")
-	packageYAML, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	packageYAML = append(packageYAML, []byte("packages:\n  - path: extras\n")...)
-	if err := os.WriteFile(packagePath, packageYAML, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	writePromptFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), "name: extras\nversion: \"1.0.0\"\nflows: []\n")
-	writePromptFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: package-ops-lead\n  intent: intent/ops-lead.md\n")
-	writePromptFixtureFile(t, filepath.Join(root, "extras", "intent", "ops-lead.md"), "Package-local intent.\n")
-	writePromptFixtureFile(t, filepath.Join(root, "flows", "intake", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: flow-ops-lead\n  intent: intent/ops-lead.md\n")
-	writePromptFixtureFile(t, filepath.Join(root, "flows", "intake", "intent", "ops-lead.md"), "Flow-local intent.\n")
+	writePromptFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: extras-ops-lead\n  intent: prompts/ops-lead.md\n")
+	writePromptFixtureFile(t, filepath.Join(root, "extras", "prompts", "ops-lead.md"), "Extras-local intent.\n")
+	writePromptFixtureFile(t, filepath.Join(root, "intake", "agents.yaml"), "ops-lead:\n  id: ops-lead\n  role: flow-ops-lead\n  intent: prompts/ops-lead.md\n")
+	writePromptFixtureFile(t, filepath.Join(root, "intake", "prompts", "ops-lead.md"), "Flow-local intent.\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -45,7 +35,7 @@ func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	if got, want := entry.ResolvedIntent.Kind, runtimeagentintent.SourceLocal; got != want {
 		t.Fatalf("kind = %q, want %q", got, want)
 	}
-	if got, want := entry.ResolvedIntent.Coordinate, "intent/ops-lead.md"; got != want {
+	if got, want := entry.ResolvedIntent.Coordinate, "prompts/ops-lead.md"; got != want {
 		t.Fatalf("coordinate = %q, want %q", got, want)
 	}
 	if !strings.Contains(entry.ResolvedIntent.Provenance, "agents.yaml#agents.ops-lead.intent") {
@@ -55,9 +45,9 @@ func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 		t.Fatalf("resolved intent: %v", err)
 	}
 	wantScoped := map[string]string{
-		"agents.yaml#agents.ops-lead.intent":              entry.ResolvedIntent.Content,
-		"extras/agents.yaml#agents.ops-lead.intent":       "Package-local intent.\n",
-		"flows/intake/agents.yaml#agents.ops-lead.intent": "Flow-local intent.\n",
+		"agents.yaml#agents.ops-lead.intent":        entry.ResolvedIntent.Content,
+		"extras/agents.yaml#agents.ops-lead.intent": "Extras-local intent.\n",
+		"intake/agents.yaml#agents.ops-lead.intent": "Flow-local intent.\n",
 	}
 	gotScoped := map[string]string{}
 	for _, record := range bundleAgentRecords(bundle) {
@@ -148,11 +138,11 @@ func TestResolvedAgentIntent_DuplicateCanonicalCoordinateFailsClosed(t *testing.
 	if err := os.WriteFile(agentsPath, []byte(`first:
   id: first
   role: first
-  intent: intent/ops-lead.md
+  intent: prompts/ops-lead.md
 second:
   id: second
   role: second
-  intent: intent/ops-lead.md
+  intent: prompts/ops-lead.md
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +155,8 @@ second:
 func TestResolvedAgentIntent_CaseCollidingCanonicalCoordinatesFailClosed(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
-	upperPath := filepath.Join(root, "intent", "Ops-Lead.md")
-	lowerPath := filepath.Join(root, "intent", "ops-lead.md")
+	upperPath := filepath.Join(root, "prompts", "Ops-Lead.md")
+	lowerPath := filepath.Join(root, "prompts", "ops-lead.md")
 	if err := os.WriteFile(upperPath, []byte("Upper-case coordinate.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -178,16 +168,16 @@ func TestResolvedAgentIntent_CaseCollidingCanonicalCoordinatesFailClosed(t *test
 	if err := os.WriteFile(filepath.Join(root, "agents.yaml"), []byte(`first:
   id: first
   role: first
-  intent: intent/Ops-Lead.md
+  intent: prompts/Ops-Lead.md
 second:
   id: second
   role: second
-  intent: intent/ops-lead.md
+  intent: prompts/ops-lead.md
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "case-colliding agent intent coordinates") {
+	if err == nil || !strings.Contains(err.Error(), "case-colliding source entries") {
 		t.Fatalf("load error = %v, want case-colliding coordinate rejection", err)
 	}
 }
@@ -226,8 +216,8 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 			name: "leaf_symlink",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				path := filepath.Join(root, "intent", "ops-lead.md")
-				target := filepath.Join(root, "intent", "target.md")
+				path := filepath.Join(root, "prompts", "ops-lead.md")
+				target := filepath.Join(root, "prompts", "target.md")
 				if err := os.Rename(path, target); err != nil {
 					t.Fatal(err)
 				}
@@ -235,14 +225,14 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 					t.Skipf("symlink unsupported: %v", err)
 				}
 			},
-			contains: "symlink",
+			contains: "must not be a symlink",
 		},
 		{
 			name: "parent_symlink",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				dir := filepath.Join(root, "intent")
-				target := filepath.Join(root, "intent-target")
+				dir := filepath.Join(root, "prompts")
+				target := filepath.Join(root, "prompts-target")
 				if err := os.Rename(dir, target); err != nil {
 					t.Fatal(err)
 				}
@@ -250,13 +240,13 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 					t.Skipf("symlink unsupported: %v", err)
 				}
 			},
-			contains: "symlink",
+			contains: "must not be a symlink",
 		},
 		{
 			name: "non_regular",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				path := filepath.Join(root, "intent", "ops-lead.md")
+				path := filepath.Join(root, "prompts", "ops-lead.md")
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
@@ -264,23 +254,23 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 					t.Fatal(err)
 				}
 			},
-			contains: "regular file",
+			contains: "not an admitted source member",
 		},
 		{
 			name: "unreadable",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				if err := os.Chmod(filepath.Join(root, "intent", "ops-lead.md"), 0o200); err != nil {
+				if err := os.Chmod(filepath.Join(root, "prompts", "ops-lead.md"), 0o200); err != nil {
 					t.Fatal(err)
 				}
 			},
-			contains: "not readable",
+			contains: "permission denied",
 		},
 		{
 			name: "invalid_utf8",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				if err := os.WriteFile(filepath.Join(root, "intent", "ops-lead.md"), []byte{0xff}, 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "prompts", "ops-lead.md"), []byte{0xff}, 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -290,7 +280,7 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 			name: "blank",
 			mutate: func(t testing.TB, root string) {
 				t.Helper()
-				if err := os.WriteFile(filepath.Join(root, "intent", "ops-lead.md"), []byte(" \n\t"), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "prompts", "ops-lead.md"), []byte(" \n\t"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -311,26 +301,17 @@ func TestResolvedAgentIntentLocalFile_FailsClosedOnHostileFilesystemShapes(t *te
 func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
-	flowDir := filepath.Join(root, "flows", "child")
-	if err := os.MkdirAll(filepath.Join(flowDir, "intent"), 0o755); err != nil {
+	flowDir := filepath.Join(root, "child")
+	if err := os.MkdirAll(filepath.Join(flowDir, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(flowDir, "agents.yaml"), []byte("child:\n  id: child\n  role: child\n  intent: intent/child.md\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(flowDir, "agents.yaml"), []byte("child:\n  id: child\n  role: child\n  intent: prompts/child.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(flowDir, "intent", "child.md"), []byte("Flow-local intent.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(flowDir, "prompts", "child.md"), []byte("Flow-local intent.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "intent", "child.md"), []byte("Wrong root intent.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	packagePath := filepath.Join(root, "package.yaml")
-	raw, err := os.ReadFile(packagePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw = append(raw, []byte("  - id: child\n    flow: child\n    mode: static\n")...)
-	if err := os.WriteFile(packagePath, raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "prompts", "child.md"), []byte("Wrong root intent.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(flowDir, "schema.yaml"), []byte("name: child\nmode: static\n"), 0o644); err != nil {
@@ -348,7 +329,7 @@ func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *te
 			break
 		}
 	}
-	if !ok || entry.ResolvedIntent.Content != "Flow-local intent.\n" || entry.ResolvedIntent.Coordinate != "flows/child/intent/child.md" {
+	if !ok || entry.ResolvedIntent.Content != "Flow-local intent.\n" || entry.ResolvedIntent.Coordinate != "child/prompts/child.md" {
 		t.Fatalf("flow-local resolved intent = %#v", entry.ResolvedIntent)
 	}
 }
@@ -356,10 +337,10 @@ func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *te
 func TestResolvedAgentIntent_DoesNotGuessSources(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
-	if err := os.WriteFile(filepath.Join(root, "ops-lead.review.md"), []byte("wrong mode"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "prompts", "ops-lead.review.md"), []byte("wrong mode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "ops_lead.md"), []byte("wrong role"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "prompts", "ops_lead.md"), []byte("wrong role"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -374,14 +355,14 @@ func TestResolvedAgentIntent_DoesNotGuessSources(t *testing.T) {
 
 func TestAssembleAgentPrompt_DeliversCriteriaWithoutChangingIntentIdentity(t *testing.T) {
 	flow := FlowContractView{
-		Paths: FlowContractPaths{ID: "validation", Flow: "validation"},
+		Paths: FlowContractPaths{FlowPath: "validation"},
 		Policy: PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
 			"feasibility_exclusions": criteriaValidationTestSet(),
 		}},
 	}
 	root := &FlowContractView{Children: []FlowContractView{flow}}
 	bundle := &WorkflowContractBundle{FlowTree: flowmodel.Tree[FlowContractView]{Root: root, ByID: map[string]*FlowContractView{"validation": &root.Children[0]}}}
-	resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "flows/validation/agents.yaml#agents.cto.intent", "Base intent.")
+	resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "validation/agents.yaml#agents.cto.intent", "Base intent.")
 	if err != nil {
 		t.Fatal(err)
 	}

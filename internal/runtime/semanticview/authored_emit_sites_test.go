@@ -22,17 +22,17 @@ func TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes(t *testing.T) {
 	})
 
 	sites := AuthoredEmitSites(source)
-	if countAuthoredEmitSites(sites, "", "root-node", "root.ready") != 1 {
+	if countAuthoredEmitSites(sites, ".", "root-node", "root.ready") != 1 {
 		t.Fatalf("expected one root authored emit site, got %#v", authoredEmitSiteSummaries(sites))
 	}
-	if countAuthoredEmitSites(sites, "", "root-node", "root.escalated") != 1 {
+	if countAuthoredEmitSites(sites, ".", "root-node", "root.escalated") != 1 {
 		t.Fatalf("expected one root guard escalation authored emit site, got %#v", authoredEmitSiteSummaries(sites))
 	}
 	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
 		t.Fatalf("expected one flow authored emit site, got %#v", authoredEmitSiteSummaries(sites))
 	}
-	if countAuthoredEmitSites(sites, "", "extras-node", "support.ready") != 1 {
-		t.Fatalf("expected unrelated package authored emit site to remain root-owned, got %#v", authoredEmitSiteSummaries(sites))
+	if countAuthoredEmitSites(sites, "extras", "extras-node", "support.ready") != 1 {
+		t.Fatalf("expected one extras child-flow authored emit site, got %#v", authoredEmitSiteSummaries(sites))
 	}
 }
 
@@ -45,7 +45,7 @@ func TestAuthoredEmitSites_GuardEscalationObjectCarriesFields(t *testing.T) {
 	})
 
 	sites := AuthoredEmitSites(source)
-	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.escalated")
+	matches := authoredEmitSitesByFlowNodeEvent(sites, ".", "root-node", "root.escalated")
 	if len(matches) != 1 {
 		t.Fatalf("expected one guard escalation authored emit site, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
 	}
@@ -68,14 +68,14 @@ func TestAuthoredEmitSites_EnumeratesOnSuccessEmitWithRules(t *testing.T) {
 	})
 
 	sites := AuthoredEmitSites(source)
-	ruleMatches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.routed")
+	ruleMatches := authoredEmitSitesByFlowNodeEvent(sites, ".", "root-node", "root.routed")
 	if len(ruleMatches) != 1 {
 		t.Fatalf("expected one rules authored emit site, got %d: %#v", len(ruleMatches), authoredEmitSiteSummaries(sites))
 	}
 	if got := ruleMatches[0].Site; got != "handler.rules.emit" {
 		t.Fatalf("rule site = %q, want handler.rules.emit", got)
 	}
-	successMatches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.audit")
+	successMatches := authoredEmitSitesByFlowNodeEvent(sites, ".", "root-node", "root.audit")
 	if len(successMatches) != 1 {
 		t.Fatalf("expected one on_success authored emit site, got %d: %#v", len(successMatches), authoredEmitSiteSummaries(sites))
 	}
@@ -91,7 +91,7 @@ func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
 	})
 
 	sites := AuthoredEmitSites(source)
-	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.ready")
+	matches := authoredEmitSitesByFlowNodeEvent(sites, ".", "root-node", "root.ready")
 	if len(matches) != 2 {
 		t.Fatalf("expected one effective template site per rule, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
 	}
@@ -117,7 +117,7 @@ func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
 	source := loadAuthoredEmitSiteLoweringFixture(t)
 
 	sites := AuthoredEmitSites(source)
-	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "dispatcher", "market_research.scan_assigned")
+	matches := authoredEmitSitesByFlowNodeEvent(sites, ".", "dispatcher", "market_research.scan_assigned")
 	if len(matches) != 1 {
 		t.Fatalf("expected one lowered authored emit site, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
 	}
@@ -132,7 +132,7 @@ func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
 	}
 }
 
-func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
+func TestAuthoredEmitSites_PreservesSameNodeIDAcrossDistinctFilesystemFlows(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:          "root-node",
 		rootEmit:            "root.ready",
@@ -143,50 +143,13 @@ func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinc
 	})
 
 	sites := AuthoredEmitSites(source)
-	matches := authoredEmitSitesByFlowNodeEvent(sites, "support", "support-node", "support.ready")
-	if len(matches) != 2 {
-		t.Fatalf("expected two distinct support-node authored sites, got %d: %#v", len(matches), authoredEmitSiteSummaries(matches))
+	main := authoredEmitSitesByFlowNodeEvent(sites, "support", "support-node", "support.ready")
+	addon := authoredEmitSitesByFlowNodeEvent(sites, "support/addon", "support-node", "support.ready")
+	if len(main) != 1 || len(addon) != 1 {
+		t.Fatalf("expected one authored site per filesystem flow, got main=%#v addon=%#v", authoredEmitSiteSummaries(main), authoredEmitSiteSummaries(addon))
 	}
-	keys := []string{matches[0].SourceScopeKey, matches[1].SourceScopeKey}
-	sort.Strings(keys)
-	if strings.Join(keys, ",") != "flows/support,flows/support/addon" {
-		t.Fatalf("source scope keys = %v, want sealed flow package and structurally nested addon; sites=%#v", keys, authoredEmitSiteSummaries(matches))
-	}
-}
-
-func TestAuthoredEmitSites_OutsidePackageDoesNotSuppressGenericFlowScope(t *testing.T) {
-	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
-		flowNodeID:      "flow-node",
-		flowEmit:        "support.ready",
-		extrasNodeID:    "extras-node",
-		extrasEmit:      "support.ready",
-		omitFlowPackage: true,
-	})
-
-	sites := AuthoredEmitSites(source)
-	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
-		t.Fatalf("expected generic flow scope site, got %#v", authoredEmitSiteSummaries(sites))
-	}
-	if countAuthoredEmitSites(sites, "", "extras-node", "support.ready") != 1 {
-		t.Fatalf("expected outside package site to remain root-owned, got %#v", authoredEmitSiteSummaries(sites))
-	}
-}
-
-func TestAuthoredEmitSites_NestedFlowPackageDoesNotSuppressMainFlowScope(t *testing.T) {
-	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
-		flowNodeID:          "flow-node",
-		flowEmit:            "support.ready",
-		nestedPackageNodeID: "nested-node",
-		nestedPackageEmit:   "support.ready",
-		omitFlowPackage:     true,
-	})
-
-	sites := AuthoredEmitSites(source)
-	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
-		t.Fatalf("expected main flow scope site, got %#v", authoredEmitSiteSummaries(sites))
-	}
-	if countAuthoredEmitSites(sites, "support", "nested-node", "support.ready") != 1 {
-		t.Fatalf("expected nested package site, got %#v", authoredEmitSiteSummaries(sites))
+	if main[0].SourceScopeKey != "support" || addon[0].SourceScopeKey != "support/addon" {
+		t.Fatalf("source scope keys = %q/%q, want exact flow paths", main[0].SourceScopeKey, addon[0].SourceScopeKey)
 	}
 }
 
@@ -201,7 +164,6 @@ type authoredEmitSiteFixture struct {
 	flowEmit            string
 	extrasNodeID        string
 	extrasEmit          string
-	omitFlowPackage     bool
 	nestedPackageNodeID string
 	nestedPackageEmit   string
 	rootGuardObject     bool
@@ -215,22 +177,6 @@ func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Sou
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
-	nestedPackageRef := ""
-	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
-		nestedPackageRef = "  - path: flows/support/addon\n"
-	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: authored-emit-site-fixture
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - path: extras
-`+nestedPackageRef+`
-flows:
-  - id: support
-    flow: support
-    mode: static
-`)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: authored-emit-site-fixture
 pins:
@@ -257,14 +203,7 @@ root.audit: {}
 	if strings.TrimSpace(rootNodeYAML) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
 	}
-	if !opts.omitFlowPackage {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
-name: support
-version: "1.0.0"
-flows: []
-`)
-	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `
 name: support
 initial_state: pending
 states: [pending, done]
@@ -275,30 +214,22 @@ pins:
   outputs:
     events: [support.ready]
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
 support.start: {}
 support.ready: {}
 `)
 	if flowNodes := authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""); strings.TrimSpace(flowNodes) != "" {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), flowNodes)
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), flowNodes)
 	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
-name: extras
-version: "1.0.0"
-flows: []
-`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "schema.yaml"), "name: extras\nmode: static\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start: {}\n")
 	if extraNodes := authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""); strings.TrimSpace(extraNodes) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), extraNodes)
 	}
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "package.yaml"), `
-name: support-addon
-version: "1.0.0"
-flows: []
-`)
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "events.yaml"), "addon.start: {}\n")
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "addon.start", opts.nestedPackageEmit, ""))
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "schema.yaml"), "name: support-addon\nmode: static\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "events.yaml"), "addon.start: {}\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "addon.start", opts.nestedPackageEmit, ""))
 	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -316,12 +247,6 @@ func loadAuthoredEmitSiteLoweringFixture(t *testing.T) Source {
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: authored-emit-site-lowering
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 initial_state: pending
 states: [pending, done]
@@ -427,7 +352,6 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
         emit: ` + successEventType + `
       rules:
         routed:
-          element_id: 00000000-0000-4000-8000-000000000002
           condition: "else"
           emit: ` + ruleEventType + `
 `
@@ -448,13 +372,11 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
           shared: payload.shared
       rules:
         high:
-          element_id: 00000000-0000-4000-8000-000000000003
           condition: "payload.score >= 80"
           emit:
             fields:
               bucket: '"high"'
         low:
-          element_id: 00000000-0000-4000-8000-000000000004
           condition: "else"
           emit:
             fields:
@@ -479,7 +401,7 @@ func countAuthoredSitesWithSite(sites []AuthoredEmitSite, site string) int {
 func authoredEmitSitesByFlowNodeEvent(sites []AuthoredEmitSite, flowID, nodeID, eventType string) []AuthoredEmitSite {
 	out := []AuthoredEmitSite{}
 	for _, site := range sites {
-		if strings.TrimSpace(site.FlowID()) == flowID &&
+		if strings.TrimSpace(site.FlowPathIdentity()) == flowID &&
 			strings.TrimSpace(site.NodeID()) == nodeID &&
 			strings.TrimSpace(site.Spec.EventType()) == eventType {
 			out = append(out, site)
@@ -491,7 +413,7 @@ func authoredEmitSitesByFlowNodeEvent(sites []AuthoredEmitSite, flowID, nodeID, 
 func authoredEmitSiteSummaries(sites []AuthoredEmitSite) []string {
 	out := make([]string, 0, len(sites))
 	for _, site := range sites {
-		out = append(out, strings.Join([]string{site.FlowID(), site.SourceScopeKey, site.NodeID(), site.HandlerEvent, site.Site, site.Spec.EventType()}, "|"))
+		out = append(out, strings.Join([]string{site.FlowPathIdentity(), site.SourceScopeKey, site.NodeID(), site.HandlerEvent, site.Site, site.Spec.EventType()}, "|"))
 	}
 	sort.Strings(out)
 	return out

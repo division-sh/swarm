@@ -7,7 +7,6 @@ test-node:
     item.reviewed:
       rules:
         approve:
-          element_id: ad9f9cd4-965e-4c8d-940c-327a10a7a0dd
           condition: "payload.decision == 'approve'"
           advances_to: approved
           emit:

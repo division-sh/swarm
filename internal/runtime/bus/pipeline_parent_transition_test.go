@@ -39,7 +39,7 @@ func TestPipelineParentTransitionAdmissionHonorsContextWhileSweepIsActive(t *tes
 	}
 	eb := &EventBus{
 		pipelineObligations: owner,
-		bundleSourceFact:    sourceMutationFact(t, "e"),
+		sourceArtifactFact:  sourceMutationFact(t, "e"),
 	}
 	sweepResult := make(chan error, 1)
 	go func() {

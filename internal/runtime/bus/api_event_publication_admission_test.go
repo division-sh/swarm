@@ -65,7 +65,7 @@ func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit root-input endpoint: %v", err)
 	}
-	if got := endpoint.Readback(); got.Kind != "root_input" || got.FlowID != "" || got.EventType != "thing.created" {
+	if got := endpoint.Readback(); got.Kind != "root_input" || got.FlowID != "." || got.EventType != "thing.created" {
 		t.Fatalf("root-input endpoint readback = %#v", got)
 	}
 	if _, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.missing"); err == nil || !strings.Contains(err.Error(), "does not own") {
@@ -146,7 +146,7 @@ func TestOrdinaryFlowAPIEventPublicationAdmissionOwnsOnlyItsExactNodeRoutes(t *t
 
 func staticAPIEventPublicationSource() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Path: "child", Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-worker": {
@@ -156,7 +156,7 @@ func staticAPIEventPublicationSource() semanticview.Source {
 		},
 	}
 	sibling := runtimecontracts.FlowContractView{
-		Path: "sibling", Paths: runtimecontracts.FlowContractPaths{ID: "sibling", Flow: "sibling"},
+		Path: "sibling", Paths: runtimecontracts.FlowContractPaths{FlowPath: "sibling"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"sibling-worker": {
@@ -165,7 +165,7 @@ func staticAPIEventPublicationSource() semanticview.Source {
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child, sibling}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{child, sibling}}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,

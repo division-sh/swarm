@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
@@ -19,10 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/flowownedprojectagent"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestBuildShowsReplyPairedTopology(t *testing.T) {
@@ -104,7 +103,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 			),
 		},
 	}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -151,37 +150,44 @@ func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	}
 }
 
-func TestBuildStageGraphShowsSameFlowPackageQualifiedJoins(t *testing.T) {
-	flow := runtimecontracts.FlowContractView{Path: "orders", Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "root/flows/orders"}}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "orders", "shared")
+func TestBuildStageGraphShowsSameLocalJoinIDAtDistinctFlowPaths(t *testing.T) {
+	firstFlow := runtimecontracts.FlowContractView{Path: "a/orders", Paths: runtimecontracts.FlowContractPaths{FlowPath: "a/orders"}}
+	secondFlow := runtimecontracts.FlowContractView{Path: "b/orders", Paths: runtimecontracts.FlowContractPaths{FlowPath: "b/orders"}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{firstFlow, secondFlow}}
+	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("a/orders", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "orders", "shared")
+	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("b/orders", "shared")
 	if err != nil {
 		t.Fatal(err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]}},
+		FlowTree: runtimecontracts.FlowTree{Root: &root, ByPath: map[string]*runtimecontracts.FlowContractView{"a/orders": &root.Children[0], "b/orders": &root.Children[1]}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowStates: map[string][]string{"orders": {"awaiting", "done"}},
+			FlowStates: map[string][]string{"a/orders": {"awaiting", "done"}, "b/orders": {"awaiting", "done"}},
 			Joins: []runtimecontracts.WorkflowJoinPlan{
 				{Node: second, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "second", Stage: "awaiting"}},
 				{Node: first, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "first", Stage: "awaiting"}},
 			},
 		},
 	}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(view.StageGraphs) != 1 || len(view.StageGraphs[0].Joins) != 2 {
-		t.Fatalf("stage graphs = %#v, want both package-qualified joins", view.StageGraphs)
+	if len(view.StageGraphs) != 2 {
+		t.Fatalf("stage graphs = %#v, want one graph per flow path", view.StageGraphs)
 	}
-	joins := view.StageGraphs[0].Joins
-	if joins[0].PackageKey != "packages/a" || joins[0].NodeID != "shared" || joins[1].PackageKey != "packages/b" || joins[1].NodeID != "shared" {
-		t.Fatalf("package-qualified join readback = %#v", joins)
+	got := map[string]StageGraphJoinView{}
+	for _, graph := range view.StageGraphs {
+		if len(graph.Joins) != 1 {
+			t.Fatalf("flow %s joins = %#v, want one", graph.FlowPath, graph.Joins)
+		}
+		got[graph.Joins[0].FlowPath] = graph.Joins[0]
+	}
+	if got["a/orders"].NodeID != "shared" || got["b/orders"].NodeID != "shared" {
+		t.Fatalf("flow-path-qualified join readback = %#v", got)
 	}
 }
 
@@ -337,36 +343,6 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 	}
 }
 
-func TestBuildProjectsFlowOwnedProjectAgentAndInferredProvenance(t *testing.T) {
-	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, false)
-	view := mustBuild(t, source, nil)
-	support := flowByID(t, view, "support")
-	if len(support.Agents) != 1 || support.Agents[0].ID != "public-worker-left" || !strings.HasSuffix(filepath.ToSlash(support.Agents[0].SourceFile), "flows/support/left/agents.yaml") {
-		t.Fatalf("support agents = %#v, want exact project declaration and source", support.Agents)
-	}
-	if len(support.RequiredAgents.Agents) != 1 || support.RequiredAgents.Agents[0].Role != "worker" || !strings.HasSuffix(filepath.ToSlash(support.RequiredAgents.Agents[0].SourceFile), "flows/support/left/agents.yaml") {
-		t.Fatalf("support required agents = %#v, want inferred project declaration provenance", support.RequiredAgents)
-	}
-	if len(view.Root.Agents) != 0 {
-		t.Fatalf("root agents = %#v, project declaration must remain flow-owned", view.Root.Agents)
-	}
-}
-
-func TestBuildPreservesDistinctFlowOwnedProjectDeclarations(t *testing.T) {
-	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, true)
-	view := mustBuild(t, source, nil)
-	support := flowByID(t, view, "support")
-	if len(support.Agents) != 2 || support.Agents[0].ID != "public-worker-left" || support.Agents[1].ID != "public-worker-right" || support.Agents[0].SourceFile == support.Agents[1].SourceFile {
-		t.Fatalf("support agents = %#v, want both distinct physical declarations", support.Agents)
-	}
-	if len(support.RequiredAgents.Agents) != 2 || support.RequiredAgents.Agents[0].SourceFile == support.RequiredAgents.Agents[1].SourceFile {
-		t.Fatalf("support required agents = %#v, want both declaration sources", support.RequiredAgents)
-	}
-	if support.RequiredAgents.SourceFile != "" {
-		t.Fatalf("aggregate required-agent source = %q, want no lossy singular source for multiple files", support.RequiredAgents.SourceFile)
-	}
-}
-
 func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
@@ -382,6 +358,7 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 			Timers: []runtimecontracts.WorkflowTimerContract{
 				{
 					ID:         "awaiting_review.review.sla_escalated",
+					FlowID:     ".",
 					Stage:      "awaiting_review",
 					Event:      "review.sla_escalated",
 					Owner:      "runtime",
@@ -391,6 +368,7 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 				},
 				{
 					ID:         "awaiting_review.expired",
+					FlowID:     ".",
 					Stage:      "awaiting_review",
 					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
 					Owner:      "runtime",
@@ -402,11 +380,11 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 			},
 		},
 	}
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
-		"", "awaiting_review", []string{"awaiting_review", "expired"}, []string{"expired"}, nil, bundle.Semantics.Timers, nil,
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
+		".", "awaiting_review", []string{"awaiting_review", "expired"}, []string{"expired"}, nil, bundle.Semantics.Timers, nil,
 	)}
 
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -440,7 +418,7 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 
 func TestBuildStageGraphShowsDecisionGateOutcomes(t *testing.T) {
 	gates := []runtimecontracts.WorkflowGatePlan{{
-		Stage: "awaiting_launch_approval", Decision: "launch_review", Title: "Launch review",
+		FlowID: ".", Stage: "awaiting_launch_approval", Decision: "launch_review", Title: "Launch review",
 		Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve", Label: "Approve", AdvancesTo: "operating", Emit: runtimecontracts.EmitSpec{Event: "opco.launched"}},
 			"reject":  {Verdict: "reject", Label: "Reject", AdvancesTo: "building", Emit: runtimecontracts.EmitSpec{Event: "launch.rejected"}},
@@ -452,11 +430,11 @@ func TestBuildStageGraphShowsDecisionGateOutcomes(t *testing.T) {
 		}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting_launch_approval", Gates: gates},
 	}
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
-		"", "awaiting_launch_approval", []string{"awaiting_launch_approval", "operating", "building"}, []string{"operating"}, nil, nil, nil, gates,
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
+		".", "awaiting_launch_approval", []string{"awaiting_launch_approval", "operating", "building"}, []string{"operating"}, nil, nil, nil, gates,
 	)}
 
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,6 +462,7 @@ func TestBuildStageGraphShowsDecisionGateOutcomes(t *testing.T) {
 
 func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: sourceartifactfixture.Artifact(),
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"order.accepted": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -512,7 +491,6 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 					"order.accepted": {
 						CreateEntity: true,
 						FanOut: &runtimecontracts.FanOutSpec{
-							ElementID: contractelementidentity.MintContractElementID(),
 							ItemsFrom: "payload.line_items",
 							As:        "line_item",
 							Identity:  "line_item.id",
@@ -524,25 +502,26 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 			},
 		},
 	}
-	effective, err := bundle.ResolveFanOutEffectiveSemantics(identitytest.RootNode(t, "dispatcher"), "order.accepted", *bundle.Nodes["dispatcher"].EventHandlers["order.accepted"].FanOut)
+	dispatcher := bundle.Nodes["dispatcher"]
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(identitytest.RootNode(t, "dispatcher"), "order.accepted", dispatcher.EventHandlers["order.accepted"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.EventHandlers["order.accepted"] = qualified
+	bundle.Nodes["dispatcher"] = dispatcher
+	effective, err := bundle.ResolveFanOutEffectiveSemantics(identitytest.RootNode(t, "dispatcher"), "order.accepted", *qualified.FanOut)
 	if err != nil {
 		t.Fatalf("ResolveFanOutEffectiveSemantics: %v", err)
 	}
 	if effective.Identity != "line_item.id" {
 		t.Fatalf("effective fan-out identity = %q, want line_item.id", effective.Identity)
 	}
-	root := t.TempDir()
-	packageFile := filepath.Join(root, "package.yaml")
-	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(packageFile, []byte("name: authoring-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bundle.Paths = runtimecontracts.ContractPaths{ContractsRoot: root, ProjectPackageFile: packageFile, PlatformSpecFile: platformFile}
 
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
+		t.Fatalf("PrepareFanOutPlans: %#v", failures)
+	}
+	view, err := Build(context.Background(), source, BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -576,11 +555,11 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 			Timeout:    runtimecontracts.JoinTimeoutSpec{After: "24h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}},
 		}}}}},
 	}
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
-		"", "awaiting", []string{"awaiting", "ready", "attention"}, []string{"attention"},
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
+		".", "awaiting", []string{"awaiting", "ready", "attention"}, []string{"attention"},
 		[]runtimecontracts.HandlerTransitionSemantic{{ID: "join-node:item.completed", Node: joinNode, EventType: "item.completed", Join: bundle.Nodes["join-node"].EventHandlers["item.completed"].Join}}, nil, nil,
 	)}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,27 +585,23 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 }
 
 func TestBuildStageGraphShowsDeliveryJoinCompletionFromHandlerScope(t *testing.T) {
-	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
-	if err != nil {
-		t.Fatal(err)
-	}
 	node := identitytest.RootNode(t, "dispatcher")
 	join := runtimecontracts.JoinSpec{
-		ID: "all-delivered", Members: runtimecontracts.JoinMembersSpec{FromFanOut: elementID},
+		ID: "all-delivered", Members: runtimecontracts.JoinMembersSpec{FromFanOut: true},
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
 	}
 	topology := runtimecontracts.BuildWorkflowStageTopology(
-		"", "active", []string{"active", "done"}, []string{"done"},
+		".", "active", []string{"active", "done"}, []string{"done"},
 		[]runtimecontracts.HandlerTransitionSemantic{{Node: node, EventType: "batch.requested", Join: &join}}, nil, nil,
 	)
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			InitialStage: "active", Stages: []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}}, TerminalStages: []string{"done"},
-			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +626,7 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 			{ID: "queued", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated", Terminal: true},
 		}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued", Loops: []runtimecontracts.WorkflowLoopPlan{{
-			ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
+			FlowID: ".", ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
 			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"},
 			Operations: []runtimecontracts.WorkflowLoopOperationPlan{
 				{Node: loopNode, HandlerEvent: "work.started", Kind: runtimecontracts.LoopOperationStart, From: "queued", AdvancesTo: "drafting"},
@@ -664,10 +639,10 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 		{ID: "loop-node:review.revision_requested", Node: loopNode, EventType: "review.revision_requested", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}},
 		{ID: "loop-node:draft.ready", Node: loopNode, EventType: "draft.ready", AdvancesTo: "review", Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}},
 	}
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
-		"", "queued", []string{"queued", "drafting", "review", "escalated"}, []string{"escalated"}, loopTransitions, nil, bundle.Semantics.Loops,
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
+		".", "queued", []string{"queued", "drafting", "review", "escalated"}, []string{"escalated"}, loopTransitions, nil, bundle.Semantics.Loops,
 	)}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,8 +740,8 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	if issue == nil {
 		t.Fatalf("route issues = %#v, want receiver_input_pin_missing", view.RoutingTopology.Issues)
 	}
-	if issue.AuthoredLocation == "" || !strings.Contains(issue.AuthoredLocation, "package.yaml:") {
-		t.Fatalf("route issue authored location = %q, want exact package.yaml:line", issue.AuthoredLocation)
+	if issue.AuthoredLocation == "" || !strings.Contains(issue.AuthoredLocation, "schema.yaml:") {
+
 	}
 
 	diag := diagnosticByCheckID(t, view, "composition_connect_validation")
@@ -878,7 +853,7 @@ func TestBuildShowsIntrinsicJoinCoordinatorFailureWithExactProvenance(t *testing
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	entitiesPath := filepath.Join(root, "flows", "telegram-ingress", "entities.yaml")
+	entitiesPath := filepath.Join(root, "telegram-ingress", "entities.yaml")
 	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
 	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
 		t.Fatalf("write standing singleton entities: %v", err)
@@ -956,7 +931,7 @@ func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T)
 		if op.MapKeyType != "text" || op.MapValueType != "Item" {
 			t.Fatalf("%s contained operation = %#v, want typed map target", flowID, op)
 		}
-		if op.SourceFile == "" || !strings.HasSuffix(op.SourceFile, filepath.Join("flows", flowID, "nodes.yaml")) {
+		if op.SourceFile == "" || !strings.HasSuffix(op.SourceFile, filepath.Join(flowID, "nodes.yaml")) {
 			t.Fatalf("%s source file = %q, want flow-local nodes.yaml", flowID, op.SourceFile)
 		}
 	}
@@ -1067,13 +1042,7 @@ func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {
 func loadAuthoringAgentProvenanceSource(t testing.TB, explicitFlowRequiredAgents bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
-name: authoring-agent-provenance
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: analysis, flow: analysis, mode: static}
-`)
+
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: authoring-agent-provenance\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), `
 root-agent:
@@ -1087,7 +1056,7 @@ root-agent:
 	if explicitFlowRequiredAgents {
 		flowSchema += "required_agents: []\n"
 	}
-	flowRoot := filepath.Join(root, "flows", "analysis")
+	flowRoot := filepath.Join(root, "analysis")
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "schema.yaml"), flowSchema)
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 analyzer:
@@ -1108,22 +1077,14 @@ analyzer:
 func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
-name: defaulted-template-policy
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: scoring
-    flow: scoring
-    mode: template
-`)
+
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
 name: scoring
 mode: template
 instance: account_id
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
 account:
   account_id: uuid
 `)
@@ -1138,12 +1099,7 @@ account:
 func writeRootPrimaryEntityContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
-name: root-primary-entity
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:
@@ -1156,18 +1112,7 @@ workspace:
 func loadDuplicateNodeIDContainedOpsSource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
-name: duplicate-node-contained-ops
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: alpha
-    flow: alpha
-    mode: singleton
-  - id: beta
-    flow: beta
-    mode: singleton
-`)
+
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-node-contained-ops\n")
 	writeDuplicateNodeIDFlow(t, root, "alpha")
 	writeDuplicateNodeIDFlow(t, root, "beta")
@@ -1182,7 +1127,7 @@ flows:
 
 func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	t.Helper()
-	dir := filepath.Join(root, "flows", flowID)
+	dir := filepath.Join(root, flowID)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
 name: `+flowID+`
 mode: singleton

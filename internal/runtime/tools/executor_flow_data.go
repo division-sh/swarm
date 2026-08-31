@@ -135,8 +135,7 @@ func (e *Executor) execReadStaticFlowData(ctx context.Context, actor models.Agen
 		return map[string]any{
 			"kind":           "static_file",
 			"static_id":      resolved.StaticID,
-			"package_key":    resolved.PackageKey,
-			"owner_flow_id":  resolved.OwnerFlowID,
+			"flow_path":      resolved.FlowPath,
 			"relative_path":  resolved.RelativePath,
 			"content_digest": resolved.ContentDigest,
 			"content_type":   resolved.ContentType,

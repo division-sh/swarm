@@ -17,12 +17,11 @@ func TestRunCommandLocalForegroundRendersRealExplicitHostRefusal(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"--swarm-dir", t.TempDir(),
-		"run", "start",
+		"run", "start", doctorAgentContractsPath,
 		"--event", "task.requested",
 		"--payload", payloadPath,
 		"--config", configPath,
 		"--backend", "claude_cli",
-		"--contracts", doctorAgentContractsPath,
 		"--data", t.TempDir(),
 		"--api-port", freeDoctorTCPPort(t),
 	}, &stdout, &stderr, Run)

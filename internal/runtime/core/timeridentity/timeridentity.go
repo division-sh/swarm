@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
@@ -255,8 +254,7 @@ type JoinArrivalRef struct {
 // FanOutDeliveryRef is the immutable declaration/intent coordinate shared by
 // the fan-out owner, barrier owner, and generic completion schedule.
 type FanOutDeliveryRef struct {
-	packageKey           runtimeidentity.PackageKey
-	elementID            contractelementidentity.ContractElementID
+	declaration          runtimeidentity.DeclarationIdentity
 	bundleHash           string
 	semanticDigest       string
 	triggeringDeliveryID string
@@ -569,30 +567,23 @@ func NewJoinRefForGeneration(node runtimeidentity.ExecutableNode, handlerEvent, 
 // triggering delivery and the execution generation is known.
 func NewFanOutDeliveryJoinRef(
 	node runtimeidentity.ExecutableNode,
-	handlerEvent, joinID, packageKey, elementID, bundleHash, semanticDigest string,
+	handlerEvent, joinID string,
+	declaration runtimeidentity.DeclarationIdentity,
+	bundleHash, semanticDigest string,
 ) (JoinRef, error) {
-	pkg, err := runtimeidentity.ParsePackageKey(packageKey)
-	if err != nil {
-		return JoinRef{}, fmt.Errorf("fan-out delivery join package: %w", err)
-	}
-	element, err := contractelementidentity.ParseContractElementID(elementID)
-	if err != nil {
-		return JoinRef{}, fmt.Errorf("fan-out delivery join element: %w", err)
-	}
 	ref := JoinRef{
 		node:         node,
 		handlerEvent: strings.TrimSpace(handlerEvent),
 		joinID:       strings.TrimSpace(joinID),
 		mode:         JoinRefModeFanOutDelivery,
 		fanOut: FanOutDeliveryRef{
-			packageKey:     pkg,
-			elementID:      element,
+			declaration:    declaration,
 			bundleHash:     strings.TrimSpace(bundleHash),
 			semanticDigest: strings.TrimSpace(semanticDigest),
 		},
 	}
 	if !ref.Valid() {
-		return JoinRef{}, fmt.Errorf("fan-out delivery join reference requires exact node, handler, join, bundle, element, and semantic identity")
+		return JoinRef{}, fmt.Errorf("fan-out delivery join reference requires exact node, handler, join, bundle, declaration, and semantic identity")
 	}
 	return ref, nil
 }
@@ -633,15 +624,15 @@ func (r JoinRef) Valid() bool {
 	case JoinRefModeArrival:
 		return r.arrival.stage != "" && r.fanOut == (FanOutDeliveryRef{})
 	case JoinRefModeFanOutDelivery:
-		return r.arrival == (JoinArrivalRef{}) && r.fanOut.Valid()
+		return r.arrival == (JoinArrivalRef{}) && r.fanOut.Valid() &&
+			r.fanOut.declaration.Flow().Equal(r.node.DeclarationIdentity().Flow())
 	default:
 		return false
 	}
 }
 
 func (r JoinRef) Node() runtimeidentity.ExecutableNode { return r.Normalize().node }
-func (r JoinRef) PackageKey() string                   { return r.Node().PackageKey() }
-func (r JoinRef) FlowID() string                       { return r.Node().FlowID() }
+func (r JoinRef) FlowPath() string                     { return r.Node().FlowPath() }
 func (r JoinRef) NodeID() string                       { return r.Node().NodeID() }
 func (r JoinRef) HandlerEvent() string                 { return r.Normalize().handlerEvent }
 func (r JoinRef) Mode() JoinRefMode                    { return r.Normalize().mode }
@@ -659,7 +650,7 @@ func (r JoinRef) FanOutDelivery() (FanOutDeliveryRef, bool) {
 
 func (r FanOutDeliveryRef) Valid() bool {
 	r = r.Normalize()
-	return r.packageKey.Valid() && r.elementID.Valid() &&
+	return r.declaration.Valid() && r.declaration.Family() == "fan_out" &&
 		bundleidentity.IsCanonicalHash(r.bundleHash) && semanticDigestPattern.MatchString(r.semanticDigest)
 }
 
@@ -670,8 +661,12 @@ func (r FanOutDeliveryRef) Normalize() FanOutDeliveryRef {
 	return r
 }
 
-func (r FanOutDeliveryRef) PackageKey() string           { return r.Normalize().packageKey.String() }
-func (r FanOutDeliveryRef) ElementID() string            { return r.Normalize().elementID.String() }
+func (r FanOutDeliveryRef) DeclarationIdentity() runtimeidentity.DeclarationIdentity {
+	return r.Normalize().declaration
+}
+func (r FanOutDeliveryRef) FlowPath() string             { return r.DeclarationIdentity().Flow().String() }
+func (r FanOutDeliveryRef) Family() string               { return r.DeclarationIdentity().Family() }
+func (r FanOutDeliveryRef) SemanticPath() string         { return r.DeclarationIdentity().SemanticPath() }
 func (r FanOutDeliveryRef) BundleHash() string           { return r.Normalize().bundleHash }
 func (r FanOutDeliveryRef) SemanticDigest() string       { return r.Normalize().semanticDigest }
 func (r FanOutDeliveryRef) TriggeringDeliveryID() string { return r.Normalize().triggeringDeliveryID }
@@ -714,7 +709,7 @@ func (r JoinRef) Key() string {
 	case JoinRefModeArrival:
 		parts = append(parts, r.arrival.stage, r.arrival.window)
 	case JoinRefModeFanOutDelivery:
-		parts = append(parts, r.fanOut.packageKey.String(), r.fanOut.elementID.String(), r.fanOut.bundleHash, r.fanOut.semanticDigest, r.fanOut.triggeringDeliveryID)
+		parts = append(parts, r.fanOut.declaration.Key(), r.fanOut.bundleHash, r.fanOut.semanticDigest, r.fanOut.triggeringDeliveryID)
 	}
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
@@ -734,9 +729,8 @@ func (r JoinRef) PayloadValue() map[string]any {
 	payload := map[string]any{
 		"mode": string(r.mode),
 		"node": map[string]any{
-			"package_key": r.node.PackageKey(),
-			"flow_id":     r.node.FlowID(),
-			"node_id":     r.node.NodeID(),
+			"flow_path": r.node.FlowPath(),
+			"node_id":   r.node.NodeID(),
 		},
 		"handler_event": r.handlerEvent,
 		"join_id":       r.joinID,
@@ -747,8 +741,9 @@ func (r JoinRef) PayloadValue() map[string]any {
 		payload["window"] = r.arrival.window
 	case JoinRefModeFanOutDelivery:
 		payload["fan_out"] = map[string]any{
-			"package_key":            r.fanOut.packageKey.String(),
-			"element_id":             r.fanOut.elementID.String(),
+			"flow_path":              r.fanOut.declaration.Flow().String(),
+			"family":                 r.fanOut.declaration.Family(),
+			"semantic_path":          r.fanOut.declaration.SemanticPath(),
 			"bundle_hash":            r.fanOut.bundleHash,
 			"semantic_digest":        r.fanOut.semanticDigest,
 			"triggering_delivery_id": r.fanOut.triggeringDeliveryID,
@@ -796,10 +791,10 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 		return JoinRef{}, false
 	}
 	nodeRaw, hasNode := stringAnyMap(raw["node"])
-	if !hasNode || !exactKeys(nodeRaw, "package_key", "flow_id", "node_id") {
+	if !hasNode || !exactKeys(nodeRaw, "flow_path", "node_id") {
 		return JoinRef{}, false
 	}
-	node, err := runtimeidentity.ParseExecutableNode(asExactString(nodeRaw["package_key"]), asExactString(nodeRaw["flow_id"]), asExactString(nodeRaw["node_id"]))
+	node, err := runtimeidentity.ParseExecutableNode(asExactString(nodeRaw["flow_path"]), asExactString(nodeRaw["node_id"]))
 	if err != nil {
 		return JoinRef{}, false
 	}
@@ -827,15 +822,22 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 			return JoinRef{}, false
 		}
 		fanOut, ok := stringAnyMap(raw["fan_out"])
-		if !ok || !exactKeys(fanOut, "package_key", "element_id", "bundle_hash", "semantic_digest", "triggering_delivery_id") {
+		if !ok || !exactKeys(fanOut, "flow_path", "family", "semantic_path", "bundle_hash", "semantic_digest", "triggering_delivery_id") {
+			return JoinRef{}, false
+		}
+		declaration, declarationErr := runtimeidentity.AdmitDeclarationIdentity(
+			asExactString(fanOut["flow_path"]),
+			asExactString(fanOut["family"]),
+			asExactString(fanOut["semantic_path"]),
+		)
+		if declarationErr != nil {
 			return JoinRef{}, false
 		}
 		ref, err = NewFanOutDeliveryJoinRef(
 			node,
 			asExactString(raw["handler_event"]),
 			asExactString(raw["join_id"]),
-			asExactString(fanOut["package_key"]),
-			asExactString(fanOut["element_id"]),
+			declaration,
 			asExactString(fanOut["bundle_hash"]),
 			asExactString(fanOut["semantic_digest"]),
 		)

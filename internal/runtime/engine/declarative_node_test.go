@@ -6,14 +6,12 @@ import (
 	"path/filepath"
 	"reflect"
 	stdruntime "runtime"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -45,6 +43,9 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 
 func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {
 				ID: "node-a",
@@ -131,28 +132,6 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	}
 }
 
-func TestResolvedExecutionHandler_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
-	source := loadEngineImportBoundaryWildcardSource(t, "")
-	resolved := resolvedExecutionHandler(source, identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener"), "producer/task.done")
-	if resolved.matched {
-		t.Fatalf("resolvedExecutionHandler matched ungranted sibling event through raw fallback: %#v", resolved)
-	}
-}
-
-func TestResolvedExecutionHandler_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
-	source := loadEngineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
-	resolved := resolvedExecutionHandler(source, identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener"), "producer/task.done")
-	if !resolved.matched {
-		t.Fatal("resolvedExecutionHandler did not match granted sibling event")
-	}
-	if got := resolved.handlerEventKey; got != "**/task.done" {
-		t.Fatalf("handler event key = %q, want **/task.done", got)
-	}
-	if !reflect.DeepEqual(resolved.handler.ClearGates, []string{"sibling_gate"}) {
-		t.Fatalf("handler = %#v, want sibling_gate clear handler", resolved.handler)
-	}
-}
-
 func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -168,17 +147,6 @@ func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testi
 	}
 }
 
-func loadEngineImportBoundaryWildcardSource(t *testing.T, observeGrant string) semanticview.Source {
-	t.Helper()
-	repoRoot := engineRepoRoot(t)
-	root := writeEngineImportBoundaryWildcardFixture(t, observeGrant)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
 func engineRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := stdruntime.Caller(0)
@@ -186,62 +154,6 @@ func engineRepoRoot(t *testing.T) string {
 		t.Fatal("resolve runtime caller")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
-}
-
-func writeEngineImportBoundaryWildcardFixture(t *testing.T, observeGrant string) string {
-	t.Helper()
-	root := t.TempDir()
-	workerBind := ""
-	if strings.TrimSpace(observeGrant) != "" {
-		workerBind = "    bind:\n" + observeGrant
-	}
-	writeEngineFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: engine-import-boundary-wildcard
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    mode: static
-`+workerBind+`  - id: producer
-    flow: producer
-    mode: static
-`)
-	writeEngineFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: engine-import-boundary-wildcard\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
-name: worker
-mode: static
-initial_state: active
-terminal_states: [done]
-states: [active, done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "task.done: {}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
-worker-listener:
-  id: worker-listener
-  execution_type: system_node
-  subscribes_to: ["**/task.done"]
-  event_handlers:
-    "**/task.done":
-      clear_gates: [sibling_gate]
-`)
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "package.yaml"), "name: producer\nversion: \"1.0.0\"\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
-name: producer
-mode: static
-initial_state: active
-terminal_states: [done]
-states: [active, done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "task.done: {}\n")
-	return root
 }
 
 func writeEngineFixtureFile(t *testing.T, path string, contents string) {

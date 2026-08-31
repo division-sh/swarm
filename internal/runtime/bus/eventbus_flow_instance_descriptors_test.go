@@ -31,10 +31,10 @@ func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testi
 			testActiveAgentDescriptor(t, "service-owner", "service-ent", "service-owner/root"),
 		},
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
-			EntityID:     "component-owner",
-			FlowInstance: flowInstance,
-			FlowTemplate: "component-scaffold",
-			BundleHash:   authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource,
+			EntityID:        "component-owner",
+			FlowInstance:    flowInstance,
+			FlowTemplate:    "component-scaffold",
+			BundleHash:      authorActivityTestBundleHash,
 			WorkflowVersion: workflowVersion,
 		}},
 	}, runtimebus.EventBusOptions{

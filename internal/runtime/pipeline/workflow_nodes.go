@@ -63,7 +63,7 @@ func workflowNodePolicyForDelivery(ctx context.Context, source semanticview.Sour
 			return policy, true, nil
 		}
 	}
-	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey), true, nil
+	return deriveWorkflowEventPolicy(source, node.Node, resolved.HandlerEventKey), true, nil
 }
 
 func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
@@ -101,7 +101,7 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 	if source == nil || !node.Valid() {
 		return workflowNodeEventHandlerResolution{}
 	}
-	executionFlowID := node.FlowID()
+	executionFlowID := node.FlowPath()
 	if executionFlowID == "" {
 		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
@@ -161,7 +161,7 @@ func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nod
 	if target.FlowID == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	executionFlowID := node.FlowID()
+	executionFlowID := node.FlowPath()
 	if executionFlowID == "" {
 		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
@@ -203,7 +203,7 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 	}
 	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if resolved.Matched {
-		executionFlowID := node.FlowID()
+		executionFlowID := node.FlowPath()
 		if executionFlowID == "" {
 			executionFlowID = semanticview.RootExecutionFlowID(source)
 		}
@@ -302,7 +302,7 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, node runtimeide
 		}
 		out = append(out, value)
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	if admission.Pattern() {
 		for _, pattern := range admission.RoutePatterns() {
 			appendAlias(pattern)
@@ -345,7 +345,7 @@ func buildWorkflowNodePolicies(source semanticview.Source, node runtimeidentity.
 		if _, ok := subscribed[eventType]; !ok {
 			continue
 		}
-		policy := deriveWorkflowEventPolicy(source, eventType)
+		policy := deriveWorkflowEventPolicy(source, node, eventType)
 		policies[eventType] = policy
 	}
 	if len(policies) == 0 {
@@ -384,7 +384,7 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, node runtimeide
 			out[eventType] = struct{}{}
 		}
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	if flowID != "" {
 		for _, eventType := range source.FlowInputEvents(flowID) {
 			eventType = strings.TrimSpace(eventType)
@@ -412,9 +412,9 @@ func workflowNodeExternalEventType(source semanticview.Source, node runtimeident
 	return source.ResolveExecutableNodeEventReference(node, eventType)
 }
 
-func deriveWorkflowEventPolicy(source semanticview.Source, eventType string) WorkflowEventPolicy {
+func deriveWorkflowEventPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) WorkflowEventPolicy {
 	eventType = strings.TrimSpace(eventType)
-	entry, ok := source.EventEntry(eventType)
+	entry, _, ok := source.ResolveExecutableNodeEventCatalogEntry(node, eventType)
 	if !ok {
 		return WorkflowEventPolicy{}
 	}
@@ -567,7 +567,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeide
 	if source == nil {
 		return false
 	}
-	flowID := node.FlowID()
+	flowID := node.FlowPath()
 	if flowID == "" {
 		flowID = semanticview.RootExecutionFlowID(source)
 	}

@@ -50,8 +50,8 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	provider := &channelOnboardingTelegramProvider{}
 	telegram := httptest.NewServer(provider)
 	t.Cleanup(telegram.Close)
-	contractsRoot := writeStandingTelegramServeFixture(t, telegram.URL)
-	disableChannelOnboardingBusinessConsumers(t, contractsRoot)
+	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
 	publicListen := reserveChannelOnboardingListenAddress(t)
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 
@@ -59,10 +59,10 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	var resetSelectedStore func()
 	diagnosticDSN := ""
 	opts := cliapp.ServeOptions{
-		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
+		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		SelfCheck: true, RequireBundleMatch: false, AbandonActiveRuns: true, Verbose: true,
+		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	switch backend {
@@ -350,19 +350,19 @@ func channelOnboardingOperationDiagnostic(t *testing.T, backend servedparity.Bac
 		return err.Error()
 	}
 	defer db.Close()
-	var phase, failureCode, failureMessage, bundleHash, bundleSource, bundleIdentity, inventory, runtimeInstance, plan, target string
+	var phase, failureCode, failureMessage, bundleHash, bundleIdentity, inventory, runtimeInstance, plan, target string
 	var publication, targetGeneration int64
-	err = db.QueryRowContext(context.Background(), `SELECT phase,failure_code,failure_message,bundle_hash,bundle_source,bundle_identity,
+	err = db.QueryRowContext(context.Background(), `SELECT phase,failure_code,failure_message,bundle_hash,bundle_identity,
 		pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,target_selector,target_generation
 		FROM channel_onboarding_operations WHERE operation_id=`+placeholder, operationID).Scan(
-		&phase, &failureCode, &failureMessage, &bundleHash, &bundleSource, &bundleIdentity,
+		&phase, &failureCode, &failureMessage, &bundleHash, &bundleIdentity,
 		&inventory, &runtimeInstance, &publication, &plan, &target, &targetGeneration,
 	)
 	if err != nil {
 		return err.Error()
 	}
-	return fmt.Sprintf("phase=%s failure=%s:%s bundle=%s source=%s identity=%s inventory=%s runtime_instance=%s publication=%d plan=%s target=%s target_generation=%d",
-		phase, failureCode, failureMessage, bundleHash, bundleSource, bundleIdentity, inventory, runtimeInstance, publication, plan, target, targetGeneration)
+	return fmt.Sprintf("phase=%s failure=%s:%s bundle=%s identity=%s inventory=%s runtime_instance=%s publication=%d plan=%s target=%s target_generation=%d",
+		phase, failureCode, failureMessage, bundleHash, bundleIdentity, inventory, runtimeInstance, publication, plan, target, targetGeneration)
 }
 
 func assertChannelOnboardingProjectClaimsReleased(t *testing.T, label string) {
@@ -413,7 +413,7 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 	cmd.Env = append(os.Environ(),
 		channelOnboardingCrashServeHelperEnv+"=1",
 		"TEST_CHANNEL_ONBOARDING_CONFIG="+opts.ConfigPath,
-		"TEST_CHANNEL_ONBOARDING_CONTRACTS="+opts.ContractsPath,
+		"TEST_CHANNEL_ONBOARDING_CONTRACTS="+opts.SourceRoot,
 		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC="+opts.PlatformSpecPath,
 		"TEST_CHANNEL_ONBOARDING_STORE="+opts.StoreMode,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN="+opts.PublicWebhookBaseURL,
@@ -522,7 +522,7 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	})
 	opts := cliapp.DefaultServeOptions()
 	opts.ConfigPath = os.Getenv("TEST_CHANNEL_ONBOARDING_CONFIG")
-	opts.ContractsPath = os.Getenv("TEST_CHANNEL_ONBOARDING_CONTRACTS")
+	opts.SourceRoot = os.Getenv("TEST_CHANNEL_ONBOARDING_CONTRACTS")
 	opts.PlatformSpecPath = os.Getenv("TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC")
 	opts.StoreMode = os.Getenv("TEST_CHANNEL_ONBOARDING_STORE")
 	opts.StoreModeSet = true
@@ -533,7 +533,6 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.WorkspaceBackend = "host"
 	opts.WorkspaceBackendSet = true
 	opts.SelfCheck = true
-	opts.RequireBundleMatch = false
 	opts.AbandonActiveRuns = true
 	opts.Verbose = true
 	opts.Output = os.Stdout
@@ -1056,52 +1055,13 @@ func enableChannelOnboardingRecoveryOnStartup(t *testing.T, configPath string) {
 	}
 }
 
-func disableChannelOnboardingBusinessConsumers(t *testing.T, contractsRoot string) {
+func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) {
 	t.Helper()
-	files := map[string]string{
-		"package.yaml": `name: telegram-agent
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - id: bot
-    path: bot
-flows:
-  - id: telegram-ingress
-    flow: telegram-ingress
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-`,
-		filepath.Join("bot", "package.yaml"): `name: telegram-channel-onboarding
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-provider_trigger_events:
-  imports:
-    - provider: telegram
-      event: inbound.telegram.text_message
-flows:
-  - id: telegram-chat
-    flow: telegram-chat
-    mode: template
-`,
+	if err := os.RemoveAll(filepath.Join(sourceRoot, "bot")); err != nil {
+		t.Fatalf("remove onboarding business-consumer flow: %v", err)
 	}
-	for relative, contents := range files {
-		if err := os.WriteFile(filepath.Join(contractsRoot, relative), []byte(contents), 0o644); err != nil {
-			t.Fatalf("disable onboarding fixture business consumer %s: %v", relative, err)
-		}
-	}
-	for _, relative := range []string{
-		filepath.Join("bot", "flows", "telegram-chat", "agents.yaml"),
-		filepath.Join("bot", "flows", "telegram-chat", "nodes.yaml"),
-		filepath.Join("bot", "flows", "telegram-chat", "events.yaml"),
-	} {
-		if err := os.Remove(filepath.Join(contractsRoot, relative)); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove empty onboarding fixture declaration %s: %v", relative, err)
-		}
+	if err := os.RemoveAll(filepath.Join(sourceRoot, "tests")); err != nil {
+		t.Fatalf("remove onboarding business-consumer scenarios: %v", err)
 	}
 }
 

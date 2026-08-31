@@ -25,7 +25,7 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 	}
 	connected := false
 	for _, plan := range CompileConnectGraph(source).Plans() {
-		if plan.providerOutputAuthorization != nil || plan.receiver.IsRoot() != (flowID == "") || plan.receiver.flowID.value != flowID {
+		if plan.providerOutputAuthorization != nil || plan.receiver.IsRoot() != (flowID == ".") || plan.receiver.flowID.value != flowID {
 			continue
 		}
 		if string(plan.receiver.event.value) != eventType && string(plan.receiver.resolvedEvent.value) != eventType {
@@ -40,7 +40,7 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 			out.Evidence = append(out.Evidence, evidence)
 		}
 	}
-	if connected && flowID == "" && !opts.AllowNonInputEvent {
+	if connected && flowID == "." && !opts.AllowNonInputEvent {
 		filtered := out.Evidence[:0]
 		for _, evidence := range out.Evidence {
 			if evidence.Kind != runtimecontracts.FlowInputProducerBoundaryExternalIngress {

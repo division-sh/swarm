@@ -147,7 +147,7 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		return runtimepipelineobligation.SweepResult{}, errors.New("event bus and event store are required")
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return runtimepipelineobligation.SweepResult{}, err
 	}
@@ -179,7 +179,7 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 
 func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int) (result runtimepipelineobligation.SweepResult, err error) {
 	request = request.WithExecutionPosture(eb.executionPosture)
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -282,7 +282,7 @@ func (eb *EventBus) closePipelineScan(ctx context.Context, request runtimepipeli
 
 func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
@@ -541,7 +541,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int
 		return runtimepipelineobligation.SweepResult{}, errors.New("pipeline obligation owner is required")
 	}
 	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return runtimepipelineobligation.SweepResult{}, err
 	}

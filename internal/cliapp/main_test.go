@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testpostgres"
 )
@@ -117,7 +118,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("%s code = %d stderr=%s stdout=%s", strings.Join(args, " "), code, stderr.String(), stdout.String())
 			}
-			for _, want := range []string{"Usage:", "--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+			for _, want := range []string{"Usage:", "[directory]", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Fatalf("%s help missing %q:\n%s", strings.Join(args, " "), want, stdout.String())
 				}
@@ -141,7 +142,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 	if verifySectionEnd := strings.Index(verifySection[len("_swarm_verify()"):], "\n_swarm_"); verifySectionEnd >= 0 {
 		verifySection = verifySection[:len("_swarm_verify()")+verifySectionEnd]
 	}
-	for _, want := range []string{"--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+	for _, want := range []string{"--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
 		if !strings.Contains(verifySection, want) {
 			t.Fatalf("_swarm_verify completion missing %q:\n%s", want, verifySection)
 		}
@@ -156,7 +157,7 @@ func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("__complete verify -- code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+	for _, want := range []string{"--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("__complete verify -- missing %q:\n%s", want, stdout.String())
 		}
@@ -241,16 +242,16 @@ func TestCLI_VersionPrintsLocalBinaryIdentity(t *testing.T) {
 
 func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), t.TempDir(), []string{"serve", "--help"}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"serve", ".", "--help"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "openai_responses", "--contracts", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level"} {
+	for _, notWant := range []string{"--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level", "--require-bundle-match", "--no-require-bundle-match"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
@@ -275,43 +276,43 @@ func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
 			name:       "legacy fingerprint shape rejected",
 			args:       []string{"serve", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			wantCode:   2,
-			wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>",
+			wantStderr: "--bundle-hash must be bundle-v2:sha256:<64 lowercase hex>",
 		},
 		{
-			name:       "contracts conflict rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--contracts", "contracts"},
+			name:       "source directory conflict rejected",
+			args:       []string{"serve", "contracts", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			wantCode:   2,
-			wantStderr: "--bundle-hash is mutually exclusive with --contracts",
+			wantStderr: "--bundle-hash is mutually exclusive with a local source directory",
 		},
 		{
 			name:       "dev conflict rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--dev"},
+			args:       []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--dev"},
 			wantCode:   2,
 			wantStderr: "--bundle-hash is mutually exclusive with --dev",
 		},
 		{
-			name:       "sqlite conflict rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--store", "sqlite"},
-			wantCode:   2,
-			wantStderr: "--bundle-hash requires --store postgres",
+			name:     "canonical bundle hash accepted with sqlite",
+			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--store", "sqlite"},
+			wantCode: 0,
+			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		{
 			name:     "canonical bundle hash accepted",
-			args:     []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
+			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
 			wantCode: 0,
-			wantHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		{
 			name:       "duplicate pinned bundle hash rejected",
-			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			args:       []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			wantCode:   2,
 			wantStderr: "--bundle-hash values must be unique",
 		},
 		{
 			name:     "repeated canonical bundle hashes accepted",
-			args:     []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
+			args:     []string{"serve", "--bundle-hash", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
 			wantCode: 0,
-			wantHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			wantHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 
@@ -347,7 +348,7 @@ func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
 				t.Fatalf("BundleHash = %q, want %q", captured.BundleHash, tc.wantHash)
 			}
 			if tc.name == "repeated canonical bundle hashes accepted" {
-				wantExtra := []string{"bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+				wantExtra := []string{"bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
 				if !reflect.DeepEqual(captured.BundleHashes, wantExtra) {
 					t.Fatalf("BundleHashes = %#v, want %#v", captured.BundleHashes, wantExtra)
 				}
@@ -364,22 +365,22 @@ func TestCLI_ServeRetiresHealthAddrAndValidatesListenAddresses(t *testing.T) {
 	}{
 		{
 			name:       "health addr retired",
-			args:       []string{"serve", "--health-addr", "127.0.0.1:0"},
+			args:       []string{"serve", ".", "--health-addr", "127.0.0.1:0"},
 			wantStderr: "unknown flag: --health-addr",
 		},
 		{
 			name:       "api bare port rejected",
-			args:       []string{"serve", "--api-listen-addr", "8081"},
+			args:       []string{"serve", ".", "--api-listen-addr", "8081"},
 			wantStderr: "--api-listen-addr must be a host:port listen address",
 		},
 		{
 			name:       "mcp host without port rejected",
-			args:       []string{"serve", "--mcp-listen-addr", "127.0.0.1"},
+			args:       []string{"serve", ".", "--mcp-listen-addr", "127.0.0.1"},
 			wantStderr: "--mcp-listen-addr must be a host:port listen address",
 		},
 		{
 			name:       "api url rejected",
-			args:       []string{"serve", "--api-listen-addr", "http://127.0.0.1:8081"},
+			args:       []string{"serve", ".", "--api-listen-addr", "http://127.0.0.1:8081"},
 			wantStderr: "--api-listen-addr must be a host:port listen address, not a URL",
 		},
 	}
@@ -408,7 +409,7 @@ func TestCLI_ServeListenAddrFlagsConsumeIndependentOwners(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--api-listen-addr", "0.0.0.0:9001"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--api-listen-addr", "0.0.0.0:9001"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -422,7 +423,7 @@ func TestCLI_ServeListenAddrFlagsConsumeIndependentOwners(t *testing.T) {
 	captured = ServeOptions{}
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--mcp-listen-addr", "127.0.0.1:9002"}, &stdout, &stderr, opts)
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--mcp-listen-addr", "127.0.0.1:9002"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -476,7 +477,7 @@ func TestCLI_ServeListenAddrSourcePrecedence(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			args := append([]string{"serve"}, tc.args...)
+			args := append([]string{"serve", "."}, tc.args...)
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
 			if code != 0 {
 				t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
@@ -537,7 +538,7 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve"}, &stdout, &stderr, opts)
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "."}, &stdout, &stderr, opts)
 			if code != 2 {
 				t.Fatalf("serve code = %d, want 2\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -638,7 +639,7 @@ func TestCLI_ServeUnifiedConfigFeedsListenerConfig(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--config", runtimeConfig}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--config", runtimeConfig}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -655,7 +656,7 @@ func TestCLI_ServeUnifiedConfigFeedsListenerConfig(t *testing.T) {
 
 func TestCLI_ServeRejectsRetiredDataFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", t.TempDir()}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--data", t.TempDir()}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("serve code = 0, want failure stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -673,7 +674,7 @@ func TestCLI_ServeWorkspaceBackendFlagFeedsServeOptions(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--workspace-backend", "host"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--workspace-backend", "host"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -684,7 +685,7 @@ func TestCLI_ServeWorkspaceBackendFlagFeedsServeOptions(t *testing.T) {
 
 func TestCLI_ServeWorkspaceBackendFlagRejectsUnsupportedBackend(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--workspace-backend", "none"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--workspace-backend", "none"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("serve code = 0, want failure stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -705,7 +706,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 	}{
 		{
 			name: "both flags skip missing explicit cli config",
-			args: []string{"serve", "--api-listen-addr", "127.0.0.1:9401", "--mcp-listen-addr", "127.0.0.1:9402"},
+			args: []string{"serve", ".", "--api-listen-addr", "127.0.0.1:9401", "--mcp-listen-addr", "127.0.0.1:9402"},
 			setup: func(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 			},
@@ -715,7 +716,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 		},
 		{
 			name: "retired env vars fail before malformed cli config",
-			args: []string{"serve"},
+			args: []string{"serve", "."},
 			setup: func(t *testing.T) {
 				configPath := filepath.Join(t.TempDir(), "config.yaml")
 				if err := os.WriteFile(configPath, []byte("serve_api_listen_addr: [\n"), 0o600); err != nil {
@@ -729,7 +730,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 		},
 		{
 			name: "partial retired env fails closed",
-			args: []string{"serve"},
+			args: []string{"serve", "."},
 			setup: func(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9601")
@@ -790,7 +791,7 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	wantGrace := 42 * time.Second
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--dev", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -799,9 +800,6 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	}
 	if captured.AbandonActiveRuns {
 		t.Fatal("serve abandon active runs = true, want fresh-epoch dev to preserve explicit direct-abandon authority")
-	}
-	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
-		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)
 	}
 	if captured.Verbose {
 		t.Fatal("serve verbose = true, want dev and presentation verbosity to remain independent")
@@ -820,7 +818,7 @@ func TestCLI_ServeDevAndExplicitVerboseComposeIndependently(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--verbose"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--dev", "--verbose"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -829,45 +827,25 @@ func TestCLI_ServeDevAndExplicitVerboseComposeIndependently(t *testing.T) {
 	}
 }
 
-func TestCLI_ServeDevRejectsRequireBundleMatchBeforeOwner(t *testing.T) {
-	var called atomic.Bool
-	opts := defaultRootCommandOptions()
-	opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
-		called.Store(true)
-		return 0
-	}
+func TestCLI_ServeRejectsRetiredBundleMatchFlagsBeforeOwner(t *testing.T) {
+	for _, flag := range []string{"--require-bundle-match", "--require-bundle-match=false", "--no-require-bundle-match"} {
+		t.Run(flag, func(t *testing.T) {
+			var called atomic.Bool
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
+				called.Store(true)
+				return 0
+			}
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--require-bundle-match"}, &stdout, &stderr, opts)
-	if code != 2 {
-		t.Fatalf("serve code = %d stderr=%s stdout=%s, want 2", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "--dev cannot be combined with --require-bundle-match") {
-		t.Fatalf("stderr = %q, want dev conflict error", stderr.String())
-	}
-	if called.Load() {
-		t.Fatal("serve owner was called despite dev/require-bundle-match conflict")
-	}
-}
-
-func TestCLI_ServeDevAcceptsExplicitRequireBundleMatchFalse(t *testing.T) {
-	var captured ServeOptions
-	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
-		captured = serveOpts
-		return 0
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--require-bundle-match=false"}, &stdout, &stderr, opts)
-	if code != 0 {
-		t.Fatalf("serve code = %d stderr=%s stdout=%s, want 0", code, stderr.String(), stdout.String())
-	}
-	if !captured.Dev {
-		t.Fatal("serve dev = false, want true")
-	}
-	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
-		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", flag}, &stdout, &stderr, opts)
+			if code != 2 || !strings.Contains(stderr.String(), "unknown flag") {
+				t.Fatalf("serve %s code = %d stderr=%s stdout=%s, want unknown-flag rejection", flag, code, stderr.String(), stdout.String())
+			}
+			if called.Load() {
+				t.Fatalf("serve owner was called for retired flag %s", flag)
+			}
+		})
 	}
 }
 
@@ -881,27 +859,20 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	}
 	for _, want := range []string{
 		"`--abandon-active-runs`",
-		"`--no-require-bundle-match`",
 		"without setting `--verbose`",
-		"dev entity-container cleanup",
 	} {
 		if !stringSliceContains(spec.Composition, want) {
 			t.Fatalf("dev mode composition missing %q: %#v", want, spec.Composition)
 		}
 	}
-	for _, want := range []string{"workspace", "containeridentity"} {
+	for _, want := range []string{"internal/cliapp", "devscratch.EpochAuthority", "internal/serveapp"} {
 		if !strings.Contains(spec.Owner, want) {
 			t.Fatalf("dev mode owner missing %q:\n%s", want, spec.Owner)
 		}
 	}
-	for _, want := range []string{"--dev --require-bundle-match", "fails before runtime boot"} {
-		if !stringSliceContains(spec.ConflictRules, want) {
-			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
-		}
-	}
-	for _, want := range []string{"--dev --require-bundle-match=false", "redundant but valid"} {
-		if !stringSliceContains(spec.ConflictRules, want) {
-			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
+	for _, retired := range []string{"entity-container cleanup", "containeridentity", "bundle-match"} {
+		if strings.Contains(spec.Owner, retired) || stringSliceContains(spec.Composition, retired) {
+			t.Fatalf("dev mode retains retired %q seam: owner=%q composition=%#v", retired, spec.Owner, spec.Composition)
 		}
 	}
 	for _, want := range []string{"--dev --verbose", "not redundant"} {
@@ -909,19 +880,14 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
 		}
 	}
-	for _, want := range []string{"runtime shutdown admission", "Cleanup still runs after a shutdown timeout/error", "joined shutdown and cleanup errors"} {
+	for _, want := range []string{"runtime shutdown admission", "source-projection owner", "before releasing the projection filesystem"} {
 		if !strings.Contains(spec.ShutdownOrdering, want) {
 			t.Fatalf("dev mode shutdown ordering missing %q:\n%s", want, spec.ShutdownOrdering)
 		}
 	}
-	for _, want := range []string{"identity-proven runtime-owned", "`kind=entity`", "MUST NOT infer ownership from names"} {
-		if !strings.Contains(spec.CleanupScope, want) {
-			t.Fatalf("dev mode cleanup scope missing %q:\n%s", want, spec.CleanupScope)
-		}
-	}
-	for _, want := range []string{"Scaffold/system", "operator-managed", "unlabeled", "`kind=agent`", "`kind=flow`"} {
-		if !strings.Contains(spec.PreservationBoundary, want) {
-			t.Fatalf("dev mode preservation boundary missing %q:\n%s", want, spec.PreservationBoundary)
+	for _, want := range []string{"no entity-workspace container cleanup", "`kind=entity`", "no compatibility or migration", "Destructive reset"} {
+		if !strings.Contains(spec.EntityCleanupRetirement, want) {
+			t.Fatalf("dev mode entity cleanup retirement missing %q:\n%s", want, spec.EntityCleanupRetirement)
 		}
 	}
 }
@@ -1234,10 +1200,11 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("cli config rejected key %q missing: %#v", key, spec.CLIConfigFile.RejectedKeys)
 		}
 	}
-	for _, key := range []string{"paths.contracts_path", "paths.platform_spec_path"} {
-		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "contract_platform_spec_path_resolution") {
-			t.Fatalf("cli config shared non-API key %q missing contract path owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
-		}
+	if _, survives := spec.CLIConfigFile.SharedNonAPIKeys["paths.contracts_path"]; survives {
+		t.Fatalf("retired paths.contracts_path remains a shared config key: %#v", spec.CLIConfigFile.SharedNonAPIKeys)
+	}
+	if key := "paths.platform_spec_path"; !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "source_platform_spec_path_resolution") {
+		t.Fatalf("cli config shared non-API key %q missing source path owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
 	}
 	for _, key := range []string{"serve.api_listen_addr", "serve.mcp_listen_addr"} {
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "listener_topology_v2_1.source_precedence") {
@@ -1281,7 +1248,7 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 		{name: "root help", args: []string{"--help"}, want: "Usage:"},
 		{name: "version", args: []string{"version"}, want: "Swarm dev"},
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
-		{name: "serve help", args: []string{"serve", "--help"}, want: "Start the Swarm runtime"},
+		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "Start the Swarm runtime"},
 		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files before boot"},
 		{name: "run help", args: []string{"run", "start", "--help"}, want: "Start a workflow run on a running runtime"},
 	} {
@@ -1304,6 +1271,40 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 	}
 }
 
+func TestCLISourceAwareLocalCommandsAcceptOmittedDirectoryAsInvocationRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "serve", args: []string{"serve"}},
+		{name: "verify", args: []string{"verify"}},
+		{name: "describe", args: []string{"describe"}},
+		{name: "describe routes", args: []string{"describe", "routes"}},
+		{name: "test", args: []string{"test"}},
+		{name: "packs list", args: []string{"packs", "list"}},
+		{name: "packs show", args: []string{"packs", "show", "telegram"}},
+		{name: "import", args: []string{"import", "telegram"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invocationRoot := t.TempDir()
+			var ownerCalls atomic.Int32
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
+				ownerCalls.Add(1)
+				return 0
+			}
+			var stdout, stderr bytes.Buffer
+			_ = executeRootCommandWithOptions(context.Background(), invocationRoot, tc.args, &stdout, &stderr, opts)
+			if strings.Contains(stderr.String(), "source directory is required") || strings.Contains(stderr.String(), "requires at least") {
+				t.Fatalf("omitted cwd was rejected: stdout=%s stderr=%s", stdout.String(), stderr.String())
+			}
+			if tc.name == "serve" && ownerCalls.Load() != 1 {
+				t.Fatalf("serve owner calls = %d, want one cwd-selected invocation", ownerCalls.Load())
+			}
+		})
+	}
+}
+
 func TestAssetCommandsCaptureInvocationRootAtExecution(t *testing.T) {
 	repo := t.TempDir()
 	chdirForTest(t, repo)
@@ -1316,7 +1317,7 @@ func TestAssetCommandsCaptureInvocationRootAtExecution(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), "", []string{"serve"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), "", []string{"serve", "."}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -1329,9 +1330,9 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_ = os.Unsetenv("SWARM_CONTRACTS_PATH")
 	repo := t.TempDir()
-	contractsRoot := writeEnvAuthorityContractsFixture(t, "dot-env-contracts")
+	sourceRoot := writeEnvAuthorityContractsFixture(t, "dot-env-contracts")
 	configPath := writeTestVerifyRuntimeConfig(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\nBROKEN\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+sourceRoot+"\nBROKEN\n")
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
@@ -1339,17 +1340,17 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	if strings.Contains(stdout.String()+stderr.String(), contractsRoot) {
+	if strings.Contains(stdout.String()+stderr.String(), sourceRoot) {
 		t.Fatalf("verify output referenced repo .env contracts path stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), "", []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "verify ok: contracts="+contractsRoot) {
+	if !strings.Contains(stdout.String(), "verify ok: source="+sourceRoot) {
 		t.Fatalf("verify explicit contracts output missing success marker:\n%s", stdout.String())
 	}
 }
@@ -1366,6 +1367,7 @@ func TestLocalRunUsesInvocationRootWithoutLoadingDotEnv(t *testing.T) {
 	var capturedRepo string
 	opts := runCommandOptions{
 		apiOptions:   defaultRootCommandOptions(),
+		sourceRoot:   ".",
 		eventName:    "scan.requested",
 		payloadPath:  payloadPath,
 		changedFlags: map[string]bool{},
@@ -1392,11 +1394,7 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: embedded-platform-spec
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
 
 	var buf bytes.Buffer
@@ -1404,95 +1402,15 @@ platform_version: ">=0.7.0 <0.8.0"
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "verify ok: contracts=") {
+	if !strings.Contains(buf.String(), "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", buf.String())
-	}
-}
-
-func TestRunVerifyCommandFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	chdirForTest(t, t.TempDir())
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: incompatible-platform-spec
-version: "1.0.0"
-platform_version: ">=0.8.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: incompatible-platform-spec\n")
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
-	if code == 0 {
-		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
-	}
-	for _, want := range []string{
-		"platform_version_compatibility",
-		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
-		"remediation: update package.yaml platform_version after re-verifying",
-	} {
-		if !strings.Contains(buf.String(), want) {
-			t.Fatalf("verify output missing %q:\n%s", want, buf.String())
-		}
-	}
-}
-
-func TestRunVerifyCommandAcceptsPackageManifestSelfFacts(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	chdirForTest(t, t.TempDir())
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: package-self-facts-verify
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-keywords: [dedup-index, catalog]
-license: MIT
-repository: https://github.com/division-sh/swarm
-extra:
-  colony.division.sh/display_name: Package Self Facts Verify
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-self-facts-verify\n")
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
-	}
-	if !strings.Contains(buf.String(), "verify ok: contracts=") {
-		t.Fatalf("verify output missing success marker:\n%s", buf.String())
-	}
-}
-
-func TestRunVerifyCommandFailsClosedForUnknownPackageManifestField(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	chdirForTest(t, t.TempDir())
-	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: package-unknown-field-verify
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-homepage: https://division.sh
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-unknown-field-verify\n")
-
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
-	if code == 0 {
-		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
-	}
-	for _, want := range []string{"ERROR: package.yaml field \"homepage\" is not supported.", "Valid options:", "Remediation:"} {
-		if !strings.Contains(buf.String(), want) {
-			t.Fatalf("verify output missing %q:\n%s", want, buf.String())
-		}
 	}
 }
 
 func TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
+	projection := testRuntimeSourceProjection(t)
 
-	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{})
+	manager, err := configuredWorkspaceLifecycle(nil, projection, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{})
 	if err != nil {
 		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
 	}
@@ -1502,12 +1420,7 @@ func TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource(t *testing.T) {
 }
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
-
-	_, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "--data",
 	})
@@ -1518,12 +1431,7 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
 
 func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback(t *testing.T) {
 	missingDataDir := filepath.Join(t.TempDir(), "missing-data")
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
-
-	_, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       missingDataDir,
 		DataSourceSource: "--data",
 	})
@@ -1534,7 +1442,7 @@ func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := configuredWorkspaceLifecycle(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "workspace.data_source",
 	})
@@ -1543,19 +1451,41 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t 
 	}
 }
 
+func testRuntimeSourceProjection(t *testing.T) *sourceartifact.RuntimeProjection {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: workspace-test\n"), 0o600); err != nil {
+		t.Fatalf("write source schema: %v", err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatalf("admit source artifact: %v", err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatalf("materialize source projection: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := projection.Release(); err != nil {
+			t.Fatalf("release source projection: %v", err)
+		}
+	})
+	return projection
+}
+
 func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{HostRoot: filepath.Join(t.TempDir(), "host-workspaces")}}
-	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
-		t.Fatalf("write package.yaml: %v", err)
-	}
-	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	projection := testRuntimeSourceProjection(t)
+	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(cfg, projection, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend: %v", err)
 	}
 	manager, ok := lifecycle.(*workspace.HostManager)
 	if !ok {
 		t.Fatalf("lifecycle = %T, want *workspace.HostManager", lifecycle)
+	}
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
 	}
 	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
@@ -1567,7 +1497,7 @@ func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testi
 
 func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	_, err := ConfiguredWorkspaceLifecycleForBackend(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
 	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend error = %v, want retired config rejection", err)
 	}
@@ -1714,8 +1644,10 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 	RepoRoot := t.TempDir()
 	configDir := t.TempDir()
 
-	result, err := resolveWorkspaceMountSources(RepoRoot, "", &config.Config{
-		Workspace: config.WorkspaceConfig{DataSource: configDir},
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:            RepoRoot,
+		ConfigDataSource:    configDir,
+		ConfigDataSourceSet: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
 		t.Fatalf("config-backed workspace mount error = %v, want hard retirement", err)
@@ -2106,7 +2038,7 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 	if !stringSliceContains(authority.LogicalMountAuthority.Writable, workspace.LogicalWorkspaceMount) {
 		t.Fatalf("logical writable mounts = %#v, want %s", authority.LogicalMountAuthority.Writable, workspace.LogicalWorkspaceMount)
 	}
-	for _, want := range []string{workspace.LogicalDataMount, workspace.LogicalContractsMount} {
+	for _, want := range []string{workspace.LogicalDataMount, workspace.LogicalSourceMount} {
 		if !stringSliceContains(authority.LogicalMountAuthority.ReadOnly, want) {
 			t.Fatalf("logical read-only mounts missing %q: %#v", want, authority.LogicalMountAuthority.ReadOnly)
 		}
@@ -2189,7 +2121,7 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	if !strings.Contains(portability.CanonicalOwner, "cli_specification.foundations.installed_binary_portability") {
 		t.Fatalf("canonical owner does not point at installed_binary_portability: %s", portability.CanonicalOwner)
 	}
-	for _, want := range []string{"help", "completion", "local `swarm version`", "contract_platform_spec_path_resolution", "workspace_model.runtime_image_packaging"} {
+	for _, want := range []string{"help", "completion", "local `swarm version`", "source_platform_spec_path_resolution", "workspace_model.runtime_image_packaging"} {
 		if !strings.Contains(portability.Scope, want) {
 			t.Fatalf("installed binary portability scope missing %q:\n%s", want, portability.Scope)
 		}
@@ -2228,7 +2160,7 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 			t.Fatalf("runtime image packaging rule missing %q:\n%s", want, packaging.Rule)
 		}
 	}
-	for _, want := range []string{"/data", "/opt/swarm/contracts", "never selected", "durable_data_resources.workspace_projection"} {
+	for _, want := range []string{"/data", "/opt/swarm/source", "never selected", "durable_data_resources.workspace_projection"} {
 		if !strings.Contains(packaging.MountSourceRule, want) {
 			t.Fatalf("runtime image packaging mount source rule missing %q:\n%s", want, packaging.MountSourceRule)
 		}
@@ -2749,82 +2681,6 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	}
 }
 
-func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
-	spec := loadCLIContractPlatformSpecPathResolutionSpec(t)
-	if strings.TrimSpace(spec.PromotedBy) != "#844" {
-		t.Fatalf("contract path promoted_by = %q, want #844", spec.PromotedBy)
-	}
-	if strings.TrimSpace(spec.ImplementationStatus) != "implemented" {
-		t.Fatalf("contract path implementation_status = %q, want implemented", spec.ImplementationStatus)
-	}
-	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.contract_platform_spec_path_resolution") {
-		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
-	}
-	for _, want := range []string{"swarm verify", "swarm serve", "local foreground `swarm run start`"} {
-		if !stringSliceContains(spec.AppliesTo, want) {
-			t.Fatalf("applies_to missing %q: %#v", want, spec.AppliesTo)
-		}
-	}
-	for _, want := range []string{"swarm run start --connect", "swarm run start --reattach"} {
-		if !stringSliceContains(spec.NotAppliesTo, want) {
-			t.Fatalf("not_applies_to missing %q: %#v", want, spec.NotAppliesTo)
-		}
-	}
-	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config paths.contracts_path", "invocation-root contracts/package.yaml"}
-	if len(spec.ContractsPath.SourceOrder) != len(wantContractsOrder) {
-		t.Fatalf("contracts source order = %#v, want %#v", spec.ContractsPath.SourceOrder, wantContractsOrder)
-	}
-	for i, want := range wantContractsOrder {
-		if spec.ContractsPath.SourceOrder[i] != want {
-			t.Fatalf("contracts source order[%d] = %q, want %q", i, spec.ContractsPath.SourceOrder[i], want)
-		}
-	}
-	if spec.ContractsPath.AcceptedSources.Flag != "--contracts <path>" {
-		t.Fatalf("contracts flag = %q", spec.ContractsPath.AcceptedSources.Flag)
-	}
-	if spec.ContractsPath.AcceptedSources.Environment != "SWARM_CONTRACTS_PATH" {
-		t.Fatalf("contracts env = %q", spec.ContractsPath.AcceptedSources.Environment)
-	}
-	if spec.ContractsPath.AcceptedSources.ConfigKey != "paths.contracts_path" {
-		t.Fatalf("contracts config key = %q", spec.ContractsPath.AcceptedSources.ConfigKey)
-	}
-	if !strings.Contains(spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"], "Not a CLI source") {
-		t.Fatalf("SWARM_CONTRACTS_DIR rejection missing CLI-source rule:\n%s", spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"])
-	}
-	wantPlatformOrder := []string{"config paths.platform_spec_path", "embedded tracked platform spec"}
-	if len(spec.PlatformSpecPath.SourceOrder) != len(wantPlatformOrder) {
-		t.Fatalf("platform source order = %#v, want %#v", spec.PlatformSpecPath.SourceOrder, wantPlatformOrder)
-	}
-	for i, want := range wantPlatformOrder {
-		if spec.PlatformSpecPath.SourceOrder[i] != want {
-			t.Fatalf("platform source order[%d] = %q, want %q", i, spec.PlatformSpecPath.SourceOrder[i], want)
-		}
-	}
-	if spec.PlatformSpecPath.AcceptedSources.Flag != "" {
-		t.Fatalf("platform flag = %q, want retired", spec.PlatformSpecPath.AcceptedSources.Flag)
-	}
-	if !strings.Contains(spec.PlatformSpecPath.RejectedSources["--platform-spec"], "Retired (#1574)") {
-		t.Fatalf("platform flag rejection missing retirement rule:\n%s", spec.PlatformSpecPath.RejectedSources["--platform-spec"])
-	}
-	if spec.PlatformSpecPath.AcceptedSources.ConfigKey != "paths.platform_spec_path" {
-		t.Fatalf("platform config key = %q", spec.PlatformSpecPath.AcceptedSources.ConfigKey)
-	}
-	if spec.PlatformSpecPath.AcceptedSources.BuiltInDefault != defaultPlatformSpecPath {
-		t.Fatalf("platform default = %q, want %q", spec.PlatformSpecPath.AcceptedSources.BuiltInDefault, defaultPlatformSpecPath)
-	}
-	if !strings.Contains(spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"], "Not promoted") {
-		t.Fatalf("SWARM_PLATFORM_SPEC_PATH rejection missing not-promoted rule:\n%s", spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"])
-	}
-	if !strings.Contains(spec.PlatformSpecPath.DefaultRule, "embedded") || !strings.Contains(spec.PlatformSpecPath.DefaultRule, "MUST NOT require source checkout") {
-		t.Fatalf("platform default rule missing embedded portability semantics:\n%s", spec.PlatformSpecPath.DefaultRule)
-	}
-	for _, want := range []string{"verify", "serve", "local foreground run", "API auth/config", "connected run"} {
-		if !stringSliceContains(spec.ImplementationBoundaries, want) {
-			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
-		}
-	}
-}
-
 func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
@@ -2834,7 +2690,7 @@ func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--verbose"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--verbose"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -2855,7 +2711,7 @@ func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--abandon-active-runs"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--abandon-active-runs"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -2874,7 +2730,7 @@ func TestCLI_ServeShutdownGraceFlagConsumesServeOwner(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	wantGrace := 42 * time.Second
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", ".", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -2885,9 +2741,9 @@ func TestCLI_ServeShutdownGraceFlagConsumesServeOwner(t *testing.T) {
 
 func TestCLI_ServeShutdownGraceRejectsNonPositiveDurationBeforeOwner(t *testing.T) {
 	for _, args := range [][]string{
-		{"serve", "--shutdown-grace", "0s"},
-		{"serve", "--shutdown-grace", "-1s"},
-		{"serve", "--shutdown-grace", "not-a-duration"},
+		{"serve", ".", "--shutdown-grace", "0s"},
+		{"serve", ".", "--shutdown-grace", "-1s"},
+		{"serve", ".", "--shutdown-grace", "not-a-duration"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var called atomic.Bool
@@ -2902,7 +2758,7 @@ func TestCLI_ServeShutdownGraceRejectsNonPositiveDurationBeforeOwner(t *testing.
 			if code != 2 {
 				t.Fatalf("serve code = %d stderr=%s stdout=%s, want 2", code, stderr.String(), stdout.String())
 			}
-			if args[2] == "not-a-duration" {
+			if args[len(args)-1] == "not-a-duration" {
 				if !strings.Contains(stderr.String(), "invalid argument") {
 					t.Fatalf("stderr = %q, want invalid duration parse error", stderr.String())
 				}
@@ -2923,12 +2779,12 @@ func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 
 // Keep the selected-fork proof independent from periodic recovery replay.
 
-func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) string {
+func servedEventPublishFixtureBundleHash(t *testing.T, sourceRoot string) string {
 	t.Helper()
-	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
-		t.Fatalf("BundleHash(%s): %v", contractsPath, err)
+		t.Fatalf("BundleHash(%s): %v", sourceRoot, err)
 	}
 	return bundleHash
 }
@@ -2943,7 +2799,6 @@ func TestCLI_NoArgCommandsRejectUnexpectedArgs(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "serve", args: []string{"serve", "unexpected"}},
 		{name: "version", args: []string{"version", "unexpected"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2965,14 +2820,14 @@ func TestCLI_NoArgCommandsRejectUnexpectedArgs(t *testing.T) {
 func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	missingContracts := filepath.Join(t.TempDir(), "missing")
-	code := executeRootCommand(context.Background(), t.TempDir(), []string{"verify", "--contracts", missingContracts}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"verify", missingContracts}, &stdout, &stderr)
 	if code != CLIExitValidation {
 		t.Fatalf("verify code = %d, want %d stderr=%s stdout=%s", code, CLIExitValidation, stderr.String(), stdout.String())
 	}
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("verify stdout = %q, want empty on error", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "ERROR: no Swarm package manifest was found") {
+	if !strings.Contains(stderr.String(), "source directory") {
 		t.Fatalf("verify stderr = %q, want local contract resolution failure", stderr.String())
 	}
 }
@@ -3446,20 +3301,63 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 	}
 }
 
-func runVerifyCommandWithContractsForTest(t *testing.T, ctx context.Context, repo, contractsPath string, out *bytes.Buffer) int {
+func runVerifyCommandWithContractsForTest(t *testing.T, ctx context.Context, repo, sourceRoot string, out *bytes.Buffer) int {
 	t.Helper()
-	return runVerifyCommandWithContractsOutputForTest(t, ctx, repo, contractsPath, out, out)
+	return runVerifyCommandWithContractsOutputForTest(t, ctx, repo, sourceRoot, out, out)
 }
 
-func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Context, repo, contractsPath string, out, errOut *bytes.Buffer) int {
+func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Context, repo, sourceRoot string, out, errOut *bytes.Buffer) int {
 	t.Helper()
 	if repo == "" {
 		repo = t.TempDir()
 	}
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = contractsPath
+	opts.sourceRoot = sourceRoot
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
+}
+
+func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
+	tests := []struct {
+		name     string
+		schema   string
+		wants    []string
+		notWants []string
+	}{
+		{
+			name:     "document mapping shape",
+			schema:   "invalid-schema-shape",
+			wants:    []string{"ERROR: schema.yaml must be a mapping.", "Location:", "schema.yaml", "Remediation:"},
+			notWants: []string{"flow schema document must be a mapping", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name:     "field valid options",
+			schema:   "name: invalid-schema-field\nbogus: true\n",
+			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "terminal_states", "Remediation:"},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), test.schema)
+			var output bytes.Buffer
+			code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &output)
+			if code != CLIExitValidation {
+				t.Fatalf("code = %d, want %d output=%s", code, CLIExitValidation, output.String())
+			}
+			for _, want := range test.wants {
+				if !strings.Contains(output.String(), want) {
+					t.Fatalf("output missing %q:\n%s", want, output.String())
+				}
+			}
+			for _, notWant := range test.notWants {
+				if strings.Contains(output.String(), notWant) {
+					t.Fatalf("output contains internal detail %q:\n%s", notWant, output.String())
+				}
+			}
+		})
+	}
 }
 
 func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
@@ -3478,7 +3376,7 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 				t.Fatal("expected non-zero exit code")
 			}
 			out := buf.String()
-			if !strings.Contains(out, "ERROR: no Swarm package manifest was found") {
+			if !strings.Contains(out, "source directory") {
 				t.Fatalf("output = %q", out)
 			}
 			if !strings.Contains(out, tc.path) {
@@ -3488,388 +3386,10 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommandFormatsPreBootLoaderDiagnostics(t *testing.T) {
-	tests := []struct {
-		name     string
-		write    func(t *testing.T, root string)
-		wants    []string
-		notWants []string
-	}{
-		{
-			name: "package yaml syntax",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-yaml
-flows:
-  - [broken
-`)
-			},
-			wants: []string{
-				"ERROR: contract YAML could not be parsed.",
-				"Location:",
-				"package.yaml",
-				"Remediation: Fix the YAML syntax, then run the command again.",
-			},
-			notWants: []string{"yaml: line", "did not find expected", "parse ", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "package document mapping shape",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `invalid-package-shape`)
-			},
-			wants: []string{
-				"ERROR: package.yaml must be a mapping.",
-				"Location:",
-				"package.yaml:package.yaml",
-				"Remediation: Use a package.yaml mapping with fields like name, version, flows, and packages.",
-			},
-			notWants: []string{"package.yaml must be a mapping\n", "parse ", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "schema document mapping shape",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-schema-shape
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `invalid-schema-shape`)
-			},
-			wants: []string{
-				"ERROR: schema.yaml must be a mapping.",
-				"Location:",
-				"schema.yaml:schema.yaml",
-				"Remediation: Use a schema.yaml mapping with fields like name, states, pins, and entity.",
-			},
-			notWants: []string{"flow schema document must be a mapping", "parse ", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "schema field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-schema-field
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-schema-field
-bogus: true
-`)
-			},
-			wants: []string{
-				"ERROR: schema field \"bogus\" is not supported.",
-				"Location:",
-				"schema.yaml:schema",
-				"Valid options:",
-				"auto_emit_on_create",
-				"terminal_states",
-				"Remediation: Use one of the supported schema fields.",
-			},
-			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "stage field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-stage-field
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-stage-field
-stages:
-  queued:
-    surprise: true
-`)
-			},
-			wants: []string{
-				"ERROR: stage field \"surprise\" is not supported.",
-				"Location:",
-				"schema.yaml:stage",
-				"Valid options:",
-				"description",
-				"initial",
-				"terminal",
-				"Remediation: Use one of the supported stage fields.",
-			},
-			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "package flows entries shape",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-package-flow-shape
-version: "1.0.0"
-flows:
-  - child
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-package-flow-shape`)
-			},
-			wants: []string{
-				"ERROR: package.yaml flows entries must be mappings with id, flow, and optional mode.",
-				"Location:",
-				"package.yaml:package.yaml.flows",
-				"Remediation: Use entries like `flows: [{id: child, flow: child, mode: child}]`.",
-			},
-			notWants: []string{"yaml: unmarshal errors", "cannot unmarshal", "contracts.ProjectFlowRef", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "package requires field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-package-requires-field
-version: "1.0.0"
-requires:
-  surprise: true
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-package-requires-field`)
-			},
-			wants: []string{
-				"ERROR: requires field \"surprise\" is not supported.",
-				"Location:",
-				"package.yaml:requires",
-				"Valid options:",
-				"inputs",
-				"platform_version",
-				"Remediation: Use one of the supported requires fields.",
-			},
-			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "agent field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-agent-field
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-agent-field`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-reviewer:
-  role: reviewer
-  model: regular
-  subscriptions: [item.received]
-  surprise: true
-`)
-			},
-			wants: []string{
-				"ERROR: agent field \"surprise\" is not supported.",
-				"Location:",
-				"agents.yaml:agent",
-				"Valid options:",
-				"model",
-				"subscriptions",
-				"Remediation: Use one of the supported agent fields.",
-			},
-			notWants: []string{"parse ", "UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "handler field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-handler-mailbox-write
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-handler-mailbox-write
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [item.received]
-  outputs:
-    events: [item.processed]
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-test-node:
-  id: test-node
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  event_handlers:
-    item.received:
-      mailbox_write: {}
-      advances_to: done
-`)
-			},
-			wants: []string{
-				"ERROR: handler field \"mailbox_write\" is not supported.",
-				"Valid options:",
-				"action",
-				"on_success",
-				"Remediation: Use the supported action field",
-			},
-			notWants: []string{"UNDEFINED-FIELD", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "guard on fail field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-guard-on-fail-field
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-guard-on-fail-field
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [item.received]
-  outputs:
-    events: [item.processed]
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-test-node:
-  id: test-node
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  event_handlers:
-    item.received:
-      guard:
-        id: gatekeeper
-        on_fail:
-          reject: true
-      advances_to: done
-`)
-			},
-			wants: []string{
-				"ERROR: guard.on_fail field \"reject\" is not supported.",
-				"Location:",
-				"nodes.yaml:guard.on_fail",
-				"Valid options:",
-				"escalate",
-				"Remediation: Use one of the supported guard.on_fail fields.",
-			},
-			notWants: []string{"action", "emit", "reason", "UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "node field valid options",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-node-field
-version: "1.0.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-node-field
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [item.received]
-  outputs:
-    events: [item.processed]
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-test-node:
-  id: test-node
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  bogus: true
-`)
-			},
-			wants: []string{
-				"ERROR: node field \"bogus\" is not supported.",
-				"Location:",
-				"nodes.yaml:node",
-				"Valid options:",
-				"event_handlers",
-				"execution_type",
-				"Remediation: Use one of the supported node fields.",
-			},
-			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "input event pin required shape",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-input-pin
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-input-pin
-pins:
-  inputs:
-    events:
-      - event: item.received
-`)
-			},
-			wants: []string{
-				"ERROR: input event pin mappings require a non-default source or resolution.",
-				"Location:",
-				"schema.yaml.pins.inputs.events",
-				"Remediation: Use `events: [item.received]` unless `source` or `resolution` is required.",
-			},
-			notWants: []string{"input event pin name", "load Swarm contracts", "resolve contracts"},
-		},
-		{
-			name: "output event pin required shape",
-			write: func(t *testing.T, root string) {
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: invalid-output-pin
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: invalid-output-pin
-pins:
-  outputs:
-    events:
-      - event: item.processed
-`)
-			},
-			wants: []string{
-				"ERROR: output event pin mappings require a non-default sink.",
-				"Location:",
-				"schema.yaml.pins.outputs.events",
-				"Remediation: Use `events: [item.processed]` unless the validation-only `sink: harness` option is required.",
-			},
-			notWants: []string{"output event pin name", "load Swarm contracts", "resolve contracts"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
-			tt.write(t, root)
-			var buf bytes.Buffer
-			code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &buf)
-			if code != CLIExitValidation {
-				t.Fatalf("code = %d, want %d output=%s", code, CLIExitValidation, buf.String())
-			}
-			out := buf.String()
-			for _, want := range tt.wants {
-				if !strings.Contains(out, want) {
-					t.Fatalf("output missing %q:\n%s", want, out)
-				}
-			}
-			for _, notWant := range tt.notWants {
-				if strings.Contains(out, notWant) {
-					t.Fatalf("output contains %q:\n%s", notWant, out)
-				}
-			}
-		})
-	}
-}
-
-func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
+func TestNormalizeSourceRootExplicitPathValidation(t *testing.T) {
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `name: explicit-root`)
 
-	got, err := NormalizeContractsRoot(root)
+	got, err := NormalizeSourceRoot(root)
 	if err != nil {
 		t.Fatalf("normalize directory root: %v", err)
 	}
@@ -3877,16 +3397,8 @@ func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
 		t.Fatalf("root = %q, want %q", got, root)
 	}
 
-	got, err = NormalizeContractsRoot(filepath.Join(root, "package.yaml"))
-	if err != nil {
-		t.Fatalf("normalize package file shorthand: %v", err)
-	}
-	if got != root {
-		t.Fatalf("root from package file = %q, want %q", got, root)
-	}
-
 	explicitChild := filepath.Join(root, "zzz-not-a-real-dir")
-	if got, err := NormalizeContractsRoot(explicitChild); err == nil {
+	if got, err := NormalizeSourceRoot(explicitChild); err == nil {
 		t.Fatalf("normalize explicit child returned %q, want fail-closed error", got)
 	} else if !strings.Contains(err.Error(), explicitChild) {
 		t.Fatalf("error = %q, want explicit child path %q", err.Error(), explicitChild)
@@ -3901,7 +3413,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
-	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := stdout.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify stdout missing success marker:\n%s", out)
 	} else if strings.Contains(out, "entity_reader_coverage") || strings.Contains(out, "lint_evidence") {
 		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
@@ -3915,7 +3427,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
@@ -3939,7 +3451,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 
@@ -3974,7 +3486,7 @@ func TestRunVerifyCommand_AllowsBootTimerWithoutCancelOn(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
-	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := stdout.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify stdout missing success marker:\n%s", out)
 	}
 }
@@ -4003,7 +3515,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
@@ -4019,8 +3531,8 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	if verifyJSON.OK {
 		t.Fatalf("verify --json ok = true, want false: %#v", verifyJSON)
 	}
-	if strings.TrimSpace(verifyJSON.Contracts) != root {
-		t.Fatalf("verify --json contracts = %q, want %q", verifyJSON.Contracts, root)
+	if strings.TrimSpace(verifyJSON.SourceRoot) != root {
+		t.Fatalf("verify --json source_root = %q, want %q", verifyJSON.SourceRoot, root)
 	}
 	if len(verifyJSON.Errors) == 0 {
 		t.Fatalf("verify --json errors = %#v, want timer_validation", verifyJSON.Errors)
@@ -4033,6 +3545,23 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 	if len(verifyJSON.Errors[0].Evidence) == 0 || !strings.Contains(strings.Join(verifyJSON.Errors[0].Evidence, "\n"), "cancel_on: state:done") {
 		t.Fatalf("verify --json first error evidence = %#v, want timer cancel_on evidence", verifyJSON.Errors[0].Evidence)
+	}
+}
+
+func TestRunVerifyCommandRejectsAncestorEventNameWithoutReceiverLocalDeclarationOrConnect(t *testing.T) {
+	root := canonicalrouting.CopyAncestorEventWithoutReceiverMembership(t)
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("verify exit code = 0, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	}
+	for _, want := range []string{"receiver-local event", "input pin", "nearest common ancestor schema.yaml", "root.started"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, stderr.String())
+		}
 	}
 }
 
@@ -4069,7 +3598,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
 	stdout.Reset()
@@ -4115,12 +3644,7 @@ func verifyFindingOutputsContain(findings []verifyFindingOutput, checkID, severi
 func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-boot-timer
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: verify-boot-timer
 initial_state: waiting
@@ -4173,7 +3697,7 @@ func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *t
 	if strings.Contains(out, "lint_evidence: entity_reader_coverage") {
 		t.Fatalf("verify output should not contain tutorial reader coverage lint evidence:\n%s", out)
 	}
-	if !strings.Contains(out, "verify ok: contracts=") {
+	if !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
 }
@@ -4213,34 +3737,27 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
+	opts.sourceRoot = root
 	code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &buf, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
 }
 
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-prompt-writer-coverage
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: child
-    flow: child
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
 name: child
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 case:
   business_brief:
     type: text
@@ -4249,7 +3766,7 @@ case:
     type: text
     _unused_reason: verify prompt writer proof field
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
 writer:
   id: writer
   type: factory
@@ -4262,7 +3779,10 @@ writer:
       save:
       - research_context
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
+task.assigned: {}
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 closer:
   id: closer
   execution_type: system_node
@@ -4271,7 +3791,7 @@ closer:
     task.assigned:
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "prompts", "writer.md"), `
 Use save_entity_field for `+"`business_brief`"+`.
 `)
 
@@ -4297,11 +3817,7 @@ Use save_entity_field for `+"`business_brief`"+`.
 
 func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-state-schema-pseudo-types
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
@@ -4330,7 +3846,7 @@ func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
 }
@@ -4346,7 +3862,7 @@ func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
-	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := buf.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
 }
@@ -4363,7 +3879,7 @@ func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithExternalSource(t *testi
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
-	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+	if out := stdout.String(); !strings.Contains(out, "verify ok: source=") {
 		t.Fatalf("verify stdout missing success marker:\n%s", out)
 	}
 	errText := stderr.String()
@@ -4403,12 +3919,7 @@ type verifyAccumulatorSafetyCommandFixtureOptions struct {
 func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumulatorSafetyCommandFixtureOptions) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: verify-accumulator-safety
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows: []
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: verify-accumulator-safety
 initial_state: collecting
@@ -4426,6 +3937,7 @@ pins:
 item.arrived:`+sourceBlock+`
   expected_count: integer
 `)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   id: accumulator
@@ -4523,11 +4035,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: dead-event-schema
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-`)
+
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 root.unused: {}
@@ -4711,15 +4219,14 @@ func TestSummarizeServeSchemaPlansZeroPlans(t *testing.T) {
 }
 
 type serveDevModeSpec struct {
-	ImplementedBy        string   `yaml:"implemented_by"`
-	Flag                 string   `yaml:"flag"`
-	Owner                string   `yaml:"owner"`
-	Composition          []string `yaml:"composition"`
-	ConflictRules        []string `yaml:"conflict_rules"`
-	ShutdownOrdering     string   `yaml:"shutdown_ordering"`
-	CleanupScope         string   `yaml:"cleanup_scope"`
-	PreservationBoundary string   `yaml:"preservation_boundary"`
-	SiblingBoundaries    string   `yaml:"sibling_boundaries"`
+	ImplementedBy           string   `yaml:"implemented_by"`
+	Flag                    string   `yaml:"flag"`
+	Owner                   string   `yaml:"owner"`
+	Composition             []string `yaml:"composition"`
+	ConflictRules           []string `yaml:"conflict_rules"`
+	ShutdownOrdering        string   `yaml:"shutdown_ordering"`
+	EntityCleanupRetirement string   `yaml:"entity_cleanup_retirement"`
+	SiblingBoundaries       string   `yaml:"sibling_boundaries"`
 }
 
 type serveUnifiedListenerSpec struct {
@@ -4844,14 +4351,14 @@ type cliAPIConnectionAuthConfigSpec struct {
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }
 
-type cliContractPlatformSpecPathResolutionSpec struct {
+type cliSourcePlatformSpecPathResolutionSpec struct {
 	PromotedBy           string   `yaml:"promoted_by"`
 	ImplementationStatus string   `yaml:"implementation_status"`
 	CanonicalOwner       string   `yaml:"canonical_owner"`
 	Scope                string   `yaml:"scope"`
 	AppliesTo            []string `yaml:"applies_to"`
 	NotAppliesTo         []string `yaml:"not_applies_to"`
-	ContractsPath        struct {
+	SourceRoot           struct {
 		AcceptedSources struct {
 			Flag              string `yaml:"flag"`
 			Environment       string `yaml:"environment"`
@@ -4945,20 +4452,20 @@ func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfig
 	return spec.CLISpecification.Foundations.APIConnectionAuthConfig
 }
 
-func loadCLIContractPlatformSpecPathResolutionSpec(t *testing.T) cliContractPlatformSpecPathResolutionSpec {
+func loadCLISourcePlatformSpecPathResolutionSpec(t *testing.T) cliSourcePlatformSpecPathResolutionSpec {
 	t.Helper()
 	var spec struct {
 		CLISpecification struct {
 			Foundations struct {
-				ContractPlatformSpecPathResolution cliContractPlatformSpecPathResolutionSpec `yaml:"contract_platform_spec_path_resolution"`
+				SourcePlatformSpecPathResolution cliSourcePlatformSpecPathResolutionSpec `yaml:"source_platform_spec_path_resolution"`
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
 	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
-	if strings.TrimSpace(spec.CLISpecification.Foundations.ContractPlatformSpecPathResolution.CanonicalOwner) == "" {
-		t.Fatal("platform spec missing contract_platform_spec_path_resolution")
+	if strings.TrimSpace(spec.CLISpecification.Foundations.SourcePlatformSpecPathResolution.CanonicalOwner) == "" {
+		t.Fatal("platform spec missing source_platform_spec_path_resolution")
 	}
-	return spec.CLISpecification.Foundations.ContractPlatformSpecPathResolution
+	return spec.CLISpecification.Foundations.SourcePlatformSpecPathResolution
 }
 
 func stringSliceContains(values []string, want string) bool {

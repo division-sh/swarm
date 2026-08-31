@@ -434,7 +434,7 @@ func commitWorkflowEngineMutationLog(
 			return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
 		}
 		return privatemutationlog.InsertEntityStateDiffWithStory(
-			ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+			ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			}), runtimeAuthorActivityMutation(story), effects,
 			record.EntityID, before, after, writer,
@@ -491,7 +491,7 @@ func commitWorkflowEngineInitialValues(
 			if !ok {
 				return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine initial values require PostgreSQL selected store")
 			}
-			if err := privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+			if err := privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			}), runtimeAuthorActivityMutation(story), effects, record.EntityID, adjusted, next, writer); err != nil {
 				return runtimemutationlog.EntityStateProjection{}, err

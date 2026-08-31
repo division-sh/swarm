@@ -305,7 +305,7 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 func TestRun_ExpressionValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "nodes.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
   id: shared-node
   execution_type: system_node
@@ -345,22 +345,22 @@ func TestHandBuiltScopedNodeRecordsReachReaderAndWriteConsumers(t *testing.T) {
 		}},
 	})
 	source := semanticview.Wrap(bundle)
-	if _, _, err := wave1ResolveEntityPathWithOwner(source, "", "entity.status"); err != nil {
+	if _, _, err := wave1ResolveEntityPathWithOwner(source, ".", "entity.status"); err != nil {
 		t.Fatalf("resolve root entity.status: %v", err)
 	}
 
 	coverage := wave1EntityReaderCoverageByFlow(source)
-	if _, ok := coverage[""]["status"]; !ok {
+	if _, ok := coverage["."]["status"]; !ok {
 		t.Fatalf("entity reader coverage = %#v, want root entity.status", coverage)
 	}
 	operations := wave1ContainedStateOperations(source)
-	if len(operations) != 1 || operations[0].Node.FlowID() != "" || operations[0].Node.NodeID() != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "entity.items" {
+	if len(operations) != 1 || operations[0].Node.FlowPath() != "." || operations[0].Node.NodeID() != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "entity.items" {
 		t.Fatalf("contained operations = %#v, want exact hand-built root scope", operations)
 	}
 	writes := wave1AllEntityWriteTargets(source)
 	foundDirectWrite := false
 	for _, write := range writes {
-		if write.Node.FlowID() == "" && write.Node.NodeID() == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "entity.status" {
+		if write.Node.FlowPath() == "." && write.Node.NodeID() == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "entity.status" {
 			foundDirectWrite = true
 		}
 	}
@@ -371,7 +371,7 @@ func TestHandBuiltScopedNodeRecordsReachReaderAndWriteConsumers(t *testing.T) {
 
 func handBuiltScopedReaderBundle(handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
 	root := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{PackageKey: "root", NodesFile: "root/nodes.yaml"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", NodesFile: "root/nodes.yaml"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"root-reader": {
 				ID:            "embedded-id-is-not-authority",

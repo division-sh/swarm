@@ -3,4 +3,8 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [root.check]
+    events: [root.check, grandchild.check]
+connect:
+  - event: grandchild.check
+    from: .
+    to: child/grandchild

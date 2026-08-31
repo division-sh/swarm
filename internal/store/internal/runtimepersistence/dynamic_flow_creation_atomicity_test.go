@@ -147,12 +147,12 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	sourceFact := mustExternalStoreTestBundleSourceFact()
-	bundleHash, bundleSource := sourceFact.StorageValues()
+	sourceFact := mustExternalStoreTestSourceArtifactFact()
+	bundleHash := sourceFact.BundleHash()
 	if sqlite {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash})
 	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	}
 
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -162,7 +162,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: identity, RunID: runID,
-		BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+		BundleHash: bundleHash, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 		CreationEvent: &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{
 			EventID: uuid.NewString(), EventType: "review/inst-1/task.started",
 			RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
@@ -185,9 +185,9 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	t.Cleanup(lease.Release)
 	eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-		RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
-		ContractBundle:    semanticview.Wrap(dynamicFlowCreationAtomicityBundle()),
-		BundleSourceFact:  sourceFact,
+		RuntimeInstanceID:  "11111111-1111-1111-1111-111111111111",
+		ContractBundle:     semanticview.Wrap(dynamicFlowCreationAtomicityBundle()),
+		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -246,7 +246,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 
 func dynamicFlowCreationAtomicityBundle() *runtimecontracts.WorkflowContractBundle {
 	review := &runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
 		},

@@ -14,17 +14,17 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-const managerTestTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const managerTestTopologyBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatalf("construct manager test topology plan: %v", err)
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	if err != nil {
 		t.Fatalf("construct manager test topology admission: %v", err)
@@ -33,6 +33,7 @@ func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 }
 
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
+	ensureManagerTestSemanticSource(am)
 	var err error
 	cfg, err = bindRuntimeCreatedIdentity(cfg, "manager.test.static_agent")
 	if err != nil {
@@ -53,7 +54,7 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	if err != nil {
 		return PersistedAgent{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	plan, err := runtimeagenttopology.NewSourceSetPlan(
 		[]runtimeagenttopology.SourceCoordinate{coordinate},
 		[]runtimeagenttopology.DesiredAgent{{Identity: identity, Source: coordinate, ConfigRevision: revision}},
@@ -62,7 +63,7 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 		return PersistedAgent{}, err
 	}
 	rec.Topology, err = runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged,
+		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
 	return rec, err
 }
@@ -82,7 +83,7 @@ func installManagerTestStaticTopology(
 	configs ...runtimeactors.AgentConfig,
 ) ([]PersistedAgent, runtimeagenttopology.Admission, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	records := make([]PersistedAgent, 0, len(configs))
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(configs))
 	for _, authored := range configs {
@@ -112,7 +113,7 @@ func installManagerTestStaticTopology(
 	if err != nil {
 		t.Fatalf("construct manager test complete source set: %v", err)
 	}
-	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct manager test static admission: %v", err)
 	}
@@ -129,6 +130,7 @@ func installManagerTestStaticTopology(
 }
 
 func registerManagerTestEphemeralAgent(ctx context.Context, am *AgentManager, rec PersistedAgent) error {
+	ensureManagerTestSemanticSource(am)
 	var err error
 	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission("11111111-1111-4111-8111-111111111111", "runtime_shard")
 	if err != nil {
@@ -160,6 +162,9 @@ func managerTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
 }
 
 func managerTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
+	if strings.TrimSpace(cfg.FlowID) == "" && cfg.CanonicalFlowPath() == "" {
+		cfg.FlowID = "."
+	}
 	if cfg.Intent.Empty() {
 		cfg.Intent = managerTestResolvedIntent(cfg.ID)
 	}

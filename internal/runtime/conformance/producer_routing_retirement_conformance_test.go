@@ -124,7 +124,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 	cases := []struct {
 		id           string
 		fixture      string
-		packageKey   string
+		flowPath     string
 		flowID       string
 		flowInstance string
 		nodeID       string
@@ -136,7 +136,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 	}{
 		{id: "B001", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "delivery", flowInstance: "delivery/fixture-instance", nodeID: "delivery-node", trigger: "timer.item.timeout", emitted: "item.completed", runtimeEvent: "delivery/item.completed", disposition: "same_flow"},
 		{id: "B002", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "intake", flowInstance: "intake", nodeID: "intake-router", trigger: "item.created", emitted: "item.processed", runtimeEvent: "intake/item.processed", disposition: "same_flow", payload: map[string]any{"item_id": "item-1", "items": []any{map[string]any{"id": "line-1"}}}},
-		{id: "B103", fixture: "tests/tier5-flow-lifecycle/test-auto-emit-on-create", packageKey: "flows/worker", flowID: "worker", flowInstance: "worker/worker-001", nodeID: "worker", trigger: "auto.started", emitted: "auto.processed", runtimeEvent: "worker/auto.processed", disposition: "same_flow"},
+		{id: "B103", fixture: "tests/tier5-flow-lifecycle/test-auto-emit-on-create", flowPath: "worker", flowID: "worker", flowInstance: "worker/worker-001", nodeID: "worker", trigger: "auto.started", emitted: "auto.processed", runtimeEvent: "worker/auto.processed", disposition: "same_flow"},
 		{id: "B151", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.ping", emitted: "cycle.pong", disposition: "same_flow"},
 		{id: "B152", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.pong", emitted: "cycle.ping", disposition: "same_flow"},
 		{id: "B164", fixture: "tests/tier8-boot-verification/test-boot-permission-tool-mismatch", nodeID: "test-node", trigger: "task.requested", emitted: "task.completed", disposition: "same_flow"},
@@ -162,8 +162,8 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			}
 			previewCtx := context.Background()
 			node := conformanceNode(t, tc.flowID, tc.nodeID)
-			if tc.packageKey != "" {
-				node = conformancePackageNode(t, tc.packageKey, tc.flowID, tc.nodeID)
+			if tc.flowPath != "" {
+				node = conformanceFlowPathNode(t, tc.flowPath, tc.nodeID)
 			}
 			if tc.flowID != "" {
 				previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
@@ -274,7 +274,7 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 	}{
 		{id: "B045", fixture: "tests/tier11-flow-composition/test-child-flow-absolute-path", nodeID: "listener", trigger: "task.done", wantEmitted: "work.finished"},
 		{id: "B078", fixture: "tests/tier11-flow-composition/test-tool-override", nodeID: "root-node", trigger: "child.done", wantEmitted: "task.done"},
-		{id: "B081", fixture: "tests/tier11-flow-composition/test-wildcard-deep-subscription", nodeID: "collector", trigger: "child/task.done", wantEmitted: "pipeline.complete"},
+		{id: "B081", fixture: "tests/tier11-flow-composition/test-wildcard-deep-subscription", nodeID: "collector", trigger: "task.done", wantEmitted: "pipeline.complete"},
 		{id: "B100", fixture: "tests/tier4-cross-entity/test-create-entity", nodeID: "test-node", trigger: "entity.create_requested", payload: map[string]any{"child_id": "child-001"}, wantEmitted: "entity.created"},
 	}
 	for _, tc := range cases {
@@ -326,9 +326,9 @@ func TestProducerRoutingRetirementExcludedDeadOutputs(t *testing.T) {
 		path  string
 		event string
 	}{
-		{id: "B080", path: "tests/tier11-flow-composition/test-wildcard-deep-subscription/flows/child/nodes.yaml", event: "work.finished"},
-		{id: "B099", path: "tests/tier4-cross-entity/test-create-entity/flows/child-flow/nodes.yaml", event: "child.done"},
-		{id: "B191", path: "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/flows/tracker/nodes.yaml", event: "task.recorded"},
+		{id: "B080", path: "tests/tier11-flow-composition/test-wildcard-deep-subscription/child/nodes.yaml", event: "work.finished"},
+		{id: "B099", path: "tests/tier4-cross-entity/test-create-entity/child-flow/nodes.yaml", event: "child.done"},
+		{id: "B191", path: "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/tracker/nodes.yaml", event: "task.recorded"},
 	}
 	repoRoot := canonicalrouting.RepoRoot(t)
 	for _, tc := range cases {
@@ -370,7 +370,7 @@ func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 
 func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T) {
 	raw := []byte("worker:\n  id: worker\n  event_handlers:\n    request:\n      emit:\n        event: task.done\n        fields:\n          config:\n            literal:\n              emit:\n                broadcast: true\n")
-	retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw)
+	retired, err := hasRetiredProducerRoutingYAML(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestProducerRoutingRetirementGuardCoversSchemaOwnedEmitSites(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			retired, err := runtimecontracts.HasRetiredProducerRoutingYAML([]byte(tc.raw))
+			retired, err := hasRetiredProducerRoutingYAML([]byte(tc.raw))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -485,6 +485,113 @@ func outputPinSinksInYAML(document map[string]any) map[string]string {
 	return out
 }
 
+func hasRetiredProducerRoutingYAML(raw []byte) (bool, error) {
+	var document yaml.Node
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return false, err
+	}
+	for _, emit := range producerRoutingProofEmitNodes(&document) {
+		for index := 0; index+1 < len(emit.Content); index += 2 {
+			switch strings.TrimSpace(emit.Content[index].Value) {
+			case "target", "broadcast":
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func producerRoutingProofEmitNodes(document *yaml.Node) []*yaml.Node {
+	root := document
+	if root != nil && root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		root = root.Content[0]
+	}
+	if root == nil || root.Kind != yaml.MappingNode {
+		return nil
+	}
+	var emits []*yaml.Node
+	for index := 1; index < len(root.Content); index += 2 {
+		node := root.Content[index]
+		handlers := producerRoutingProofMappingValue(node, "event_handlers")
+		if handlers == nil || handlers.Kind != yaml.MappingNode {
+			continue
+		}
+		for handlerIndex := 1; handlerIndex < len(handlers.Content); handlerIndex += 2 {
+			handler := handlers.Content[handlerIndex]
+			emits = appendProducerRoutingProofEmit(emits, handler)
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(handler, "on_success"))
+			for _, key := range []string{"rules", "on_complete"} {
+				emits = appendProducerRoutingProofRuleEmits(emits, producerRoutingProofMappingValue(handler, key))
+			}
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(handler, "fan_out"))
+			join := producerRoutingProofMappingValue(handler, "join")
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(join, "on_complete"))
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(join, "timeout"))
+		}
+	}
+	for _, loop := range producerRoutingProofMappingValues(producerRoutingProofMappingValue(root, "loops")) {
+		emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(loop, "escape"))
+	}
+	for _, stage := range producerRoutingProofMappingValues(producerRoutingProofMappingValue(root, "stages")) {
+		gate := producerRoutingProofMappingValue(stage, "gate")
+		for _, outcome := range producerRoutingProofMappingValues(producerRoutingProofMappingValue(gate, "outcomes")) {
+			emits = appendProducerRoutingProofEmit(emits, outcome)
+		}
+	}
+	return emits
+}
+
+func appendProducerRoutingProofRuleEmits(emits []*yaml.Node, rules *yaml.Node) []*yaml.Node {
+	if rules == nil {
+		return emits
+	}
+	if rules.Kind == yaml.SequenceNode {
+		for _, rule := range rules.Content {
+			emits = appendProducerRoutingProofEmit(emits, rule)
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(rule, "fan_out"))
+		}
+		return emits
+	}
+	if rules.Kind == yaml.MappingNode {
+		for _, rule := range producerRoutingProofMappingValues(rules) {
+			emits = appendProducerRoutingProofEmit(emits, rule)
+			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(rule, "fan_out"))
+		}
+	}
+	return emits
+}
+
+func appendProducerRoutingProofEmit(emits []*yaml.Node, owner *yaml.Node) []*yaml.Node {
+	emit := producerRoutingProofMappingValue(owner, "emit")
+	if emit != nil && emit.Kind == yaml.MappingNode {
+		return append(emits, emit)
+	}
+	return emits
+}
+
+func producerRoutingProofMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		if strings.TrimSpace(node.Content[index].Value) == key {
+			return node.Content[index+1]
+		}
+	}
+	return nil
+}
+
+func producerRoutingProofMappingValues(node *yaml.Node) []*yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	values := make([]*yaml.Node, 0, len(node.Content)/2)
+	for index := 1; index < len(node.Content); index += 2 {
+		values = append(values, node.Content[index])
+	}
+	return values
+}
+
 func hasRetiredProducerRoutingFile(t testing.TB, path string) bool {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -494,7 +601,7 @@ func hasRetiredProducerRoutingFile(t testing.TB, path string) bool {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw)
+	retired, err := hasRetiredProducerRoutingYAML(raw)
 	if err != nil {
 		t.Fatalf("scan %s: %v", path, err)
 	}

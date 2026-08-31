@@ -19,7 +19,6 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -45,10 +44,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -75,16 +71,16 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 		!reflect.DeepEqual(replayed, materialized) {
 		t.Fatalf("selected-contract materialization replay = %#v, want %#v", replayed, materialized)
 	}
-	var forkBundleHash, forkBundleSource string
+	var forkBundleHash string
 	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
+	`, materialized.ForkRunID).Scan(&forkBundleHash); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
-		t.Fatalf("selected fork bundle identity = hash:%q source:%q, want inherited canonical identity", forkBundleHash, forkBundleSource)
+	if forkBundleHash != authorActivityTestBundleHash {
+		t.Fatalf("selected fork bundle identity = hash:%q, want inherited canonical identity", forkBundleHash)
 	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {
@@ -102,10 +98,7 @@ func TestRunForkSelectedContractBindingUsesPersistedPostgresTimestampPrecision(t
 		SourceRunID: uuid.NewString(),
 		ForkEventID: uuid.NewString(),
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            runfork.RunForkContractSelectionModeSelectedContracts,
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 		},
 	}, createdAt)
 	if err != nil {
@@ -125,38 +118,36 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002402, 0).UTC()
-	bundleHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	targetArtifact := storeTestSourceArtifact("selected-contract-execution")
+	bundleHash := targetArtifact.BundleHash()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	seedStoreTestPersistedBundle(t, db, bundleHash)
+	seedStoreTestPersistedArtifact(t, db, targetArtifact)
 
-	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
-		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
+		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:      sourceRunID,
-		At:               eventID,
-		BundleSourceFact: bundleSource,
+		SourceRunID:        sourceRunID,
+		At:                 eventID,
+		SourceArtifactFact: bundleSource,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	var forkBundleHash, forkBundleSource string
+	var forkBundleHash string
 	if err := db.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source
+		SELECT bundle_hash
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
+	`, materialized.ForkRunID).Scan(&forkBundleHash); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != bundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("selected fork bundle identity = hash:%q source:%q, want persisted canonical identity", forkBundleHash, forkBundleSource)
+	if forkBundleHash != bundleHash {
+		t.Fatalf("selected fork bundle identity = hash:%q, want inherited canonical identity", forkBundleHash)
 	}
 }
 
@@ -202,10 +193,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -266,10 +254,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 		SourceRunID: sourceRunID,
 		At:          laterEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -312,10 +297,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -366,10 +348,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -442,10 +421,7 @@ func TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourc
 				SourceRunID: sourceRunID,
 				At:          eventID,
 				ContractSelection: runfork.RunForkContractSelection{
-					Mode:            "selected_contracts",
-					ContractsRoot:   "/tmp/selected-contracts",
-					WorkflowName:    "selected-workflow",
-					WorkflowVersion: "v1",
+					Mode: "selected_contracts",
 				},
 			})
 			if err != nil {
@@ -482,10 +458,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err == nil || (!strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) && !strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven)) {
@@ -527,10 +500,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -599,10 +569,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
@@ -643,10 +610,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerDeliveryHistoryUnproven) {
@@ -691,10 +655,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -734,10 +695,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -794,10 +752,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
@@ -857,10 +812,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				SourceRunID: sourceRunID,
 				At:          eventID,
 				ContractSelection: runfork.RunForkContractSelection{
-					Mode:            "selected_contracts",
-					ContractsRoot:   "/tmp/selected-contracts",
-					WorkflowName:    "selected-workflow",
-					WorkflowVersion: "v1",
+					Mode: "selected_contracts",
 				},
 			})
 			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
@@ -911,10 +863,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || materialized.ForkRunID != "" {
@@ -937,10 +886,7 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1034,10 +980,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1082,10 +1025,7 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1113,10 +1053,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1231,10 +1168,7 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1352,10 +1286,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 				SourceRunID: sourceRunID,
 				At:          eventID,
 				ContractSelection: runfork.RunForkContractSelection{
-					Mode:            "selected_contracts",
-					ContractsRoot:   "/tmp/selected-contracts",
-					WorkflowName:    "selected-workflow",
-					WorkflowVersion: "v1",
+					Mode: "selected_contracts",
 				},
 			})
 			if err != nil {
@@ -1416,10 +1347,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1466,10 +1394,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1506,10 +1431,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1626,10 +1548,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1672,10 +1591,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1712,10 +1628,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1751,10 +1664,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1790,10 +1700,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1829,10 +1736,7 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1869,10 +1773,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	if err != nil {
@@ -1933,10 +1834,7 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
-			Mode:            "selected_contracts",
-			ContractsRoot:   "/tmp/selected-contracts",
-			WorkflowName:    "selected-workflow",
-			WorkflowVersion: "v1",
+			Mode: "selected_contracts",
 		},
 	})
 	blocker, fact, ok := runForkReplayResumeBlockerFromError(err)
@@ -1973,7 +1871,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
 	event := semanticEventRecordFixture(

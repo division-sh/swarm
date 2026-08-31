@@ -17,18 +17,32 @@ import (
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantFreeBundle(t *testing.T) {
-	contractsRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsRoot, "package.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
-		t.Fatalf("write package marker: %v", err)
+	sourceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
+		t.Fatalf("write flow marker: %v", err)
 	}
+	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
+	if err != nil {
+		t.Fatalf("admit source: %v", err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatalf("materialize source: %v", err)
+	}
+	t.Cleanup(func() { _ = projection.Release() })
 	manager := workspace.NewHostManager()
 	cfg := workspace.DefaultHostConfig()
 	cfg.WorkspaceRoot = t.TempDir()
-	cfg.ContractsSource = contractsRoot
+	cfg.SourceProjection = projection
 	manager.SetConfigForTest(cfg)
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("bind source projection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	manager.SetSemanticSource(source)
 
@@ -90,16 +104,29 @@ func TestConfigureWorkspaceDataProjectionRejectsMissingStoreForDataBearingBundle
 }
 
 func TestConfigureWorkspaceDataProjectionMountsCanonicalEmptyDataInDocker(t *testing.T) {
-	contractsRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsRoot, "package.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
-		t.Fatalf("write package marker: %v", err)
+	sourceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
+		t.Fatalf("write flow marker: %v", err)
 	}
-	manager := workspace.NewDockerManager(nil)
+	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
+	if err != nil {
+		t.Fatalf("admit source: %v", err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatalf("materialize source: %v", err)
+	}
+	t.Cleanup(func() { _ = projection.Release() })
+	manager := workspace.NewDockerManager()
 	cfg := workspace.DefaultDockerConfig()
-	cfg.ContractsSource = contractsRoot
+	cfg.SourceProjection = projection
 	cfg.WorkspaceImage = "test-image"
 	cfg.WorkspaceNetwork = ""
 	manager.SetConfig(cfg)
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("bind source projection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	manager.SetSemanticSource(source)
 	var created []string

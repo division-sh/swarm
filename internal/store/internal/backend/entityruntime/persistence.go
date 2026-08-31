@@ -24,14 +24,14 @@ import (
 var _ runtimetools.EntityPersistence = (*EntityPostgresOwner)(nil)
 var _ runtimetools.EntityPersistence = (*EntitySQLiteOwner)(nil)
 
-type entityRunSourceOwner func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+type entityRunSourceOwner func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 
-func (fn entityRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+func (fn entityRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return fn(ctx, runID)
 }
 
 func postgresEntityRunSourceOwner(tx *sql.Tx) entityRunSourceOwner {
-	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 		return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
 	}
 }

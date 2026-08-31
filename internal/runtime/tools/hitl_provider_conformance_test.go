@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	hitlProviderTestBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	hitlProviderTestBundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	hitlProviderTestRunID      = "33333333-3333-4333-8333-333333333333"
 	hitlProviderTestMailboxID  = "7b5cd83d-b971-4d49-b9ce-46e4b31823a5"
 )
@@ -330,11 +330,11 @@ func managedHITLProviderContext(t *testing.T, harness *effecttest.Harness, actor
 	if actor.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	}
-	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(hitlProviderTestBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(hitlProviderTestBundleHash)
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: "hitl-provider-runtime", BundleHash: hitlProviderTestBundleHash})
 	if err != nil {

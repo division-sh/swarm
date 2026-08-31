@@ -219,7 +219,7 @@ func seedProviderTriggerSmokeRuntime(
 	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
-	const fixtureBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const fixtureBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	agentContext := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		fixtureBundleHash,

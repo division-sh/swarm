@@ -12,21 +12,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/mailbox"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
-	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
-const readOnlyProbeBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const readOnlyProbeMissingBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const readOnlyProbeBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const readOnlyProbeMissingBundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 const readOnlyProbeTurnID = "00000000-0000-4000-8000-000000000401"
 
 func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
@@ -261,9 +262,6 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.get",
 		"agent.list",
 		"agent.usage",
-		"bundle.agents",
-		"bundle.get",
-		"bundle.list",
 		"channel.onboarding_get",
 		"conversation.fork_list",
 		"conversation.fork_view",
@@ -295,12 +293,9 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.delivery_lifecycle":   {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
 		"agent.diagnose":             {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                  {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
-		"agent.frame":                {Params: map[string]any{"scope": "static", "agent_id": "researcher", "bundle_hash": readOnlyProbeBundleHash, "flow": "research/inst-1"}, ResultKeys: []string{"version", "scope", "selector", "session_contract", "turn_context"}},
+		"agent.frame":                {Params: map[string]any{"scope": "effective", "agent_id": "researcher", "root": true}, ResultKeys: []string{"version", "scope", "selector", "session_contract", "turn_context"}},
 		"agent.list":                 {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"agent.usage":                {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
-		"bundle.agents":              {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
-		"bundle.get":                 {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
-		"bundle.list":                {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
 		"channel.onboarding_get":     {Params: map[string]any{"operation_id": "00000000-0000-4000-8000-000000000207"}, ResultKeys: []string{"operation", "candidate"}},
 		"conversation.fork_list":     {Params: map[string]any{}, ResultKeys: []string{"forks"}},
 		"conversation.fork_view":     {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
@@ -320,7 +315,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"run.get":                    {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
 		"run.list":                   {Params: map[string]any{}, ResultKeys: []string{"runs"}},
 		"run.trace":                  {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
-		"runtime.identity":           {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports", "bundle_sources"}},
+		"runtime.identity":           {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports", "source_artifacts"}},
 		"runtime.incidents":          {Params: map[string]any{}, ResultKeys: []string{"incidents"}},
 		"runtime.logs":               {Params: map[string]any{}, ResultKeys: []string{"logs"}},
 	}
@@ -330,19 +325,11 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 	return []readOnlyHTTPRuntimeErrorProbe{
 		{
 			Method: "agent.frame",
-			Params: map[string]any{"scope": "static", "agent_id": "missing", "bundle_hash": readOnlyProbeBundleHash, "flow": "research/inst-1"},
+			Params: map[string]any{"scope": "effective", "agent_id": "missing", "root": true},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
-				return readOnlyRuntimeProbeOptions(t)
-			},
-		},
-		{
-			Method: "agent.frame",
-			Params: map[string]any{"scope": "static", "agent_id": "researcher", "bundle_hash": readOnlyProbeMissingBundleHash, "flow": "research/inst-1"},
-			Code:   BundleNotFoundCode,
-			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
+				opts.AgentFrameEffective = &agentFrameEffectiveResolverStub{err: runtimemanager.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -393,26 +380,6 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.AgentConversations = &fakeAgentConversationReadStore{agentErr: operatorread.ErrAgentNotFound}
-				return opts
-			},
-		},
-		{
-			Method: "bundle.agents",
-			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
-			Code:   BundleNotFoundCode,
-			Options: func(t *testing.T) testOperatorCapabilities {
-				opts := readOnlyRuntimeProbeOptions(t)
-				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
-				return opts
-			},
-		},
-		{
-			Method: "bundle.get",
-			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
-			Code:   BundleNotFoundCode,
-			Options: func(t *testing.T) testOperatorCapabilities {
-				opts := readOnlyRuntimeProbeOptions(t)
-				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
 				return opts
 			},
 		},
@@ -521,19 +488,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 
 func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 	t.Helper()
-	catalogIntent := apiTestResolvedIntent(t, "researcher", "Research the requested market signal.")
-	catalogDerivedPrompt, err := runtimeagentintent.IntentOnlyPrompt(catalogIntent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalogProviderPrompt, err := runtimeagentintent.AssembleProviderPrompt(catalogIntent, nil, catalogDerivedPrompt, runtimeagentintent.RuntimeEnvironmentContext())
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalogProviderPromptText, err := catalogProviderPrompt.Text()
-	if err != nil {
-		t.Fatal(err)
-	}
+	effectiveIntent := apiTestResolvedIntent(t, "researcher", "Research the requested market signal.")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run-1"
 	eventID := "evt-1"
@@ -569,8 +524,8 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			StartedAt:           now.Format(time.RFC3339Nano),
 			APIVersion:          "v1",
 			SupportedTransports: []string{"tcp"},
-			BundleSources: []RuntimeBundleSourceIdentity{{
-				BundleHash: readOnlyProbeBundleHash, BundleSource: "persisted",
+			SourceArtifacts: []RuntimeSourceArtifactIdentity{{
+				BundleHash: readOnlyProbeBundleHash,
 			}},
 		},
 		Runs: &fakeRunReadStore{
@@ -664,52 +619,15 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			},
 			aggregate: operatorread.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
 		},
-		BundleCatalog: &fakeBundleCatalogReadStore{
-			listResult: bundlecatalog.ListResult{Bundles: []bundlecatalog.Summary{{
-				BundleHash:    readOnlyProbeBundleHash,
-				AgentCount:    1,
-				HasData:       false,
-				DataSizeBytes: 0,
-				Metadata:      map[string]any{"source": "probe"},
-				IngestedAt:    now,
-			}}},
-			details: map[string]bundlecatalog.Detail{
-				readOnlyProbeBundleHash: {
-					BundleHash:    readOnlyProbeBundleHash,
-					ContentYAML:   "name: probe",
-					ParsedJSON:    map[string]any{"agents": map[string]any{}},
-					Metadata:      map[string]any{"source": "probe"},
-					AgentCount:    1,
-					HasData:       false,
-					DataSizeBytes: 0,
-					IngestedAt:    now,
-				},
+		AgentFrameEffective: &agentFrameEffectiveResolverStub{result: runtimemanager.AgentFrameConfig{
+			BundleHash: readOnlyProbeBundleHash,
+			Config: runtimeactors.AgentConfig{
+				ID: "researcher", Identity: agentidentitytest.RootRuntime(t, "researcher", "read-only-probe"),
+				Role: "researcher", FlowID: "root", Intent: effectiveIntent, Model: "regular",
+				Prompt: agentFrameTestDerivedPrompt(t, effectiveIntent), ResolvedLLMBackend: "claude_api",
+				ResolvedLLMProvider: "anthropic", ResolvedLLMTransport: "api", ResolvedModel: "claude-sonnet",
 			},
-			agents: map[string]bundlecatalog.AgentsResult{
-				readOnlyProbeBundleHash: {
-					Agents: []bundlecatalog.AgentDefinition{{
-						AgentID:           "researcher",
-						AgentNameOwner:    "swarm://flows/research/agent/researcher",
-						Role:              "research",
-						Type:              "managed",
-						Model:             "cheap",
-						LLMBackend:        "claude",
-						Memory:            true,
-						MemorySource:      "authored",
-						FlowInstance:      "research/inst-1",
-						IntentKind:        string(catalogIntent.Kind),
-						IntentSource:      catalogIntent.Coordinate,
-						IntentProvenance:  catalogIntent.Provenance,
-						IntentContentHash: catalogIntent.ContentHash,
-						IntentIdentity:    catalogIntent.Identity,
-						IntentContent:     catalogIntent.Content,
-						ProviderPrompt:    catalogProviderPromptText,
-						Subscriptions:     []string{"scan.requested"},
-						Tools:             []string{"web_search"},
-					}},
-				},
-			},
-		},
+		}},
 		AgentConversations: &fakeAgentConversationReadStore{
 			listAgentsResult: operatorread.OperatorAgentListResult{Agents: []operatorread.OperatorAgentSummary{{
 				AgentID:       "agent-1",
@@ -992,7 +910,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
-			BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:      "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 }
@@ -1029,7 +947,7 @@ func readOnlyOnboardingProbeResult() map[string]any {
 		"semantic_generation": "sha256:semantic", "selector": "channel-interface-v2:probe",
 	}
 	coordinate := map[string]any{
-		"bundle_hash": readOnlyProbeBundleHash, "bundle_source": "persisted", "bundle_identity": "probe@1.0.0#bundle",
+		"bundle_hash": readOnlyProbeBundleHash, "bundle_identity": "probe@1.0.0#bundle",
 		"pack_inventory_generation": "sha256:inventory", "context_publication_generation": 1,
 		"plan_generation": "sha256:plan", "target_generation": 1,
 	}
@@ -1037,7 +955,7 @@ func readOnlyOnboardingProbeResult() map[string]any {
 		"operation": map[string]any{
 			"operation_id": "00000000-0000-4000-8000-000000000207", "principal_id": "00000000-0000-4000-8000-000000000208",
 			"verb": "connect", "provider": "telegram", "interface": identity, "coordinate": coordinate,
-			"target_selector": "ingress:probe:telegram:telegram", "activation_posture": "webhook_registration",
+			"target_selector": "ingress:probe:telegram", "activation_posture": "webhook_registration",
 			"identity_ceremony": "authenticated_text_challenge", "phase": "preparing", "revision": 1,
 			"save_proof": false, "credential_reservations": []any{map[string]any{"role": "bot_token", "store_key": "telegram_bot_token"}},
 			"credential_admissions": []any{}, "requested_at": "2026-08-25T12:00:00Z", "updated_at": "2026-08-25T12:00:00Z",
@@ -1045,8 +963,8 @@ func readOnlyOnboardingProbeResult() map[string]any {
 		"candidate": map[string]any{
 			"provider": "telegram", "interface": identity, "coordinate": coordinate,
 			"target": map[string]any{
-				"selector": "ingress:probe:telegram:telegram", "service_id": "00000000-0000-4000-8000-000000000209",
-				"package_key": "probe", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
+				"selector": "ingress:probe:telegram", "service_id": "00000000-0000-4000-8000-000000000209",
+				"flow_path": "probe", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
 				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("a", 64),
 			},
 			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
@@ -1236,18 +1154,6 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		for _, forbidden := range []string{"token_usage", "run_id", "session_id", "turn_id"} {
 			if _, ok := result[forbidden]; ok {
 				t.Fatalf("agent.usage exposed forbidden field %q: %#v", forbidden, result)
-			}
-		}
-	}
-	if methodName == "bundle.agents" {
-		agents, ok := result["agents"].([]any)
-		if !ok || len(agents) != 1 {
-			t.Fatalf("bundle.agents agents = %#v, want one definition", result["agents"])
-		}
-		agent := asMap(t, agents[0])
-		for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
-			if _, ok := agent[runtimeKey]; ok {
-				t.Fatalf("bundle.agents leaked runtime field %q: %#v", runtimeKey, agent)
 			}
 		}
 	}

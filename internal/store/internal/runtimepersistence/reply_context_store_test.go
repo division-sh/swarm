@@ -255,7 +255,7 @@ func TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
-			ctx := testAuthorActivityBundleSourceContext()
+			ctx := testAuthorActivitySourceArtifactContext()
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			replyEventID := uuid.NewString()
@@ -299,7 +299,7 @@ func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t 
 			for _, winner := range []string{"operation", "freeze"} {
 				t.Run(tc.name+"/"+operation+"_commits_first_"+winner, func(t *testing.T) {
 					store, seed := tc.setup(t)
-					ctx := testAuthorActivityBundleSourceContext()
+					ctx := testAuthorActivitySourceArtifactContext()
 					runID := uuid.NewString()
 					requestEventID := uuid.NewString()
 					replyEventID := uuid.NewString()

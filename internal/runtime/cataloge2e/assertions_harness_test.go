@@ -726,12 +726,12 @@ func catalogRootEventExists(source semanticview.Source, eventName string) bool {
 	if source == nil || eventName == "" {
 		return false
 	}
-	for _, scope := range source.ProjectScopes() {
-		if _, ok := scope.Events[eventName]; ok {
-			return true
-		}
+	scope, ok := source.FlowScopeByID(".")
+	if !ok {
+		return false
 	}
-	return false
+	_, ok = scope.Events[eventName]
+	return ok
 }
 
 func shouldIgnoreCatalogE2EEvent(eventName string) bool {

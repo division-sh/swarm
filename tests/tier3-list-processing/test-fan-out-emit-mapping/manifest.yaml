@@ -1,0 +1,4 @@
+name: test-fan-out-emit-mapping
+version: 1.0.0
+description: fan_out.emit.fields shapes per-item payload under the current single-event fan_out emit model.
+platform_version: ">=0.7.0 <0.8.0"

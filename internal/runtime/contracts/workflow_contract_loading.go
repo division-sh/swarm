@@ -2,12 +2,11 @@ package contracts
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type WorkflowContractLoadOptions struct {
@@ -24,27 +23,53 @@ func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
 	if bundle == nil {
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
-	for _, view := range bundle.RootProjectViews() {
-		return clonePolicyDocument(view.Policy)
-	}
 	if bundle.FlowTree.Root != nil {
 		return clonePolicyDocument(bundle.FlowTree.Root.Policy)
 	}
 	return PolicyDocument{Values: map[string]PolicyValue{}}
 }
 func LoadWorkflowContractBundle(repoRoot string) (*WorkflowContractBundle, error) {
-	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPaths(repoRoot), WorkflowContractLoadOptions{})
+	return loadWorkflowContractBundleFromSource(repoRoot, repoRoot, DefaultPlatformSpecFile(repoRoot), WorkflowContractLoadOptions{})
 }
 func LoadWorkflowContractBundleWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) (*WorkflowContractBundle, error) {
-	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride), WorkflowContractLoadOptions{})
+	return loadWorkflowContractBundleFromSource(repoRoot, workflowDirOverride, platformSpecFileOverride, WorkflowContractLoadOptions{})
 }
 func LoadWorkflowContractBundleWithOptions(repoRoot, workflowDirOverride, platformSpecFileOverride string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
-	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride), options)
+	return loadWorkflowContractBundleFromSource(repoRoot, workflowDirOverride, platformSpecFileOverride, options)
 }
-func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+func loadWorkflowContractBundleFromSource(repoRoot, sourceRoot, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	if sourceRoot == "" {
+		sourceRoot = strings.TrimSpace(repoRoot)
+	}
+	if strings.TrimSpace(platformSpecFile) == "" {
+		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(sourceRoot)
+	if err != nil {
+		return nil, err
+	}
+	return LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, platformSpecFile, options)
+}
+
+// LoadWorkflowContractBundleFromArtifact compiles an already-admitted source
+// snapshot. It never receives or reconstructs the source's ambient host path.
+func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceartifact.AdmittedSourceArtifact, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+	if artifact == nil {
+		return nil, fmt.Errorf("admitted source artifact is required")
+	}
+	if strings.TrimSpace(platformSpecFile) == "" {
+		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
+	}
+	flowSources, err := indexFlowSources(artifact)
+	if err != nil {
+		return nil, err
+	}
+	paths := ContractPaths{PlatformSpecFile: platformSpecFile}
 	bundle := &WorkflowContractBundle{
+		SourceArtifact:        artifact,
+		FlowSources:           flowSources,
 		Paths:                 paths,
-		projectContracts:      map[string]ProjectContractView{},
 		flowTypes:             map[string]TypeCatalogDocument{},
 		flowEntities:          map[string]EntityContractsDocument{},
 		dataDeclarations:      map[string]DurableDataDeclaration{},
@@ -71,130 +96,69 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 		FlowSchemas:           map[string]FlowSchemaDocument{},
 	}
 	flowViewsByID := map[string]FlowContractView{}
-	if paths.ProjectPackageFile != "" {
-		if strings.TrimSpace(paths.RootSchemaFile) != "" {
-			var rootSchema FlowSchemaDocument
-			if err := loadYAMLFile(paths.RootSchemaFile, &rootSchema); err != nil {
-				return nil, err
+	for _, source := range sortedFlowSources(flowSources) {
+		schema := FlowSchemaDocument{}
+		if source.Schema != "" {
+			if err := artifact.DecodeYAML(source.Schema, &schema); err != nil {
+				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
 			}
-			bundle.RootSchema = &rootSchema
 		}
-		var err error
-		if bundle.RootTypes, err = loadOptionalTypeDeclarations(paths.RootTypesFile); err != nil {
+		view, err := loadFlowContractViewFromSource(artifact, source, schema)
+		if err != nil {
 			return nil, err
 		}
-		if bundle.RootEntities, err = loadOptionalEntityDeclarations(paths.RootEntitiesFile); err != nil {
+		flowViewsByID[source.FlowPath] = view
+		flowTypes, err := loadOptionalTypeDeclarationsFromSource(artifact, source.Types)
+		if err != nil {
 			return nil, err
 		}
-		for i, pkgPaths := range paths.ProjectPackages {
-			var manifest ProjectPackageDocument
-			if err := loadYAMLFile(pkgPaths.PackageFile, &manifest); err != nil {
-				return nil, err
-			}
-			if i == 0 {
-				bundle.Package = manifest
-			}
-			bundle.PackageTree = append(bundle.PackageTree, LoadedProjectPackage{
-				Key:       pkgPaths.Key,
-				ParentKey: pkgPaths.ParentKey,
-				Depth:     pkgPaths.Depth,
-				Paths:     pkgPaths,
-				Manifest:  manifest,
-			})
-			projectView, err := loadProjectContractView(paths.ContractsRoot, pkgPaths, manifest)
-			if err != nil {
-				return nil, err
-			}
-			bundle.projectContracts[pkgPaths.Key] = projectView
-		}
-		if err := validateDiscoveredPackageTree(bundle.PackageTree); err != nil {
+		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.Entities)
+		if err != nil {
 			return nil, err
 		}
-		for _, flow := range paths.Flows {
-			if strings.TrimSpace(flow.ID) == "" || strings.TrimSpace(flow.SchemaFile) == "" {
-				continue
+		if source.FlowPath == "." {
+			if source.Schema != "" {
+				root := schema
+				bundle.RootSchema = &root
 			}
-			if _, exists := bundle.FlowSchemas[flow.ID]; exists {
-				return nil, fmt.Errorf("duplicate flow id %q discovered in package tree", flow.ID)
-			}
-			var schema FlowSchemaDocument
-			if err := loadYAMLFile(flow.SchemaFile, &schema); err != nil {
-				return nil, err
-			}
-			effectiveMode, err := ResolveEffectiveFlowMode(flow.ID, flow.Mode, schema.Mode)
-			if err != nil {
-				return nil, err
-			}
-			schema.Mode = effectiveMode
-			bundle.FlowSchemas[flow.ID] = schema
-			flowTypes, err := loadOptionalTypeDeclarations(flow.TypesFile)
-			if err != nil {
-				return nil, err
+			bundle.RootTypes = flowTypes
+			bundle.RootEntities = flowEntities
+		} else {
+			if source.Schema != "" {
+				bundle.FlowSchemas[source.FlowPath] = schema
 			}
 			if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
-				bundle.flowTypes[flow.ID] = flowTypes
-			}
-			flowEntities, err := loadOptionalEntityDeclarations(flow.EntitiesFile)
-			if err != nil {
-				return nil, err
+				bundle.flowTypes[source.FlowPath] = flowTypes
 			}
 			if len(flowEntities) > 0 {
-				bundle.flowEntities[flow.ID] = flowEntities
+				bundle.flowEntities[source.FlowPath] = flowEntities
 			}
-			flowView, err := loadFlowContractView(paths.ContractsRoot, flow, schema)
-			if err != nil {
-				return nil, err
-			}
-			flowViewsByID[flow.ID] = flowView
 		}
-		if err := validateWave1ContractsLoadBoundary(bundle); err != nil {
-			return nil, err
-		}
-		if err := buildFlowTree(bundle, flowViewsByID); err != nil {
-			return nil, err
-		}
-		if err := populateMergedPackageViews(bundle, flowViewsByID); err != nil {
-			return nil, err
-		}
+	}
+	if err := buildFilesystemFlowTree(bundle, flowViewsByID); err != nil {
+		return nil, err
+	}
+	if err := populateMergedFlowViews(bundle); err != nil {
+		return nil, err
+	}
+	if err := validateWave1ContractsLoadBoundary(bundle); err != nil {
+		return nil, err
 	}
 	bundle.Policy = rootWorkflowPolicy(bundle)
-	if err := loadYAMLFile(paths.PlatformSpecFile, &bundle.Platform); err != nil {
+	if err := loadYAMLFile(platformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
-	projectPacks, err := packartifact.LoadProjectPackSet(paths.ContractsRoot)
+	projectPacks, err := packartifact.LoadProjectPackSetFS(artifact.FS())
 	if err != nil {
 		return nil, err
 	}
-	receiptPath := ""
-	if strings.TrimSpace(paths.ContractsRoot) != "" {
-		receiptPath = filepath.Join(paths.ContractsRoot, filepath.FromSlash(packartifact.PackSelectionRelativePath))
-	}
-	persistedReceipt, receipt, err := loadWorkflowPackSelectionReceipt(receiptPath)
-	if err != nil {
-		return nil, err
-	}
-	base, err := resolveWorkflowPlatformPackBase(options, strings.TrimSpace(bundle.Platform.Platform.Version), receipt)
+	base, err := resolveWorkflowPlatformPackBase(options, strings.TrimSpace(bundle.Platform.Platform.Version))
 	if err != nil {
 		return nil, err
 	}
 	effective, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
 	if err != nil {
 		return nil, fmt.Errorf("resolve effective pack inventory: %w", err)
-	}
-	receiptBody, err := effective.SelectionReceiptBody()
-	if err != nil {
-		return nil, err
-	}
-	if receipt != nil {
-		if !receipt.Matches(base, effective) {
-			return nil, fmt.Errorf(
-				"pack selection receipt requires %s base %s and effective inventory %s but reconstruction selected %s base %s and effective inventory %s",
-				receipt.BaseMode, receipt.BaseDigest, receipt.EffectiveDigest,
-				base.SelectionMode(), base.Digest(), effective.Digest(),
-			)
-		}
-		bundle.PackSelectionPath = receiptPath
-		receiptBody = persistedReceipt
 	}
 	if options.AdmitPackInventory != nil {
 		admission, err := options.AdmitPackInventory(effective, bundle.Platform)
@@ -208,7 +172,6 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride || len(projectPacks.Sources) > 0 {
 		return nil, fmt.Errorf("body-specific pack admission is required for development or project pack inventory")
 	}
-	bundle.PackSelectionBody = receiptBody
 	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
 	if err := populateWorkflowSemantics(bundle); err != nil {
@@ -226,54 +189,19 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	}
 	return bundle, nil
 }
-
-func loadWorkflowPackSelectionReceipt(receiptPath string) ([]byte, *packartifact.PackSelectionReceipt, error) {
-	if strings.TrimSpace(receiptPath) == "" {
-		return nil, nil, nil
-	}
-	info, err := os.Lstat(receiptPath)
-	if os.IsNotExist(err) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("inspect pack selection receipt: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, nil, fmt.Errorf("pack selection receipt %s must be a regular file", packartifact.PackSelectionRelativePath)
-	}
-	body, err := os.ReadFile(receiptPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read pack selection receipt: %w", err)
-	}
-	receipt, err := packartifact.ParsePackSelectionReceipt(body)
-	if err != nil {
-		return nil, nil, err
-	}
-	return body, &receipt, nil
-}
-
-func resolveWorkflowPlatformPackBase(options WorkflowContractLoadOptions, runningVersion string, receipt *packartifact.PackSelectionReceipt) (*packartifact.PlatformPackInventory, error) {
+func resolveWorkflowPlatformPackBase(options WorkflowContractLoadOptions, runningVersion string) (*packartifact.PlatformPackInventory, error) {
 	if options.PlatformPackBase != nil && options.PlatformPackBases != nil {
 		return nil, fmt.Errorf("workflow contract load must not provide competing platform pack base owners")
 	}
 	if options.PlatformPackBase != nil {
-		if receipt != nil && !receipt.MatchesBase(options.PlatformPackBase) {
-			return nil, fmt.Errorf("pack selection receipt requires %s base %s but selected base is %s base %s", receipt.BaseMode, receipt.BaseDigest, options.PlatformPackBase.SelectionMode(), options.PlatformPackBase.Digest())
-		}
 		return options.PlatformPackBase, nil
 	}
 	if options.PlatformPackBases != nil {
-		if receipt != nil {
-			return options.PlatformPackBases.ResolvePlatformPackBase(*receipt)
-		}
 		return options.PlatformPackBases.CurrentPlatformPackBase()
 	}
 	base, err := packartifact.LoadEmbeddedPlatformPackInventory(runningVersion)
 	if err != nil {
 		return nil, fmt.Errorf("load embedded platform pack inventory: %w", err)
-	}
-	if receipt != nil && !receipt.MatchesBase(base) {
-		return nil, fmt.Errorf("pack selection receipt requires %s base %s but default embedded selection is %s", receipt.BaseMode, receipt.BaseDigest, base.Digest())
 	}
 	return base, nil
 }
@@ -291,35 +219,35 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 		nodeID := node.Key()
 		for eventType, handler := range record.Entry.EventHandlers {
-			qualified, qualifyErr := QualifySystemNodeHandlerRuleRefs(node, handler)
+			qualified, qualifyErr := QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 			if qualifyErr != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, strings.TrimSpace(eventType), qualifyErr))
 				continue
 			}
 			handler = qualified
 			for _, rule := range HandlerRuleEntries(handler) {
-				ref, ok := rule.ContractElementRef()
+				ref, ok := rule.DeclarationIdentity()
 				if !ok {
 					continue
 				}
-				key := ref.PackageKey().String() + "|" + ref.ElementID().String()
+				key := ref.Key()
 				owner := nodeID + ":" + strings.TrimSpace(eventType)
 				if previous, exists := elementOwners[key]; exists {
-					errs = append(errs, fmt.Errorf("%w: contract element_id %s is duplicated in package %s by %s and %s", ErrInvalidField, ref.ElementID().String(), ref.PackageKey().String(), previous, owner))
+					errs = append(errs, fmt.Errorf("%w: declaration identity %s is duplicated by %s and %s", ErrInvalidField, key, previous, owner))
 				} else {
 					elementOwners[key] = owner
 				}
 			}
 			for _, site := range HandlerFanOutSites(handler) {
-				ref, ok := site.Spec.ContractElementRef()
+				ref, ok := site.Spec.DeclarationIdentity()
 				if !ok {
-					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s requires canonical element_id", ErrInvalidField, nodeID, strings.TrimSpace(eventType), site.Source))
+					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s requires canonical declaration identity", ErrInvalidField, nodeID, strings.TrimSpace(eventType), site.Source))
 					continue
 				}
-				key := ref.PackageKey().String() + "|" + ref.ElementID().String()
+				key := ref.Key()
 				owner := nodeID + ":" + strings.TrimSpace(eventType) + ":" + site.Source
 				if previous, exists := elementOwners[key]; exists {
-					errs = append(errs, fmt.Errorf("%w: contract element_id %s is duplicated in package %s by %s and %s", ErrInvalidField, ref.ElementID().String(), ref.PackageKey().String(), previous, owner))
+					errs = append(errs, fmt.Errorf("%w: declaration identity %s is duplicated by %s and %s", ErrInvalidField, key, previous, owner))
 				} else {
 					elementOwners[key] = owner
 				}
@@ -338,7 +266,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			}
 		}
 		for eventType, handler := range record.Entry.EventHandlers {
-			handler, _ = QualifySystemNodeHandlerRuleRefs(node, handler)
+			handler, _ = QualifySystemNodeHandlerRuleRefsForEvent(node, eventType, handler)
 			eventType = strings.TrimSpace(eventType)
 			if err := ValidateAccumulateHandlerIsolation(handler); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, eventType, err))
@@ -363,7 +291,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 	}
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
-	errs = append(errs, validateIntraPackageEventSchemaOwnership(bundle)...)
+	errs = append(errs, validateCompiledConnectEventSchemaOwnership(bundle)...)
 	errs = append(errs, validateEventBusinessKeys(bundle)...)
 	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)
@@ -388,8 +316,7 @@ func validateEventBusinessKeys(bundle *WorkflowContractBundle) []error {
 			continue
 		}
 		if _, _, err := bundle.compileCurrentEventDeclaration(
-			record.packageKey,
-			record.flowID,
+			record.flowPath,
 			record.layer,
 			record.sourceFile,
 			record.localName,

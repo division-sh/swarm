@@ -155,21 +155,18 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	if eventType == "" {
 		return EmitSchema{}, false
 	}
+	flowID := strings.TrimSpace(actor.FlowID)
+	if r.source != nil && flowID != "" {
+		resolution := semanticview.ResolveEventSchema(r.source, flowID, eventType)
+		if !resolution.HasSchema {
+			return EmitSchema{}, false
+		}
+		return resolution.Schema, true
+	}
 	if schema, ok := emitSchemaForEventType(r.activeSchemas, eventType); ok {
 		return schema, true
 	}
-	if r.source == nil {
-		return EmitSchema{}, false
-	}
-	flowID := strings.TrimSpace(actor.FlowID)
-	if flowID == "" {
-		return EmitSchema{}, false
-	}
-	resolution := semanticview.ResolveEventSchema(r.source, flowID, eventType)
-	if !resolution.HasSchema || len(resolution.UnresolvedTypes) > 0 {
-		return EmitSchema{}, false
-	}
-	return closeGeneratedEmitSchema(resolution.Schema), true
+	return EmitSchema{}, false
 }
 
 func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
@@ -300,6 +297,9 @@ func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolNam
 		return "", EmitSchema{}, false
 	}
 	if configured := UniqueNonEmpty(actor.EmitEvents); len(configured) > 0 {
+		if duplicateEmitToolNames(configured)[toolName] > 1 {
+			return "", EmitSchema{}, false
+		}
 		var matchedEventType string
 		var matchedSchema EmitSchema
 		matchCount := 0
@@ -322,6 +322,7 @@ func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolNam
 		if matchCount > 1 {
 			return "", EmitSchema{}, false
 		}
+		return "", EmitSchema{}, false
 	}
 	eventType, ok := r.EventTypeFromToolName(toolName)
 	if !ok {

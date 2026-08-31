@@ -70,11 +70,6 @@ const (
 	RetiredConnectUsingMixed             RetiredReceiverRoutingSnippet = "connect-using-mixed"
 )
 
-func PackageConnectSourceSnippet(t testing.TB) ParserSnippet {
-	t.Helper()
-	return NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - event: work.done\n    from: producer\n    to: consumer\n")
-}
-
 func InputPinSourceParserSnippet(t testing.TB, id InputPinSourceSnippet) ParserSnippet {
 	t.Helper()
 	var source string
@@ -153,61 +148,6 @@ func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnipp
 		t.Fatalf("unsupported W2 mapping-key parser snippet %q", id)
 	}
 	return NewParserSnippet(t, source)
-}
-
-func PackageRequiresBindConnectSnippet(t testing.TB) ParserSnippet {
-	t.Helper()
-	return NewParserSnippet(t, `
-name: package-boundary
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-requires:
-  inputs: [work.requested]
-  outputs: [work.completed]
-  policy: [provider.threshold]
-  credentials: [provider_token]
-  platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: worker
-    flow: worker
-    bind:
-      inputs:
-        work.requested: parent.work_requested
-      outputs:
-        work.completed: parent.work_completed
-      policy:
-        provider.threshold: parent.policy.threshold
-      credentials:
-        provider_token: parent_provider_token
-packages:
-  - path: packages/child
-    bind:
-      inputs:
-        child.requested: parent.child_requested
-      outputs:
-        child.completed: parent.child_completed
-      policy:
-        child.policy: parent.policy.child
-      credentials:
-        child_token: parent_child_token
-connect:
-  - event: parent.work_completed
-    from: worker
-    to: worker
-    rename: parent.work_requested
-`)
-}
-
-func InvalidPackageConnectFieldSnippet(t testing.TB) ParserSnippet {
-	t.Helper()
-	return NewParserSnippet(t, `
-name: invalid
-connect:
-  - event: work.ready
-    from: producer
-    to: consumer
-    topic: unsupported
-`)
 }
 
 func InputPinResolutionModesSnippet(t testing.TB) ParserSnippet {

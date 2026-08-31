@@ -2,12 +2,30 @@ package destructivereset
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestPreservedResourcesJSONUsesOnlySourceArtifacts(t *testing.T) {
+	raw, err := json.Marshal(PreservedResources{SourceArtifacts: true})
+	if err != nil {
+		t.Fatalf("marshal preserved resources: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode preserved resources: %v", err)
+	}
+	if got, ok := decoded["source_artifacts"]; !ok || got != true {
+		t.Fatalf("source_artifacts = %#v, present %v, want true", got, ok)
+	}
+	if _, exists := decoded["bundle_contracts"]; exists {
+		t.Fatalf("retired bundle_contracts key survived in %s", raw)
+	}
+}
 
 func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testing.T) {
 	reader := &recordingInventoryReader{}
@@ -31,11 +49,11 @@ func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testin
 		containsSeam(plan.ResetSeams, "scripts_private_reset_dev") {
 		t.Fatalf("reset seams = %#v, want retired dashboard/Builder and private reset helper seams omitted", plan.ResetSeams)
 	}
-	if !plan.IncludeBundles || !containsTableAction(plan.RunScopedTables, "bundles", CleanupDeleteAll) {
-		t.Fatalf("include_bundles plan = include:%v tables:%#v, want bundle catalog delete table", plan.IncludeBundles, plan.RunScopedTables)
+	if !plan.IncludeSourceArtifacts || !containsTableAction(plan.RunScopedTables, "source_artifacts", CleanupDeleteAll) {
+		t.Fatalf("include_source_artifacts plan = include:%v tables:%#v, want source artifacts delete table", plan.IncludeSourceArtifacts, plan.RunScopedTables)
 	}
-	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || plan.Preserved.BundleContracts {
-		t.Fatalf("preserved resources = %#v, want schema/auth preserved and bundle contracts not preserved when include_bundles defaults true", plan.Preserved)
+	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || plan.Preserved.SourceArtifacts {
+		t.Fatalf("preserved resources = %#v, want schema/auth preserved and source artifacts not preserved when include_source_artifacts defaults true", plan.Preserved)
 	}
 	if !slices.Contains(plan.Preserved.SystemContainers, "swarm-scaffold") || !slices.Contains(plan.Preserved.SystemContainers, "swarm-system") {
 		t.Fatalf("system containers = %#v, want scaffold/system preserved", plan.Preserved.SystemContainers)
@@ -48,7 +66,7 @@ func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 			SystemContainers: []string{"custom-system"},
 		},
 	}}
-	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{IncludeBundles: false, IncludeBundlesSet: true})
+	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{IncludeSourceArtifacts: false, IncludeSourceArtifactsSet: true})
 	if err != nil {
 		t.Fatalf("BuildPlan error = %v", err)
 	}
@@ -58,11 +76,11 @@ func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 	if plan.Preserved.OperatorManagedBoundary == "" {
 		t.Fatalf("operator-managed boundary was not defaulted")
 	}
-	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
+	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.SourceArtifacts {
 		t.Fatalf("preserved resources = %#v, want critical defaults merged", plan.Preserved)
 	}
-	if plan.IncludeBundles || containsTableAction(plan.RunScopedTables, "bundles", CleanupDeleteAll) {
-		t.Fatalf("include_bundles=false plan = include:%v tables:%#v, want bundle catalog preserved", plan.IncludeBundles, plan.RunScopedTables)
+	if plan.IncludeSourceArtifacts || containsTableAction(plan.RunScopedTables, "source_artifacts", CleanupDeleteAll) {
+		t.Fatalf("include_source_artifacts=false plan = include:%v tables:%#v, want source artifacts preserved", plan.IncludeSourceArtifacts, plan.RunScopedTables)
 	}
 }
 

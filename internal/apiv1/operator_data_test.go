@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -21,8 +21,10 @@ const (
 	dataProbeSourceInvocationID = "1c36924e-b33e-44e4-b228-73dfb4c9d52a"
 	dataProbePruneInvocationID  = "e827bd86-4148-479c-8142-9e5048a647f4"
 	dataProbeEventName          = "startup.loaded"
-	dataProbeBundleHash         = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 )
+
+var dataProbeSourceArtifact = mustAPITestSourceArtifactNamed("data-http-probe")
+var dataProbeBundleHash = dataProbeSourceArtifact.BundleHash()
 
 type dataRuntimeProbeStore struct {
 	declaration durabledata.Declaration
@@ -298,7 +300,7 @@ func dataProbeParams(methodName string, store *dataRuntimeProbeStore) map[string
 }
 
 func dataProbeDeclarationParams() map[string]any {
-	return map[string]any{"package_key": ".", "event": dataProbeEventName}
+	return map[string]any{"flow_path": ".", "event": dataProbeEventName}
 }
 
 func TestOperatorDataHandlersRejectUnknownAndMissingFieldsBeforeStoreExecution(t *testing.T) {
@@ -557,7 +559,7 @@ func TestDataShowPinCursorIsStableAcrossConcurrentInsertions(t *testing.T) {
 	store.pins = []durabledata.Pin{pin(10), pin(20), pin(30)}
 	handler := OperatorDataHandlers(DataHandlerOptions{Store: store})["data.show"]
 	params := map[string]any{
-		"view": "pins", "declaration": map[string]any{"package_key": ".", "event": dataProbeEventName},
+		"view": "pins", "declaration": map[string]any{"flow_path": ".", "event": dataProbeEventName},
 		"selector": map[string]any{"kind": "version", "version_id": string(store.version.VersionID)},
 		"page":     map[string]any{"limit": 1, "byte_limit": durabledata.MaxPublicPageBytes},
 	}
@@ -700,7 +702,7 @@ func TestDataVersionAliasSelectorRejectsNoncanonicalSpellings(t *testing.T) {
 
 type dataHTTPSelectedStore interface {
 	DurableDataStore
-	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
+	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 }
 
 func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
@@ -719,11 +721,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 			selected := backend.open(t)
 			db := storetest.Database(selected)
 			catalog, ref := dataHTTPProbeCatalog(t)
-			if _, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
-				BundleHash: catalog.BundleHash, ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
-				ParsedJSON: map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
-				Metadata:   map[string]any{"source": "data-http-proof"},
-			}, catalog); err != nil {
+			if _, err := selected.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {
 				t.Fatalf("register catalog: %v", err)
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: selected})})
@@ -746,8 +744,8 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 			input := func(slug string) map[string]any {
 				return map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte("{\"slug\":\"" + slug + "\"}\n"))}
 			}
-			declaration := map[string]any{"package_key": ref.PackageKey, "event": ref.EventName}
-			missingDeclaration := map[string]any{"package_key": ref.PackageKey, "event": "missing.loaded"}
+			declaration := map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName}
+			missingDeclaration := map[string]any{"flow_path": ref.FlowPath, "event": "missing.loaded"}
 			for _, probe := range []map[string]any{
 				{"view": "version", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}},
 				{"view": "rows", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "page": map[string]any{}},
@@ -808,7 +806,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("keyed position selector error = %#v", err)
 			}
 
-			keylessDeclaration := map[string]any{"package_key": ".", "event": "score.observed"}
+			keylessDeclaration := map[string]any{"flow_path": ".", "event": "score.observed"}
 			keyless := call("data.import", map[string]any{
 				"source_invocation_id": uuid.NewString(), "bundle_hash": dataProbeBundleHash,
 				"declaration": keylessDeclaration, "expected_head": map[string]any{"state": "absent"},

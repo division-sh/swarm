@@ -171,12 +171,11 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			name: "optional product claim borrows generic runtime projection",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				purpose := storeParityPurposeByID(t, matrix, "runtime")
-				purpose.ProofIDs = storeParityStringsExcept(purpose.ProofIDs, "bundle-delete-postgres")
-				purpose.ProofIDs = storeParityStringsExcept(purpose.ProofIDs, "sqlite-optional-mutators-fail-closed")
+				purpose.ProofIDs = storeParityStringsExcept(purpose.ProofIDs, "served-selected-contract-fork")
 				projection := storeParityProofByID(t, matrix, "runtime-port-projection")
-				projection.Capabilities = append(projection.Capabilities, publicSurfaceStoreProofCapability{ClaimID: "bundle_delete"})
+				projection.Capabilities = append(projection.Capabilities, publicSurfaceStoreProofCapability{ClaimID: "selected_contract_fork"})
 			},
-			want: "selected purpose runtime optional-product claim bundle_delete has no catalog-scoped execution proof",
+			want: "selected purpose runtime optional-product claim selected_contract_fork has no catalog-scoped execution proof",
 		},
 		{
 			name: "required port",
@@ -220,18 +219,18 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "optional product",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "bundle_catalog")
-				claim.OptionalProducts = storeParityStringsExcept(claim.OptionalProducts, "bundleRegister")
+				claim := storeParityClaimByID(t, matrix, "selected_contract_fork")
+				claim.OptionalProducts = storeParityStringsExcept(claim.OptionalProducts, "runFork")
 			},
-			want: "optional product census missing bundleRegister",
+			want: "optional product census missing runFork",
 		},
 		{
 			name: "optional product subrole",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "bundle_delete")
-				claim.NestedRoles["product_bundle_delete"] = storeParityStringsExcept(claim.NestedRoles["product_bundle_delete"], "locks")
+				claim := storeParityClaimByID(t, matrix, "selected_contract_fork")
+				claim.NestedRoles["product_run_fork"] = storeParityStringsExcept(claim.NestedRoles["product_run_fork"], "executionOwner")
 			},
-			want: "composite owner product_bundle_delete role census missing locks",
+			want: "composite owner product_run_fork role census missing executionOwner",
 		},
 		{
 			name: "platform table",
@@ -298,10 +297,10 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "teaching proof",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "bundle_delete")
+				claim := storeParityClaimByID(t, matrix, "destructive_reset")
 				claim.Evidence = storeParityEvidenceExceptRole(claim.Evidence, "teaching_failure")
 			},
-			want: "store parity claim bundle_delete default_sqlite disposition requires exactly one teaching_failure evidence record, got 0",
+			want: "store parity claim destructive_reset default_sqlite disposition requires exactly one teaching_failure evidence record, got 0",
 		},
 		{
 			name: "executable selector",
@@ -345,11 +344,11 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "risk proof claim overreach",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "bundle_delete")
-				claim.RiskDimensions = append(claim.RiskDimensions, "restart")
-				claim.Evidence = append(claim.Evidence, publicSurfaceStoreParityEvidence{Role: "risk_proof", RiskDimensions: []string{"restart"}, ProofIDs: []string{"golden-forced-restart"}})
+				claim := storeParityClaimByID(t, matrix, "source_artifact")
+				claim.RiskDimensions = append(claim.RiskDimensions, "forced_death")
+				claim.Evidence = append(claim.Evidence, publicSurfaceStoreParityEvidence{Role: "risk_proof", RiskDimensions: []string{"forced_death"}, ProofIDs: []string{"golden-forced-restart"}})
 			},
-			want: "proof golden-forced-restart does not own claim bundle_delete",
+			want: "proof golden-forced-restart does not own claim source_artifact",
 		},
 		{
 			name: "unused risk capability",

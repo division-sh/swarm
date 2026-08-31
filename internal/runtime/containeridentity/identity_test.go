@@ -114,6 +114,30 @@ func TestIdentityRejectsResetEligibleSystemContainer(t *testing.T) {
 	}
 }
 
+func TestIdentityRejectsMalformedSourceProjectionIdentity(t *testing.T) {
+	base := Identity{
+		Owner:            OwnerRuntime,
+		Kind:             KindSystem,
+		ContainerName:    "swarm-system",
+		BundleHash:       "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		SourceProjection: "runtime-projection-v1:" + strings.Repeat("b", 32),
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid projection-bearing identity rejected: %v", err)
+	}
+	for _, invalid := range []string{
+		"runtime-projection-v1:deadbeef",
+		"runtime-projection-v1:" + strings.Repeat("A", 32),
+		"projection:" + strings.Repeat("b", 32),
+	} {
+		candidate := base
+		candidate.SourceProjection = invalid
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("malformed source projection identity %q validated", invalid)
+		}
+	}
+}
+
 func TestIdentityReportsAbsentForUnlabeledContainer(t *testing.T) {
 	if _, ok, err := FromLabels(nil); ok || err != nil {
 		t.Fatalf("FromLabels(nil) = ok:%v err:%v, want absent nil", ok, err)

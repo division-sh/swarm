@@ -135,12 +135,12 @@ func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash release E2E full lifecycle fixture: %v", err)
 	}
-	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("create release E2E full lifecycle source fact: %v", err)
 	}
 	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
-		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
+		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("admit release E2E full lifecycle effective source: %v", err)
@@ -205,18 +205,18 @@ func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *te
 
 func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) {
 	paths := []string{
-		"examples/routing/fan-in/barrier/flows/operating/schema.yaml",
-		"examples/routing/fan-in/stream/flows/operating/schema.yaml",
-		"examples/routing/notify-all-children/flows/account/schema.yaml",
-		"examples/routing/template-create-minted-key/flows/validator/schema.yaml",
-		"examples/routing/template-reply/flows/requester/schema.yaml",
-		"examples/routing/template-select-existing/flows/account/schema.yaml",
-		"examples/routing/template-select-or-create/flows/account/schema.yaml",
-		"tests/tier5-flow-lifecycle/test-create-flow-instance-config/flows/worker-flow/schema.yaml",
-		"tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/flows/worker-flow/schema.yaml",
-		"tests/tier5-flow-lifecycle/test-create-flow-instance/flows/worker-flow/schema.yaml",
-		"tests/tier9-composition-patterns/test-compose-create-instance-config/flows/worker/schema.yaml",
-		"tests/tier11-flow-composition/test-dynamic-flow-instance/flows/worker/schema.yaml",
+		"examples/routing/fan-in/barrier/operating/schema.yaml",
+		"examples/routing/fan-in/stream/operating/schema.yaml",
+		"examples/routing/notify-all-children/account/schema.yaml",
+		"examples/routing/template-create-minted-key/validator/schema.yaml",
+		"examples/routing/template-reply/requester/schema.yaml",
+		"examples/routing/template-select-existing/account/schema.yaml",
+		"examples/routing/template-select-or-create/account/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance-config/worker-flow/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/worker-flow/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance/worker-flow/schema.yaml",
+		"tests/tier9-composition-patterns/test-compose-create-instance-config/worker/schema.yaml",
+		"tests/tier11-flow-composition/test-dynamic-flow-instance/worker/schema.yaml",
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -311,8 +311,8 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 					}
 					text := string(readme)
 					for _, required := range []string{
-						"swarm verify --contracts examples/routing/" + string(id),
-						"swarm serve --contracts examples/routing/" + string(id),
+						"swarm verify examples/routing/" + string(id),
+						"swarm serve examples/routing/" + string(id),
 						"Expected:",
 					} {
 						if !strings.Contains(text, required) {

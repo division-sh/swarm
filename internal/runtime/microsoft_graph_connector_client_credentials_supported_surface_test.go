@@ -34,7 +34,7 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 		const (
 			runID        = "8c000000-0000-0000-0000-000000000001"
 			entityID     = "8c000000-0000-0000-0000-000000000002"
-			flowInstance = "microsoft-graph-connector-client-credentials-pg"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -63,7 +63,7 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 		const (
 			runID        = "8d000000-0000-0000-0000-000000000001"
 			entityID     = "8d000000-0000-0000-0000-000000000002"
-			flowInstance = "microsoft-graph-connector-client-credentials-sqlite"
+			flowInstance = boundedProviderFlowID
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -372,8 +372,9 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 			"inbound.telegram": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "microsoft_graph", Tool: "microsoft_graph.send_mail"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
@@ -399,20 +400,7 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 			},
 		},
 	}))
-	importSource := slackManagedConnectorPackImportSource{
-		Source: base,
-		projectScopes: []semanticview.ProjectScope{
-			{
-				Key: ".",
-				Manifest: runtimecontracts.ProjectPackageDocument{
-					ConnectorPacks: runtimecontracts.ConnectorPackImports{
-						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "microsoft_graph", Tool: "microsoft_graph.send_mail"}},
-					},
-				},
-			},
-		},
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, microsoftGraphConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(base, microsoftGraphConnectorPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}

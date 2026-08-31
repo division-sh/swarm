@@ -137,7 +137,7 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 	// selected-store clock has millisecond resolution, so activation in the same
 	// clock tick must use the first representable instant after that tick.
 	reclaimAt := now.Add(time.Millisecond)
-	bundleHash, bundleSource := authority.BundleSource().StorageValues()
+	bundleHash := authority.SourceArtifact().BundleHash()
 	expireQuery := `
 		UPDATE event_delivery_attempts AS attempt
 		SET lease_expires_at=$1
@@ -149,10 +149,9 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 		  AND delivery.status='in_progress'
 		  AND delivery.execution_authority_kind='normal_runtime'
 		  AND delivery.authority_bundle_hash=$2
-		  AND delivery.authority_bundle_source=$3
-		  AND (delivery.execution_authority_id<>$4 OR delivery.execution_authority_generation<>$5)
+		  AND (delivery.execution_authority_id<>$3 OR delivery.execution_authority_generation<>$4)
 		  AND attempt.lease_expires_at>$1`
-	expireArgs := []any{reclaimAt, bundleHash, bundleSource, authority.ExecutionID(), authority.Generation()}
+	expireArgs := []any{reclaimAt, bundleHash, authority.ExecutionID(), authority.Generation()}
 	if a.dialect == DialectSQLite {
 		expireQuery = `
 			UPDATE event_delivery_attempts
@@ -167,10 +166,9 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 				  AND delivery.status='in_progress'
 				  AND delivery.execution_authority_kind='normal_runtime'
 				  AND delivery.authority_bundle_hash=?
-				  AND delivery.authority_bundle_source=?
 				  AND (delivery.execution_authority_id<>? OR delivery.execution_authority_generation<>?)
 			  )`
-		expireArgs = []any{reclaimAt, reclaimAt, bundleHash, bundleSource, authority.ExecutionID(), authority.Generation()}
+		expireArgs = []any{reclaimAt, reclaimAt, bundleHash, authority.ExecutionID(), authority.Generation()}
 	}
 	if _, err := tx.ExecContext(ctx, expireQuery, expireArgs...); err != nil {
 		return fmt.Errorf("expire predecessor delivery attempts: %w", err)
@@ -182,10 +180,9 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 			updated_at=GREATEST(updated_at, CURRENT_TIMESTAMP)
 		WHERE execution_authority_kind='normal_runtime'
 		  AND authority_bundle_hash=$3
-		  AND authority_bundle_source=$4
 		  AND (execution_authority_id<>$1 OR execution_authority_generation<>$2)
 		  AND status IN ('pending','failed','in_progress')`
-	args := []any{authority.ExecutionID(), authority.Generation(), bundleHash, bundleSource}
+	args := []any{authority.ExecutionID(), authority.Generation(), bundleHash}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
@@ -197,7 +194,6 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 				END
 			WHERE execution_authority_kind='normal_runtime'
 			  AND authority_bundle_hash=?
-			  AND authority_bundle_source=?
 			  AND (execution_authority_id<>? OR execution_authority_generation<>?)
 			  AND status IN ('pending','failed','in_progress')`
 		args = append(args, authority.ExecutionID(), authority.Generation())
@@ -221,7 +217,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	if err != nil {
 		return DurableHandoffProof{}, err
 	}
-	bundleHash, bundleSource := obligation.Authority().BundleSource().StorageValues()
+	bundleHash := obligation.Authority().SourceArtifact().BundleHash()
 	var selectedExecutionID, selectedForkRunID any
 	var selectedGeneration any
 	if obligation.Authority().Kind() == ExecutionAuthoritySelectedContractFork {
@@ -235,7 +231,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			agent_name_owner, agent_name_source, agent_route_presence,
 			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 			delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
-			execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+			execution_authority_kind, authority_bundle_hash,
 			execution_authority_id, execution_authority_generation,
 			selected_execution_id, selected_fork_run_id, selected_execution_generation,
 			status, retry_count, max_retries, next_eligible_at, claim_version,
@@ -244,9 +240,9 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			$1::uuid, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12,
 			$13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
-			$17, $18, $19, $20, $21,
-			NULLIF($22, '')::uuid, NULLIF($23, '')::uuid, $24,
-			'pending', 0, $25, $26, 0, $26, $26
+			$17, $18, $19, $20,
+			NULLIF($21, '')::uuid, NULLIF($22, '')::uuid, $23,
+			'pending', 0, $24, $25, 0, $25, $25
 		) ON CONFLICT (event_id, route_identity) DO NOTHING`
 	args := []any{
 		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()),
@@ -254,7 +250,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
 		string(target), string(deliveryContext), string(projection), string(connectClaim),
-		string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
+		string(obligation.Authority().Kind()), bundleHash, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
 		selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now,
 	}
 	if a.dialect == DialectSQLite {
@@ -264,7 +260,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 				agent_name_owner, agent_name_source, agent_route_presence,
 				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 				delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
-				execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+				execution_authority_kind, authority_bundle_hash,
 				execution_authority_id, execution_authority_generation,
 				selected_execution_id, selected_fork_run_id, selected_execution_generation,
 				status, retry_count, max_retries, next_eligible_at, claim_version,
@@ -273,9 +269,9 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 				?1, NULLIF(?2, ''), ?3, ?4, ?5, ?6,
 				?7, ?8, ?9, ?10, ?11, ?12,
 				?13, ?14, ?15, ?16,
-				?17, ?18, ?19, ?20, ?21,
-				NULLIF(?22, ''), NULLIF(?23, ''), ?24,
-				'pending', 0, ?25, ?26, 0, ?27, ?28
+				?17, ?18, ?19, ?20,
+				NULLIF(?21, ''), NULLIF(?22, ''), ?23,
+				'pending', 0, ?24, ?25, 0, ?26, ?27
 			)
 			ON CONFLICT(event_id, route_identity) DO NOTHING`
 		args = []any{
@@ -284,7 +280,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
 			string(target), string(deliveryContext), string(projection), string(connectClaim),
-			string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
+			string(obligation.Authority().Kind()), bundleHash, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
 			selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, now, now,
 		}
 	}
@@ -409,27 +405,26 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 	if cursorStarted && cursorAuthorityID != cursorID {
 		return ContinuationPage{}, fmt.Errorf("delivery continuation cursor authority mismatch")
 	}
-	bundleHash, bundleSource := authority.BundleSource().StorageValues()
+	bundleHash := authority.SourceArtifact().BundleHash()
 	query := `
 		SELECT d.delivery_id::text, d.created_at
 		FROM event_deliveries d
 		WHERE d.execution_authority_kind=$1
 		  AND d.authority_bundle_hash=$2
-		  AND d.authority_bundle_source=$3
-		  AND d.execution_authority_id=$4
-		  AND d.execution_authority_generation=$5
+		  AND d.execution_authority_id=$3
+		  AND d.execution_authority_generation=$4
 		  AND d.status IN ('pending','failed','in_progress')
 		  AND d.continuation_handoff_at IS NOT NULL
-		  AND ($6::timestamptz IS NULL OR d.created_at>$6 OR (d.created_at=$6 AND d.delivery_id>$7::uuid))
+		  AND ($5::timestamptz IS NULL OR d.created_at>$5 OR (d.created_at=$5 AND d.delivery_id>$6::uuid))
 		ORDER BY d.created_at, d.delivery_id
-		LIMIT $8`
+		LIMIT $7`
 	args := []any{
-		string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
+		string(authority.Kind()), bundleHash, authority.ExecutionID(), authority.Generation(),
 		nil, nil, limit + 1,
 	}
 	if cursorStarted {
-		args[5] = cursorCreatedAt
-		args[6] = cursorDeliveryID
+		args[4] = cursorCreatedAt
+		args[5] = cursorDeliveryID
 	}
 	if a.dialect == DialectSQLite {
 		query = `
@@ -437,7 +432,6 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 			FROM event_deliveries d
 			WHERE d.execution_authority_kind=?
 			  AND d.authority_bundle_hash=?
-			  AND d.authority_bundle_source=?
 			  AND d.execution_authority_id=?
 			  AND d.execution_authority_generation=?
 			  AND d.status IN ('pending','failed','in_progress')
@@ -452,7 +446,7 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 			cursorDelivery = cursorDeliveryID
 		}
 		args = []any{
-			string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
+			string(authority.Kind()), bundleHash, authority.ExecutionID(), authority.Generation(),
 			cursorTime, cursorTime2, cursorTime3, cursorDelivery, limit + 1,
 		}
 	}
@@ -576,12 +570,12 @@ func (a *Adapter) ObserveContinuation(
 func (a *Adapter) InspectRecovery(
 	ctx context.Context,
 	q queryer,
-	source runtimecorrelation.BundleSourceFact,
+	source runtimecorrelation.SourceArtifactFact,
 ) (RecoveryInventory, error) {
 	if err := source.Validate(); err != nil {
 		return RecoveryInventory{}, err
 	}
-	bundleHash, bundleSource := source.StorageValues()
+	bundleHash := source.BundleHash()
 	query := `
 		SELECT run_id::text,
 			COUNT(*) FILTER (WHERE status='pending'),
@@ -590,11 +584,10 @@ func (a *Adapter) InspectRecovery(
 		FROM event_deliveries
 		WHERE execution_authority_kind='normal_runtime'
 		  AND authority_bundle_hash=$1
-		  AND authority_bundle_source=$2
 		  AND status IN ('pending','failed','in_progress')
 		GROUP BY run_id
 		ORDER BY run_id`
-	args := []any{bundleHash, bundleSource}
+	args := []any{bundleHash}
 	if a.dialect == DialectSQLite {
 		query = `
 			SELECT run_id,
@@ -604,7 +597,6 @@ func (a *Adapter) InspectRecovery(
 			FROM event_deliveries
 			WHERE execution_authority_kind='normal_runtime'
 			  AND authority_bundle_hash=?
-			  AND authority_bundle_source=?
 			  AND status IN ('pending','failed','in_progress')
 			GROUP BY run_id
 			ORDER BY run_id`
@@ -658,9 +650,8 @@ func (a *Adapter) CommitPipelineHandoff(ctx context.Context, tx *sql.Tx, eventID
 }
 
 func executionAuthorityCursorID(authority ExecutionAuthority) string {
-	bundleHash, bundleSource := authority.BundleSource().StorageValues()
 	return strings.Join([]string{
-		string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(),
+		string(authority.Kind()), authority.SourceArtifact().BundleHash(), authority.ExecutionID(),
 		authority.ForkRunID(), fmt.Sprint(authority.Generation()),
 	}, "\x00")
 }
@@ -1192,41 +1183,42 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoract
 }
 
 func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
-	var packageKey, elementID any
+	var flowPath, family, semanticPath any
 	if ref := fact.Ref(); ref.Valid() {
-		packageKey = ref.PackageKey().String()
-		elementID = ref.ElementID().String()
+		flowPath = ref.Flow().String()
+		family = ref.Family()
+		semanticPath = ref.SemanticPath()
 	}
 	query := `
 		INSERT INTO event_delivery_handler_rule_selections
-			(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
-		VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6)
+			(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (delivery_id) DO NOTHING`
 	if a.dialect == DialectSQLite {
 		query = `
 			INSERT INTO event_delivery_handler_rule_selections
-				(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
-			VALUES (?, ?, ?, ?, ?, ?)
+				(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (delivery_id) DO NOTHING`
 	}
-	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition()), packageKey, elementID, fact.DisplayLabel()); err != nil {
+	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition()), flowPath, family, semanticPath, fact.DisplayLabel()); err != nil {
 		return fmt.Errorf("persist delivery handler rule selection: %w", err)
 	}
 	load := `
-		SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
-			COALESCE(element_id::text, ''), display_label
+		SELECT selection_context, disposition, COALESCE(flow_path, ''),
+			COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
 		FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
 	if a.dialect == DialectSQLite {
 		load = `
-			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
-				COALESCE(element_id, ''), display_label
+			SELECT selection_context, disposition, COALESCE(flow_path, ''),
+				COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
 			FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
 	}
-	var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
-	if err := tx.QueryRowContext(ctx, load, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw); err != nil {
+	var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
+	if err := tx.QueryRowContext(ctx, load, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw); err != nil {
 		return fmt.Errorf("load delivery handler rule selection: %w", err)
 	}
-	persisted, err := handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	persisted, err := handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
 	if err != nil {
 		return fmt.Errorf("hydrate delivery handler rule selection: %w", err)
 	}
@@ -1240,14 +1232,14 @@ func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *s
 	fact := handlerselection.NotApplicable()
 	query := `
 		INSERT INTO event_delivery_handler_rule_selections
-			(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
-		VALUES ($1::uuid, $2, $3, NULL, NULL, '')
+			(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
+		VALUES ($1::uuid, $2, $3, NULL, NULL, NULL, '')
 		ON CONFLICT (delivery_id) DO NOTHING`
 	if a.dialect == DialectSQLite {
 		query = `
 			INSERT INTO event_delivery_handler_rule_selections
-				(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
-			VALUES (?, ?, ?, NULL, NULL, '')
+				(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
+			VALUES (?, ?, ?, NULL, NULL, NULL, '')
 			ON CONFLICT (delivery_id) DO NOTHING`
 	}
 	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition())); err != nil {
@@ -2532,7 +2524,7 @@ func (a *Adapter) selectRecord() string {
 				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context,
 				d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
-				d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
+				d.execution_authority_id, d.execution_authority_generation,
 				COALESCE(d.selected_execution_id, ''), COALESCE(d.selected_fork_run_id, ''),
 				COALESCE(d.selected_execution_generation, 0),
 				d.status, d.retry_count, d.max_retries,
@@ -2554,7 +2546,7 @@ func (a *Adapter) selectRecord() string {
 			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 			d.delivery_target_route, d.delivery_context,
 			d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
-			d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
+			d.execution_authority_id, d.execution_authority_generation,
 			COALESCE(d.selected_execution_id::text, ''), COALESCE(d.selected_fork_run_id::text, ''),
 			COALESCE(d.selected_execution_generation, 0),
 			d.status, d.retry_count, d.max_retries,
@@ -2575,7 +2567,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var routeIdentity, subscriberType, status, authorityKind string
 	var agentNameOwner, agentNameSource, agentRoutePresence string
 	var agentFlowScopeKey, agentFlowInstanceID, agentFlowInstancePath string
-	var authorityBundleHash, authorityBundleSource, authorityExecutionID, selectedExecutionID, selectedForkRunID string
+	var authorityBundleHash, authorityExecutionID, selectedExecutionID, selectedForkRunID string
 	var authorityGeneration, selectedGeneration uint64
 	var targetRaw, contextRaw, projectionRaw, connectClaimRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
@@ -2585,7 +2577,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		&agentNameOwner, &agentNameSource, &agentRoutePresence,
 		&agentFlowScopeKey, &agentFlowInstanceID, &agentFlowInstancePath,
 		&targetRaw, &contextRaw, &projectionRaw, &connectClaimRaw,
-		&authorityKind, &authorityBundleHash, &authorityBundleSource, &authorityExecutionID, &authorityGeneration,
+		&authorityKind, &authorityBundleHash, &authorityExecutionID, &authorityGeneration,
 		&selectedExecutionID, &selectedForkRunID, &selectedGeneration,
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
 		&record.claimToken, &claimExpires, &record.ActiveSessionID, &record.ReasonCode, &failureRaw,
@@ -2617,7 +2609,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		authorityForkRunID = selectedForkRunID
 	}
 	record.Authority, err = DecodeExecutionAuthority(
-		ExecutionAuthorityKind(authorityKind), authorityBundleHash, authorityBundleSource,
+		ExecutionAuthorityKind(authorityKind), authorityBundleHash,
 		authorityExecutionIdentity, authorityForkRunID, authorityGeneration,
 	)
 	if err != nil {

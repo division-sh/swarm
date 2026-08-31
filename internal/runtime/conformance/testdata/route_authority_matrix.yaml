@@ -6,7 +6,6 @@ source:
   platform_spec: platform-spec.yaml
   openrpc_artifact: openrpc.json
   public_surface_backend_matrix: internal/apiv1/testdata/public_surface_backend_matrix.yaml
-  multi_bundle_matrix: internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml
   catalog_tiers: internal/runtime/cataloge2e/README.md
 policy:
   closure_level: matrix_owner_first_slice_complete
@@ -119,7 +118,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
     proof_refs:
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
-      - {kind: go_test, name: TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory}
+      - {kind: go_test, name: TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres}
       - {kind: issue, issue: 1337}
     notes: >
       The served proof asserts that the initial root-input publication persists
@@ -215,7 +214,7 @@ rows:
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
       - {kind: go_test, name: TestExecutableDeliveryLifecycleParity}
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
-      - {kind: go_test, name: TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory}
+      - {kind: go_test, name: TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres}
     notes: >
       #1293 owns execution admission. Workflow nodes now consume committed
       typed node event_deliveries authority before handler execution across the
@@ -621,7 +620,7 @@ rows:
     proof_dimensions: [replay_recovery, full_conformance, persistence_authority]
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
-      - {kind: artifact, path: internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: source_artifacts}
     proof_refs:
       - {kind: go_test, name: TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres}
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON}
