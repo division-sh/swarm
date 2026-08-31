@@ -26,9 +26,9 @@ const (
 type fullLifecycleJourneyKind string
 
 const (
-	fullLifecycleGraceful      fullLifecycleJourneyKind = "graceful"
-	fullLifecycleRefuseRecover fullLifecycleJourneyKind = "refuse-then-recover"
-	fullLifecycleDevFresh      fullLifecycleJourneyKind = "dev-fresh-epoch"
+	fullLifecycleGraceful       fullLifecycleJourneyKind = "graceful"
+	fullLifecycleCrashIntrinsic fullLifecycleJourneyKind = "crash-intrinsic-recover"
+	fullLifecycleDevFresh       fullLifecycleJourneyKind = "dev-fresh-epoch"
 )
 
 type fullLifecycleJourney struct {
@@ -40,8 +40,8 @@ type fullLifecycleJourney struct {
 var fullLifecycleJourneys = []fullLifecycleJourney{
 	{name: "J1-sqlite-graceful", backend: "sqlite", kind: fullLifecycleGraceful},
 	{name: "J2-postgres-graceful", backend: "postgres", kind: fullLifecycleGraceful},
-	{name: "J3-sqlite-refuse-recover", backend: "sqlite", kind: fullLifecycleRefuseRecover},
-	{name: "J4-postgres-refuse-recover", backend: "postgres", kind: fullLifecycleRefuseRecover},
+	{name: "J3-sqlite-crash-intrinsic-recover", backend: "sqlite", kind: fullLifecycleCrashIntrinsic},
+	{name: "J4-postgres-crash-intrinsic-recover", backend: "postgres", kind: fullLifecycleCrashIntrinsic},
 	{name: "J5-sqlite-dev-fresh", backend: "sqlite", kind: fullLifecycleDevFresh},
 }
 
@@ -88,10 +88,7 @@ func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
 }
 
 type fullLifecycleProject struct {
-	root       string
-	configPath string
-	store      goldenStoreSelection
-	process    releaseProcessSpec
+	process releaseProcessSpec
 }
 
 func prepareFullLifecycleProject(t *testing.T, binary, root string, store goldenStoreSelection, dev bool) fullLifecycleProject {
@@ -105,7 +102,7 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 		t.Fatalf("full lifecycle child project must remain YAML-only: %v", err)
 	}
 	configPath := filepath.Join(projectRoot, "swarm.yaml")
-	writeReleaseFile(t, configPath, fullLifecycleRuntimeConfig(store, false, dev))
+	writeReleaseFile(t, configPath, fullLifecycleRuntimeConfig(store, dev))
 	writeReleaseFile(t, filepath.Join(projectRoot, "api-token"), fullLifecycleAPIToken+"\n")
 	env := goldenProcessEnv(t, projectRoot, store.passwordEnv, 0)
 	credentialFreeEnv := goldenProcessEnv(t, projectRoot, "", 0)
@@ -124,9 +121,6 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 		}
 	}
 	return fullLifecycleProject{
-		root:       projectRoot,
-		configPath: configPath,
-		store:      store,
 		process: releaseProcessSpec{
 			BinaryPath: binary,
 			WorkingDir: projectRoot,
@@ -143,11 +137,8 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 	}
 }
 
-func fullLifecycleRuntimeConfig(store goldenStoreSelection, recovery, dev bool) string {
+func fullLifecycleRuntimeConfig(store goldenStoreSelection, dev bool) string {
 	runtimeConfig := "runtime:\n  execution_posture: mock_only\n"
-	if recovery {
-		runtimeConfig += "  recovery_on_startup: true\n"
-	}
 	storeConfig := store.configYAML
 	if dev {
 		storeConfig = "store:\n  backend: sqlite\n"
@@ -177,7 +168,7 @@ func assertFullLifecycleSourceAdmission(t *testing.T, binary, root string) {
 				mutateFullLifecycleFixtureWithoutExactConnectorResponse(t, contracts)
 			}
 			store := goldenSQLiteStore(filepath.Join(project, "store"))
-			writeReleaseFile(t, filepath.Join(project, "swarm.yaml"), fullLifecycleRuntimeConfig(store, false, false))
+			writeReleaseFile(t, filepath.Join(project, "swarm.yaml"), fullLifecycleRuntimeConfig(store, false))
 			env := goldenProcessEnv(t, project, "", 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			result := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
@@ -238,8 +229,8 @@ func runFullLifecycleJourney(t *testing.T, binary, root string, store goldenStor
 	switch journey.kind {
 	case fullLifecycleGraceful:
 		runFullLifecycleGracefulJourney(t, startReady, process, bundleHash, standing)
-	case fullLifecycleRefuseRecover:
-		runFullLifecycleRefuseRecoverJourney(t, project, startReady, process, bundleHash, standing)
+	case fullLifecycleCrashIntrinsic:
+		runFullLifecycleCrashIntrinsicJourney(t, startReady, process, bundleHash, standing)
 	case fullLifecycleDevFresh:
 		runFullLifecycleDevFreshJourney(t, startReady, process, bundleHash, standing, lifecycleCard.CardID)
 	default:
@@ -280,9 +271,8 @@ func runFullLifecycleGracefulJourney(
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
 
-func runFullLifecycleRefuseRecoverJourney(
+func runFullLifecycleCrashIntrinsicJourney(
 	t *testing.T,
-	project fullLifecycleProject,
 	startReady func() *releaseServeProcess,
 	process *releaseServeProcess,
 	bundleHash string,
@@ -300,19 +290,9 @@ func runFullLifecycleRefuseRecoverJourney(
 		t.Fatalf("force lifecycle process death: %v\n%s", err, process.output.String())
 	}
 
-	denied := startReleaseServe(t, project.process)
-	if err := denied.waitForExit(fullLifecycleStartupLimit); err != nil {
-		t.Fatalf("omitted-recovery restart did not exit: %v\n%s", err, denied.output.String())
-	}
-	if exitErr := denied.waitError(); exitErr == nil {
-		t.Fatalf("omitted-recovery restart exited successfully, want fail-closed refusal\n%s", denied.output.String())
-	}
-	assertFullLifecycleRecoveryRefusal(t, denied, standing.RunID, checkpoint.EventID)
-
-	writeReleaseFile(t, project.configPath, fullLifecycleRuntimeConfig(project.store, true, false))
 	process = startReady()
 	if recoveredHash := requireFullLifecycleHealth(t, process.rpc); recoveredHash != bundleHash {
-		t.Fatalf("recovery bundle = %s, want %s", recoveredHash, bundleHash)
+		t.Fatalf("intrinsic recovery bundle = %s, want %s", recoveredHash, bundleHash)
 	}
 	recovered := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, standing.Origin.ServiceID, standing.Origin.Generation, standing.RunID)
 	if recovered.RunID != standing.RunID || recovered.Status != "running" || recovered.ControlReason != "standing_reconcile" ||
@@ -914,19 +894,6 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 		t.Fatalf("wait for public lifecycle crash checkpoint: %v; checkpoint=%#v diagnosis=%#v\n%s", err, checkpoint, diagnosis, process.output.String())
 	}
 	return checkpoint
-}
-
-func assertFullLifecycleRecoveryRefusal(t *testing.T, process *releaseServeProcess, runID, eventID string) {
-	t.Helper()
-	output := process.output.String()
-	for _, want := range []string{"runtime.recovery_on_startup=false", "executable delivery obligations"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("default recovery refusal omitted %q for run=%s event=%s:\n%s", want, runID, eventID, output)
-		}
-	}
-	if strings.Contains(output, "ready in") {
-		t.Fatalf("default recovery refusal crossed readiness for run=%s event=%s:\n%s", runID, eventID, output)
-	}
 }
 
 func assertFullLifecycleDeliveryCompleted(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint) {

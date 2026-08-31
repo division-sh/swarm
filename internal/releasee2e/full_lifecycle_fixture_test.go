@@ -35,11 +35,11 @@ func TestFullLifecycleFixtureRegistryIsTotal(t *testing.T) {
 
 func TestFullLifecycleJourneyMatrixIsClosed(t *testing.T) {
 	want := map[string]fullLifecycleJourney{
-		"J1-sqlite-graceful":         {name: "J1-sqlite-graceful", backend: "sqlite", kind: fullLifecycleGraceful},
-		"J2-postgres-graceful":       {name: "J2-postgres-graceful", backend: "postgres", kind: fullLifecycleGraceful},
-		"J3-sqlite-refuse-recover":   {name: "J3-sqlite-refuse-recover", backend: "sqlite", kind: fullLifecycleRefuseRecover},
-		"J4-postgres-refuse-recover": {name: "J4-postgres-refuse-recover", backend: "postgres", kind: fullLifecycleRefuseRecover},
-		"J5-sqlite-dev-fresh":        {name: "J5-sqlite-dev-fresh", backend: "sqlite", kind: fullLifecycleDevFresh},
+		"J1-sqlite-graceful":                  {name: "J1-sqlite-graceful", backend: "sqlite", kind: fullLifecycleGraceful},
+		"J2-postgres-graceful":                {name: "J2-postgres-graceful", backend: "postgres", kind: fullLifecycleGraceful},
+		"J3-sqlite-crash-intrinsic-recover":   {name: "J3-sqlite-crash-intrinsic-recover", backend: "sqlite", kind: fullLifecycleCrashIntrinsic},
+		"J4-postgres-crash-intrinsic-recover": {name: "J4-postgres-crash-intrinsic-recover", backend: "postgres", kind: fullLifecycleCrashIntrinsic},
+		"J5-sqlite-dev-fresh":                 {name: "J5-sqlite-dev-fresh", backend: "sqlite", kind: fullLifecycleDevFresh},
 	}
 	if len(fullLifecycleJourneys) != len(want) {
 		t.Fatalf("full lifecycle journey count = %d, want %d", len(fullLifecycleJourneys), len(want))
