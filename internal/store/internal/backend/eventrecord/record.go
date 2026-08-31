@@ -208,11 +208,15 @@ func (r Record) Validate() error {
 	if !json.Valid(r.Payload) {
 		return fmt.Errorf("event record payload must be valid JSON")
 	}
-	if _, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
+	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: r.PayloadSchemaBundleHash, BundleSource: r.PayloadSchemaBundleSource, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("event record payload schema binding: %w", err)
+	}
+	if _, err := events.NewPayloadAdmission(r.Payload, payloadBinding); err != nil {
+		return fmt.Errorf("event record payload admission: %w", err)
 	}
 	settlement, err := r.DecodeSettlement()
 	if err != nil {
@@ -372,6 +376,17 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 		}
 		selectedFork = &value
 	}
+	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: r.PayloadSchemaBundleHash, BundleSource: r.PayloadSchemaBundleSource, FlowID: r.PayloadSchemaFlowID,
+		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
+	})
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("event record payload schema binding: %w", err)
+	}
+	payloadAdmission, err := events.NewPayloadAdmission(r.Payload, payloadBinding)
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("event record payload admission: %w", err)
+	}
 	restored, err := events.RestoreAdmittedEvent(events.RestoredEventInput{
 		Class:         r.Class,
 		Facts:         facts,
@@ -379,14 +394,7 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 		ParentEventID: r.SourceEventID,
 		OperatorRef:   operatorRef,
 		SelectedFork:  selectedFork,
-		Payload: func() events.PayloadAdmission {
-			binding, _ := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
-				BundleHash: r.PayloadSchemaBundleHash, BundleSource: r.PayloadSchemaBundleSource, FlowID: r.PayloadSchemaFlowID,
-				EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
-			})
-			admission, _ := events.NewPayloadAdmission(r.Payload, binding)
-			return admission
-		}(),
+		Payload:       payloadAdmission,
 	})
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: %w", strings.TrimSpace(r.EventID), err)
