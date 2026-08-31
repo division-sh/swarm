@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -27,10 +28,13 @@ type HostConfig struct {
 }
 
 type HostManager struct {
-	cfg             HostConfig
-	source          semanticview.Source
-	data            runtimedataaccess.Provider
-	ownedProjection *sourceartifact.RuntimeProjection
+	cfg                HostConfig
+	source             semanticview.Source
+	data               runtimedataaccess.Provider
+	projectionMu       sync.Mutex
+	projectionOps      sync.WaitGroup
+	projectionReleased bool
+	ownedProjection    *sourceartifact.RuntimeProjection
 }
 
 func DefaultHostConfig() HostConfig {
@@ -103,7 +107,12 @@ func (m *HostManager) RebindSourceProjection(projection *sourceartifact.RuntimeP
 }
 
 func (m *HostManager) SourceProjectionBundleHash() string {
-	if m == nil || m.cfg.SourceProjection == nil {
+	if m == nil {
+		return ""
+	}
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased || m.cfg.SourceProjection == nil {
 		return ""
 	}
 	return m.cfg.SourceProjection.BundleHash()
@@ -111,6 +120,11 @@ func (m *HostManager) SourceProjectionBundleHash() string {
 
 func (m *HostManager) SourceProjectionIdentity() string {
 	if m == nil {
+		return ""
+	}
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased {
 		return ""
 	}
 	return strings.TrimSpace(m.cfg.SourceProjectionID)
@@ -129,12 +143,19 @@ func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimePro
 	if strings.TrimSpace(projection.Identity()) == "" {
 		return fmt.Errorf("runtime source projection identity is required")
 	}
-	if m.ownedProjection != nil {
-		return fmt.Errorf("host workspace source projection is already bound")
-	}
 	ownedProjection, err := projection.Retain()
 	if err != nil {
 		return fmt.Errorf("retain runtime source projection: %w", err)
+	}
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased {
+		_ = ownedProjection.Release()
+		return fmt.Errorf("host workspace source projection is released")
+	}
+	if m.ownedProjection != nil {
+		_ = ownedProjection.Release()
+		return fmt.Errorf("host workspace source projection is already bound")
 	}
 	cfg := m.cfg
 	cfg.SourceProjection = projection
@@ -151,18 +172,32 @@ func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimePro
 }
 
 func (m *HostManager) ReleaseSourceProjection(context.Context) error {
-	if m == nil || m.ownedProjection == nil {
+	if m == nil {
 		return nil
 	}
+	m.projectionMu.Lock()
+	m.projectionReleased = true
+	m.projectionMu.Unlock()
+	m.projectionOps.Wait()
+	m.projectionMu.Lock()
 	projection := m.ownedProjection
 	m.ownedProjection = nil
+	m.cfg.SourceProjection = nil
+	m.cfg.BundleHash = ""
+	m.cfg.BundleScope = ""
+	m.cfg.SourceProjectionID = ""
+	m.projectionMu.Unlock()
+	if projection == nil {
+		return nil
+	}
 	return projection.Release()
 }
 
 func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Source) error {
-	if m == nil {
-		return fmt.Errorf("host workspace manager is required")
+	if err := m.beginProjectionOperation(); err != nil {
+		return err
 	}
+	defer m.projectionOps.Done()
 	if source == nil {
 		return fmt.Errorf("workspace semantic source is required")
 	}
@@ -181,9 +216,14 @@ func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Sour
 }
 
 func (m *HostManager) EnsurePrereqs(context.Context) error {
-	if m == nil {
-		return fmt.Errorf("host workspace manager is required")
+	if err := m.beginProjectionOperation(); err != nil {
+		return err
 	}
+	defer m.projectionOps.Done()
+	return m.ensurePrereqs()
+}
+
+func (m *HostManager) ensurePrereqs() error {
 	if err := m.validateSharedMounts(); err != nil {
 		return err
 	}
@@ -197,8 +237,12 @@ func (m *HostManager) EnsurePrereqs(context.Context) error {
 	return nil
 }
 
-func (m *HostManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsurePrereqs(ctx); err != nil {
+func (m *HostManager) EnsureSystemWorkspaces(context.Context) error {
+	if err := m.beginProjectionOperation(); err != nil {
+		return err
+	}
+	defer m.projectionOps.Done()
+	if err := m.ensurePrereqs(); err != nil {
 		return err
 	}
 	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
@@ -222,9 +266,10 @@ func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context
 }
 
 func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
-	if m == nil {
-		return nil, fmt.Errorf("host workspace manager is required")
+	if err := m.beginProjectionOperation(); err != nil {
+		return nil, err
 	}
+	defer m.projectionOps.Done()
 	class, err := workspaceClassForSource(m.source, actor)
 	if err != nil {
 		return nil, err
@@ -272,6 +317,19 @@ func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentCo
 		}
 		return m.hostTarget(key, dataRoot)
 	}
+}
+
+func (m *HostManager) beginProjectionOperation() error {
+	if m == nil {
+		return fmt.Errorf("host workspace manager is required")
+	}
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased {
+		return fmt.Errorf("host workspace source projection is released")
+	}
+	m.projectionOps.Add(1)
+	return nil
 }
 
 func (m *HostManager) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
