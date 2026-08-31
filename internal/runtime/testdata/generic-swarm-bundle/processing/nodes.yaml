@@ -27,7 +27,7 @@ processing-node:
             weight: 1.0
       rules:
         approve:
-          condition: payload.score >= 80
+          condition: payload.score >= 80.0
           advances_to: approved
           emit:
             event: item.completed

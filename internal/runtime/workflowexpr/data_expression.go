@@ -131,7 +131,11 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 			return nil, err
 		}
 	}
-	if opts.RequireBool && typeChecked.OutputType() != cel.BoolType {
+	// Payload reads are structurally typed before this point. Other roots keep
+	// their separately owned runtime value contracts until those grammars gain
+	// exact types, so a dynamic result still receives the existing bool check at
+	// evaluation.
+	if opts.RequireBool && typeChecked.OutputType() != cel.BoolType && typeChecked.OutputType() != cel.DynType {
 		return nil, fmt.Errorf("workflow expression must return bool, got %s", typeChecked.OutputType())
 	}
 	provider, err := newWorkflowStructuralTypeProvider(nil, opts)
@@ -1099,7 +1103,7 @@ func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) 
 func requireStructuralExpressionRoots(expression string, opts ValueExpressionOptions) error {
 	if ExpressionReferencesRoot(expression, "payload") {
 		if opts.PayloadType == nil || opts.PayloadType.Kind == runtimecontracts.CatalogTypeDynamic {
-			return fmt.Errorf("workflow expression reads payload without an exact structural schema")
+			return fmt.Errorf("workflow expression %q reads payload without an exact structural schema", expression)
 		}
 	}
 	return nil
