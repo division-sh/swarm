@@ -39,6 +39,14 @@ func TestRecordEqualDistinguishesNestedMapKeys(t *testing.T) {
 	}
 }
 
+func TestRecordValidateRejectsPersistedPayloadNull(t *testing.T) {
+	record := validRecord(t)
+	record.Payload = []byte(`{"nested":{"value":null}}`)
+	if err := record.Validate(); err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+		t.Fatalf("Validate error = %v, want persisted payload null rejection", err)
+	}
+}
+
 func TestRecordValidateRejectsEveryNormalizedScalarFamily(t *testing.T) {
 	tests := []struct {
 		name   string
