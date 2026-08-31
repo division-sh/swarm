@@ -29,17 +29,19 @@ type workflowStructuralNode struct {
 
 type workflowStructuralTypeProvider struct {
 	celtypes.Provider
-	nodes     map[string]*workflowStructuralNode
-	rootTypes map[string]*cel.Type
-	aliases   map[string]string
+	nodes           map[string]*workflowStructuralNode
+	rootTypes       map[string]*cel.Type
+	rootIdentifiers map[string]struct{}
+	aliases         map[string]string
 }
 
 func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpressionOptions) (*workflowStructuralTypeProvider, error) {
 	provider := &workflowStructuralTypeProvider{
-		Provider:  base,
-		nodes:     map[string]*workflowStructuralNode{},
-		rootTypes: map[string]*cel.Type{},
-		aliases:   map[string]string{},
+		Provider:        base,
+		nodes:           map[string]*workflowStructuralNode{},
+		rootTypes:       map[string]*cel.Type{},
+		rootIdentifiers: map[string]struct{}{},
+		aliases:         map[string]string{},
 	}
 	for _, root := range []struct {
 		name  string
@@ -56,6 +58,11 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 			return nil, fmt.Errorf("workflow %s structural type: %w", root.name, err)
 		}
 		provider.rootTypes[root.name] = resolved
+		identifier := root.name
+		if root.name == "item" && strings.TrimSpace(opts.ItemAlias) != "" {
+			identifier = strings.TrimSpace(opts.ItemAlias)
+		}
+		provider.rootIdentifiers[identifier] = struct{}{}
 	}
 	return provider, nil
 }
@@ -254,7 +261,7 @@ func validateWorkflowOptionalReads(compiled *cel.Ast, provider *workflowStructur
 		return nil
 	}
 	analyzer := workflowOptionalReadAnalyzer{ast: compiled.NativeRep(), provider: provider}
-	return analyzer.validate(compiled.NativeRep().Expr(), workflowPresenceFacts{})
+	return analyzer.validate(compiled.NativeRep().Expr(), workflowPresenceFacts{}, cloneWorkflowStructuralBindings(provider.rootIdentifiers))
 }
 
 type workflowOptionalReadAnalyzer struct {
@@ -262,13 +269,23 @@ type workflowOptionalReadAnalyzer struct {
 	provider *workflowStructuralTypeProvider
 }
 
-func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowPresenceFacts) error {
+type workflowStructuralBindings map[string]struct{}
+
+func cloneWorkflowStructuralBindings(source map[string]struct{}) workflowStructuralBindings {
+	out := make(workflowStructuralBindings, len(source))
+	for name := range source {
+		out[name] = struct{}{}
+	}
+	return out
+}
+
+func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowPresenceFacts, bindings workflowStructuralBindings) error {
 	if expr == nil {
 		return nil
 	}
 	if expr.Kind() == celast.SelectKind {
 		selection := expr.AsSelect()
-		if err := a.validate(selection.Operand(), facts); err != nil {
+		if err := a.validate(selection.Operand(), facts, bindings); err != nil {
 			return err
 		}
 		if selection.IsTestOnly() {
@@ -285,48 +302,48 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 	if expr.Kind() == celast.CallKind {
 		call := expr.AsCall()
 		args := call.Args()
-		if call.FunctionName() == "_[_]" && len(args) == 2 && workflowStructuralRootExpression(args[0]) {
+		if call.FunctionName() == "_[_]" && len(args) == 2 && a.structuralExpression(args[0], bindings) {
 			return fmt.Errorf("direct map/list lookup is not presence-safe; use the stock optional lookup form <value>[?<key-or-index>] and decide or forward its absence")
 		}
 		switch call.FunctionName() {
 		case "_&&_":
 			if len(args) == 2 {
-				if err := a.validate(args[0], facts); err != nil {
+				if err := a.validate(args[0], facts, bindings); err != nil {
 					return err
 				}
-				return a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true)))
+				return a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true)), bindings)
 			}
 		case "_||_":
 			if len(args) == 2 {
-				if err := a.validate(args[0], facts); err != nil {
+				if err := a.validate(args[0], facts, bindings); err != nil {
 					return err
 				}
-				return a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)))
+				return a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)), bindings)
 			}
 		case "_?_:_":
 			if len(args) == 3 {
-				if err := a.validate(args[0], facts); err != nil {
+				if err := a.validate(args[0], facts, bindings); err != nil {
 					return err
 				}
-				if err := a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true))); err != nil {
+				if err := a.validate(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true)), bindings); err != nil {
 					return err
 				}
-				return a.validate(args[2], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)))
+				return a.validate(args[2], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)), bindings)
 			}
 		case "_?._":
 			// Stock optional selection owns the absence decision. Its operand may
 			// still contain an independently undecided parent read.
 			if len(args) > 0 {
-				return a.validate(args[0], facts)
+				return a.validate(args[0], facts, bindings)
 			}
 		}
 		if call.IsMemberFunction() {
-			if err := a.validate(call.Target(), facts); err != nil {
+			if err := a.validate(call.Target(), facts, bindings); err != nil {
 				return err
 			}
 		}
 		for _, arg := range args {
-			if err := a.validate(arg, facts); err != nil {
+			if err := a.validate(arg, facts, bindings); err != nil {
 				return err
 			}
 		}
@@ -335,30 +352,46 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 	switch expr.Kind() {
 	case celast.ComprehensionKind:
 		value := expr.AsComprehension()
-		for _, child := range []celast.Expr{value.IterRange(), value.AccuInit(), value.LoopCondition(), value.LoopStep(), value.Result()} {
-			if err := a.validate(child, facts); err != nil {
+		if err := a.validate(value.IterRange(), facts, bindings); err != nil {
+			return err
+		}
+		if err := a.validate(value.AccuInit(), facts, bindings); err != nil {
+			return err
+		}
+		bodyBindings := cloneWorkflowStructuralBindings(bindings)
+		if a.structuralExpression(value.IterRange(), bindings) {
+			bodyBindings[value.IterVar()] = struct{}{}
+			if value.HasIterVar2() {
+				bodyBindings[value.IterVar2()] = struct{}{}
+			}
+		}
+		if a.structuralExpression(value.AccuInit(), bindings) {
+			bodyBindings[value.AccuVar()] = struct{}{}
+		}
+		for _, child := range []celast.Expr{value.LoopCondition(), value.LoopStep(), value.Result()} {
+			if err := a.validate(child, facts, bodyBindings); err != nil {
 				return err
 			}
 		}
 	case celast.ListKind:
 		for _, element := range expr.AsList().Elements() {
-			if err := a.validate(element, facts); err != nil {
+			if err := a.validate(element, facts, bindings); err != nil {
 				return err
 			}
 		}
 	case celast.MapKind:
 		for _, entry := range expr.AsMap().Entries() {
 			value := entry.AsMapEntry()
-			if err := a.validate(value.Key(), facts); err != nil {
+			if err := a.validate(value.Key(), facts, bindings); err != nil {
 				return err
 			}
-			if err := a.validate(value.Value(), facts); err != nil {
+			if err := a.validate(value.Value(), facts, bindings); err != nil {
 				return err
 			}
 		}
 	case celast.StructKind:
 		for _, field := range expr.AsStruct().Fields() {
-			if err := a.validate(field.AsStructField().Value(), facts); err != nil {
+			if err := a.validate(field.AsStructField().Value(), facts, bindings); err != nil {
 				return err
 			}
 		}
@@ -366,23 +399,30 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 	return nil
 }
 
-func workflowStructuralRootExpression(expr celast.Expr) bool {
+func (a workflowOptionalReadAnalyzer) structuralExpression(expr celast.Expr, bindings workflowStructuralBindings) bool {
 	if expr == nil {
 		return false
 	}
+	if typeValue := a.ast.GetType(expr.ID()); typeValue != nil {
+		if _, owned := a.provider.nodes[typeValue.TypeName()]; owned {
+			return true
+		}
+	}
 	switch expr.Kind() {
 	case celast.IdentKind:
-		name := expr.AsIdent()
-		return name == "payload" || name == "item"
+		_, ok := bindings[expr.AsIdent()]
+		return ok
 	case celast.SelectKind:
-		return workflowStructuralRootExpression(expr.AsSelect().Operand())
+		return a.structuralExpression(expr.AsSelect().Operand(), bindings)
 	case celast.CallKind:
 		call := expr.AsCall()
-		if call.IsMemberFunction() && workflowStructuralRootExpression(call.Target()) {
+		if call.IsMemberFunction() && a.structuralExpression(call.Target(), bindings) {
 			return true
 		}
 		args := call.Args()
-		return len(args) > 0 && workflowStructuralRootExpression(args[0])
+		return len(args) > 0 && a.structuralExpression(args[0], bindings)
+	case celast.ComprehensionKind:
+		return a.structuralExpression(expr.AsComprehension().IterRange(), bindings)
 	default:
 		return false
 	}

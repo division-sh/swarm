@@ -46,21 +46,27 @@ func (c *checkerContext) conditionExpressions() []Finding {
 					})
 				}
 			}
-			for _, cond := range handlerConditions(handler) {
+			for _, cond := range handlerConditionExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				expr := cond.Expression
 				options := workflowexpr.ValueExpressionOptions{PayloadType: payloadType}
-				if source := conditionCollectionSource(handler, cond.Context); source != "" {
-					itemType, err := executableCollectionItemStructuralType(c.source, nodeRef, eventType, source)
+				if source := cond.ConditionCollectionSource; source != "" {
+					itemType, err := executableCollectionItemStructuralType(c.source, nodeRef, eventType, handler, source)
 					if err != nil {
-						c.conditionExprFindings = append(c.conditionExprFindings, Finding{
-							CheckID: "condition_expression_validation", Severity: SeverityHardInvalidity,
-							Message: fmt.Sprintf("node %s handler %s condition %q has no exact item schema: %v", nodeID, eventType, expr, err), Location: nodeID,
-						})
-						continue
+						if workflowexpr.ExpressionReferencesRoot(expr, "item") {
+							c.conditionExprFindings = append(c.conditionExprFindings, Finding{
+								CheckID: "condition_expression_validation", Severity: SeverityHardInvalidity,
+								Message: fmt.Sprintf("node %s handler %s condition %q has no exact item schema: %v", nodeID, eventType, expr, err), Location: nodeID,
+							})
+							continue
+						}
+					} else {
+						options.ItemType = itemType
 					}
-					options.ItemType = itemType
 				}
-				if conditionMissingRecognizedPrefixLocal(expr, cond.Context) {
+				if cond.AllowJoin {
+					options.AllowJoin = true
+				}
+				if conditionMissingRecognizedPrefixLocal(expr, cond.ConditionContext) {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -75,7 +81,7 @@ func (c *checkerContext) conditionExpressions() []Finding {
 					})
 					continue
 				}
-				if err := validateConditionCELLocal(expr, cond.Context, options); err != nil {
+				if err := validateConditionCELLocal(expr, cond.ConditionContext, options); err != nil {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -89,38 +95,16 @@ func (c *checkerContext) conditionExpressions() []Finding {
 	return c.conditionExprFindings
 }
 
-func conditionCollectionSource(handler runtimecontracts.SystemNodeEventHandler, context runtimepipeline.WorkflowConditionContext) string {
-	switch context {
-	case runtimepipeline.WorkflowConditionContextFilter:
-		if handler.Filter != nil {
-			return firstNonEmptyLocal(handler.Filter.ItemsFrom, handler.Filter.Source)
-		}
-	case runtimepipeline.WorkflowConditionContextCount:
-		if handler.Count != nil {
-			return firstNonEmptyLocal(handler.Count.ItemsFrom, handler.Count.Source)
-		}
-	}
-	return ""
-}
-
-func firstNonEmptyLocal(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func executableCollectionItemStructuralType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, itemsFrom string) (*runtimecontracts.ResolvedCatalogType, error) {
+func executableCollectionItemStructuralType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler, itemsFrom string) (*runtimecontracts.ResolvedCatalogType, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("collection item schema requires a loaded contract bundle")
 	}
-	item, err := bundle.ResolveWorkflowCollectionItemType(node, eventType, itemsFrom)
+	resolution, err := bundle.ResolveHandlerCollectionItemType(node, eventType, handler, itemsFrom)
 	if err != nil {
 		return nil, err
 	}
+	item := resolution.ItemType
 	if item.Kind == runtimecontracts.CatalogTypeDynamic {
 		return nil, fmt.Errorf("collection item schema is dynamic")
 	}
@@ -290,72 +274,34 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 }
 
 type expressionReference struct {
-	Kind                    string
-	Expression              string
-	Phase                   runtimepipeline.WorkflowEntityFieldLifecyclePhase
-	HandlerField            string
-	RuleCollection          string
-	RuleField               string
-	RuleIndex               int
-	HasRuleIndex            bool
-	RequireScalarEntityLeaf bool
-	AllowBareItem           bool
-	ItemAlias               string
-	AllowJoin               bool
-	ItemType                runtimecontracts.ResolvedCatalogType
-	HasItemType             bool
-	ResultType              runtimecontracts.ResolvedCatalogType
-	HasResultType           bool
-	ResultOptional          bool
+	Kind                      string
+	Expression                string
+	Phase                     runtimepipeline.WorkflowEntityFieldLifecyclePhase
+	HandlerField              string
+	RuleCollection            string
+	RuleField                 string
+	RuleIndex                 int
+	HasRuleIndex              bool
+	RequireScalarEntityLeaf   bool
+	AllowBareItem             bool
+	ItemAlias                 string
+	AllowJoin                 bool
+	ItemType                  runtimecontracts.ResolvedCatalogType
+	HasItemType               bool
+	ResultType                runtimecontracts.ResolvedCatalogType
+	HasResultType             bool
+	ResultOptional            bool
+	ConditionContext          runtimepipeline.WorkflowConditionContext
+	HasConditionContext       bool
+	ConditionCollectionSource string
 }
 
-type handlerCondition struct {
-	Expression string
-	Context    runtimepipeline.WorkflowConditionContext
-}
-
-func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []handlerCondition {
-	out := make([]handlerCondition, 0, 10)
-	if handler.Guard != nil {
-		for _, item := range handler.Guard.EffectiveChecks() {
-			if check := strings.TrimSpace(item.Check); check != "" {
-				out = append(out, handlerCondition{
-					Expression: check,
-					Context:    runtimepipeline.WorkflowConditionContextGuard,
-				})
-			}
-		}
-	}
-	for _, rule := range handler.Rules {
-		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-			out = append(out, handlerCondition{
-				Expression: condition,
-				Context:    runtimepipeline.WorkflowConditionContextRule,
-			})
-		}
-	}
-	for _, rule := range handler.OnComplete {
-		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-			out = append(out, handlerCondition{
-				Expression: condition,
-				Context:    runtimepipeline.WorkflowConditionContextOnComplete,
-			})
-		}
-	}
-	if handler.Filter != nil {
-		if condition := strings.TrimSpace(handler.Filter.Condition); condition != "" {
-			out = append(out, handlerCondition{
-				Expression: condition,
-				Context:    runtimepipeline.WorkflowConditionContextFilter,
-			})
-		}
-	}
-	if handler.Count != nil {
-		if condition := strings.TrimSpace(handler.Count.Condition); condition != "" {
-			out = append(out, handlerCondition{
-				Expression: condition,
-				Context:    runtimepipeline.WorkflowConditionContextCount,
-			})
+func handlerConditionExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	readers := handlerExecutableReaderExpressionsForSource(source, node, eventType, handler)
+	out := make([]expressionReference, 0, 10)
+	for _, reader := range readers {
+		if reader.HasConditionContext {
+			out = append(out, reader)
 		}
 	}
 	return out

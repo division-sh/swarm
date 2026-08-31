@@ -53,7 +53,7 @@ func WorkflowPresenceGuardedEntityFields(expression string) map[string]struct{} 
 
 func WorkflowEntityFieldsAvailableBeforeCondition(handler runtimecontracts.SystemNodeEventHandler, context WorkflowConditionContext) map[string]struct{} {
 	switch context {
-	case WorkflowConditionContextGuard:
+	case WorkflowConditionContextGuard, WorkflowConditionContextQueryFilter:
 		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleGuard)
 	case WorkflowConditionContextFilter:
 		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleFilter)
