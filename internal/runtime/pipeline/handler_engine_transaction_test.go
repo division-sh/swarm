@@ -2320,10 +2320,10 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	})
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(testWorkflowStoreRunContext(t, store), route), evt)
 	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-		t.Fatalf("nested package-root delivery error = %v, want stamped connect claim", err)
+		t.Fatalf("nested authoring-flow delivery error = %v, want stamped connect claim", err)
 	}
 	if handled {
-		t.Fatal("nested package-root delivery handled without a stamped connect claim")
+		t.Fatal("nested authoring-flow delivery handled without a stamped connect claim")
 	}
 	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("child/inst-1"))
 	if err != nil {

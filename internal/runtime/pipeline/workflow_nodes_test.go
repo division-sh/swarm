@@ -537,7 +537,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackage
 	route := workflowNodeStampedConnectRoute(t, source, "child", "micro.done", "child-relay")
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "child", "child-relay"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
-		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
+		t.Fatalf("authoring-flow connect handler resolution = %#v, want child-relay micro.done", resolved)
 	}
 }
 

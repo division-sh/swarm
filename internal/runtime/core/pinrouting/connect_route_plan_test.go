@@ -1939,7 +1939,7 @@ func TestCompileConnectGraphRejectsFlowOutsideAuthoringSubtree(t *testing.T) {
 
 	plans, issues := compileConnectPlans(source)
 	if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverFlowMissing {
-		t.Fatalf("plans/issues = %#v/%#v, want package-visible receiver rejection", plans, issues)
+		t.Fatalf("plans/issues = %#v/%#v, want authoring-flow-visible receiver rejection", plans, issues)
 	}
 	for _, want := range []string{`schema owner "."`, `endpoint "unrelated"`, "does not name itself or an exact descendant flow"} {
 		if !strings.Contains(issues[0].Detail, want) {

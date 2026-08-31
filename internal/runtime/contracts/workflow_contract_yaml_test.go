@@ -20,7 +20,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
+func TestFlowConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 	var connect FlowConnect
 	if err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted\n"), &connect); err != nil {
 		t.Fatalf("decode canonical connect row: %v", err)
@@ -513,7 +513,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
+func TestFlowConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
 		canonicalrouting.RetiredConnectMapEmpty,
 		canonicalrouting.RetiredConnectMapMalformed,
@@ -530,7 +530,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
+func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
 		canonicalrouting.RetiredConnectUsingEmpty,
 		canonicalrouting.RetiredConnectUsingMalformed,
@@ -717,7 +717,7 @@ pins:
 	}
 }
 
-func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
+func TestFlowConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
 	if _, ok := flowConnectFieldOptions["delivery"]; ok {
 		t.Fatal("connect valid options retain retired delivery field")
 	}

@@ -20,24 +20,25 @@ import (
 )
 
 const (
-	fakeDockerHelperEnv        = "RELEASE_E2E_DOCKER_HELPER"
-	fakeDockerRootEnv          = "RELEASE_E2E_DOCKER_ROOT"
-	fakeDockerMCPEmitGateEnv   = "RELEASE_E2E_MCP_EMIT_GATE"
-	releaseE2EOAuthToken       = "release-e2e-oauth-value"
-	releaseE2ERawMCPURL        = "http://host.docker.internal:8082/mcp"
-	releaseE2EHostMCPURL       = "http://127.0.0.1:8082/mcp"
-	releaseE2EWorkspaceImage   = "swarm-workspace:latest"
-	releaseE2ENetwork          = "mas_default"
-	releaseE2EAgentWorkdir     = "/workspace"
-	releaseE2EManagedModel     = "sonnet"
-	releaseE2EAgentFingerprint = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
-	releaseE2EProjectionDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	releaseE2EProjectionID     = "runtime-projection-v1:" + releaseE2EProjectionDigest
-	releaseE2EFixtureScope     = "bundle-aaaaaaaaaaaa-projection-bbbbbbbbbbbb"
-	releaseE2EAgentSuffix      = "agent-" + releaseE2EAgentFingerprint
-	releaseE2EFixtureAgent     = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
-	releaseE2EFixtureAgentVol  = "workspaces_swarm_bundle_aaaaaaaaaaaa_projection_bbbbbbbbbbbb_agent_" + releaseE2EAgentFingerprint
-	releaseE2EOrphanKill       = `if command -v pkill >/dev/null 2>&1; then
+	fakeDockerHelperEnv          = "RELEASE_E2E_DOCKER_HELPER"
+	fakeDockerRootEnv            = "RELEASE_E2E_DOCKER_ROOT"
+	fakeDockerMCPEmitGateEnv     = "RELEASE_E2E_MCP_EMIT_GATE"
+	releaseE2EOAuthToken         = "release-e2e-oauth-value"
+	releaseE2ERawMCPURL          = "http://host.docker.internal:8082/mcp"
+	releaseE2EHostMCPURL         = "http://127.0.0.1:8082/mcp"
+	releaseE2EWorkspaceImage     = "swarm-workspace:latest"
+	releaseE2ENetwork            = "mas_default"
+	releaseE2EAgentWorkdir       = "/workspace"
+	releaseE2EManagedModel       = "sonnet"
+	releaseE2EAgentFingerprint   = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
+	releaseE2EProjectionDigest   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	releaseE2EProjectionID       = "runtime-projection-v1:" + releaseE2EProjectionDigest
+	releaseE2EFixtureBundleScope = "bundle-aaaaaaaaaaaa"
+	releaseE2EFixtureScope       = releaseE2EFixtureBundleScope + "-projection-bbbbbbbbbbbb"
+	releaseE2EAgentSuffix        = "agent-" + releaseE2EAgentFingerprint
+	releaseE2EFixtureAgent       = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
+	releaseE2EFixtureAgentVol    = "workspaces_swarm_bundle_aaaaaaaaaaaa_agent_" + releaseE2EAgentFingerprint
+	releaseE2EOrphanKill         = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
   for p in /proc/[0-9]*; do
@@ -351,9 +352,13 @@ func validateReleaseDockerCreate(root string, args []string) error {
 		scope         string
 		requiredMount map[string]string
 	}
-	kind, bundleScope, ok := releaseE2EContainerIdentity(create.name)
+	kind, processScope, ok := releaseE2EContainerIdentity(create.name)
 	if !ok {
 		return fmt.Errorf("unexpected create container %q", create.name)
+	}
+	bundleScope, _, ok := strings.Cut(processScope, "-projection-")
+	if !ok {
+		return fmt.Errorf("unexpected process scope %q", processScope)
 	}
 	expected := map[string]expectation{
 		"scaffold": {
@@ -392,7 +397,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount, create.labels["dev.swarm.data_projection_id"]); err != nil {
 		return fmt.Errorf("create %s mounts: %w", create.name, err)
 	}
-	if err := validateReleaseDockerLabels(create, bundleScope, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
+	if err := validateReleaseDockerLabels(create, processScope, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
 		return err
 	}
 	return nil

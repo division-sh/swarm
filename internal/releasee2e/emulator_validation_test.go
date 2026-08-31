@@ -358,7 +358,7 @@ func validReleaseScaffoldCreateArgs(sourceProjection string) []string {
 		"--label", "dev.swarm.source_projection=" + releaseE2EProjectionID,
 		"--label", "dev.swarm.workspace.scope=scaffold",
 		"-v", sourceProjection + ":/opt/swarm/source:ro",
-		"-v", name + ":/opt/swarm/scaffold",
+		"-v", "swarm-" + releaseE2EFixtureBundleScope + "-scaffold:/opt/swarm/scaffold",
 		"-w", "/opt/swarm/scaffold",
 		releaseE2EWorkspaceImage, "sleep", "infinity",
 	}

@@ -98,7 +98,7 @@ func TestResolveFlowInputProducer_NestedFlowRootConnectDoesNotSuppressRepository
 		t.Fatalf("root evidence = %#v, want repository-root external ingress", rootResolution.Evidence)
 	}
 	if rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
-		t.Fatalf("root evidence = %#v, nested package-root connect must not own the repository-root pin", rootResolution.Evidence)
+		t.Fatalf("root evidence = %#v, nested authoring-flow connect must not own the root-flow pin", rootResolution.Evidence)
 	}
 
 	childResolution := ResolveNonConnectFlowInputProducer(source, "child", childInput.EventType())

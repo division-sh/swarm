@@ -468,7 +468,7 @@ seam_families:
       - executor state metadata overriding the admitted producer route
       - suffix or same-leaf event-name fallback
       - an empty fork-point source route recovered from event-name text or a delivery row
-      - a package-root source selected by local event name when source_route is empty and flow_instance identifies semantic child-flow context
+      - an authoring-flow source selected by local event name when source_route is empty and flow_instance identifies semantic child-flow context
     notes: >
       ConnectSourceEndpointMatches is the canonical producer endpoint matcher.
       It consumes the lowered producer Mode: template sources require exact
@@ -481,7 +481,7 @@ seam_families:
       carries the exact normalized source_route from the fixed revision so
       no-delivery selected history and dynamic instance evidence do not depend
       on PendingWork or event-name reconstruction. The event-aware wrapper also
-      fails closed before package-root matching when source_route is absent and
+      fails closed before authoring-flow matching when source_route is absent and
       flow_instance identifies semantic child-flow context, while preserving
       UUID root instances and explicit source-route precedence. The canonical
       owner matrix, EventBus plan/preflight/publish, connect-issue matching, and
@@ -497,7 +497,7 @@ seam_families:
     search_dimensions: [connect_route_plan, route_table_resolve, typed_connect_recipient_evaluation]
     invalid_authority:
       - applying retired receiver-carrier filtering to a global-root connect receiver
-      - treating a nested package-root receiver as the repository root
+      - treating a nested authoring-flow receiver as the root FlowNode
       - admitting non-carrier routes for a non-root connect receiver
     notes: >
       Selected-contract connect lookup preserves receiver kind per lowered plan.

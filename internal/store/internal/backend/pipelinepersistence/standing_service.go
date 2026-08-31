@@ -605,7 +605,11 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
 			return err
 		}
-		source, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
+		currentRunSource, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
+		if err != nil {
+			return err
+		}
+		declarationSource, err := runtimecorrelation.DecodeSourceArtifactFact(current.BundleHash)
 		if err != nil {
 			return err
 		}
@@ -615,7 +619,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if currentState.Active() {
-			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, source.BundleHash(), "standing_reset", "cancelled", now)
+			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, currentRunSource.BundleHash(), "standing_reset", "cancelled", now)
 			if err != nil {
 				return err
 			}
@@ -633,7 +637,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if _, err := s.createRun(txctx, tx, runtimerunlifecycle.CreateRequest{
-			RunID: nextRunID, Origin: origin, Source: source, StartedAt: now,
+			RunID: nextRunID, Origin: origin, Source: declarationSource, StartedAt: now,
 		}); err != nil {
 			return err
 		}
@@ -682,7 +686,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 				return err
 			}
 		}
-		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, FlowPath: current.FlowPath, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: source}
+		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, FlowPath: current.FlowPath, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: declarationSource}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
 		result.TimerCancellations = cancellations
 		result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, nextRunID, current.ServiceID, nextGeneration)

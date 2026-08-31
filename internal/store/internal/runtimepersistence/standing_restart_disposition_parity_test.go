@@ -263,15 +263,15 @@ func TestStandingRestartDispositionRejectsBrokenServiceIdentityParity(t *testing
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
 			created := fixture.create(t, ctx, "broken-service-identity")
-			query := `UPDATE standing_services SET package_key=? WHERE service_id=?`
-			args := []any{"corrupt-package", created.ServiceID}
+			query := `UPDATE standing_services SET flow_path=? WHERE service_id=?`
+			args := []any{"corrupt-flow", created.ServiceID}
 			if backend == "postgres" {
-				query = `UPDATE standing_services SET package_key=$1 WHERE service_id=$2::uuid`
+				query = `UPDATE standing_services SET flow_path=$1 WHERE service_id=$2::uuid`
 			}
 			if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 				t.Fatalf("break %s standing service identity: %v", backend, err)
 			}
-			if _, err := fixture.workflow.StandingRunRestartDisposition(ctx, created.RunID); err == nil || !strings.Contains(err.Error(), "does not match package/flow owner") {
+			if _, err := fixture.workflow.StandingRunRestartDisposition(ctx, created.RunID); err == nil || !strings.Contains(err.Error(), "does not match flow_path owner") {
 				t.Fatalf("broken %s standing service identity error = %v", backend, err)
 			}
 		})

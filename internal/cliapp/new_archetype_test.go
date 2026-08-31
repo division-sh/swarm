@@ -40,7 +40,7 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 				}
 			}
 			if strings.Contains(out.String(), "cd ./bot") {
-				t.Fatalf("output %q retains the retired nested package root", out.String())
+				t.Fatalf("output %q retains the retired nested source-root handoff", out.String())
 			}
 			for _, command := range []string{"swarm verify", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {
