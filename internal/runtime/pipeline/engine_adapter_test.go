@@ -916,13 +916,13 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	if !ok {
 		t.Fatal("expected saved state to load")
 	}
-	if got := loaded.Fields["score"]; got != 91 && got != 91.0 {
+	if got := loaded.Fields["score"]; got != int64(91) {
 		t.Fatalf("loaded metadata score = %#v, want 91", got)
 	}
 	if !loaded.Gates["ready"] {
 		t.Fatalf("loaded gates = %#v, want ready=true", loaded.Gates)
 	}
-	if got := loaded.StateBuckets["evidence"]["count"]; got != 2 && got != 2.0 {
+	if got := loaded.StateBuckets["evidence"]["count"]; got != int64(2) {
 		t.Fatalf("loaded state bucket evidence.count = %#v, want 2", got)
 	}
 }

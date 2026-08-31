@@ -542,6 +542,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 				})
 			}
 			waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
 
 			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
 			if err != nil {
@@ -587,6 +588,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 					{"account_id": "mixed-after", "eng_roles": 3, "gem_score": 3.25},
 				},
 			})
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, mixedRunID, 5*time.Minute)
 			mixedSummary, err := selected.FanOutRunSummary(mixedCtx, mixedRunID, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("mixed FanOutRunSummary: %v", err)

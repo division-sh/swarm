@@ -870,7 +870,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1.0")},
+				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
 			},
 		},
 	}, workflowTriggerContext{
@@ -894,6 +894,10 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 			t.Fatalf("revision_count = %d, want 1", got)
 		}
 	case float64:
+		if got != 1 {
+			t.Fatalf("revision_count = %v, want 1", got)
+		}
+	case int64:
 		if got != 1 {
 			t.Fatalf("revision_count = %v, want 1", got)
 		}
@@ -1553,7 +1557,7 @@ node-a:
 	if !ok {
 		t.Fatal("expected created entity to persist")
 	}
-	if got := instance.Fields["revision_count"]; got != float64(0) && got != 0 {
+	if got := instance.Fields["revision_count"]; got != int64(0) {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)

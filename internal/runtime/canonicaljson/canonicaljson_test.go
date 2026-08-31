@@ -1,12 +1,28 @@
 package canonicaljson
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
+
+func TestDecodePreservingNumberLexemesRetainsTransportKinds(t *testing.T) {
+	var decoded map[string]any
+	if err := DecodePreservingNumberLexemes([]byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]json.Number{"integer": "75", "decimal": "75.0", "exponent": "75e0"} {
+		if got, ok := decoded[field].(json.Number); !ok || got != want {
+			t.Fatalf("decoded %s = %#v, want json.Number(%q)", field, decoded[field], want)
+		}
+	}
+	if err := DecodePreservingNumberLexemes([]byte(`{"value":1} {"value":2}`), &decoded); err == nil || !strings.Contains(err.Error(), "trailing JSON content") {
+		t.Fatalf("trailing transport JSON error = %v", err)
+	}
+}
 
 func TestDecodeNormalizesIJSONSafeNumbers(t *testing.T) {
 	raw := []byte(`{"safe_integer":9007199254740991,"fraction":1.25,"equivalent_integer":1e0}`)

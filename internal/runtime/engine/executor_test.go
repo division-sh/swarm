@@ -1306,7 +1306,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != 80.0 && got != 80 {
+	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != int64(80) {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
@@ -3417,6 +3417,71 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	}
 }
 
+func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: stubSource(), StateRepo: repo, MutationOwner: stubMutationOwner{state: repo},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-integer", "scores.ready", "", "", json.RawMessage(`{"items":[{"integer":75,"decimal":75.0,"exponent":75e0}]}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+			Source:  "payload.items",
+			Filter:  "item.integer + 1 == 76 && item.decimal + 1.0 == 76.0 && item.exponent + 1.0 == 76.0",
+			StoreAs: "entity.matches",
+		}},
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("ordinary event integer arithmetic: %v", err)
+	}
+	rows, ok := repo.mutation.Fields["matches"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("integer arithmetic rows = %#v", repo.mutation.Fields["matches"])
+	}
+	item, _ := rows[0].(map[string]any)
+	if item["integer"] != int64(75) || item["decimal"] != float64(75) || item["exponent"] != float64(75) {
+		t.Fatalf("integer arithmetic rows = %#v", rows)
+	}
+}
+
+func TestExecutorOrdinaryEventPayloadRejectsUnsafeIntegerBeforeMutation(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: stubSource(), StateRepo: repo, MutationOwner: stubMutationOwner{state: repo},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-unsafe", "scores.ready", "", "", json.RawMessage(`{"score":9007199254740992}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	var projection *workflowexpr.CELProjectionError
+	if !errors.As(err, &projection) || projection.Path != "$.score" || !strings.Contains(projection.Remediation, "declare the field as string") {
+		t.Fatalf("unsafe ordinary event error = %#v, want typed $.score remediation", err)
+	}
+	if len(order) != 0 || len(repo.mutation.Fields) != 0 {
+		t.Fatalf("unsafe ordinary event mutated runtime: order=%v mutation=%#v", order, repo.mutation)
+	}
+}
+
 func TestExecutorNumericProjectionCoversAllFiveListConsumers(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -3585,7 +3650,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 		t.Fatalf("query_rows = %#v", result.StateMutation.Fields["query_rows"])
 	}
 	item, _ := rows[0].(map[string]any)
-	if item["score"] != 7.0 {
+	if item["score"] != int64(7) {
 		t.Fatalf("query_rows[0] = %#v", item)
 	}
 }
@@ -6963,7 +7028,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "action.emitted" {
 		t.Fatalf("unexpected action emit intents: %#v", result.EmitIntents)
 	}
-	if got := shaper.lastPayload["score"]; got != float64(9) {
+	if got := shaper.lastPayload["score"]; got != int64(9) {
 		t.Fatalf("action emit payload score = %#v, want 9", got)
 	}
 	if shaper.lastSurface != EmitSurfaceAction {

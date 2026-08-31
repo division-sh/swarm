@@ -67,6 +67,26 @@ func Decode(raw []byte) (semanticvalue.Value, error) {
 	return value, nil
 }
 
+// DecodePreservingNumberLexemes decodes one transport value without replacing
+// JSON number tokens with float64. Semantic admission still belongs to Decode
+// and NormalizeNumber; this adapter only preserves evidence needed by later
+// checked projections.
+func DecodePreservingNumberLexemes(raw []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("trailing JSON content")
+		}
+		return fmt.Errorf("trailing JSON content: %w", err)
+	}
+	return nil
+}
+
 // DecodeInto is a centralized typed adapter. The admitted Value remains the
 // semantic owner; destination is only a transport projection.
 func DecodeInto(raw []byte, destination any) error {

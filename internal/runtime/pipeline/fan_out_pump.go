@@ -217,21 +217,6 @@ func (pc *PipelineCoordinator) commitFanOutRange(
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return CommittedFanOutChunk{}, false, errors.Join(err, releaseFanOutOutcomePlans(ctx, planner, outcomes))
 	}
-	if item, ok := FanOutItemSemanticFailure(err); ok {
-		index := item.Ordinal - outcomes[0].Ordinal
-		if index < 0 || index >= len(outcomes) || outcomes[index].Publication == nil {
-			return pc.blockFanOutCommit(ctx, owner, planner, claim, outcomes, err, now)
-		}
-		failure, marshalErr := runtimefailures.MarshalEnvelope(item.Failure)
-		if marshalErr != nil {
-			return pc.blockFanOutCommit(ctx, owner, planner, claim, outcomes, errors.Join(err, marshalErr), now)
-		}
-		if releaseErr := releaseFanOutOutcomePlans(ctx, planner, outcomes[index:index+1]); releaseErr != nil {
-			return CommittedFanOutChunk{}, false, errors.Join(err, releaseErr)
-		}
-		outcomes[index] = FanOutChunkOutcome{Ordinal: item.Ordinal, Failure: failure}
-		return pc.commitFanOutRange(ctx, owner, planner, claim, outcomes, now)
-	}
 	if _, ok := FanOutSafeAggregateFailure(err); ok {
 		if len(outcomes) == 1 {
 			return pc.blockFanOutCommit(ctx, owner, planner, claim, outcomes, err, now)
@@ -297,6 +282,9 @@ func fanOutPrecommitFailure(err error) (json.RawMessage, fanOutFailureDispositio
 	}
 	if failure.Failure.Retryable || !failure.Failure.Deterministic {
 		return nil, fanOutFailureRetry
+	}
+	if !runtimeengine.IsEmitPayloadContractFailure(err) {
+		return nil, fanOutFailureBlock
 	}
 	raw, marshalErr := runtimefailures.MarshalEnvelope(failure.Failure)
 	if marshalErr != nil {

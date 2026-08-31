@@ -240,8 +240,8 @@ contract_formats:
     - decision-card provenance, verdict fields, change payloads, persistence, lifecycle events, replay, fork cloning, and readback
     - complete JSON-RPC request envelopes admitted by the v1 HTTP and WebSocket server
     - complete JSON-RPC response and subscription-notification envelopes emitted by the v1 HTTP and WebSocket server
-    - persisted event-payload, exact entity-revision, and resource-version values projected into workflow/CEL evaluation,
-      including deferred fan-out emit fields
+    - ordinary and deferred event-payload, persisted workflow-state, exact entity-revision, and resource-version values
+      projected into workflow/CEL evaluation, including deferred fan-out emit fields
     explicitly_deferred_scope:
     - unrelated event payload interpreters
     - provider ingress and module ABI payloads
@@ -272,7 +272,9 @@ contract_formats:
       Lexical JSON integers inside the I-JSON safe range project to exact CEL
       integers. Decimal and exponent spellings project to CEL doubles even
       when mathematically integral. Native floating-point values remain CEL
-      doubles. Malformed or unsafe numbers fail before evaluation with the
+      doubles. Every production JSON boundary feeding this projection preserves
+      number lexemes until this owner runs; no boundary may first erase them to
+      float64. Malformed or unsafe numbers fail before evaluation with the
       exact recursive value path; unsafe exact integers teach authors to
       declare the field as string. This implemented scope excludes authored
       aggregate/reduce/scoring coercion tracked by #2046.
@@ -3882,11 +3884,13 @@ handler_specification:
           division. A typed retryable selected-store failure advances nothing and applies the same halving. Restart and
           fork without valid tuning state use 4. Chunk boundaries never change semantic output.
         failure_isolation: >-
-          Publication plans, outcomes, cursor advancement, and closure commit atomically. A typed item-semantic error may
-          become semantic_rejected. A typed safe aggregate error is bisected lower-half first. Retryable infrastructure
-          errors advance nothing. Outcome-uncertain results are read back by structured operation identity before retry.
-          Unknown errors, raw database strings, invariants, and internal failures block the intent with typed diagnosis;
-          they are never parsed into rejection or blindly retried.
+          Publication plans, outcomes, cursor advancement, and closure commit atomically. Only a typed emit-contract
+          failure may become semantic_rejected. Publication-planner, authorization, conflicting-duplicate, non-emit
+          schema, store, unknown, and internal failures never advance an ordinal as semantic rejection. A typed safe
+          aggregate error is bisected lower-half first. Retryable infrastructure errors advance nothing.
+          Outcome-uncertain results are read back by structured operation identity before retry. Unknown errors, raw
+          database strings, invariants, and internal failures block the intent with typed diagnosis; they are never
+          parsed into rejection or blindly retried.
         semantic_rejection_evidence: >-
           Every semantic_rejected ordinal persists one deterministic non-retryable FailureEnvelope produced from a typed
           emit-contract error. The error retains event, rejection kind, path, constraint, expected, actual, and stable

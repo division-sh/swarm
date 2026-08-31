@@ -49,6 +49,34 @@ func TestWorkflowCELProjectionConsumersStayOnCanonicalOwner(t *testing.T) {
 	}
 }
 
+func TestWorkflowCELProjectionJSONSourcesPreserveNumberLexemes(t *testing.T) {
+	runtimeRoot := workflowProjectionRuntimeRoot(t)
+	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
+	boundaries := []struct {
+		name, path, function string
+		streaming            bool
+		projects             bool
+	}{
+		{name: "ordinary event payload", path: filepath.Join(runtimeRoot, "engine", "executor.go"), function: "decodePayload", projects: true},
+		{name: "persisted workflow state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_store.go"), function: "decodeWorkflowInstanceJSONMap", projects: true},
+		{name: "deferred trigger payload", path: filepath.Join(runtimeRoot, "engine", "fan_out_evaluator.go"), function: "decodeFanOutPayload"},
+		{name: "exact entity revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSON", streaming: true},
+		{name: "pinned resource version", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSONL", streaming: true},
+	}
+	for _, boundary := range boundaries {
+		t.Run(boundary.name, func(t *testing.T) {
+			raw, err := os.ReadFile(boundary.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical, projected, useNumber, unmarshal, found := workflowProjectionSourceBoundaryFacts(string(raw), boundary.function)
+			if !found || unmarshal || boundary.streaming && !useNumber || !boundary.streaming && !canonical || boundary.projects && !projected {
+				t.Fatalf("source boundary %s facts = found:%v canonical:%v projected:%v use_number:%v unmarshal:%v", boundary.function, found, canonical, projected, useNumber, unmarshal)
+			}
+		})
+	}
+}
+
 func TestFanOutSummaryRetiredRejectedVocabularyStaysAbsent(t *testing.T) {
 	runtimeRoot := workflowProjectionRuntimeRoot(t)
 	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
@@ -107,6 +135,56 @@ func workflowNormalizeCELInput(value any) any { return value }
 	if len(violations) != 3 {
 		t.Fatalf("hostile projection violations = %#v, want json.Number, arbitrary Float64 receiver, and retired helper", violations)
 	}
+}
+
+func TestWorkflowProjectionSourceGuardDetectsFloatErasingDecoder(t *testing.T) {
+	hostile := `package hostile
+import "encoding/json"
+func arbitraryName(raw []byte, destination any) error { return json.Unmarshal(raw, destination) }
+`
+	canonical, projected, useNumber, unmarshal, found := workflowProjectionSourceBoundaryFacts(hostile, "arbitraryName")
+	if !found || canonical || projected || useNumber || !unmarshal {
+		t.Fatalf("hostile source facts = found:%v canonical:%v projected:%v use_number:%v unmarshal:%v", found, canonical, projected, useNumber, unmarshal)
+	}
+}
+
+func workflowProjectionSourceBoundaryFacts(source, functionName string) (canonical, projected, useNumber, unmarshal, found bool) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "source.go", source, 0)
+	if err != nil {
+		return false, false, false, false, false
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name == nil || function.Name.Name != functionName {
+			continue
+		}
+		found = true
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel == nil {
+				return true
+			}
+			owner, _ := selector.X.(*ast.Ident)
+			switch {
+			case owner != nil && owner.Name == "canonicaljson" && selector.Sel.Name == "DecodePreservingNumberLexemes":
+				canonical = true
+			case owner != nil && owner.Name == "workflowexpr" && selector.Sel.Name == "ProjectCELValue":
+				projected = true
+			case selector.Sel.Name == "UseNumber":
+				useNumber = true
+			case owner != nil && owner.Name == "json" && selector.Sel.Name == "Unmarshal":
+				unmarshal = true
+			}
+			return true
+		})
+		break
+	}
+	return canonical, projected, useNumber, unmarshal, found
 }
 
 func workflowProjectionGuardViolations(source string, canonicalOwner bool) []string {
