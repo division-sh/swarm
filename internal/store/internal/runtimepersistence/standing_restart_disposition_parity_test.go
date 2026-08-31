@@ -278,6 +278,181 @@ func TestStandingRestartDispositionRejectsBrokenServiceIdentityParity(t *testing
 	}
 }
 
+func TestTerminalDeclaredStandingResetUsesLatestDeclarationSourceParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openStandingDispositionParityFixture(t, backend)
+			ctx := testAuthorActivityRuntimeContext()
+			candidate := fixture.candidate("terminal-declared-source-revision")
+			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing service: %v", err)
+			}
+			fixture.terminalize(t, ctx, created.RunID, runtimerunlifecycle.StateCancelled)
+
+			revised := fixture.reviseCandidateSource(t, candidate, "a")
+			if _, found, err := fixture.workflow.LoadReconciledStandingService(ctx, revised); err != nil || found {
+				t.Fatalf("load stale terminal declaration: found=%t err=%v", found, err)
+			}
+			reconciled, err := fixture.workflow.ReconcileStandingService(ctx, revised)
+			if err != nil {
+				t.Fatalf("reconcile terminal source revision: %v", err)
+			}
+			if reconciled.RunID != created.RunID || reconciled.Generation != created.Generation || reconciled.BundleHash != revised.Source.BundleHash() {
+				t.Fatalf("terminal source reconciliation = %#v", reconciled)
+			}
+			fixture.assertRunSource(t, ctx, created.RunID, candidate.Source.BundleHash())
+			beforeRevision, beforeJournal := fixture.standingRevisionAndJournalCount(t, ctx, created.ServiceID)
+			if loaded, found, err := fixture.workflow.LoadReconciledStandingService(ctx, revised); err != nil || !found || loaded.BundleHash != revised.Source.BundleHash() {
+				t.Fatalf("load reconciled terminal declaration = %#v found=%t err=%v", loaded, found, err)
+			}
+			if _, err := fixture.workflow.ReconcileStandingService(ctx, revised); err != nil {
+				t.Fatalf("repeat unchanged terminal reconciliation: %v", err)
+			}
+			afterRevision, afterJournal := fixture.standingRevisionAndJournalCount(t, ctx, created.ServiceID)
+			if afterRevision != beforeRevision || afterJournal != beforeJournal {
+				t.Fatalf("unchanged terminal source churned revision/journal: before=%d/%d after=%d/%d", beforeRevision, beforeJournal, afterRevision, afterJournal)
+			}
+
+			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+			if err != nil {
+				t.Fatalf("reset revised terminal service: %v", err)
+			}
+			fixture.assertRunSource(t, ctx, reset.RunID, revised.Source.BundleHash())
+		})
+	}
+}
+
+func TestTerminalOrphanStandingRestoreAndResetUsesLatestDeclarationSourceParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openStandingDispositionParityFixture(t, backend)
+			ctx := testAuthorActivityRuntimeContext()
+			candidate := fixture.candidate("terminal-orphan-source-revision")
+			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing service: %v", err)
+			}
+			fixture.terminalize(t, ctx, created.RunID, runtimerunlifecycle.StateCancelled)
+			fixture.setDesiredState(t, created.ServiceID, false, "orphaned", "none")
+			revised := fixture.reviseCandidateSource(t, candidate, "b")
+
+			restored, err := fixture.workflow.ReconcileStandingService(ctx, revised)
+			if err != nil {
+				t.Fatalf("restore terminal orphan under revised source: %v", err)
+			}
+			if restored.RestartDisposition.Kind != runtimepipeline.StandingRestartTerminalDeclared || restored.BundleHash != revised.Source.BundleHash() {
+				t.Fatalf("restored terminal source = %#v", restored)
+			}
+			fixture.assertRunSource(t, ctx, created.RunID, candidate.Source.BundleHash())
+			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+			if err != nil {
+				t.Fatalf("reset restored terminal service: %v", err)
+			}
+			fixture.assertRunSource(t, ctx, reset.RunID, revised.Source.BundleHash())
+		})
+	}
+}
+
+func TestInvalidStandingResetUsesLatestDeclarationSourceParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openStandingDispositionParityFixture(t, backend)
+			ctx := testAuthorActivityRuntimeContext()
+			candidate := fixture.candidate("invalid-declared-source-revision")
+			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing service: %v", err)
+			}
+			fixture.setDesiredState(t, created.ServiceID, true, "suspended", "suspended")
+			revised := fixture.reviseCandidateSource(t, candidate, "c")
+
+			quarantined, err := fixture.workflow.ReconcileStandingService(ctx, revised)
+			if err != nil {
+				t.Fatalf("reconcile invalid service source revision: %v", err)
+			}
+			if quarantined.RestartDisposition.Kind != runtimepipeline.StandingRestartInvalidCurrent || quarantined.BundleHash != revised.Source.BundleHash() {
+				t.Fatalf("invalid source reconciliation = %#v", quarantined)
+			}
+			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+			if err != nil {
+				t.Fatalf("reset invalid service: %v", err)
+			}
+			if reset.RestartDisposition.Kind != runtimepipeline.StandingRestartSuspended {
+				t.Fatalf("invalid suspended reset disposition = %#v", reset.RestartDisposition)
+			}
+			fixture.assertRunSource(t, ctx, reset.RunID, revised.Source.BundleHash())
+		})
+	}
+}
+
+func TestInvalidOrphanStandingRestoreThenResetParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openStandingDispositionParityFixture(t, backend)
+			ctx := testAuthorActivityRuntimeContext()
+			candidate := fixture.candidate("invalid-orphan-restore-reset")
+			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing service: %v", err)
+			}
+			fixture.setDesiredState(t, created.ServiceID, false, "orphaned", "none")
+			assertStandingDisposition(t, ctx, fixture, created.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+			revised := fixture.reviseCandidateSource(t, candidate, "d")
+
+			restored, err := fixture.workflow.ReconcileStandingService(ctx, revised)
+			if err != nil {
+				t.Fatalf("restore invalid orphan declaration: %v", err)
+			}
+			if !restored.RestartDisposition.Executable() || restored.BundleHash != revised.Source.BundleHash() {
+				t.Fatalf("restored invalid orphan = %#v", restored)
+			}
+			if loaded, found, err := fixture.workflow.LoadReconciledStandingService(ctx, revised); err != nil || !found || !loaded.RestartDisposition.Executable() {
+				t.Fatalf("load restored invalid orphan = %#v found=%t err=%v", loaded, found, err)
+			}
+			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+			if err != nil {
+				t.Fatalf("reset restored invalid orphan: %v", err)
+			}
+			fixture.assertRunSource(t, ctx, reset.RunID, revised.Source.BundleHash())
+		})
+	}
+}
+
+func TestSuspendedStandingResetInstallsSuccessorBeforePauseParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openStandingDispositionParityFixture(t, backend)
+			ctx := testAuthorActivityRuntimeContext()
+			created := fixture.create(t, ctx, "direct-suspended-reset")
+			if _, err := fixture.workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"}); err != nil {
+				t.Fatalf("suspend standing service: %v", err)
+			}
+			nextRunID := runtimeflowidentity.StandingGenerationRunID(created.ServiceID, created.Generation+1)
+			fixture.installResetPauseFailure(t, ctx, nextRunID)
+			if _, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"}); err == nil || !strings.Contains(err.Error(), "injected standing reset pause failure") {
+				t.Fatalf("injected suspended reset error = %v", err)
+			}
+			fixture.assertResetRolledBack(t, ctx, created, nextRunID)
+			fixture.removeResetPauseFailure(t, ctx)
+
+			reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+			if err != nil {
+				t.Fatalf("direct suspended reset: %v", err)
+			}
+			if reset.RunID != nextRunID || reset.Generation != created.Generation+1 || reset.EffectiveState != "suspended" || reset.RestartDisposition.Kind != runtimepipeline.StandingRestartSuspended {
+				t.Fatalf("direct suspended reset = %#v", reset)
+			}
+			fixture.assertGenerationOwner(t, ctx, created.ServiceID, created.Generation, reset.Generation)
+		})
+	}
+}
+
 func standingResultsByService(results []runtimepipeline.StandingServiceReconciliation) map[string]runtimepipeline.StandingServiceReconciliation {
 	byService := make(map[string]runtimepipeline.StandingServiceReconciliation, len(results))
 	for _, result := range results {
@@ -320,6 +495,131 @@ func (f standingDispositionParityFixture) candidate(name string) runtimepipeline
 		PackageKey: "restart-disposition", FlowID: f.backend + "-" + name,
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestPersistedBundleSourceFact(f.hash),
+	}
+}
+
+func (f standingDispositionParityFixture) reviseCandidateSource(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, digit string) runtimepipeline.StandingServiceCandidate {
+	t.Helper()
+	hash := "bundle-v1:sha256:" + strings.Repeat(digit, 64)
+	seedStoreTestPersistedBundle(t, f.db, hash)
+	candidate.Source = mustStoreTestPersistedBundleSourceFact(hash)
+	return candidate
+}
+
+func (f standingDispositionParityFixture) assertRunSource(t *testing.T, ctx context.Context, runID, wantHash string) {
+	t.Helper()
+	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+	args := []any{runID}
+	if f.backend == "postgres" {
+		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	}
+	var hash, source string
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&hash, &source); err != nil {
+		t.Fatalf("read %s run source for %s: %v", f.backend, runID, err)
+	}
+	if hash != wantHash || source != "persisted" {
+		t.Fatalf("%s run source for %s = %s/%s, want %s/persisted", f.backend, runID, hash, source, wantHash)
+	}
+}
+
+func (f standingDispositionParityFixture) standingRevisionAndJournalCount(t *testing.T, ctx context.Context, serviceID string) (int64, int64) {
+	t.Helper()
+	query := `SELECT revision_sequence, (SELECT COUNT(*) FROM standing_service_journal WHERE service_id=?) FROM standing_services WHERE service_id=?`
+	args := []any{serviceID, serviceID}
+	if f.backend == "postgres" {
+		query = `SELECT revision_sequence, (SELECT COUNT(*) FROM standing_service_journal WHERE service_id=$1::uuid) FROM standing_services WHERE service_id=$1::uuid`
+		args = []any{serviceID}
+	}
+	var revision, journal int64
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&revision, &journal); err != nil {
+		t.Fatalf("read %s standing revision/journal: %v", f.backend, err)
+	}
+	return revision, journal
+}
+
+func (f standingDispositionParityFixture) installResetPauseFailure(t *testing.T, ctx context.Context, runID string) {
+	t.Helper()
+	if f.backend == "sqlite" {
+		_, err := f.db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER fail_standing_reset_pause BEFORE INSERT ON run_control_state WHEN NEW.run_id = '%s' BEGIN SELECT RAISE(ABORT, 'injected standing reset pause failure'); END`, runID))
+		if err != nil {
+			t.Fatalf("install sqlite reset pause failure: %v", err)
+		}
+		return
+	}
+	if _, err := f.db.ExecContext(ctx, `CREATE FUNCTION fail_standing_reset_pause() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected standing reset pause failure'; END $$`); err != nil {
+		t.Fatalf("install postgres reset pause failure function: %v", err)
+	}
+	if _, err := f.db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER fail_standing_reset_pause BEFORE INSERT ON run_control_state FOR EACH ROW WHEN (NEW.run_id = '%s'::uuid) EXECUTE FUNCTION fail_standing_reset_pause()`, runID)); err != nil {
+		t.Fatalf("install postgres reset pause failure trigger: %v", err)
+	}
+}
+
+func (f standingDispositionParityFixture) removeResetPauseFailure(t *testing.T, ctx context.Context) {
+	t.Helper()
+	if f.backend == "sqlite" {
+		if _, err := f.db.ExecContext(ctx, `DROP TRIGGER fail_standing_reset_pause`); err != nil {
+			t.Fatalf("drop sqlite reset pause failure: %v", err)
+		}
+		return
+	}
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER fail_standing_reset_pause ON run_control_state`); err != nil {
+		t.Fatalf("drop postgres reset pause failure trigger: %v", err)
+	}
+	if _, err := f.db.ExecContext(ctx, `DROP FUNCTION fail_standing_reset_pause()`); err != nil {
+		t.Fatalf("drop postgres reset pause failure function: %v", err)
+	}
+}
+
+func (f standingDispositionParityFixture) assertResetRolledBack(t *testing.T, ctx context.Context, current runtimepipeline.StandingServiceReconciliation, nextRunID string) {
+	t.Helper()
+	query := `SELECT current_generation, current_run_id FROM standing_services WHERE service_id=?`
+	args := []any{current.ServiceID}
+	if f.backend == "postgres" {
+		query = `SELECT current_generation, current_run_id::text FROM standing_services WHERE service_id=$1::uuid`
+	}
+	var generation int64
+	var runID string
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&generation, &runID); err != nil {
+		t.Fatalf("read reset rollback standing owner: %v", err)
+	}
+	if generation != current.Generation || runID != current.RunID {
+		t.Fatalf("reset rollback current owner = generation:%d run:%s, want %d/%s", generation, runID, current.Generation, current.RunID)
+	}
+	query = `SELECT COUNT(*) FROM runs WHERE run_id=?`
+	if f.backend == "postgres" {
+		query = `SELECT COUNT(*) FROM runs WHERE run_id=$1::uuid`
+	}
+	var count int64
+	if err := f.db.QueryRowContext(ctx, query, nextRunID).Scan(&count); err != nil {
+		t.Fatalf("read reset rollback successor: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("reset rollback retained %d successor runs", count)
+	}
+}
+
+func (f standingDispositionParityFixture) assertGenerationOwner(t *testing.T, ctx context.Context, serviceID string, retiredGeneration, currentGeneration int64) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM standing_service_generations WHERE service_id=? AND generation=? AND retired_at IS NOT NULL`
+	args := []any{serviceID, retiredGeneration}
+	if f.backend == "postgres" {
+		query = `SELECT COUNT(*) FROM standing_service_generations WHERE service_id=$1::uuid AND generation=$2 AND retired_at IS NOT NULL`
+	}
+	var retired int64
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&retired); err != nil {
+		t.Fatalf("read retired generation owner: %v", err)
+	}
+	query = `SELECT COUNT(*) FROM standing_service_generations WHERE service_id=? AND generation=? AND retired_at IS NULL`
+	args = []any{serviceID, currentGeneration}
+	if f.backend == "postgres" {
+		query = `SELECT COUNT(*) FROM standing_service_generations WHERE service_id=$1::uuid AND generation=$2 AND retired_at IS NULL`
+	}
+	var current int64
+	if err := f.db.QueryRowContext(ctx, query, args...).Scan(&current); err != nil {
+		t.Fatalf("read current generation owner: %v", err)
+	}
+	if retired != 1 || current != 1 {
+		t.Fatalf("generation ownership = retired:%d current:%d, want 1/1", retired, current)
 	}
 }
 

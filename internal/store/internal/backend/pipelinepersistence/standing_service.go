@@ -319,7 +319,7 @@ func (s *standingServiceAdapter) requireStandingRunSourceTx(
 		return runtimecorrelation.BundleSourceFact{}, err
 	}
 	bundleHash, bundleSource := fact.StorageValues()
-	if current.BundleHash != bundleHash || current.BundleSource != bundleSource {
+	if requireActive && (current.BundleHash != bundleHash || current.BundleSource != bundleSource) {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf(
 			"standing service %s provenance conflicts with run %s: standing bundle_hash=%s bundle_source=%s, run bundle_hash=%s bundle_source=%s",
 			current.ServiceID, current.RunID, current.BundleHash, current.BundleSource, bundleHash, bundleSource,
@@ -365,7 +365,7 @@ func (s *standingServiceAdapter) LoadReconciledStandingService(ctx context.Conte
 			return err
 		}
 		bundleHash, bundleSource := candidate.Source.StorageValues()
-		if !current.DeclarationPresent || (disposition.Executable() && (current.BundleHash != bundleHash || current.BundleSource != bundleSource)) {
+		if !current.DeclarationPresent || current.BundleHash != bundleHash || current.BundleSource != bundleSource {
 			return nil
 		}
 		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, disposition.Executable()); err != nil {
@@ -605,7 +605,11 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
 			return err
 		}
-		source, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
+		currentRunSource, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
+		if err != nil {
+			return err
+		}
+		declarationSource, err := runtimecorrelation.DecodeBundleSourceFact(current.BundleHash, current.BundleSource)
 		if err != nil {
 			return err
 		}
@@ -615,7 +619,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if currentState.Active() {
-			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now)
+			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, currentRunSource.BundleHash(), "standing_reset", "cancelled", now)
 			if err != nil {
 				return err
 			}
@@ -633,38 +637,56 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if _, err := s.createRun(txctx, tx, runtimerunlifecycle.CreateRequest{
-			RunID: nextRunID, Origin: origin, Source: source, StartedAt: now,
+			RunID: nextRunID, Origin: origin, Source: declarationSource, StartedAt: now,
 		}); err != nil {
 			return err
 		}
 		effectiveState := "active"
 		if current.OperatorOverride == "suspended" {
 			effectiveState = "suspended"
-			if err := s.setStandingRunPausedTx(txctx, tx, nextRunID, "standing_reset_preserved_suspend", operation.Actor, now); err != nil {
-				return err
-			}
 		}
 		if s.isSQLite() {
-			if _, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = ?, retired_reason = 'standing_reset', retired_by = ? WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, now, operation.Actor, current.ServiceID, current.Generation); err != nil {
+			retired, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = ?, retired_reason = 'standing_reset', retired_by = ? WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, now, operation.Actor, current.ServiceID, current.Generation)
+			if err != nil {
 				return err
+			}
+			if err := requireOneStandingRow(retired); err != nil {
+				return fmt.Errorf("retire standing generation: %w", err)
 			}
 			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES (?, ?, ?, ?)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = ?, current_run_id = ?, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ?`, nextGeneration, nextRunID, effectiveState, now, current.ServiceID)
-		} else {
-			if _, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = $3, retired_reason = 'standing_reset', retired_by = $4 WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL`, current.ServiceID, current.Generation, now, operation.Actor); err != nil {
+			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = ?, current_run_id = ?, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ? AND current_generation = ? AND current_run_id = ?`, nextGeneration, nextRunID, effectiveState, now, current.ServiceID, current.Generation, current.RunID)
+			if err != nil {
 				return err
+			}
+			err = requireOneStandingRow(updated)
+		} else {
+			retired, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = $3, retired_reason = 'standing_reset', retired_by = $4 WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL`, current.ServiceID, current.Generation, now, operation.Actor)
+			if err != nil {
+				return err
+			}
+			if err := requireOneStandingRow(retired); err != nil {
+				return fmt.Errorf("retire standing generation: %w", err)
 			}
 			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES ($1::uuid, $2, $3::uuid, $4)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = $2, current_run_id = $3::uuid, effective_state = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid`, current.ServiceID, nextGeneration, nextRunID, effectiveState, now)
+			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = $2, current_run_id = $3::uuid, effective_state = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid AND current_generation = $6 AND current_run_id = $7::uuid`, current.ServiceID, nextGeneration, nextRunID, effectiveState, now, current.Generation, current.RunID)
+			if err != nil {
+				return err
+			}
+			err = requireOneStandingRow(updated)
 		}
 		if err != nil {
 			return fmt.Errorf("reset standing service: %w", err)
 		}
-		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, PackageKey: current.PackageKey, FlowID: current.FlowID, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: source}
+		if current.OperatorOverride == "suspended" {
+			if err := s.setStandingRunPausedTx(txctx, tx, nextRunID, "standing_reset_preserved_suspend", operation.Actor, now); err != nil {
+				return err
+			}
+		}
+		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, PackageKey: current.PackageKey, FlowID: current.FlowID, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: declarationSource}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
 		result.TimerCancellations = cancellations
 		result.RestartDisposition, err = s.readStandingRestartDispositionTx(txctx, tx, nextRunID, current.ServiceID, nextGeneration)
@@ -776,11 +798,11 @@ func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context,
 	case runtimepipeline.StandingRestartActiveIntrinsic, runtimepipeline.StandingRestartSuspended, runtimepipeline.StandingRestartOrphaned:
 		return s.resumeStandingServiceTx(ctx, tx, current, candidate)
 	case runtimepipeline.StandingRestartTerminalOrphaned:
-		return s.restoreTerminalStandingServiceTx(ctx, tx, current)
+		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
 	case runtimepipeline.StandingRestartTerminalDeclared:
-		return standingResultFromRow(current, "stopped", "standing_generation_terminal", disposition), nil
+		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
 	case runtimepipeline.StandingRestartInvalidCurrent:
-		return standingResultFromRow(current, "quarantined", "standing_current_state_inconsistent", disposition), nil
+		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)
 	default:
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s returned unsupported current disposition %q", current.ServiceID, disposition.Kind)
 	}
@@ -1168,29 +1190,69 @@ func (s *standingServiceAdapter) resumeStandingServiceTx(ctx context.Context, tx
 	return result, nil
 }
 
-func (s *standingServiceAdapter) restoreTerminalStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow) (runtimepipeline.StandingServiceReconciliation, error) {
+func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current standingServiceRow,
+	candidate runtimepipeline.StandingServiceCandidate,
+	disposition runtimepipeline.StandingRestartDisposition,
+) (runtimepipeline.StandingServiceReconciliation, error) {
+	bundleHash, bundleSource := candidate.Source.StorageValues()
+	sourceChanged := current.BundleHash != bundleHash || current.BundleSource != bundleSource
+	restoreDeclaration := !current.DeclarationPresent
+	if !sourceChanged && !restoreDeclaration {
+		if disposition.Kind == runtimepipeline.StandingRestartTerminalDeclared {
+			return standingResultFromRow(current, "stopped", "standing_generation_terminal", disposition), nil
+		}
+		return standingResultFromRow(current, "quarantined", "standing_current_state_inconsistent", disposition), nil
+	}
+
+	previousState := current.EffectiveState
 	effectiveState := "active"
 	if current.OperatorOverride == "suspended" {
 		effectiveState = "suspended"
 	}
+	revisionSequence := current.RevisionSequence
+	if sourceChanged {
+		revisionSequence++
+	}
+	if restoreDeclaration && disposition.Kind == runtimepipeline.StandingRestartInvalidCurrent && sourceChanged {
+		if _, err := s.reviseRunSource(ctx, tx, runtimerunlifecycle.SourceRevisionRequest{
+			RunID: current.RunID, Source: candidate.Source,
+		}); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, err
+		}
+	}
 	now := time.Now().UTC()
 	var err error
 	if s.isSQLite() {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ?`, effectiveState, now, current.ServiceID)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = ?, current_bundle_hash = ?, current_bundle_source = ?, revision_sequence = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ?`, effectiveState, bundleHash, bundleSource, revisionSequence, now, current.ServiceID)
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = $2, publication_state = 'pending', updated_at = $3 WHERE service_id = $1::uuid`, current.ServiceID, effectiveState, now)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = $2, current_bundle_hash = $3, current_bundle_source = $4, revision_sequence = $5, publication_state = 'pending', updated_at = $6 WHERE service_id = $1::uuid`, current.ServiceID, effectiveState, bundleHash, bundleSource, revisionSequence, now)
 	}
 	if err != nil {
-		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("restore terminal standing declaration: %w", err)
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("reconcile reset-required standing declaration: %w", err)
 	}
-	disposition, err := s.readStandingRestartDispositionTx(ctx, tx, current.RunID, current.ServiceID, current.Generation)
+	updatedDisposition, err := s.readStandingRestartDispositionTx(ctx, tx, current.RunID, current.ServiceID, current.Generation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	current.DeclarationPresent = true
 	current.EffectiveState = effectiveState
-	result := standingResultFromRow(current, "restored_stopped", "standing_terminal_declaration_restored", disposition)
-	if err := s.insertStandingJournalTx(ctx, tx, result, "orphaned", "runtime", now); err != nil {
+	current.BundleHash = bundleHash
+	current.BundleSource = bundleSource
+	current.RevisionSequence = revisionSequence
+	transition := "revised"
+	reason := "standing_declaration_source_revised"
+	if restoreDeclaration && disposition.Kind == runtimepipeline.StandingRestartTerminalOrphaned {
+		transition = "restored_stopped"
+		reason = "standing_terminal_declaration_restored"
+	} else if restoreDeclaration {
+		transition = "resumed"
+		reason = "standing_invalid_declaration_restored"
+	}
+	result := standingResultFromRow(current, transition, reason, updatedDisposition)
+	if err := s.insertStandingJournalTx(ctx, tx, result, previousState, "runtime", now); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	return result, nil
