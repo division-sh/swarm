@@ -252,6 +252,12 @@ type BeginRequest struct {
 	ExpiresAt             time.Time                        `json:"expires_at"`
 }
 
+type BeginReplayRequest struct {
+	PrincipalID    string `json:"principal_id"`
+	RequestKeyHash string `json:"request_key_hash"`
+	RequestHash    string `json:"request_hash"`
+}
+
 type ConfirmRequest struct {
 	OperationID               string    `json:"operation_id"`
 	PrincipalID               string    `json:"principal_id"`
@@ -415,6 +421,7 @@ type ProofResponsibility struct {
 
 type Store interface {
 	EnsureOperatorPrincipal(context.Context, time.Time) (Principal, error)
+	FindChannelBindingBeginReplay(context.Context, BeginReplayRequest) (Operation, bool, error)
 	BeginChannelBinding(context.Context, BeginRequest) (Operation, error)
 	ConfirmChannelBinding(context.Context, ConfirmRequest) (Operation, Binding, error)
 	ExpireChannelBinding(context.Context, ExpireRequest) (Operation, error)

@@ -50,6 +50,9 @@ func (s *OverlayStore) AdmitWithReceipt(ctx context.Context, key, value, receipt
 	if key == "" || strings.TrimSpace(receipt) == "" {
 		return WriteReceipt{}, fmt.Errorf("credential key and write receipt are required")
 	}
+	if err := ValidateValue(value); err != nil {
+		return WriteReceipt{}, fmt.Errorf("%w: credential %q cannot be admitted", err, key)
+	}
 	if s.primary != nil {
 		snapshotter, ok := s.primary.(Snapshotter)
 		if !ok || snapshotter == nil {

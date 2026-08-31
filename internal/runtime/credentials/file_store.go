@@ -88,6 +88,9 @@ func (s *FileStore) AdmitWithReceipt(_ context.Context, key, value, receipt stri
 	if key == "" || receipt == "" {
 		return WriteReceipt{}, fmt.Errorf("credential key and write receipt are required")
 	}
+	if err := ValidateValue(value); err != nil {
+		return WriteReceipt{}, fmt.Errorf("%w: credential %q cannot be admitted", err, key)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out WriteReceipt

@@ -1310,6 +1310,65 @@ func TestChannelOnboardingIdentityExpiryRevisionRaceConvergesParent(t *testing.T
 	}
 }
 
+func TestChannelOnboardingIdentityBeginCrashReplaysExactChildBeforeCheckpoint(t *testing.T) {
+	now := time.Date(2026, 8, 31, 21, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := testCredentialWriter(t)
+	op := testSucceededOperation(candidate, now)
+	op.Phase = PhaseAwaitingExternalIdentity
+	op.Revision = 4
+	op.BindingRevision = 0
+	op.CompletedAt = time.Time{}
+	op.IdentityOperationID = ""
+	op.CredentialAdmissions = writeTestOperationCredentials(t, credentials, op, "identity-begin-crash")
+	store := &cancellationTestStore{op: op}
+	identities := &cancellationTestIdentities{}
+	crashErr := errors.New("injected crash after identity begin")
+	barrierCalls := 0
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+		TestBarrier: func(boundary TestLifecycleBoundary, responsibilityID string) error {
+			if boundary != TestAfterIdentityBeginBeforeCheckpoint {
+				return nil
+			}
+			if responsibilityID != op.OperationID {
+				t.Fatalf("identity begin responsibility = %s, want %s", responsibilityID, op.OperationID)
+			}
+			barrierCalls++
+			if barrierCalls == 1 {
+				return crashErr
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.drive(context.Background(), op, candidate, ""); !errors.Is(err, crashErr) {
+		t.Fatalf("first drive error = %v", err)
+	}
+	committedChild := identities.operation
+	if committedChild.OperationID == "" || store.op.IdentityOperationID != "" || identities.beginCalls != 1 {
+		t.Fatalf("uncheckpointed child = child:%#v parent:%#v begin_calls:%d", committedChild, store.op, identities.beginCalls)
+	}
+
+	result, err := service.drive(context.Background(), store.op, candidate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identities.beginCalls != 2 || identities.beginRequestMismatch || identities.operation.OperationID != committedChild.OperationID ||
+		store.op.IdentityOperationID != committedChild.OperationID || result.Operation.IdentityOperationID != committedChild.OperationID {
+		t.Fatalf("identity begin replay = child:%#v parent:%#v result:%#v identities:%#v", identities.operation, store.op, result.Operation, identities)
+	}
+}
+
 func TestChannelOnboardingRecoveryRetriesProcessPublicationBeforePromotion(t *testing.T) {
 	now := time.Date(2026, 8, 27, 4, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
@@ -2067,6 +2126,9 @@ type cancellationTestIdentities struct {
 	beginCalls            int
 	beginKind             operatorchannel.OperationKind
 	beginExpectedRevision int64
+	beginRequestKey       string
+	beginRequestHash      string
+	beginRequestMismatch  bool
 	bindOnBegin           bool
 	bindingErr            error
 	sawCanceledContext    bool
@@ -2084,11 +2146,16 @@ func (i *cancellationTestIdentities) Principal() (operatorchannel.Principal, err
 	return operatorchannel.Principal{ID: "principal-a"}, nil
 }
 
-func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind operatorchannel.OperationKind, expectedRevision int64, _, _, onboardingOperationID string, providerCredential runtimecredentials.ValueEvidence, _ bool, _ time.Time) (operatorchannel.Operation, error) {
+func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind operatorchannel.OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, providerCredential runtimecredentials.ValueEvidence, _ bool, _ time.Time) (operatorchannel.Operation, error) {
 	i.observe(ctx)
 	i.beginCalls++
 	i.beginKind = kind
 	i.beginExpectedRevision = expectedRevision
+	if i.beginRequestKey == "" {
+		i.beginRequestKey, i.beginRequestHash = requestKey, requestHash
+	} else if i.beginRequestKey != requestKey || i.beginRequestHash != requestHash {
+		i.beginRequestMismatch = true
+	}
 	if i.operation.OperationID == "" || i.operation.State == operatorchannel.StateCredentialStale {
 		i.operation = operatorchannel.Operation{
 			OperationID: uuid.NewString(), State: operatorchannel.StateAwaitingClaim, Revision: 1,

@@ -180,6 +180,9 @@ func (w *CredentialWriter) Admit(ctx context.Context, req CredentialWriteRequest
 	if key == "" || key != strings.TrimSpace(key) || receipt == "" {
 		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential key and receipt are required")
 	}
+	if err := runtimecredentials.ValidateValue(req.Value); err != nil {
+		return CredentialWriteResult{}, fmt.Errorf("%w: credential %q cannot be admitted", err, key)
+	}
 	written, err := w.store.AdmitWithReceipt(ctx, key, req.Value, receipt)
 	if err != nil {
 		return CredentialWriteResult{}, err
