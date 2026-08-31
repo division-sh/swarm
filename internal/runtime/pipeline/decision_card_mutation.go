@@ -475,8 +475,7 @@ func decisionCardForcedDeferralEvent(card decisioncard.Card, until, now time.Tim
 		return noEvent, fmt.Errorf("forced decision-card deferral requires its exact budget window end")
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{
-		"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(),
-		"until": until.UTC().Format(time.RFC3339Nano), "cause": "weekly_budget_exhausted",
+		"card_id": card.CardID, "until": until.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		return noEvent, err

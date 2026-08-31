@@ -170,7 +170,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 		if rpc.Params["event_name"] != "item.received" || rpc.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", rpc.Params)
 		}
-		if !reflect.DeepEqual(rpc.Params["payload"], map[string]any{}) {
+		if !reflect.DeepEqual(rpc.Params["payload"], map[string]any{"item_id": ""}) {
 			t.Fatalf("generated payload = %#v, want schema-valid root input", rpc.Params["payload"])
 		}
 		writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))

@@ -1540,6 +1540,10 @@ func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []stri
 		events.EventEnvelope{EntityID: eventtest.UUID("entity-1")},
 		time.Unix(1700000000, 0).UTC(),
 	)
+	event, err := eventtest.AdmitPayload(event, "research", "scan.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
 	view, err := operatorread.NewOperatorEventFull(event)
 	if err != nil {
 		panic(err)
