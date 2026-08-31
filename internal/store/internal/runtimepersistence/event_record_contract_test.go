@@ -92,6 +92,10 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			selected := eventtest.SelectedForkReplay(uuid.NewString(), "contract.selected_fork", eventtest.Producer(events.EventProducerNode, "selected-node"), "fork-task", []byte(`{"fork":true}`), 0, selectedLineage, events.EventEnvelope{}, now.Add(7*time.Microsecond))
+			selected, err = bindSemanticEventFixturePayload(selected)
+			if err != nil {
+				t.Fatal(err)
+			}
 			admitted, err := events.AdmitForPersistence(selected, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 			if err != nil {
 				t.Fatal(err)
@@ -132,7 +136,30 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 				uuid.NewString(), "outbox.payload_bytes", "gateway", "", payload, 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC),
 			)
-			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+			binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+				BundleHash:   "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+				BundleSource: "persisted",
+				FlowID:       "proof-flow",
+				EventKey:     "outbox.payload_bytes",
+				SchemaDigest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+				SchemaClass:  events.PayloadSchemaImported,
+			})
+			if err != nil {
+				t.Fatalf("build payload schema binding: %v", err)
+			}
+			admission, err := events.NewPayloadAdmission(payload, binding)
+			if err != nil {
+				t.Fatalf("build payload admission: %v", err)
+			}
+			event, err = events.ApplyPayloadAdmission(event, admission)
+			if err != nil {
+				t.Fatalf("apply payload admission: %v", err)
+			}
+			admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatalf("admit event for publish: %v", err)
+			}
+			if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, store, admitted, nil, runtimepipelineobligation.ScopeDirect); err != nil {
 				t.Fatalf("commit event: %v", err)
 			}
 
@@ -142,6 +169,10 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 			}
 			if got := prepared.Event.Event().Payload(); !bytes.Equal(got, payload) {
 				t.Fatalf("prepared payload = %q, want %q", got, payload)
+			}
+			gotAdmission, ok := prepared.Event.Event().PayloadAdmission()
+			if !ok || !gotAdmission.Binding().Equal(binding) {
+				t.Fatalf("prepared payload binding = %#v/%v, want exact persisted binding", gotAdmission.Binding(), ok)
 			}
 		})
 	}
@@ -308,6 +339,11 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 
 func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 	baseEvent := eventtest.RunCreatingRootIngress(uuid.NewString(), "duplicate.base", "gateway", "task", []byte(`{"value":1}`), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 17, 0, 0, 0, time.UTC))
+	var err error
+	baseEvent, err = bindSemanticEventFixturePayload(baseEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
 	admitted, err := events.AdmitForPersistence(baseEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)
@@ -719,6 +755,11 @@ func eventRecordContractBackends() []eventRecordContractBackend {
 
 func assertExactEventRecord(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, event events.Event) {
 	t.Helper()
+	var err error
+	event, err = bindSemanticEventFixturePayload(event)
+	if err != nil {
+		t.Fatalf("bind expected event payload: %v", err)
+	}
 	wantAdmitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatalf("admit expected event: %v", err)

@@ -23,7 +23,7 @@ func (e *Executor) applyContainedDataOperation(frame *executionFrame, current Ba
 
 	key := ""
 	if !write.Key.IsZero() {
-		rawKey, err := evalRequiredDataOperationExpression(current, frame.state, write.Key, "key")
+		rawKey, err := evalRequiredDataOperationExpression(current, frame.state, write.Key, "key", frameExpressionOptions(frame))
 		if err != nil {
 			return err
 		}
@@ -36,7 +36,7 @@ func (e *Executor) applyContainedDataOperation(frame *executionFrame, current Ba
 	hasIndex := !write.Index.IsZero()
 	index := 0
 	if hasIndex {
-		rawIndex, err := evalRequiredDataOperationExpression(current, frame.state, write.Index, "index")
+		rawIndex, err := evalRequiredDataOperationExpression(current, frame.state, write.Index, "index", frameExpressionOptions(frame))
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func (e *Executor) applyContainedDataOperation(frame *executionFrame, current Ba
 
 	var value any
 	if write.Operation != runtimecontracts.WorkflowDataOperationDelete {
-		rawValue, err := evalRequiredDataOperationExpression(current, frame.state, write.Value, "value")
+		rawValue, err := evalRequiredDataOperationExpression(current, frame.state, write.Value, "value", frameExpressionOptions(frame))
 		if err != nil {
 			return err
 		}
@@ -68,8 +68,8 @@ func (e *Executor) applyContainedDataOperation(frame *executionFrame, current Ba
 	return nil
 }
 
-func evalRequiredDataOperationExpression(base BaseContext, state ExecutionState, expr runtimecontracts.ExpressionValue, label string) (any, error) {
-	value, ok, err := evalExpressionValue(base, state, expr, workflowexpr.ValueExpressionOptions{})
+func evalRequiredDataOperationExpression(base BaseContext, state ExecutionState, expr runtimecontracts.ExpressionValue, label string, opts workflowexpr.ValueExpressionOptions) (any, error) {
+	value, ok, err := evalExpressionValue(base, state, expr, opts)
 	if err != nil {
 		return nil, err
 	}

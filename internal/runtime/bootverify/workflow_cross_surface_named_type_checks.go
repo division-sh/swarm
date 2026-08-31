@@ -166,7 +166,11 @@ func collectCrossSurfaceTypeCatalogShapes(add func(string, string, map[string]st
 		if typeName == "" {
 			continue
 		}
-		add("type "+scope+"."+typeName, "type "+scope+"."+typeName, crossSurfaceNamedTypeFields(doc.Types[typeName]))
+		resolved, err := (runtimecontracts.CatalogTypeReference{Type: typeName, Catalog: doc}).Resolve()
+		if err != nil {
+			continue
+		}
+		add("type "+scope+"."+typeName, "type "+scope+"."+typeName, crossSurfaceNamedTypeFields(resolved))
 	}
 }
 
@@ -234,10 +238,13 @@ func newCrossSurfaceShapeCandidate(label, location string, fields map[string]str
 	}, true
 }
 
-func crossSurfaceNamedTypeFields(decl runtimecontracts.NamedTypeDecl) map[string]string {
-	fields := make(map[string]string, len(decl.Fields))
-	for name, spec := range decl.Fields {
-		fields[name] = spec.Type
+func crossSurfaceNamedTypeFields(resolved runtimecontracts.ResolvedCatalogType) map[string]string {
+	fields := make(map[string]string, len(resolved.Fields))
+	for _, field := range resolved.Fields {
+		fields[field.Name] = field.TypeRef
+		if field.IsOptional {
+			fields[field.Name] += "?"
+		}
 	}
 	return fields
 }
@@ -246,6 +253,9 @@ func crossSurfaceEventPayloadFields(entry runtimecontracts.EventCatalogEntry) ma
 	fields := make(map[string]string, len(entry.Payload.Properties))
 	for name, spec := range entry.Payload.Properties {
 		fields[name] = spec.Type
+		if !containsString(entry.Payload.Required, name) {
+			fields[name] += "?"
+		}
 	}
 	return fields
 }

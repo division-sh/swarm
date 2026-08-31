@@ -41,6 +41,7 @@ type RestoredEventInput struct {
 	ParentEventID string
 	OperatorRef   *OperatorReferenceProvenance
 	SelectedFork  *SelectedForkLineage
+	Payload       PayloadAdmission
 }
 
 // RestoreAdmittedEvent is the canonical durable readback boundary. It does not
@@ -78,6 +79,10 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 	}
 	if err != nil {
 		return AdmittedEvent{}, err
+	}
+	event, err = ApplyPayloadAdmission(event, input.Payload)
+	if err != nil {
+		return AdmittedEvent{}, fmt.Errorf("durable event payload admission: %w", err)
 	}
 	if event.ID() != strings.TrimSpace(input.Facts.ID) || !event.CreatedAt().Equal(input.Facts.CreatedAt.UTC().Truncate(time.Microsecond)) {
 		return AdmittedEvent{}, fmt.Errorf("durable event identity changed during readback")

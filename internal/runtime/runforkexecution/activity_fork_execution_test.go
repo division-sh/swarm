@@ -159,15 +159,16 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 
 			forkRequest := loadSelectedContractActivityRequest(t, db, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID)
-			if forkRequest.SourceRunID != result.Materialization.ForkRunID || forkRequest.SourceEventID != result.ForkEvents[0].ForkEventID || !forkRequest.Generation.Valid() || forkRequest.Generation.RevisionID == sourceGeneration.RevisionID {
-				t.Fatalf("fork request identity = %#v, source generation = %#v", forkRequest, sourceGeneration)
+			if forkRequest.SourceRunID != sourceRunID || forkRequest.SourceEventID != initiatingEventID || !forkRequest.Generation.Equal(sourceGeneration) {
+				t.Fatalf("selected source payload changed = %#v, source generation = %#v", forkRequest, sourceGeneration)
 			}
+			forkGeneration := loadSelectedContractActivityGeneration(t, db, result.Materialization.ForkRunID, entityID)
 			forkFact := activityidentity.Fact{
-				RunID: result.Materialization.ForkRunID, SourceEventID: forkRequest.SourceEventID,
-				ParentEventID: forkRequest.ParentEventID, EntityID: entityID,
-				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
+				RunID: result.Materialization.ForkRunID, SourceEventID: result.ForkEvents[0].ForkEventID,
+				EntityID: entityID,
+				Owner:    activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
 				HandlerEventKey: "review.requested", ActivityID: "connector",
-				Tool: "provider.connector", Attempt: 1, RevisionID: forkRequest.Generation.RevisionID,
+				Tool: "provider.connector", Attempt: 1, RevisionID: forkGeneration.RevisionID,
 			}
 			forkRequestEventID := activityidentity.RequestEventID(forkFact)
 			forkResultEventID := activityidentity.ResultEventID(forkFact, tt.resultEventType)
@@ -187,12 +188,12 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				if forkAttemptCount != 1 {
 					t.Fatalf("fork activity attempts = %d, want 1", forkAttemptCount)
 				}
-				assertSelectedContractForkActivityAttempt(t, db, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
+				assertSelectedContractForkActivityAttempt(t, db, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkGeneration, tt)
 			}
 
 			published := loadSelectedContractActivityResult(t, db, result.Materialization.ForkRunID, forkResultEventID, tt.resultEventType)
-			if published["revision_id"] != forkRequest.Generation.RevisionID {
-				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkRequest.Generation.RevisionID)
+			if published["revision_id"] != forkGeneration.RevisionID {
+				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkGeneration.RevisionID)
 			}
 			if tt.failureClass != "" {
 				failure, _ := published["failure"].(map[string]any)
@@ -258,21 +259,32 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 func selectedContractActivitySourceWithMode(serverURL string, effectClass runtimecontracts.ActivityEffectClass, mode string) semanticview.Source {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{ID: "connector", Tool: "provider.connector"},
+		Loop:     &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "pending"},
 	}
 	node := runtimecontracts.SystemNodeContract{
 		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "flow_a", PackageKey: "activity-fork-proof", Dir: "flows/flow_a"},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", Mode: mode, InitialState: "pending", States: []string{"pending"}},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
+		Paths: runtimecontracts.FlowContractPaths{ID: "flow_a", PackageKey: "activity-fork-proof", Dir: "flows/flow_a"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Name: "flow_a", Mode: mode, InitialState: "pending", States: []string{"pending"},
+			LoopDeclarations: runtimecontracts.FlowLoopDeclarations{Declared: true, Entries: []runtimecontracts.FlowLoopDeclaration{{
+				ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
+				Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "pending"},
+			}}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "activity-fork-proof", Version: "v1", InitialStage: "pending",
 			FlowInitial: map[string]string{"flow_a": "pending"}, FlowStates: map[string][]string{"flow_a": {"pending"}},
+			Loops: []runtimecontracts.WorkflowLoopPlan{{
+				FlowID: "flow_a", ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
+				Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "pending"},
+			}},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"test-node": {"review.requested": handler},
 			},
@@ -327,6 +339,23 @@ func seedSelectedContractActivityLoop(t *testing.T, db *sql.DB, runID, entityID,
 	`, runID, entityID, handlerLoops, requestEventID, at); err != nil {
 		t.Fatalf("seed source loop mutation: %v", err)
 	}
+}
+
+func loadSelectedContractActivityGeneration(t *testing.T, db *sql.DB, runID, entityID string) attemptgeneration.Generation {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRowContext(context.Background(), `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&raw); err != nil {
+		t.Fatalf("load selected fork loop state: %v", err)
+	}
+	var buckets map[string]map[string]any
+	if err := json.Unmarshal(raw, &buckets); err != nil {
+		t.Fatalf("decode selected fork loop state: %v", err)
+	}
+	activation, found, err := loopruntime.Load(buckets, "flow_a", "revision")
+	if err != nil || !found {
+		t.Fatalf("load selected fork loop generation: found=%v err=%v", found, err)
+	}
+	return activation.Generation()
 }
 
 func seedSelectedContractActivityRequest(t *testing.T, db *sql.DB, runID, requestEventID string, payload selectedContractActivityRequestPayload) {

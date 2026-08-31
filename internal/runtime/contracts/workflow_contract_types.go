@@ -1274,6 +1274,7 @@ type NamedTypeDecl struct {
 
 type TypeFieldSpec struct {
 	Type        string            `yaml:"type"`
+	IsOptional  bool              `yaml:"-" json:"is_optional"`
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
 }

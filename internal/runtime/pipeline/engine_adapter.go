@@ -25,6 +25,7 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 type pipelineEngineEvaluator struct {
@@ -52,7 +53,17 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
 	}
-	return e.evaluator.EvalBool(expression, queryCtx)
+	options := workflowexpr.ValueExpressionOptions{AllowAccumulated: true}
+	if workflowexpr.ExpressionReferencesRoot(expression, "payload") {
+		eventType := strings.TrimSpace(asString(queryCtx.Event["trigger_event_type"]))
+		resolution := semanticview.ResolveEventSchema(e.coordinator.SemanticSource(), ctx.FlowID, eventType)
+		if !resolution.HasStructural {
+			return false, fmt.Errorf("workflow payload expression for %s has no exact structural schema", eventType)
+		}
+		payloadType := resolution.StructuralType.Clone()
+		options.PayloadType = &payloadType
+	}
+	return e.evaluator.EvalBoolWithOptions(expression, queryCtx, options)
 }
 
 func (e pipelineEngineEvaluator) workflowName() string {

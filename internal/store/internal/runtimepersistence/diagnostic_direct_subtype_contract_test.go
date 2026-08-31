@@ -80,7 +80,11 @@ func namedDiagnosticContractEventForTuple(eventType events.EventType, runID stri
 }
 
 func commitNamedDiagnosticContractEvent(ctx context.Context, fixture authorActivityReceiptFixture, expectedType events.EventType, event events.Event) error {
-	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	bound, err := eventtest.AdmitPayload(event, "", string(event.Type()))
+	if err != nil {
+		return err
+	}
+	admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}

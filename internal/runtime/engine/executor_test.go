@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
@@ -35,12 +37,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"gopkg.in/yaml.v3"
 )
 
 func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+}
+
+func requiredEventPayload(fields map[string]runtimecontracts.EventFieldSpec) runtimecontracts.EventCatalogEntry {
+	required := make([]string, 0, len(fields))
+	for field := range fields {
+		required = append(required, field)
+	}
+	sort.Strings(required)
+	return runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: fields, Required: required}}
+}
+
+func sourceWithEvents(entries map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Events: entries})
 }
 
 func mustCompileEngineSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
@@ -75,10 +91,10 @@ func fanOutEntitySource(t testing.TB) semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 				"replacement": {Type: "[text]"},
-			}}},
+			}, Required: []string{"replacement"}}},
 			"item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 				"item": {Type: "text"},
-			}}},
+			}, Required: []string{"item"}}},
 		},
 	})
 }
@@ -415,7 +431,14 @@ func sourceWithPolicy(values map[string]any) semanticview.Source {
 	for key, value := range values {
 		policy.Values[key] = runtimecontracts.PolicyValue{Value: value}
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: policy})
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: policy, Events: map[string]runtimecontracts.EventCatalogEntry{
+		"digest.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"score": {Type: "integer"}, "items": {Type: "[json]"},
+		}),
+		"items.submitted": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"category": {Type: "text"}, "items": {Type: "[json]"},
+		}),
+	}})
 }
 
 func stubSourceWithRootEntityContract() semanticview.Source {
@@ -960,7 +983,7 @@ func TestExecutionScopeResolveOperand_RejectsLegacyEventReceiverProjection(t *te
 }
 
 func TestCompiledExecutionCondition_AllowsSupportedEventRouteRoot(t *testing.T) {
-	compiled, err := compileExecutionCondition(`event.source.entity_id == "source-entity"`)
+	compiled, err := compileExecutionCondition(`event.source.entity_id == "source-entity"`, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		t.Fatalf("compileExecutionCondition error: %v", err)
 	}
@@ -989,7 +1012,7 @@ func TestCompiledExecutionCondition_RejectsLegacyEventReceiverProjection(t *test
 		`event["flow_instance"] == "legacy-flow"`,
 	} {
 		t.Run(expression, func(t *testing.T) {
-			_, err := compileExecutionCondition(expression)
+			_, err := compileExecutionCondition(expression, workflowexpr.ValueExpressionOptions{})
 			if err == nil {
 				t.Fatalf("expected %q to fail closed", expression)
 			}
@@ -1381,7 +1404,7 @@ func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
 					"evidence":    {Type: "text"},
 					"confidence":  {Type: "text"},
 					"targets":     {Type: "[text]"},
-				}},
+				}, Required: []string{"vertical_id", "dimension", "tier", "score", "evidence", "confidence", "targets"}},
 			},
 		},
 	})
@@ -1465,6 +1488,50 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	emittedScores, ok := emitted["scores"].([]any)
 	if !ok || len(emittedScores) != 1 {
 		t.Fatalf("emit payload scores = %#v", emitted["scores"])
+	}
+}
+
+func TestAccumulatorProjection_OmitsAbsentOptionalNamedFields(t *testing.T) {
+	binding := accprojection.Binding{
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+		}},
+		TargetType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+			{Name: "summary", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+		}},
+		Project: map[string]any{
+			"id":   "source.id",
+			"note": "source.note",
+		},
+	}
+	typed, err := accumulatorTypedView(binding, map[string]any{"id": "item-1"})
+	if err != nil {
+		t.Fatalf("accumulatorTypedView: %v", err)
+	}
+	if !reflect.DeepEqual(typed, map[string]any{"id": "item-1"}) {
+		t.Fatalf("typed view = %#v, want absent optional field omitted", typed)
+	}
+
+	projected, err := (&Executor{}).projectAccumulatorItem(nil, binding, typed)
+	if err != nil {
+		t.Fatalf("projectAccumulatorItem: %v", err)
+	}
+	if !reflect.DeepEqual(projected, map[string]any{"id": "item-1"}) {
+		t.Fatalf("projected item = %#v, want absent optional fields omitted", projected)
+	}
+}
+
+func TestAccumulatorTypedView_RejectsAbsentRequiredNamedField(t *testing.T) {
+	_, err := accumulatorTypedView(accprojection.Binding{
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "id", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		}},
+	}, map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), `missing required typed-view field "id"`) {
+		t.Fatalf("error = %v, want missing required field", err)
 	}
 }
 
@@ -3118,6 +3185,9 @@ func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intent
 
 func sourceWithActivityTool() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"source.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}}),
+		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -3286,7 +3356,9 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source: sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+			"items.submitted": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}}),
+		}),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3750,6 +3822,14 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 }
 
 func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing.T) {
+	source := sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+		"account.scored": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"account_id": {Type: "text"}, "score": {Type: "integer"},
+		}),
+		"account.bucketed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"account_id": {Type: "text"}, "score": {Type: "integer"}, "bucket": {Type: "text"},
+		}),
+	})
 	cases := []struct {
 		name   string
 		score  int
@@ -3783,7 +3863,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			publications := &recordingPublicationCommitter{}
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:        stubSource(),
+				Source:        source,
 				StateRepo:     stubStateRepo{},
 				MutationOwner: composedMutationOwner{publications: publications},
 				Locker:        stubLocker{},
@@ -4043,7 +4123,7 @@ func emitFromExecutorSource() semanticview.Source {
 						"interest_score": {Type: "number"},
 						"computed_tier":  {Type: "string"},
 					},
-					Required: []string{"interest_score"},
+					Required: []string{"interest_score", "computed_tier"},
 				},
 			},
 			"account.bucketed": {
@@ -5155,7 +5235,14 @@ func TestSelectedFanOutPlanIgnoresContradictoryRawHandlerSpec(t *testing.T) {
 
 func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source: sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+			"vertical.discovered": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"mode": {Type: "text"}, "discovery_context": {Type: "object"},
+			}),
+			"scoring.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"vertical_name": {Type: "text"}, "rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"}, "discovery_context": {Type: "object"},
+			}),
+		}),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -7055,7 +7142,14 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source: sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"ok": {Type: "boolean"}, "score": {Type: "integer"}, "legacy": {Type: "text"},
+			}),
+			"guard.failed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"score": {Type: "integer"}, "reason": {Type: "text"},
+			}),
+		}),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},

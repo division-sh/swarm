@@ -540,23 +540,19 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		}
 		seen[namedName] = struct{}{}
 		defer delete(seen, namedName)
-		named := types.Types[namedName]
-		props := make(map[string]any, len(named.Fields))
-		required := make([]string, 0, len(named.Fields))
-		fieldNames := make([]string, 0, len(named.Fields))
-		for fieldName := range named.Fields {
-			fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
+		resolved, err := (CatalogTypeReference{Type: namedName, Catalog: types}).Resolve()
+		if err != nil {
+			return map[string]any{}
 		}
-		sort.Strings(fieldNames)
-		for _, fieldName := range fieldNames {
-			if fieldName == "" {
-				continue
+		props := make(map[string]any, len(resolved.Fields))
+		required := make([]string, 0, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			prop := eventSchemaForTypeRefSchema(field.TypeRef, types, seen)
+			applySchemaRefinements(prop, field.Refinements)
+			props[field.Name] = prop
+			if !field.IsOptional {
+				required = append(required, field.Name)
 			}
-			spec := named.Fields[fieldName]
-			prop := eventSchemaForTypeRefSchema(spec.Type, types, seen)
-			applySchemaRefinements(prop, spec.Refinements)
-			props[fieldName] = prop
-			required = append(required, fieldName)
 		}
 		return map[string]any{
 			"type":                 "object",
@@ -668,12 +664,12 @@ func eventListItemType(typeRef string) string {
 	switch {
 	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
 		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
-	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
-		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	case strings.HasSuffix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[:len(typeRef)-2])
 	case strings.HasPrefix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[2:])
+	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
+		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	default:
 		return typeRef
 	}

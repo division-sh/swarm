@@ -1,9 +1,9 @@
 search.requested:
-  query: text?
-  candidate_ids: "[text]?"
+  query: text
+  candidate_ids: "[text]"
 scout.requested:
-  query: text?
-  candidate_ids: "[text]?"
+  query: text
+  candidate_ids: "[text]"
 candidate.requested:
-  batch_id: text?
+  batch_id: text
   candidate_id: text

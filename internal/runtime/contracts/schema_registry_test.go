@@ -3,6 +3,7 @@ package contracts
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -119,6 +120,47 @@ payload:
 
 	if len(entry.Payload.Required) != 1 || entry.Payload.Required[0] != "required_value" {
 		t.Fatalf("Required = %#v, want only required_value", entry.Payload.Required)
+	}
+}
+
+func TestEventSchemaForNamedTypeRequiresOnlyRequiredFieldEdges(t *testing.T) {
+	types := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Contact": {Fields: map[string]TypeFieldSpec{
+			"name":  {Type: "text"},
+			"email": {Type: "text", IsOptional: true},
+		}},
+	}}
+	schema := eventSchemaForResolvedType("Contact", types, map[string]struct{}{})
+	required, ok := schema["required"].([]string)
+	if !ok || !reflect.DeepEqual(required, []string{"name"}) {
+		t.Fatalf("required = %#v, want [name]", schema["required"])
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok || properties["email"] == nil {
+		t.Fatalf("properties = %#v, want optional email schema retained", schema["properties"])
+	}
+}
+
+func TestCatalogTypeReferenceResolvesRecursiveFieldPresence(t *testing.T) {
+	resolved, err := (CatalogTypeReference{Type: "Contact", Catalog: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Contact": {Fields: map[string]TypeFieldSpec{
+			"name":    {Type: "text"},
+			"address": {Type: "Address", IsOptional: true},
+		}},
+		"Address": {Fields: map[string]TypeFieldSpec{
+			"city": {Type: "text"},
+		}},
+	}}}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	address, ok := resolved.Field("address")
+	if !ok || !address.IsOptional || address.Type.Kind != CatalogTypeObject {
+		t.Fatalf("address = %#v, want optional object field", address)
+	}
+	city, ok := address.Type.Field("city")
+	if !ok || city.IsOptional || city.Type.Kind != CatalogTypeText {
+		t.Fatalf("city = %#v, want required text field", city)
 	}
 }
 

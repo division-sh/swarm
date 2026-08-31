@@ -31,6 +31,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                   1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                         1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                     1,
+	{Path: "internal/runtime/diagnostics.go", Scope: "logRuntimeEventSpec", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                         1,
 	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:         1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                      1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                                     1,

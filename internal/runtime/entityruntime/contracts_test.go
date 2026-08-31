@@ -143,6 +143,64 @@ func TestMaterialize_EnforcesNestedDefaultRefinements(t *testing.T) {
 	}
 }
 
+func TestMaterialize_PreservesOptionalNestedFieldOmission(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"spec": {Type: "Spec"},
+		}},
+		Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Spec": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"name": {Type: "text"},
+				"note": {Type: "text", IsOptional: true},
+			}},
+		}},
+	}
+
+	materialized, err := Materialize(contract, nil)
+	if err != nil {
+		t.Fatalf("Materialize defaults: %v", err)
+	}
+	if got := materialized["spec"]; !reflect.DeepEqual(got, map[string]any{"name": ""}) {
+		t.Fatalf("default spec = %#v, want required name only", got)
+	}
+
+	explicit, err := Materialize(contract, map[string]any{"spec": map[string]any{"name": "deploy", "note": "ready"}})
+	if err != nil {
+		t.Fatalf("Materialize explicit optional field: %v", err)
+	}
+	if got := explicit["spec"]; !reflect.DeepEqual(got, map[string]any{"name": "deploy", "note": "ready"}) {
+		t.Fatalf("explicit spec = %#v", got)
+	}
+}
+
+func TestMaterialize_OptionalNestedEqualityRequiresMatchingPresence(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"spec": {Type: "Spec"},
+		}},
+		Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Spec": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"left": {
+					Type:        "text",
+					IsOptional:  true,
+					Refinements: runtimecontracts.SchemaRefinements{EqualTo: "right"},
+				},
+				"right": {Type: "text", IsOptional: true},
+			}},
+		}},
+	}
+
+	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{}}); err != nil {
+		t.Fatalf("both optional equality fields omitted: %v", err)
+	}
+	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"left": "same"}}); err == nil || !strings.Contains(err.Error(), "target is missing") {
+		t.Fatalf("one-sided optional equality error = %v", err)
+	}
+	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"left": "same", "right": "same"}}); err != nil {
+		t.Fatalf("present matching optional equality fields: %v", err)
+	}
+}
+
 func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{

@@ -48,9 +48,10 @@ func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 }
 
 func TestEvalValueExpression_ExposesFanOutItemAlias(t *testing.T) {
+	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}
 	value, err := EvalValueExpressionWithOptions(`[line_item]`, ValueContext{
 		FanOut: map[string]any{"item": "industry-a"},
-	}, ValueExpressionOptions{ItemAlias: "line_item"})
+	}, ValueExpressionOptions{ItemAlias: "line_item", ItemType: &itemType})
 	if err != nil {
 		t.Fatalf("EvalValueExpression error = %v", err)
 	}
@@ -153,6 +154,163 @@ func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", tc.expression, err)
 			}
 		})
+	}
+}
+
+func TestSchemaBoundPayloadOptionalDecisionMatrix(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{
+		Kind: runtimecontracts.CatalogTypeObject,
+		Name: "ScorePayload",
+		Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "required", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+			{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}, IsOptional: true},
+		},
+	}
+	opts := ValueExpressionOptions{PayloadType: &payloadType, RequireBool: true}
+	for _, expression := range []string{
+		`payload.required > 0`,
+		`payload.?score.orValue(0) > 0`,
+		`has(payload.score) ? payload.score > 0 : false`,
+		`!has(payload.score) ? false : payload.score > 0`,
+		`has(payload.score) && payload.score > 0`,
+		`!has(payload.score) || payload.score > 0`,
+	} {
+		t.Run("valid "+expression, func(t *testing.T) {
+			if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
+			}
+		})
+	}
+	for _, expression := range []string{
+		`payload.score > 0`,
+		`has(payload.score) || payload.score > 0`,
+		`!has(payload.score) && payload.score > 0`,
+	} {
+		t.Run("invalid "+expression, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(expression, opts)
+			if err == nil || !strings.Contains(err.Error(), "optional field payload.score") ||
+				!strings.Contains(err.Error(), "payload.?score.orValue(<default>)") ||
+				!strings.Contains(err.Error(), "has(payload.score) &&") {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v, want dual teaching error", expression, err)
+			}
+		})
+	}
+}
+
+func TestSchemaBoundPayloadOptionalSelectionEvaluatesOrdinaryMaps(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{
+		Kind: runtimecontracts.CatalogTypeObject,
+		Name: "ScorePayload",
+		Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}, IsOptional: true},
+		},
+	}
+	opts := ValueExpressionOptions{PayloadType: &payloadType}
+	for _, test := range []struct {
+		name    string
+		payload map[string]any
+		want    int
+	}{
+		{name: "absent", payload: map[string]any{}, want: 7},
+		{name: "present", payload: map[string]any{"score": 9}, want: 9},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := EvalValueExpressionWithOptions(`payload.?score.orValue(7)`, ValueContext{Payload: test.payload}, opts)
+			if err != nil {
+				t.Fatalf("EvalValueExpressionWithOptions: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("value = %#v, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSchemaBoundPayloadNestedOptionalAndTraversalMatrix(t *testing.T) {
+	childType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "Child", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "required", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+		{Name: "optional", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+	}}
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "NestedPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "parent", Type: childType, IsOptional: true},
+		{Name: "items", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &childType}},
+		{Name: "labels", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeMap, Key: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, Value: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}},
+	}}
+	opts := ValueExpressionOptions{PayloadType: &payloadType}
+	for _, expression := range []string{
+		`payload.?parent.optMap(p, p.required).orValue(0)`,
+		`payload.?parent.optFlatMap(p, p.?optional).orValue("")`,
+		`payload.labels[?"key"].orValue("")`,
+		`payload.items[?0].optMap(item, item.required).orValue(0)`,
+		`payload.items.filter(item, has(item.optional) && item.optional != "").size()`,
+	} {
+		t.Run("valid "+expression, func(t *testing.T) {
+			if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
+			}
+		})
+	}
+	for _, expression := range []string{
+		`payload.parent.required`,
+		`payload.labels["key"]`,
+		`payload.items[0].required`,
+		`payload.items.filter(item, has(item.optional)).map(item, item.optional)`,
+	} {
+		t.Run("invalid "+expression, func(t *testing.T) {
+			if err := ValidateValueExpressionWithOptions(expression, opts); err == nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) succeeded", expression)
+			}
+		})
+	}
+}
+
+func TestSchemaBoundOptionalResultRequiresCompatibleOptionalSink(t *testing.T) {
+	integerType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "ScorePayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "score", Type: integerType, IsOptional: true},
+	}}
+	if err := ValidateValueExpressionWithOptions(`payload.?score`, ValueExpressionOptions{PayloadType: &payloadType, ResultType: &integerType}); err == nil {
+		t.Fatal("optional result was accepted for required sink")
+	}
+	opts := ValueExpressionOptions{PayloadType: &payloadType, ResultType: &integerType, ResultOptional: true}
+	if err := ValidateValueExpressionWithOptions(`payload.?score`, opts); err != nil {
+		t.Fatalf("optional result for optional sink: %v", err)
+	}
+	absent, err := EvalValueResultWithOptions(`payload.?score`, ValueContext{Payload: map[string]any{}}, opts)
+	if err != nil {
+		t.Fatalf("evaluate absent optional result: %v", err)
+	}
+	if absent.Present() {
+		t.Fatalf("absent result = %#v, want omission", absent.Value())
+	}
+	present, err := EvalValueResultWithOptions(`payload.?score`, ValueContext{Payload: map[string]any{"score": 7}}, opts)
+	if err != nil {
+		t.Fatalf("evaluate present optional result: %v", err)
+	}
+	if !present.Present() || present.Value() != 7 {
+		t.Fatalf("present result = (%#v, %t), want (7, true)", present.Value(), present.Present())
+	}
+}
+
+func TestSchemaBoundResultUsesStructuralRecordIdentity(t *testing.T) {
+	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "SourceItem", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+	}}
+	resultType := itemType.Clone()
+	resultType.Name = "CompiledEventField"
+	if err := ValidateValueExpressionWithOptions(`item`, ValueExpressionOptions{AllowBareItem: true, ItemType: &itemType, ResultType: &resultType}); err != nil {
+		t.Fatalf("structurally identical record result: %v", err)
+	}
+	resultType.Fields[0].IsOptional = true
+	if err := ValidateValueExpressionWithOptions(`item`, ValueExpressionOptions{AllowBareItem: true, ItemType: &itemType, ResultType: &resultType}); err == nil {
+		t.Fatal("field-presence mismatch was accepted as structurally identical")
+	}
+}
+
+func TestValidateValueExpressionRejectsDynamicPayloadAuthority(t *testing.T) {
+	dynamic := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeDynamic}
+	if err := ValidateValueExpressionWithOptions(`payload.value`, ValueExpressionOptions{PayloadType: &dynamic}); err == nil {
+		t.Fatal("dynamic payload authority was accepted for an exact-schema expression")
 	}
 }
 
@@ -316,19 +474,40 @@ func TestValidateValueExpression_AllowsSupportedEventBracketRefs(t *testing.T) {
 }
 
 func TestValidateValueExpression_AllowsNestedAuthorEventFields(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "NestedEventPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "event", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "NestedEvent", Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "entity_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+			{Name: "flow_instance", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		}}},
+	}}
 	for _, expression := range []string{
 		`payload.event.entity_id`,
 		`payload.event.flow_instance == "flow-1"`,
 		`_entity.event.flow_instance`,
 		`payload.event.entity_id == event.source.entity_id`,
-		`payload.event["entity_id"]`,
 		`_entity.event["flow_instance"]`,
 	} {
 		t.Run(expression, func(t *testing.T) {
-			if err := ValidateValueExpression(expression); err != nil {
+			opts := ValueExpressionOptions{}
+			if ExpressionReferencesRoot(expression, "payload") {
+				opts.PayloadType = &payloadType
+			}
+			if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
 				t.Fatalf("ValidateValueExpression(%q) error = %v", expression, err)
 			}
 		})
+	}
+}
+
+func TestValidateValueExpression_RejectsNamedRecordBracketAccess(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "NestedEventPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "event", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "NestedEvent", Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "entity_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		}}},
+	}}
+	err := ValidateValueExpressionWithOptions(`payload.event["entity_id"]`, ValueExpressionOptions{PayloadType: &payloadType})
+	if err == nil {
+		t.Fatal("expected named-record bracket access to reject")
 	}
 }
 
@@ -371,6 +550,12 @@ func TestValidateValueExpression_AllowsSupportedEventContextRefs(t *testing.T) {
 }
 
 func TestValidateValueExpression_AllowsFanOutAliasAndStringLiteralTargetText(t *testing.T) {
+	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "LineItem", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "target", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+	}}
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "FanOutPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "note", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+	}}
 	tests := []string{
 		`line_item.target`,
 		`"fan_out.target"`,
@@ -378,7 +563,11 @@ func TestValidateValueExpression_AllowsFanOutAliasAndStringLiteralTargetText(t *
 	}
 	for _, expression := range tests {
 		t.Run(expression, func(t *testing.T) {
-			if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{ItemAlias: "line_item"}); err != nil {
+			opts := ValueExpressionOptions{ItemAlias: "line_item", ItemType: &itemType}
+			if ExpressionReferencesRoot(expression, "payload") {
+				opts.PayloadType = &payloadType
+			}
+			if err := ValidateValueExpressionWithOptions(expression, opts); err != nil {
 				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
 			}
 		})

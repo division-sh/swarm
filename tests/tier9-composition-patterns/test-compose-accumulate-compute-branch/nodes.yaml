@@ -11,12 +11,12 @@ scorer:
             target_field: score
       on_complete:
         - element_id: 19388a80-c249-4e16-8648-f239259d5e6c
-          condition: "payload.value >= 75"
+          condition: "payload.value >= 75.0"
           advances_to: high
           emit:
             event: result.high
         - element_id: d5399ad1-65cb-4d4b-b110-faa3e7276584
-          condition: "payload.value >= 50"
+          condition: "payload.value >= 50.0"
           advances_to: mid
         - element_id: 77c1a87c-1c88-48e0-8493-b9113b0bc484
           condition: "else"

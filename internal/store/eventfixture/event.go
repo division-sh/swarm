@@ -85,6 +85,10 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 	if exec == nil {
 		return fmt.Errorf("canonical event fixture requires a database")
 	}
+	event, err := BindPayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -132,6 +136,25 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 		return fmt.Errorf("canonical event fixture %s conflicts with its persisted record", record.EventID)
 	}
 	return nil
+}
+
+// BindPayload attaches explicit schema-less fixture admission evidence. It is
+// shared by store fixtures that intentionally bypass runtime publication.
+func BindPayload(event events.Event) (events.Event, error) {
+	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash:   "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		BundleSource: "ephemeral", FlowID: event.RoutingSource().Route().FlowID, EventKey: string(event.Type()),
+		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		SchemaClass:  events.PayloadSchemaSchemaLess,
+	})
+	if err != nil {
+		return event.Clone(), err
+	}
+	admission, err := events.NewPayloadAdmission(event.Payload(), binding)
+	if err != nil {
+		return event.Clone(), err
+	}
+	return events.ApplyPayloadAdmission(event, admission)
 }
 
 func fixtureSettlement(event events.Event) (events.RouteSettlement, error) {

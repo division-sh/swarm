@@ -216,17 +216,20 @@ func singletonCoordinatorValidateTypeRefSeen(types TypeCatalogDocument, typeRef 
 		return nil
 	}
 	typeName := templateInstanceTypeName(types, typeRef)
-	named, ok := types.Types[typeName]
-	if !ok {
+	if _, ok := types.Types[typeName]; !ok {
 		return fmt.Errorf("unsupported contract type %s", typeRef)
 	}
 	if _, ok := seen[typeName]; ok {
 		return nil
 	}
 	seen[typeName] = struct{}{}
-	for field, spec := range named.Fields {
-		if err := singletonCoordinatorValidateTypeRefSeen(types, spec.Type, seen); err != nil {
-			return fmt.Errorf("field %s: %w", strings.TrimSpace(field), err)
+	resolved, err := (CatalogTypeReference{Type: typeName, Catalog: types}).Resolve()
+	if err != nil {
+		return err
+	}
+	for _, field := range resolved.Fields {
+		if err := singletonCoordinatorValidateTypeRefSeen(types, field.TypeRef, seen); err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
 		}
 	}
 	delete(seen, typeName)

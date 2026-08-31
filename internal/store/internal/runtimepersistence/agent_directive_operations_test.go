@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -655,6 +656,10 @@ func directiveOperationReservationForIdentityAndPostureTest(t *testing.T, agentI
 	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}, operationID, eventID, now, posture)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
+	}
+	event, err = eventtest.AdmitPayload(event, "", runtimeagentcontrol.DirectiveEventType)
+	if err != nil {
+		t.Fatalf("admit directive payload: %v", err)
 	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

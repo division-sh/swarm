@@ -1,4 +1,4 @@
 check.requested:
-  score: integer?
-  override: boolean?
+  score: integer
+  override: boolean
 check.passed: {}

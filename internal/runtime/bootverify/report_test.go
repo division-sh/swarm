@@ -2442,19 +2442,28 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 }
 
 func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	node, eventType, handler, ok := firstBundleHandler(bundle)
-	if !ok {
-		t.Fatal("expected at least one handler")
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Task": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"task": {Type: "Task"}},
+				Required:   []string{"task"},
+			}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"complete-task": {
+				ID: "complete-task", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.requested": {Guard: &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}},
+				},
+			},
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{InitialState: "pending", States: []string{"pending"}},
 	}
-	handler.Guard = &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}
-	writeBundleHandler(t, bundle, node, eventType, handler)
-	entry := bundle.Events[eventType]
-	entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{
-		"task": {Type: "object"},
-	}
-	bundle.Events[eventType] = entry
-	writeBundleEventEntry(t, bundle, node, eventType, entry)
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3459,6 +3468,7 @@ emit:
 }
 
 func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
@@ -3475,13 +3485,27 @@ fan_out:
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{
+			ContractsRoot:      repoRoot,
+			PlatformSpecFile:   filepath.Join(repoRoot, "platform-spec.yaml"),
+			ProjectPackageFile: filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-condition-policy", "package.yaml"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"industries": {Type: "text[]"},
+					},
+					Required: []string{"industries"},
+				},
+			},
 			"market_research.industry_assigned": {
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"industry":            {Type: "text"},
 						"taxonomy_categories": {Type: "text[]"},
 					},
+					Required: []string{"industry", "taxonomy_categories"},
 				},
 			},
 		},
@@ -5559,7 +5583,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		ID:        "ready",
-		Condition: `entity.revision_count == 0 && payload.score >= 0 && event["source"].entity_id != ""`,
+		Condition: `entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""`,
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 	markFlowInputPinSource(t, bundle, "child", "task.assigned", "harness")

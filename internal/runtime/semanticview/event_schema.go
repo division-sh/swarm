@@ -5,14 +5,22 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
 type EventSchemaResolution struct {
-	Schema          runtimecontracts.EventSchema
-	EventKey        string
-	HasSchema       bool
-	UnresolvedTypes []string
+	Schema            runtimecontracts.EventSchema
+	CompiledSchema    runtimecontracts.CompiledEventSchema
+	StructuralType    runtimecontracts.ResolvedCatalogType
+	Classification    runtimecontracts.CompiledEventSchemaClassification
+	EventKey          string
+	HasSchema         bool
+	HasCompiled       bool
+	HasStructural     bool
+	HasClassification bool
+	UnresolvedTypes   []string
 }
 
 func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaResolution {
@@ -23,16 +31,26 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 	}
 	if bundle, ok := Bundle(source); ok && bundle != nil {
 		if schema, key, ok := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); ok {
-			return EventSchemaResolution{
+			resolution := EventSchemaResolution{
 				Schema:          schema,
 				EventKey:        strings.TrimSpace(key),
 				HasSchema:       true,
 				UnresolvedTypes: UnsupportedJSONSchemaTypes(schema.Schema),
 			}
+			bindCompiledEventSchema(source, bundle, flowID, eventType, &resolution)
+			bindEventSchemaClassification(source, flowID, eventType, &resolution)
+			bindStructuralEventSchema(&resolution)
+			return resolution
 		}
 	}
 	proof := ResolveFlowEventProof(source, flowID, eventType)
 	if !proof.HasSchema {
+		return EventSchemaResolution{}
+	}
+	// Some diagnostic-direct platform catalog rows reference a separate typed
+	// subtype owner instead of declaring an event payload schema. Do not turn
+	// that reference-only row into a closed empty-object schema.
+	if proof.Entry.Source == "platform_spec" && len(proof.Entry.Payload.Properties) == 0 {
 		return EventSchemaResolution{}
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
@@ -42,12 +60,96 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 	if !ok {
 		return EventSchemaResolution{}
 	}
-	return EventSchemaResolution{
+	resolution := EventSchemaResolution{
 		Schema:          schema,
 		EventKey:        proof.EventKey(),
 		HasSchema:       true,
 		UnresolvedTypes: UnsupportedJSONSchemaTypes(schema.Schema),
 	}
+	if bundle, ok := Bundle(source); ok && bundle != nil {
+		bindCompiledEventSchema(source, bundle, flowID, eventType, &resolution)
+	}
+	bindEventSchemaClassification(source, flowID, eventType, &resolution)
+	bindStructuralEventSchema(&resolution)
+	return resolution
+}
+
+func bindCompiledEventSchema(source Source, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string, resolution *EventSchemaResolution) {
+	if resolution == nil {
+		return
+	}
+	association := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, eventType)
+	if endpoint, ok := association.Endpoint(); ok {
+		if pin, found := source.FlowInputEventPin(flowID, endpoint.PinName); found {
+			if schema, owned := pin.ReceiverEventSchema(); owned {
+				resolution.CompiledSchema = schema
+				resolution.HasCompiled = true
+				return
+			}
+			if schema, owned := pin.ProducerEventSchema(); owned {
+				resolution.CompiledSchema = schema
+				resolution.HasCompiled = true
+				return
+			}
+		}
+	}
+	if schema, ok, err := bundle.ResolveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
+		resolution.CompiledSchema = schema
+		resolution.HasCompiled = true
+	}
+}
+
+func bindEventSchemaClassification(source Source, flowID, eventType string, resolution *EventSchemaResolution) {
+	if resolution == nil || !resolution.HasSchema {
+		return
+	}
+	if resolution.HasCompiled {
+		resolution.Classification = resolution.CompiledSchema.Classification()
+		resolution.HasClassification = true
+		return
+	}
+	proof := ResolveFlowEventProof(source, flowID, eventType)
+	if !proof.HasSchema {
+		return
+	}
+	switch {
+	case strings.Contains(strings.TrimSpace(proof.CatalogKey), "*"):
+		resolution.Classification = runtimecontracts.CompiledEventSchemaPattern
+	case strings.TrimSpace(proof.Entry.Source) == "platform_spec":
+		resolution.Classification = runtimecontracts.CompiledEventSchemaPlatform
+	case strings.HasPrefix(strings.TrimSpace(proof.Entry.Source), "contract_derived_activity") || strings.TrimSpace(proof.Entry.Swarm.Status) == "generated":
+		resolution.Classification = runtimecontracts.CompiledEventSchemaGenerated
+	default:
+		return
+	}
+	resolution.HasClassification = true
+}
+
+func bindStructuralEventSchema(resolution *EventSchemaResolution) {
+	if resolution == nil {
+		return
+	}
+	if resolution.HasCompiled {
+		if structural, ok := resolution.CompiledSchema.StructuralType(); ok {
+			resolution.StructuralType = structural
+			resolution.HasStructural = true
+			return
+		}
+	}
+	if !resolution.HasSchema {
+		return
+	}
+	acceptance := runtimeeventschema.CanonicalAcceptanceSchema(resolution.Schema.Schema)
+	canonical, err := canonicaljson.Bytes(acceptance)
+	if err != nil {
+		return
+	}
+	structural, err := runtimecontracts.ResolveJSONSchemaStructuralType(acceptance, "event."+canonicaljson.HashBytes(canonical))
+	if err != nil {
+		return
+	}
+	resolution.StructuralType = structural
+	resolution.HasStructural = true
 }
 
 func (r EventSchemaResolution) UnresolvedTypeError() error {

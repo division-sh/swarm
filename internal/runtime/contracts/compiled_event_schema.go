@@ -21,6 +21,7 @@ const (
 	CompiledEventSchemaImported  CompiledEventSchemaClassification = "imported"
 	CompiledEventSchemaGenerated CompiledEventSchemaClassification = "generated"
 	CompiledEventSchemaPattern   CompiledEventSchemaClassification = "pattern"
+	CompiledEventSchemaPlatform  CompiledEventSchemaClassification = "platform"
 )
 
 // CompiledEventSchemaProvider exposes admitted event semantics without
@@ -84,6 +85,7 @@ type compiledEventSchemaValue struct {
 	canonicalSchema        []byte
 	acceptanceSchemaDigest string
 	source                 CompiledEventSchemaSource
+	structuralType         ResolvedCatalogType
 }
 
 // CompiledEventSchema is the immutable, admitted event-schema boundary used
@@ -160,6 +162,15 @@ func (s CompiledEventSchema) Source() CompiledEventSchemaSource {
 	return s.value.source
 }
 
+// StructuralType returns the recursive, presence-aware payload root admitted
+// with this exact schema. It never exposes the owner's mutable backing value.
+func (s CompiledEventSchema) StructuralType() (ResolvedCatalogType, bool) {
+	if s.value == nil || s.value.structuralType.Kind == "" {
+		return ResolvedCatalogType{}, false
+	}
+	return s.value.structuralType.Clone(), true
+}
+
 func (s CompiledEventSchema) withRequiredField(name string, fieldSchema map[string]any) (CompiledEventSchema, error) {
 	name = strings.TrimSpace(name)
 	if s.value == nil {
@@ -205,6 +216,11 @@ func (s CompiledEventSchema) withRequiredField(name string, fieldSchema map[stri
 	value.acceptanceSchema = cloneEventSchemaMap(acceptanceSchema)
 	value.canonicalSchema = append([]byte(nil), canonicalSchema...)
 	value.acceptanceSchemaDigest = canonicaljson.HashBytes(canonicalSchema)
+	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
+	if err != nil {
+		return CompiledEventSchema{}, fmt.Errorf("receiver structural schema: %w", err)
+	}
+	value.structuralType = structuralType
 	return CompiledEventSchema{value: &value}, nil
 }
 
@@ -498,6 +514,11 @@ func newCompiledEventSchema(
 		acceptanceSchemaDigest: canonicaljson.HashBytes(canonicalSchema),
 		source:                 source,
 	}
+	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
+	if err != nil {
+		return CompiledEventSchema{}, fmt.Errorf("compiled structural schema: %w", err)
+	}
+	value.structuralType = structuralType
 	if strings.TrimSpace(businessKeyField) != "" {
 		key, err := compileEventBusinessKey(strings.TrimSpace(businessKeyField), fields)
 		if err != nil {

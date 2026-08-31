@@ -23,12 +23,13 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 			name: "valid",
 		},
 		{
-			name: "items source accepts array schema type",
+			name: "items source rejects untyped array schema type",
 			mutate: func(_ *runtimecontracts.FanOutSpec, bundle *runtimecontracts.WorkflowContractBundle) {
 				event := bundle.Events["order.accepted"]
 				event.Payload.Properties["line_items"] = runtimecontracts.EventFieldSpec{Type: "array"}
 				bundle.Events["order.accepted"] = event
 			},
+			wantError: "must declare an exact collection item type",
 		},
 		{
 			name: "missing alias",

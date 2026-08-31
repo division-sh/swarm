@@ -226,8 +226,8 @@ func stageLifecycleIdentityPostgresDeps(deps runtimepkg.RuntimeDeps, selected *s
 	deps.WorkflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 	deps.EventStore = selected
 	deps.EventBusDurable = conformanceDurableEventBusDependencies(selected)
-	deps.EventPayloadValidationBinder = selected
-	deps.InboundPayloadValidationBinder = selected
+	deps.EventPayloadAdmissionBinder = selected
+	deps.InboundPayloadAdmissionBinder = selected
 	deps.AuthorActivityRegistrars = []runtimepkg.AuthorActivityCatalogRegistrar{selected}
 	deps.RunBundleAvailability = selected
 	deps.RunControlStore = selected
@@ -270,8 +270,8 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	deps.WorkflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 	deps.EventStore = selected
 	deps.EventBusDurable = conformanceDurableEventBusDependencies(selected)
-	deps.EventPayloadValidationBinder = selected
-	deps.InboundPayloadValidationBinder = selected
+	deps.EventPayloadAdmissionBinder = selected
+	deps.InboundPayloadAdmissionBinder = selected
 	deps.AuthorActivityRegistrars = []runtimepkg.AuthorActivityCatalogRegistrar{selected}
 	deps.RunBundleAvailability = selected
 	deps.RunControlStore = selected

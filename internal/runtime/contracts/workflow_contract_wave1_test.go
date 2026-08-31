@@ -1127,6 +1127,59 @@ types:
 	}
 }
 
+func TestTypeCatalogDocumentDecode_PreservesNamedFieldOptionalityAndMergedMappings(t *testing.T) {
+	var doc TypeCatalogDocument
+	err := yaml.Unmarshal([]byte(`
+types:
+  Contact:
+    <<: &contact_fields
+      email: text?
+    phone:
+      type: text?
+      description: Optional phone number.
+    name: text
+`), &doc)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	contact := doc.Types["Contact"]
+	for _, field := range []string{"email", "phone"} {
+		spec, ok := contact.Fields[field]
+		if !ok {
+			t.Fatalf("Contact.%s missing from %#v", field, contact.Fields)
+		}
+		if spec.Type != "text" || !spec.IsOptional {
+			t.Fatalf("Contact.%s = %#v, want optional text", field, spec)
+		}
+	}
+	if spec := contact.Fields["name"]; spec.Type != "text" || spec.IsOptional {
+		t.Fatalf("Contact.name = %#v, want required text", spec)
+	}
+	if _, exists := contact.Fields["<<"]; exists {
+		t.Fatalf("merge pseudo-field leaked into Contact: %#v", contact.Fields)
+	}
+}
+
+func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
+	for _, typeRef := range []string{"text??", "text? ", "[text?]"} {
+		t.Run(typeRef, func(t *testing.T) {
+			var doc TypeCatalogDocument
+			err := yaml.Unmarshal([]byte("types:\n  Item:\n    value: '"+typeRef+"'\n"), &doc)
+			if err == nil || !strings.Contains(err.Error(), "optional") {
+				t.Fatalf("yaml.Unmarshal error = %v, want optional-marker rejection", err)
+			}
+		})
+	}
+}
+
+func TestEntityContractsDocumentDecode_RejectsOptionalTopLevelFieldUntil2397(t *testing.T) {
+	var doc EntityContractsDocument
+	err := yaml.Unmarshal([]byte("item:\n  label: text?\n"), &doc)
+	if err == nil || !strings.Contains(err.Error(), "#2397") {
+		t.Fatalf("yaml.Unmarshal error = %v, want #2397 entity-presence boundary", err)
+	}
+}
+
 func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
 	var entities EntityContractsDocument
 	if err := yaml.Unmarshal([]byte("<<: &entities\n  item: {}\n"), &entities); err != nil {

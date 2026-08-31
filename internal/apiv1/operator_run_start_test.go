@@ -386,11 +386,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
 			BundleSourceFact: runStartTestBundleSourceFact(),
-			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
-				if eventType != "scan.requested" {
-					return fmt.Errorf("unexpected event type %q", eventType)
+			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+				if event.Type() != "scan.requested" {
+					return events.PayloadAdmission{}, fmt.Errorf("unexpected event type %q", event.Type())
 				}
-				return errors.New("schema violation")
+				return events.PayloadAdmission{}, errors.New("schema violation")
 			},
 		})
 		if err != nil {

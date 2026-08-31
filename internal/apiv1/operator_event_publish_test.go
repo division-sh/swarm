@@ -22,6 +22,7 @@ import (
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -395,11 +396,11 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	bus, err := newScopedAPITestEventBus(t, sqliteStore, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runStartTestBundleSourceFact(),
-		PayloadValidator: func(_ context.Context, eventType string, _ []byte) error {
-			if eventType == "scan.requested" {
-				return errors.New("schema violation")
+		PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+			if event.Type() == "scan.requested" {
+				return events.PayloadAdmission{}, errors.New("schema violation")
 			}
-			return nil
+			return eventtest.PayloadAdmission(event, "", string(event.Type()))
 		},
 	})
 	if err != nil {
@@ -433,11 +434,11 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runStartTestBundleSourceFact(),
-		PayloadValidator: func(_ context.Context, eventType string, _ []byte) error {
-			if eventType != canonicalEventName {
-				return fmt.Errorf("event type = %q, want %s", eventType, canonicalEventName)
+		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			if string(event.Type()) != canonicalEventName {
+				return events.PayloadAdmission{}, fmt.Errorf("event type = %q, want %s", event.Type(), canonicalEventName)
 			}
-			return nil
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		},
 	})
 	if err != nil {
@@ -2019,11 +2020,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:   source,
 			BundleSourceFact: runStartTestBundleSourceFact(),
-			PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
-				if eventType != "scan.requested" {
-					return fmt.Errorf("unexpected event type %q", eventType)
+			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+				if event.Type() != "scan.requested" {
+					return events.PayloadAdmission{}, fmt.Errorf("unexpected event type %q", event.Type())
 				}
-				return errors.New("schema violation")
+				return events.PayloadAdmission{}, errors.New("schema violation")
 			},
 		})
 		if err != nil {

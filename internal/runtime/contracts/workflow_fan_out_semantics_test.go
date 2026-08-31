@@ -3,11 +3,38 @@ package contracts
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
+
+func TestFanOutCollectionItemTypePreservesNamedFieldPresence(t *testing.T) {
+	item, err := resolveWorkflowCollectionItemType(CatalogTypeReference{
+		Type: "[WorkItem]",
+		Catalog: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"WorkItem": {Fields: map[string]TypeFieldSpec{
+				"id":   {Type: "text"},
+				"note": {Type: "text", IsOptional: true},
+			}},
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolveFanOutCollectionItemType: %v", err)
+	}
+	note, ok := item.Field("note")
+	if !ok || !note.IsOptional || note.Type.Kind != CatalogTypeText {
+		t.Fatalf("note = %#v, want optional text field", note)
+	}
+}
+
+func TestWorkflowCollectionItemTypeRejectsUntypedArray(t *testing.T) {
+	_, err := resolveWorkflowCollectionItemType(CatalogTypeReference{Type: "array"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "exact collection item type") {
+		t.Fatalf("resolveWorkflowCollectionItemType error = %v, want exact item type rejection", err)
+	}
+}
 
 func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *testing.T) {
 	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", "dispatcher")

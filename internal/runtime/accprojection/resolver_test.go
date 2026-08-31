@@ -61,13 +61,13 @@ func projectionResolverBundle() *runtimecontracts.WorkflowContractBundle {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 					"dimension": {Type: "text"},
 					"score":     {Type: "integer"},
-				}},
+				}, Required: []string{"dimension", "score"}},
 			},
 			"score.bad_dimension_complete": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 					"dimension": {Type: "text"},
 					"score":     {Type: "integer"},
-				}},
+				}, Required: []string{"dimension", "score"}},
 			},
 		},
 	}
@@ -91,6 +91,35 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 	_, issues = ForExecutableHandler(source, identitytest.RootNode(t, "bad-node"), "score.bad_dimension_complete")
 	if !issuesContain(issues, "missing_buffer") {
 		t.Fatalf("ForHandler bad issues = %#v, want missing_buffer issue", issues)
+	}
+}
+
+func TestValidateProject_PreservesOptionalNamedFieldPresence(t *testing.T) {
+	binding := Binding{
+		SourceItemType: "SourceRecord",
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+		}},
+		TargetItemType: "TargetRecord",
+		TargetType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "detail", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		}},
+		Project: map[string]any{"note": "source.note"},
+	}
+	issues := validateProject(nil, materializedFieldTarget{
+		EntityType: "record",
+		FieldName:  "items",
+		TypeCatalog: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"SourceRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}},
+			"TargetRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"note": {Type: "text"}, "detail": {Type: "text", IsOptional: true}}},
+		}},
+	}, binding)
+	if !issuesContain(issues, "optional source field") {
+		t.Fatalf("issues = %#v, want optional-to-required presence mismatch", issues)
+	}
+	if issuesContain(issues, "missing detail") {
+		t.Fatalf("issues = %#v, optional target field must not require a projection", issues)
 	}
 }
 

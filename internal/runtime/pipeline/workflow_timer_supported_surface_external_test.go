@@ -41,7 +41,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -203,7 +203,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			bundle.Semantics.Timers[0].Delay = "5s"
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -284,7 +284,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -408,7 +408,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				}},
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator, TestLifecycleProbe: lifecycleProbe,
+				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter, TestLifecycleProbe: lifecycleProbe,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -570,7 +570,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 				}
 			}()
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: validator.validate,
+				ContractBundle: source, PayloadAdmitter: validator.admit,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -657,7 +657,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				ContractBundle: source, PayloadAdmitter: strictWorkflowTimerPayloadAdmitter,
 				PipelineObligations: failingOwner,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
@@ -738,17 +738,20 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 	}
 }
 
-func strictWorkflowTimerPayloadValidator(_ context.Context, eventType string, payload []byte) error {
-	if eventType != runtimecontracts.WorkflowStageTimerInternalEvent {
-		return nil
+func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	if event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	}
 	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return err
+	if err := json.Unmarshal(event.Payload(), &decoded); err != nil {
+		return events.PayloadAdmission{}, err
 	}
-	return runtimeeventschema.ValidatePayloadAgainstSchema(map[string]any{
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(map[string]any{
 		"type": "object", "properties": map[string]any{}, "additionalProperties": false,
-	}, decoded)
+	}, decoded); err != nil {
+		return events.PayloadAdmission{}, err
+	}
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 
 var errInjectedWorkflowTimerPublishFailure = errors.New("injected workflow timer publish failure")
@@ -766,23 +769,24 @@ func newFailOnceWorkflowTimerPayloadValidator() *failOnceWorkflowTimerPayloadVal
 	}
 }
 
-func (v *failOnceWorkflowTimerPayloadValidator) validate(ctx context.Context, eventType string, payload []byte) error {
-	if err := strictWorkflowTimerPayloadValidator(ctx, eventType, payload); err != nil || eventType != runtimecontracts.WorkflowStageTimerInternalEvent {
-		return err
+func (v *failOnceWorkflowTimerPayloadValidator) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, flowID)
+	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
+		return admitted, err
 	}
 	attempt := v.attempts.Add(1)
 	if attempt == 1 {
-		return errInjectedWorkflowTimerPublishFailure
+		return events.PayloadAdmission{}, errInjectedWorkflowTimerPublishFailure
 	}
 	if attempt == 2 {
 		close(v.secondAttempt)
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return events.PayloadAdmission{}, ctx.Err()
 		case <-v.releaseSecond:
 		}
 	}
-	return nil
+	return admitted, nil
 }
 
 type failOncePipelineDispositionStore struct {

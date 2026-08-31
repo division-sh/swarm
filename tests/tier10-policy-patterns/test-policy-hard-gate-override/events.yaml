@@ -1,4 +1,4 @@
 score.final:
-  main_score: number?
-  secondary_score: number?
+  main_score: number
+  secondary_score: number
 result.demoted: {}

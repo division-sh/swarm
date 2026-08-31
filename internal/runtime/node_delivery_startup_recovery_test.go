@@ -115,7 +115,7 @@ func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
 
 type startupRecoveryOrderStore interface {
 	nodeDeliveryRecoveryStore
-	swarmruntime.EventPayloadValidationBinder
+	swarmruntime.EventPayloadAdmissionBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimemanager.ManagerPersistence
@@ -247,7 +247,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
 
 				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
-				EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+				EventPayloadAdmissionBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
 				ManagerStore:            selected,
 				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: selected,
@@ -444,7 +444,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						},
 
 						EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
-						EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+						EventPayloadAdmissionBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 						RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
 						ManagerStore:            selected,
 						ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: activationProbe,

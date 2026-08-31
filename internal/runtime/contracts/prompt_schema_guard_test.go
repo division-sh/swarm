@@ -163,7 +163,9 @@ ops-lead:
 	prompt := strings.TrimSpace(`
 You are the Operations Lead for {{team_name}}.
 
-When you call emit_item_created, include item_id.
+When you call emit_item_created with:
+- item_id: the created item id
+- items: the intake items
 `)
 	if err := os.WriteFile(filepath.Join(intentDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write prompt fixture: %v", err)

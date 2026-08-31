@@ -5092,6 +5092,23 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 	}
 }
 
+func TestSelectedContractForkEventRejectsMissingOrInvalidHistoricalPayload(t *testing.T) {
+	for name, payload := range map[string]json.RawMessage{
+		"missing": nil,
+		"invalid": json.RawMessage(`{"ok":`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := selectedContractForkEvent(uuid.NewString(), uuid.NewString(), uuid.NewString(), runfork.RunForkSelectedContractSourceEvent{
+				SourceEventID: uuid.NewString(), EventName: "task.started",
+				ExecutionMode: runtimeeffects.ExecutionModeMock, Payload: payload,
+			}, "selected-contract")
+			if err == nil {
+				t.Fatalf("selectedContractForkEvent accepted %s historical payload", name)
+			}
+		})
+	}
+}
+
 func commitRunForkTestEvent(t testing.TB, ctx context.Context, pg *store.PostgresStore, event events.Event, routes []events.DeliveryRoute) {
 	t.Helper()
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)

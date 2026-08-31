@@ -1058,11 +1058,11 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	store.SetEventPayloadValidator(func(_ context.Context, eventType string, _ []byte) error {
-		if eventType == "item.failed" {
-			return errors.New("schema violation")
+	store.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		if event.Type() == "item.failed" {
+			return events.PayloadAdmission{}, errors.New("schema violation")
 		}
-		return nil
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {

@@ -11,6 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -129,6 +131,11 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	}
 	if opts.BundleSourceFact.BundleHash() == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
 	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok && opts.BundleSourceFact.IsEphemeral() {
 		catalog := durabledata.Catalog{BundleHash: opts.BundleSourceFact.BundleHash()}

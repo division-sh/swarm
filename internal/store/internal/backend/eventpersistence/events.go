@@ -47,32 +47,42 @@ func eventReadQueryerFromDB(db eventReadQueryer) eventReadQueryer {
 	return db
 }
 
-func (s *EventPostgresOwner) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
+func (s *EventPostgresOwner) SetEventPayloadAdmitter(admitter runtimebus.PayloadAdmitter) {
 	if s == nil {
 		return
 	}
 	s.validatorMu.Lock()
-	s.validator = validator
+	s.payloadAdmitter = admitter
 	s.validatorMu.Unlock()
 }
 
 // validateEventPayload is the store-side canonical admission guard for append
 // paths that may not pass through an emit-surface owner immediately before
 // persistence.
-func (s *EventPostgresOwner) validateEventPayload(ctx context.Context, eventType string, payload []byte) error {
+func (s *EventPostgresOwner) ensureEventPayloadAdmission(ctx context.Context, admitted events.AdmittedEvent) (events.AdmittedEvent, error) {
 	if s == nil {
-		return nil
+		return events.AdmittedEvent{}, fmt.Errorf("postgres event owner is required")
+	}
+	event := admitted.Event()
+	if _, ok := event.PayloadAdmission(); ok {
+		return admitted, nil
 	}
 	s.validatorMu.RLock()
-	validator := s.validator
+	admitter := s.payloadAdmitter
 	s.validatorMu.RUnlock()
-	if validator == nil {
-		return nil
+	if admitter == nil {
+		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
-	if err := validator(ctx, strings.TrimSpace(eventType), payload); err != nil {
-		return fmt.Errorf("validate event payload: %w", err)
+	flowID := strings.TrimSpace(event.RoutingSource().Route().FlowID)
+	payload, err := admitter(ctx, event, flowID)
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("admit event payload: %w", err)
 	}
-	return nil
+	restored, err := events.ApplyAdmittedPayload(admitted, payload)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return restored, nil
 }
 
 func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
@@ -189,12 +199,13 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 	if story == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
-	evt := admitted.Event()
-	wantIdentity, err := eventrecord.FromAdmitted(admitted, settlement)
+	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
+	evt := admitted.Event()
+	wantIdentity, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	queryer := chooseRowQueryer(s.backend, tx)

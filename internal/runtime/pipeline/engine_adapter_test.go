@@ -230,6 +230,10 @@ states: [queued]
 child_entity:
   request_id: text
 `,
+		"flows/child/events.yaml": `
+request.received:
+  request_id: text
+`,
 	})
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
@@ -258,7 +262,7 @@ child_entity:
 	eval := pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc}
 	ok, err := eval.EvalBool(`query_entities(request_id == payload.request_id).count == 1`, runtimeengine.BaseContext{
 		FlowID:  "child",
-		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID}),
+		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID, "trigger_event_type": "request.received"}),
 		Payload: values.Wrap(map[string]any{"request_id": "req-existing"}),
 	})
 	if err != nil {

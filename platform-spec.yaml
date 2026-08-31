@@ -785,6 +785,30 @@ contract_formats:
             min: 0
             max: 100
           equal_to: sibling_field
+    recursive_field_presence:
+      owner: internal/runtime/contracts.ResolvedCatalogType
+      rule: |
+        Event payload fields and fields declared inside named types share one
+        recursive structural field-edge model. A field is required by default;
+        exactly one trailing `?` on that field's complete authored type marks
+        only that field edge optional. The marker is consumed during YAML
+        admission through the canonical `internal/yamlsource` effective mapping
+        and never survives as part of the scalar, enum, named, list, or map type
+        name. Duplicate keys, aliases, and merge provenance are resolved by that
+        owner before type meaning is assigned. No raw-node or suffix-parser
+        fallback exists.
+      composition: |
+        Named records preserve required/optional edges recursively when nested
+        directly or as list/map values. Optionality belongs to an object field,
+        not to a list element or map key/value position; optional list elements
+        and explicit null list elements are unsupported. Every schema compiler,
+        connect projection, accumulator projection, node-state resolver,
+        fan-out/join item resolver, entity nested normalizer, and generated tool
+        schema consumes this same structural type.
+      omission: |
+        Absence is the sole runtime representation of an optional field that has
+        no value. Empty string, empty list/map, zero, and false are present
+        values. Explicit null is never an internal optional-value representation.
     strict_payload_contract:
       rule: |
         Event payloads are producer-complete only. Every required declared
@@ -986,6 +1010,37 @@ contract_formats:
         readers MUST NOT infer or repair it. Historical and operator replay consume
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
+      payload_admission:
+        owner: internal/events.PayloadAdmission
+        chronology: |
+          Every persistable event payload is admitted against exactly one pinned
+          effective event schema before route planning, instance-key/window/dedup
+          extraction, event identity, delivery planning, or selected-store
+          mutation. Admission returns one immutable value containing the exact
+          normalized payload bytes and schema binding: bundle hash/source, flow
+          identity when applicable, effective event key, schema digest, and
+          source class. Public ingress, normal EventBus publication, direct and
+          recipient-plan preflight, internal/generated/platform publication, and
+          selected-fork publication consume this owner. A schema-less generated or
+          platform event is admissible only when no authored payload reader is
+          reachable.
+        normalization: |
+          Admission recursively lowers external null on an optional field to
+          omission, rejects null on a required field, rejects null list elements,
+          rejects unknown members under a closed schema, preserves all non-null
+          present values, and produces the authoritative bytes once. A later
+          surface may compare or clone those bytes but must not normalize,
+          reserialize, reinterpret, or replace their binding.
+        durable_continuity: |
+          SQLite and PostgreSQL persist the exact admitted bytes and every schema
+          binding coordinate atomically. Hydration restores that evidence through
+          the canonical event decoder. Retry, recovery, ordinary replay, and
+          delivery-event fork replay reuse persisted bytes and binding without an
+          ambient schema lookup. A selected-contract fork validates the exact
+          historical bytes against its pinned target bundle before mutation and
+          persists those bytes unchanged with the target binding. Payload JSONB is
+          query projection only. Byte-distinct payloads or binding-distinct events
+          are identity conflicts even when JSON values are semantically equal.
       invariant_ids:
         runtime.event.producer_origin_valid_at_construction:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
@@ -2197,11 +2252,18 @@ type_system:
           allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
+    optional_record_edge: |
+      Event and named-record fields may append exactly one trailing `?` to the
+      complete type in either terse or verbose form, for example `label: text?`
+      or `child: {type: Child?}`. This denotes omission-capable field presence,
+      not `Optional<T>` type syntax and not a nullable value. Top-level entity
+      field presence remains governed by entity_contracts until #2397.
   restrictions:
     retired:
     - jsonb as an author-declared contract type
     - Inline type: object without declared inner shape
     - Optional<T> in Wave 1
+    - Optional list elements or map key/value types
     - inheritance / extends clauses
     - recursive types in Wave 1
     allowed_composition: |
@@ -4421,6 +4483,17 @@ handler_specification:
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
+        read_model:
+          schema_owner: The exact effective event-source structural schema is resolved before expression checking; authored, connected, imported, provider, generated, platform, and finite wildcard sources may not fall back to dyn when a payload reader is reachable.
+          required_field: A required field has its declared CEL type and may be read directly.
+          optional_field: '`payload.?field` has stock CEL `optional<T>` type. Direct `payload.field` is valid only where checked-AST control flow proves that exact field path present on every incoming path.'
+          decisions: '`payload.?field.orValue(default)`, `has(payload.field) ? payload.field : default`, and the logically equivalent negated conditional are supported when types agree.'
+          short_circuit: '`has(payload.field) && predicate(payload.field)` and `!has(payload.field) || predicate(payload.field)` prove presence on the evaluated branch. `has(payload.field) || predicate(payload.field)` and `!has(payload.field) && predicate(payload.field)` do not.'
+          nested_records: Optional parent to required child uses `payload.?parent.optMap(p, p.child)`; optional parent to optional child uses `payload.?parent.optFlatMap(p, p.?child)`.
+          lookup: Map/list optional lookup uses stock CEL `m[?key]` and `l[?index]`. Named records use typed dot or optional field selection; bracket lookup on a named record is invalid.
+          facts: Presence facts are exact-path and lexical-scope facts. Nested branches compose, merge retains only facts true on every incoming path, and comprehension facts do not escape their lambda/body.
+          sinks: Optional-to-optional assignment preserves omission. Optional-to-required assignment requires a decision. An absent optional emit result omits the target field; it never emits null.
+        implementation_constraint: Use stock `cel.OptionalTypes()` plus one checked-AST structural/control-flow analysis. Regex/string scanning, custom optional macros, exact-schema `dyn`, and permissive unresolved-source fallback are prohibited.
       event:
         resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
           platform-populated event context fields supplied by the runtime.'
@@ -13545,7 +13618,7 @@ flow_model:
       importable schemas, but it must error rather than silently omit an invalid
       concrete declaration.
   compiled_event_schema_projection:
-    status: implemented_presence_preserving_w3
+    status: implemented_recursive_structural_presence
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
     rule: >-
       Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml,
@@ -13555,7 +13628,8 @@ flow_model:
       noncanonical package restatements do not become declaration identities.
     fields: >-
       Each declaration carries its canonical package key and qualified authored event name, authored classification,
-      a closed ordered field set with admitted semantic schema and IsOptional, an optional already-admitted scalar
+      a closed ordered recursive structural field set with admitted semantic schema and optionality on every named-record
+      field edge, an optional already-admitted scalar
       business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source
       is never identity or hash input. Readbacks are mutation-isolated.
     canonical_schema_owner: >-
@@ -13564,11 +13638,12 @@ flow_model:
       internal/runtime/canonicaljson owns canonical bytes and their sha256 digest. Consumers must not reserialize or
       independently hash raw event declarations.
     current_grammar_adapter: >-
-      The presence-preserving W3 adapter derives IsOptional exactly once from
-      the admitted trailing-`?` spelling. Requiredness defaults to true; the
-      marker never survives in the semantic type and the retired required-list
-      syntax is not represented. `key:` is admitted only after its referenced
-      field is proved required with boolean, number, or string semantics.
+      The presence-preserving adapter derives field-edge optionality exactly once
+      from the admitted trailing-`?` spelling for both event fields and nested named-record fields through
+      `internal/yamlsource`. Requiredness defaults to true; the marker never survives in the semantic type and the
+      retired required-list syntax is not represented. `key:` is admitted only after its referenced field is proved
+      required with boolean, number, or string semantics. Raw YAML nodes, local suffix trimming, and parallel string-only
+      type projections are not downstream authority.
     migration_boundary: >-
       The stable compiled interface and W3 event-family migration are complete.
       Producer-only intra-package ownership and receiver delivery projections
@@ -13576,8 +13651,8 @@ flow_model:
       business keys, field types and optionality, descriptions, refinements,
       citations, payload requiredness, event metadata, receiver aliases and
       generated carries, plus package-identified boundary snapshots. The
-      remaining decoder families continue under #2300 without reopening event
-      grammar or compatibility paths.
+      remaining unrelated decoder families continue under #2300 without reopening event/named-record field grammar or
+      compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'
@@ -13820,7 +13895,7 @@ durable_data_resources:
     rule: ResourceVersionID hashes only the canonical semantic manifest. Provenance and import attempt identity are attached evidence and are never identity inputs.
     keyless_rows: Every row has a 1-based ordinal. Source order and duplicate payload multiplicity are preserved; row identity and lookup are (version_id, ordinal). Delta compares canonical payload multiplicity and reports order_changed when equal multisets differ in order.
     keyed_rows: Every row has a 1-based ordinal and a canonical typed boolean, number, or string business key. Duplicate business keys reject the whole input. Rows are byte-sorted by canonical business-key bytes for digesting, storage, activation, and replay; delta and named lookup use the business key.
-    import_normalization: External null in an optional field normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
+    import_normalization: External null in an optional field consumes the same recursive structural field-edge owner as event admission and normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
     atomicity: One invalid row rejects the entire candidate and reports all bounded row defects. No partial version or head mutation exists.
     empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row.
   source_operations:
@@ -14232,9 +14307,11 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay. payload_bytes is the authoritative exact admitted payload used by identity, hydration,
-        retry, recovery, replay, and fork. payload is an atomically derived JSON query projection only and cannot
-        become execution or duplicate authority. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
+        and fork/replay. payload_bytes plus the six payload_schema_* coordinates are the authoritative exact admitted
+        payload and pinned schema evidence used by identity, hydration, retry, recovery, replay, and fork. payload is an
+        atomically derived JSON query projection only and cannot become execution or duplicate authority. execution_mode
+        is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it
+        from provider or backend names.'
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
@@ -14248,6 +14325,12 @@ platform_tables:
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
             payload_bytes               BYTEA NOT NULL,
+            payload_schema_bundle_hash  TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            payload_schema_bundle_source TEXT NOT NULL CHECK (payload_schema_bundle_source IN ('persisted', 'ephemeral')),
+            payload_schema_flow_id       TEXT CHECK (payload_schema_flow_id IS NULL OR payload_schema_flow_id = TRIM(payload_schema_flow_id)),
+            payload_schema_event_key     TEXT NOT NULL CHECK (payload_schema_event_key = TRIM(payload_schema_event_key) AND NULLIF(payload_schema_event_key, '') IS NOT NULL),
+            payload_schema_digest        TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$'),
+            payload_schema_class         TEXT NOT NULL CHECK (payload_schema_class IN ('authored', 'imported', 'generated', 'pattern', 'platform', 'schema_less')),
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
             produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
@@ -17639,8 +17722,10 @@ run_model:
       outcomes, and regenerates emitted follow-ups under the fork run_id. This surface is timer-free: relevant timer
       history in the selected revision or any workflow-timer declaration in the selected semantic source rejects the
       request before materialization, because no long-lived timer owner survives the ephemeral container. When selected frontier work is a
-      platform.activity_requested event, source preparation MUST bind the request payload source_event_id to the actual
-      fork-local frontier event before deriving fork-local request/result identities. read_only with reexecute_read executes
+      platform.activity_requested event, source preparation MUST derive fork-local request/result identities from the actual
+      fork-local frontier event and typed selected-fork lineage without rewriting the exact historical request payload.
+      The EventBus validates those exact historical bytes against the selected target contract and persists them unchanged
+      with the target schema binding. read_only with reexecute_read executes
       the connector exactly once under that fork-local generation and does not copy a source attempt;
       an unapproved non_idempotent_write with reuse_recorded_result copies accepted terminal evidence under fork-local
       request/result identities and publishes that recorded result without calling the connector. For activity.approval,

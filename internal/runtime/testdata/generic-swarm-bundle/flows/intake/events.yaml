@@ -1,8 +1,8 @@
 item.created:
   emitter:
     - control-plane
-  item_id: string?
-  items: "[IntakeItem]?"
+  item_id: string
+  items: "[IntakeItem]"
 item.processed:
   emitter:
     - worker-a

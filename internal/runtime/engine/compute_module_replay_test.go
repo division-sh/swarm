@@ -32,6 +32,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func computeReplayRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+}
+
 func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnStoredDivergence(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newComputeModuleReplaySQLiteStore(t)
@@ -86,7 +90,7 @@ func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Co
 	t.Helper()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["node_id"] = nodeID
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live, computeReplayRuntimeLogPayloadAdmitter)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",
@@ -129,6 +133,9 @@ func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 	}); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
+	sqliteStore.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
 	return sqliteStore
 }
 

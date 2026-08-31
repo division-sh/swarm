@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -137,6 +139,11 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	}
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = selected.PipelineObligations()
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
 	}
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,

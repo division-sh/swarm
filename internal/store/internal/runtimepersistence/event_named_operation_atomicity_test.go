@@ -120,6 +120,10 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
 
 				conflictEvent := selectedForkEventForRequest(t, req, []byte(`{"changed":true}`))
+				conflictEvent, err = bindSemanticEventFixturePayload(conflictEvent)
+				if err != nil {
+					t.Fatal(err)
+				}
 				conflict, err := events.AdmitForPersistence(conflictEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 				if err != nil {
 					t.Fatal(err)
@@ -337,6 +341,10 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		t.Fatal(err)
 	}
 	event := eventtest.SelectedForkReplay(uuid.NewString(), "atomic.selected", eventtest.Producer(events.EventProducerNode, "fork-node"), "fork-task", []byte(`{"selected":true}`), 1, lineage, events.EventEnvelope{}, createdAt.Add(time.Second))
+	event, err = bindSemanticEventFixturePayload(event)
+	if err != nil {
+		t.Fatal(err)
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)

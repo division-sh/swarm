@@ -413,7 +413,14 @@ func appendCompiledFanOutExecutableReaders(out *[]expressionReference, ctx execu
 		return
 	}
 	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
+	before := len(*out)
 	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
+	if len(*out) > before {
+		ref := &(*out)[len(*out)-1]
+		ref.ItemAlias = plan.ItemAlias
+		ref.ItemType = plan.ItemType.Clone()
+		ref.HasItemType = true
+	}
 }
 
 func appendGroupByExecutableReaders(out *[]expressionReference, groupBy *runtimecontracts.GroupBySpec) {

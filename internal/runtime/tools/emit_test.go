@@ -501,7 +501,7 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 	}
 }
 
-func TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode(t *testing.T) {
+func TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType(t *testing.T) {
 	root := t.TempDir()
 	writeEmitFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: provider-schema-validation
@@ -561,16 +561,11 @@ local.done:
 		t.Fatalf("repo root: %v", err)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	if err == nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides accepted unresolved flow-local event type: %#v", bundle)
 	}
-
-	errs := ValidateGeneratedEmitToolSchemasForSource(semanticview.Wrap(bundle))
-	if len(errs) != 1 {
-		t.Fatalf("errors = %#v, want one provider schema error", errs)
-	}
-	got := errs[0].Error()
-	for _, want := range []string{"flow-agent", "emit_local_done", "unsupported JSON Schema type \"NotDeclared\""} {
+	got := err.Error()
+	for _, want := range []string{"support/local.done", "unsupported", "unsupported structural schema type \"NotDeclared\""} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("error = %q, want substring %q", got, want)
 		}

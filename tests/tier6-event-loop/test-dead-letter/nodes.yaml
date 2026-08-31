@@ -8,6 +8,6 @@ test-node:
       guard:
         checks:
           - id: impossible
-            check: "payload.score > 9999"
+            check: "payload.score > 9999.0"
         on_fail: discard
       advances_to: done

@@ -1,4 +1,4 @@
 portfolio.setup:
-  portfolio_id: text?
-  expected_operating_ids: "[text]?"
-  period_id: text?
+  portfolio_id: text
+  expected_operating_ids: "[text]"
+  period_id: text

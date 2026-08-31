@@ -98,7 +98,9 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 
 func newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub) *RuntimeLogger {
 	stub.db = db
-	return NewRuntimeLogger(stub, executionposture.Live)
+	return NewRuntimeLogger(stub, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
 }
 
 func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCapture, want runtimeLogPayloadArg, wantRunID, wantParentEventID string) {

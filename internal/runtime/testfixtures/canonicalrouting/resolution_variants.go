@@ -100,7 +100,7 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 	t.Helper()
 	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
 	for _, event := range []string{"account.requested", "account.ready"} {
-		key, fieldType := "", "text?"
+		key, fieldType := "", "text"
 		if event == "account.ready" {
 			key = "  key: account_id\n"
 			fieldType = "text"
@@ -234,7 +234,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateMintPayload:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: payload.candidate\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
-			"validation.requested:\n  candidate: text?\n",
+			"validation.requested:\n  candidate: text\n",
 			"validation.requested:\n  key: candidate\n  candidate: text\n")
 	default:
 		t.Fatalf("unsupported create mint %d", opts.Mint)
@@ -246,7 +246,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateResolutionInvalidMint:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
 	case CreateResolutionProducerCollision:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: text?\n  validation_case_id: uuid\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text\n", "validation.requested:\n  candidate: text\n  validation_case_id: uuid\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
 		if opts.Mint == CreateMintPayload {

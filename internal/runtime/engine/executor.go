@@ -108,6 +108,7 @@ type executionFrame struct {
 	state                     ExecutionState
 	result                    ExecutionResult
 	rule                      *runtimecontracts.HandlerRuleEntry
+	payloadType               *runtimecontracts.ResolvedCatalogType
 	ruleSource                handlerRuleSource
 	ruleIndex                 int
 	payload                   map[string]any
@@ -648,11 +649,13 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
+	payloadType := e.executionPayloadType(req)
 	return executionFrame{
 		ctx:                      ctx,
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
+		payloadType:              payloadType,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
 			State:       state,
@@ -989,7 +992,7 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		items = executionItems(entityValue)
 	}
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
-		compiled, err := compileExecutionCondition(filter)
+		compiled, err := compileExecutionCondition(filter, e.collectionExpressionOptions(frame, spec.SourcePath, spec.Source))
 		if err != nil {
 			return err
 		}
@@ -1141,7 +1144,7 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition), e.collectionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source)))
 	if err != nil {
 		return err
 	}
@@ -1185,7 +1188,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition), e.collectionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source)))
 	if err != nil {
 		return err
 	}
@@ -2055,14 +2058,112 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 
 func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
 	allowJoin := frame != nil && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout)
+	options := frameExpressionOptions(frame)
 	if !allowJoin {
-		return workflowexpr.ValueExpressionOptions{}
+		return options
 	}
-	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
+	options.AllowJoin = true
+	options.JoinResultType = frame.joinResultType
 	if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
 		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
 	}
 	return options
+}
+
+func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
+	if frame == nil || frame.payloadType == nil {
+		return workflowexpr.ValueExpressionOptions{}
+	}
+	value := frame.payloadType.Clone()
+	return workflowexpr.ValueExpressionOptions{PayloadType: &value}
+}
+
+func (e *Executor) collectionExpressionOptions(frame *executionFrame, parsed paths.Path, authored string) workflowexpr.ValueExpressionOptions {
+	options := frameExpressionOptions(frame)
+	if parsed.IsZero() {
+		parsed = paths.Parse(strings.TrimSpace(authored))
+	}
+	if frame == nil || frame.payloadType == nil {
+		return options
+	}
+	parsed = collectionPayloadOrigin(frame.req.Handler, parsed, map[string]struct{}{})
+	if parsed.Root != paths.RootPayload {
+		return options
+	}
+	current := frame.payloadType.Clone()
+	for _, segment := range parsed.Segments {
+		if current.Kind != runtimecontracts.CatalogTypeObject {
+			return options
+		}
+		field, ok := current.Field(segment)
+		if !ok {
+			return options
+		}
+		current = field.Type.Clone()
+	}
+	if current.Kind != runtimecontracts.CatalogTypeList || current.Element == nil {
+		return options
+	}
+	item := current.Element.Clone()
+	options.ItemType = &item
+	return options
+}
+
+func collectionPayloadOrigin(handler runtimecontracts.SystemNodeEventHandler, source paths.Path, seen map[string]struct{}) paths.Path {
+	key := source.String()
+	if _, exists := seen[key]; exists {
+		return source
+	}
+	seen[key] = struct{}{}
+	redirect := func(target, upstream string) (paths.Path, bool) {
+		if !sameExecutionPath(source, paths.Parse(target)) {
+			return paths.Path{}, false
+		}
+		return collectionPayloadOrigin(handler, paths.Parse(upstream), seen), true
+	}
+	if handler.Query != nil {
+		if origin, ok := redirect(handler.Query.StoreAs, firstNonEmpty(handler.Query.Source, handler.Query.Entities)); ok {
+			return origin
+		}
+	}
+	if handler.Filter != nil {
+		if origin, ok := redirect(handler.Filter.StoreAs, firstNonEmpty(handler.Filter.ItemsFrom, handler.Filter.Source)); ok {
+			return origin
+		}
+	}
+	return source
+}
+
+func sameExecutionPath(left, right paths.Path) bool {
+	if left.Root != right.Root || len(left.Segments) != len(right.Segments) {
+		return false
+	}
+	for index := range left.Segments {
+		if strings.TrimSpace(left.Segments[index]) != strings.TrimSpace(right.Segments[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.ResolvedCatalogType {
+	if e == nil || e.deps.Source == nil {
+		return nil
+	}
+	eventType := strings.TrimSpace(req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(req.Event.Type()))
+	}
+	flowID := strings.TrimSpace(req.ExecutionFlowID.String())
+	if flowID == "" {
+		flowID = strings.TrimSpace(req.Node.FlowID())
+	}
+	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, eventType)
+	if !resolution.HasStructural {
+		return nil
+	}
+	value := resolution.StructuralType.Clone()
+	return &value
 }
 
 func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoinPlan, bool) {
@@ -2185,14 +2286,17 @@ func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accpro
 }
 
 func accumulatorTypedView(binding accprojection.Binding, item map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.SourceNamedType.Fields))
-	for fieldName := range binding.SourceNamedType.Fields {
-		fieldName = strings.TrimSpace(fieldName)
+	out := make(map[string]any, len(binding.SourceType.Fields))
+	for _, spec := range binding.SourceType.Fields {
+		fieldName := strings.TrimSpace(spec.Name)
 		if fieldName == "" {
 			continue
 		}
 		value, ok := item[fieldName]
 		if !ok {
+			if spec.IsOptional {
+				continue
+			}
 			return nil, fmt.Errorf("source item missing required typed-view field %q", fieldName)
 		}
 		out[fieldName] = cloneProjectionValue(value)
@@ -2201,11 +2305,22 @@ func accumulatorTypedView(binding accprojection.Binding, item map[string]any) (m
 }
 
 func (e *Executor) projectAccumulatorItem(frame *executionFrame, binding accprojection.Binding, source map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.TargetNamedType.Fields))
-	for fieldName := range binding.TargetNamedType.Fields {
+	out := make(map[string]any, len(binding.TargetType.Fields))
+	for _, spec := range binding.TargetType.Fields {
+		fieldName := spec.Name
 		rawExpr, ok := binding.Project[fieldName]
 		if !ok {
+			if spec.IsOptional {
+				continue
+			}
 			return nil, fmt.Errorf("project missing target field %q", fieldName)
+		}
+		if sourceExpr, isSource := rawExpr.(string); isSource {
+			if sourceField, isSourceField := strings.CutPrefix(strings.TrimSpace(sourceExpr), "source."); isSourceField {
+				if _, present := source[strings.TrimSpace(sourceField)]; !present && spec.IsOptional {
+					continue
+				}
+			}
 		}
 		value, err := e.evaluateProjectionExpression(frame, rawExpr, source)
 		if err != nil {
@@ -2296,7 +2411,7 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 	}
 	// Resolve emit.fields against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
+	transformed, err := e.emitFieldsPayload(frame, emitSpec, emitSpec.EventType(), joinExpressionOptions(frame))
 	if err != nil {
 		return err
 	}
@@ -2332,7 +2447,7 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 		if emitSpec.HasFields() && len(activeEmits) == 1 && len(frame.state.Transformed) > 0 {
 			payload = frame.state.Transformed
 		} else if emitSpec.HasFields() {
-			transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
+			transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, joinExpressionOptions(frame))
 			if err != nil {
 				return err
 			}
@@ -2419,7 +2534,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		if field == "" {
 			continue
 		}
-		value, ok, err := evalExpressionValue(base, frame.state, expr, workflowexpr.ValueExpressionOptions{})
+		value, ok, err := evalExpressionValue(base, frame.state, expr, frameExpressionOptions(frame))
 		if err != nil {
 			return fmt.Errorf("activity.input.%s: %w", field, err)
 		}
@@ -2905,11 +3020,17 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {
 	req := frame.req
 	req.State = frame.state.State
+	var payloadType *runtimecontracts.ResolvedCatalogType
+	if frame.payloadType != nil {
+		value := frame.payloadType.Clone()
+		payloadType = &value
+	}
 	return ExecutionContext{
-		Request:   req,
-		Base:      e.currentContext(frame),
-		Step:      step,
-		Completed: append([]Step(nil), frame.result.ExecutedSteps...),
+		Request:     req,
+		Base:        e.currentContext(frame),
+		PayloadType: payloadType,
+		Step:        step,
+		Completed:   append([]Step(nil), frame.result.ExecutedSteps...),
 	}
 }
 
@@ -3255,6 +3376,27 @@ func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, pay
 	return e.shapeEmitPayloadWithContext(frame.ctx, frame, eventType, payload)
 }
 
+func (e *Executor) emitFieldsPayload(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, options workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+	if frame == nil {
+		return nil, fmt.Errorf("emit expression frame is required")
+	}
+	flowID := strings.TrimSpace(frame.req.ExecutionFlowID.String())
+	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, strings.TrimSpace(eventType))
+	return emitFieldsPayload(e.currentContext(frame), frame.state, spec, options, func(target string, base workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions {
+		if !resolution.HasStructural {
+			return base
+		}
+		field, ok := resolution.StructuralType.FieldPath(target)
+		if !ok {
+			return base
+		}
+		valueType := field.Type.Clone()
+		base.ResultType = &valueType
+		base.ResultOptional = field.IsOptional
+		return base
+	})
+}
+
 func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
 	cloned := cloneStringAnyMap(payload)
 	if e.deps.PayloadShaper == nil {
@@ -3523,7 +3665,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 		}
 		emitSpec.Event = eventType
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+		transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, frameExpressionOptions(frame))
 		if err != nil {
 			return err
 		}

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -163,6 +165,11 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		TargetFailureRecorder: eventStore,
 		RunOrigins:            eventStore,
 		StandingRestarts:      eventStore,
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
 	}
 	descriptors := testAuthorActivityEventDescriptors(t, opts)
 	for _, eventType := range differentEvents {

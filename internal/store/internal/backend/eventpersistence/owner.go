@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
@@ -54,7 +55,7 @@ type EventPostgresOwner struct {
 	backend               *postgresbackend.Backend
 	requireCurrent        func() error
 	validatorMu           sync.RWMutex
-	validator             func(context.Context, string, []byte) error
+	payloadAdmitter       runtimebus.PayloadAdmitter
 	runFork               selectedForkLineageOwner
 	apiIdempotency        *storeapiidempotency.PostgresOwner
 	operatorChannelClaims operatorChannelClaimPostgresOwner
@@ -72,7 +73,7 @@ type EventSQLiteOwner struct {
 	requireCurrent        func() error
 	nowFn                 func() time.Time
 	validatorMu           sync.RWMutex
-	validator             func(context.Context, string, []byte) error
+	payloadAdmitter       runtimebus.PayloadAdmitter
 	runFork               selectedForkLineageOwner
 	apiIdempotency        *storeapiidempotency.SQLiteOwner
 	operatorChannelClaims operatorChannelClaimSQLiteOwner

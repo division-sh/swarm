@@ -549,19 +549,19 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 					"component_scaffold.batch_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 							"components": {Type: "[json]"},
-						}},
+						}, Required: []string{"components"}},
 					},
 					"component_scaffold.spawn_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 							"component_id": {Type: "text"},
 							"nested_items": {Type: "[text]"},
-						}},
+						}, Required: []string{"component_id", "nested_items"}},
 					},
 					"component_scaffold.task_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 							"component_id": {Type: "text"},
 							"task":         {Type: "text"},
-						}},
+						}, Required: []string{"component_id", "task"}},
 					},
 				},
 			},

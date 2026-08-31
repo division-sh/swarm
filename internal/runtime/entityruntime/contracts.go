@@ -478,16 +478,16 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 		if segment == "" {
 			return Field{}, fmt.Errorf("field is required")
 		}
-		named, ok := contract.Types.Types[typeName(contract, currentType)]
-		if !ok {
+		resolved, err := resolveStructuralType(contract, currentType)
+		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
 			return Field{}, fmt.Errorf("path %s does not resolve through a named type", path)
 		}
-		spec, ok := named.Fields[segment]
+		field, ok := resolved.Field(segment)
 		if !ok {
 			return Field{}, fmt.Errorf("undeclared path %s", path)
 		}
-		currentType = strings.TrimSpace(spec.Type)
-		currentRefinements = spec.Refinements
+		currentType = strings.TrimSpace(field.TypeRef)
+		currentRefinements = field.Refinements
 	}
 	kind := pathKind(contract, currentType)
 	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements}, nil
@@ -555,21 +555,26 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		}
 		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):
-		named := contract.Types.Types[typeName(contract, typeRef)]
-		out := make(map[string]any, len(named.Fields))
-		for name, spec := range named.Fields {
-			name = strings.TrimSpace(name)
-			value, err := defaultValue(contract, spec.Type, nil)
-			if err != nil {
-				return nil, err
-			}
-			value, err = validateValueRefinements(contract, name, spec.Type, spec.Refinements, value)
-			if err != nil {
-				return nil, err
-			}
-			out[name] = value
+		resolved, err := resolveStructuralType(contract, typeRef)
+		if err != nil {
+			return nil, err
 		}
-		if err := validateTypeFieldEqualities(typeName(contract, typeRef), named.Fields, out); err != nil {
+		out := make(map[string]any, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			if field.IsOptional {
+				continue
+			}
+			value, err := defaultValue(contract, field.TypeRef, nil)
+			if err != nil {
+				return nil, err
+			}
+			value, err = validateValueRefinements(contract, field.Name, field.TypeRef, field.Refinements, value)
+			if err != nil {
+				return nil, err
+			}
+			out[field.Name] = value
+		}
+		if err := validateStructuralFieldEqualities(typeName(contract, typeRef), resolved.Fields, out); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -700,45 +705,47 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be object")
 		}
-		named := contract.Types.Types[typeName(contract, typeRef)]
-		out := make(map[string]any, len(named.Fields))
-		for key, spec := range named.Fields {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			if raw, ok := object[key]; ok {
-				normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, key), spec.Type, raw)
+		resolved, err := resolveStructuralType(contract, typeRef)
+		if err != nil {
+			return nil, fieldTypeError(fieldName, err.Error())
+		}
+		out := make(map[string]any, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			if raw, ok := object[field.Name]; ok {
+				normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, field.Name), field.TypeRef, raw)
 				if err != nil {
 					return nil, err
 				}
-				normalized, err = validateValueRefinements(contract, joinFieldName(fieldName, key), spec.Type, spec.Refinements, normalized)
+				normalized, err = validateValueRefinements(contract, joinFieldName(fieldName, field.Name), field.TypeRef, field.Refinements, normalized)
 				if err != nil {
 					return nil, err
 				}
-				out[key] = normalized
+				out[field.Name] = normalized
 				continue
 			}
-			defaulted, err := defaultValue(contract, spec.Type, nil)
+			if field.IsOptional {
+				continue
+			}
+			defaulted, err := defaultValue(contract, field.TypeRef, nil)
 			if err != nil {
 				return nil, err
 			}
-			defaulted, err = validateValueRefinements(contract, joinFieldName(fieldName, key), spec.Type, spec.Refinements, defaulted)
+			defaulted, err = validateValueRefinements(contract, joinFieldName(fieldName, field.Name), field.TypeRef, field.Refinements, defaulted)
 			if err != nil {
 				return nil, err
 			}
-			out[key] = defaulted
+			out[field.Name] = defaulted
 		}
 		for key := range object {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue
 			}
-			if _, ok := named.Fields[key]; !ok {
+			if _, ok := resolved.Field(key); !ok {
 				return nil, fieldTypeError(joinFieldName(fieldName, key), "is undeclared")
 			}
 		}
-		if err := validateTypeFieldEqualities(fieldName, named.Fields, out); err != nil {
+		if err := validateStructuralFieldEqualities(fieldName, resolved.Fields, out); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -824,14 +831,20 @@ func validateEntityFieldEqualities(context string, fields map[string]runtimecont
 	return nil
 }
 
-func validateTypeFieldEqualities(context string, fields map[string]runtimecontracts.TypeFieldSpec, values map[string]any) error {
+func validateStructuralFieldEqualities(context string, fields []runtimecontracts.ResolvedCatalogField, values map[string]any) error {
 	if len(fields) == 0 {
 		return nil
 	}
-	for name, field := range fields {
-		name = strings.TrimSpace(name)
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
 		target := strings.TrimSpace(field.Refinements.EqualTo)
 		if name == "" || target == "" {
+			continue
+		}
+		_, leftPresent := values[name]
+		_, rightPresent := values[target]
+		targetField, targetDeclared := resolvedStructuralField(fields, target)
+		if !leftPresent && !rightPresent && field.IsOptional && targetDeclared && targetField.IsOptional {
 			continue
 		}
 		if err := validateEqualityValue(context, name, target, values); err != nil {
@@ -878,19 +891,19 @@ func fieldPathParticipatesInEquality(contract Contract, path string) bool {
 	}
 	currentType := strings.TrimSpace(decl.Type)
 	for _, segment := range segments[1:] {
-		named, ok := contract.Types.Types[typeName(contract, currentType)]
-		if !ok {
+		resolved, err := resolveStructuralType(contract, currentType)
+		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
 			return false
 		}
 		segment = strings.TrimSpace(segment)
-		if typeFieldParticipatesInEquality(named.Fields, segment) {
+		if structuralFieldParticipatesInEquality(resolved.Fields, segment) {
 			return true
 		}
-		spec, ok := named.Fields[segment]
+		field, ok := resolved.Field(segment)
 		if !ok {
 			return false
 		}
-		currentType = strings.TrimSpace(spec.Type)
+		currentType = strings.TrimSpace(field.TypeRef)
 	}
 	return false
 }
@@ -913,13 +926,13 @@ func entityFieldParticipatesInEquality(fields map[string]runtimecontracts.Entity
 	return false
 }
 
-func typeFieldParticipatesInEquality(fields map[string]runtimecontracts.TypeFieldSpec, name string) bool {
+func structuralFieldParticipatesInEquality(fields []runtimecontracts.ResolvedCatalogField, name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return false
 	}
-	for fieldName, field := range fields {
-		fieldName = strings.TrimSpace(fieldName)
+	for _, field := range fields {
+		fieldName := strings.TrimSpace(field.Name)
 		target := strings.TrimSpace(field.Refinements.EqualTo)
 		if fieldName == name && target != "" {
 			return true
@@ -929,6 +942,20 @@ func typeFieldParticipatesInEquality(fields map[string]runtimecontracts.TypeFiel
 		}
 	}
 	return false
+}
+
+func resolvedStructuralField(fields []runtimecontracts.ResolvedCatalogField, name string) (runtimecontracts.ResolvedCatalogField, bool) {
+	name = strings.TrimSpace(name)
+	for _, field := range fields {
+		if field.Name == name {
+			return field, true
+		}
+	}
+	return runtimecontracts.ResolvedCatalogField{}, false
+}
+
+func resolveStructuralType(contract Contract, typeRef string) (runtimecontracts.ResolvedCatalogType, error) {
+	return (runtimecontracts.CatalogTypeReference{Type: strings.TrimSpace(typeRef), Catalog: contract.Types}).Resolve()
 }
 
 func pathKind(contract Contract, typeRef string) string {

@@ -15,6 +15,37 @@ import (
 	"github.com/google/uuid"
 )
 
+const fixtureBundleHash = "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+// AdmitPayload binds a fixture's current payload to deterministic schema
+// evidence. Tests exercising real schema admission should use the runtime
+// admitter instead.
+func AdmitPayload(event events.Event, flowID, eventKey string) (events.Event, error) {
+	admission, err := PayloadAdmission(event, flowID, eventKey)
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.ApplyPayloadAdmission(event, admission)
+}
+
+// PayloadAdmission returns deterministic schema evidence for fixture
+// admitters without granting them ownership of the event value.
+func PayloadAdmission(event events.Event, flowID, eventKey string) (events.PayloadAdmission, error) {
+	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: fixtureBundleHash, BundleSource: "ephemeral", FlowID: strings.TrimSpace(flowID),
+		EventKey: strings.TrimSpace(eventKey), SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		SchemaClass: events.PayloadSchemaSchemaLess,
+	})
+	if err != nil {
+		return events.PayloadAdmission{}, err
+	}
+	admission, err := events.NewPayloadAdmission(event.Payload(), binding)
+	if err != nil {
+		return events.PayloadAdmission{}, err
+	}
+	return admission, nil
+}
+
 // UUID returns a stable UUID for a semantic fixture label.
 func UUID(label string) string {
 	if parsed, err := uuid.Parse(strings.TrimSpace(label)); err == nil {

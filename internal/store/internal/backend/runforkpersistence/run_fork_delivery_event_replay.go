@@ -283,6 +283,10 @@ func loadSQLiteRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceR
 }
 
 func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
+	sourceAdmission, ok := source.PayloadAdmission()
+	if !ok {
+		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s: source payload admission evidence is required", forkEventID, source.ID())
+	}
 	selected, err := events.NewSelectedForkLineage(
 		lineage.ForkRunID,
 		lineage.SourceRunID,
@@ -305,6 +309,10 @@ func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLin
 	})
 	if err != nil {
 		return events.AdmittedEvent{}, err
+	}
+	replayed, err = events.ApplyPayloadAdmission(replayed, sourceAdmission)
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s payload admission: %w", forkEventID, source.ID(), err)
 	}
 	admitted, err := events.AdmitForPersistence(replayed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

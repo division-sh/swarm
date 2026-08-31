@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/cel-go/cel"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 type WorkflowConditionContext string
@@ -18,6 +18,10 @@ const (
 )
 
 func ValidateConditionCEL(expression string, context WorkflowConditionContext) error {
+	return ValidateConditionCELWithOptions(expression, context, workflowexpr.ValueExpressionOptions{})
+}
+
+func ValidateConditionCELWithOptions(expression string, context WorkflowConditionContext, opts workflowexpr.ValueExpressionOptions) error {
 	expression = strings.TrimSpace(expression)
 	if expression == "" || strings.EqualFold(expression, "else") {
 		return nil
@@ -32,15 +36,17 @@ func ValidateConditionCEL(expression string, context WorkflowConditionContext) e
 	if call := workflowConditionAmbientTimeCall(normalized); call != "" {
 		return fmt.Errorf("workflow expression uses ambient time call %s(); use stage timers for time-driven behavior", call)
 	}
-	env, err := celValidationEnv(context)
-	if err != nil {
-		return err
+	if workflowexpr.ExpressionReferencesRoot(normalized, "fan_out") {
+		return fmt.Errorf("fan_out.* is unavailable in workflow conditions")
 	}
-	_, issues := env.Compile(normalized)
-	if issues != nil {
-		return issues.Err()
+	if context != WorkflowConditionContextRule && context != WorkflowConditionContextOnComplete &&
+		workflowexpr.ExpressionReferencesRoot(normalized, "computed") {
+		return fmt.Errorf("computed.* is only available in rule and on_complete conditions")
 	}
-	return nil
+	opts.RequireBool = true
+	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount
+	opts.AllowAccumulated = context == WorkflowConditionContextOnComplete || opts.AllowBareItem
+	return workflowexpr.ValidateValueExpressionWithOptions(normalized, opts)
 }
 
 func workflowConditionAmbientTimeCall(expression string) string {
@@ -67,38 +73,6 @@ func workflowConditionAmbientTimeCall(expression string) string {
 		}
 	}
 	return ""
-}
-
-func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
-	options := []cel.EnvOption{
-		cel.Variable("entity", cel.DynType),
-		cel.Variable("_entity", cel.DynType),
-		cel.Variable("event", cel.DynType),
-		cel.Variable("payload", cel.DynType),
-		cel.Variable("policy", cel.DynType),
-		cel.Function("count_ge",
-			cel.Overload(
-				"count_ge_dyn_dyn",
-				[]*cel.Type{cel.DynType, cel.DynType},
-				cel.IntType,
-				cel.FunctionBinding(workflowExpressionCountGE),
-			),
-		),
-	}
-	switch context {
-	case WorkflowConditionContextRule, WorkflowConditionContextOnComplete:
-		options = append(options, cel.Variable("computed", cel.DynType))
-	}
-	switch context {
-	case WorkflowConditionContextOnComplete:
-		options = append(options, cel.Variable("accumulated", cel.DynType))
-	case WorkflowConditionContextFilter, WorkflowConditionContextCount:
-		options = append(options,
-			cel.Variable("accumulated", cel.DynType),
-			cel.Variable("item", cel.DynType),
-		)
-	}
-	return cel.NewEnv(options...)
 }
 
 func WorkflowConditionMissingRecognizedPrefix(expression string, context WorkflowConditionContext) bool {
