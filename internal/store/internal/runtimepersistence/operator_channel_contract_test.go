@@ -200,6 +200,22 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	if op.ProviderCredential != begin.ProviderCredential {
 		t.Fatalf("operation provider evidence = %#v, want %#v", op.ProviderCredential, begin.ProviderCredential)
 	}
+	foundReplay, found, err := fixture.store.FindChannelBindingBeginReplay(ctx, operatorchannel.BeginReplayRequest{
+		PrincipalID: principal.ID, RequestKeyHash: begin.RequestKeyHash, RequestHash: begin.RequestHash,
+	})
+	if err != nil || !found || foundReplay != op {
+		t.Fatalf("find exact begin replay = %#v found=%v err=%v, want %#v", foundReplay, found, err, op)
+	}
+	if missing, found, err := fixture.store.FindChannelBindingBeginReplay(ctx, operatorchannel.BeginReplayRequest{
+		PrincipalID: principal.ID, RequestKeyHash: "missing-connect-key", RequestHash: begin.RequestHash,
+	}); err != nil || found || missing != (operatorchannel.Operation{}) {
+		t.Fatalf("find missing begin replay = %#v found=%v err=%v", missing, found, err)
+	}
+	if _, _, err := fixture.store.FindChannelBindingBeginReplay(ctx, operatorchannel.BeginReplayRequest{
+		PrincipalID: principal.ID, RequestKeyHash: begin.RequestKeyHash, RequestHash: "changed-body",
+	}); !errors.Is(err, operatorchannel.ErrConflict) {
+		t.Fatalf("find changed begin replay error = %v", err)
+	}
 	replay := begin
 	replay.OperationID = uuid.NewString()
 	replayed, err := fixture.store.BeginChannelBinding(ctx, replay)
