@@ -51,7 +51,7 @@ states: [new, waiting, done]
     item.processed:
       rules:
         complete:
-          condition: "payload.item_id == 'review'"
+          condition: "has(payload.item_id) && payload.item_id == 'review'"
           advances_to: done
 `)
 	return root
