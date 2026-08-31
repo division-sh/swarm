@@ -297,6 +297,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 
 func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectClass(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
+	declareRuntimeValidationSourceRequestedEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -356,6 +357,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 
 func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
+	declareRuntimeValidationSourceRequestedEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -468,6 +470,7 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 
 func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
+	declareRuntimeValidationTelegramEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -782,6 +785,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testRuntimeWorkflowValidationBundle()
+			declareRuntimeValidationSourceRequestedEvent(bundle)
 			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"}))
@@ -814,6 +818,38 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 			}
 		})
 	}
+}
+
+func declareRuntimeValidationSourceRequestedEvent(bundle *runtimecontracts.WorkflowContractBundle) {
+	if bundle.Events == nil {
+		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
+	}
+	bundle.Events["source.requested"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
+		Properties: map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}},
+		Required:   []string{"url"},
+	}}
+}
+
+func declareRuntimeValidationTelegramEvent(bundle *runtimecontracts.WorkflowContractBundle) {
+	if bundle.Events == nil {
+		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
+	}
+	if bundle.RootTypes.Types == nil {
+		bundle.RootTypes.Types = map[string]runtimecontracts.NamedTypeDecl{}
+	}
+	bundle.RootTypes.Types["RuntimeValidationTelegramPayload"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
+		"message": {Type: "RuntimeValidationTelegramMessage"},
+	}}
+	bundle.RootTypes.Types["RuntimeValidationTelegramMessage"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
+		"chat": {Type: "RuntimeValidationTelegramChat"},
+	}}
+	bundle.RootTypes.Types["RuntimeValidationTelegramChat"] = runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
+		"id": {Type: "text"},
+	}}
+	bundle.Events["inbound.telegram"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
+		Properties: map[string]runtimecontracts.EventFieldSpec{"payload": {Type: "RuntimeValidationTelegramPayload"}},
+		Required:   []string{"payload"},
+	}}
 }
 
 func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
