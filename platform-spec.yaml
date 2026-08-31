@@ -11844,6 +11844,7 @@ flow_model:
         - producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints
         - receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance
         - receiver input same-named required payload source or exact resolution.from override and resolution mode
+        - finite filesystem FlowNode ownership and exact child-flow endpoints
         - explicit receiver-event rename
       produces:
         - semantic producer scope and local output pin identity
