@@ -422,6 +422,60 @@ func TestCredentialValueSealRejectsUnusableFileAndEffectiveOverlayValues(t *test
 	}
 }
 
+func TestObserveValueMatchingSealReturnsOnlyTheValidatedObservation(t *testing.T) {
+	ctx := context.Background()
+	store := &rotatingSealObservationStore{values: []string{"provider-a", "provider-b"}}
+	owner, err := NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := ValueEvidence{Key: "provider", Seal: ValueSeal(valueSealPrefix + strings.Repeat("a", 64))}
+
+	first, current, err := owner.ObserveValueMatchingSeal(ctx, evidence)
+	if err != nil || !current || first.CredentialValue() != "provider-a" {
+		t.Fatalf("first sealed observation = value:%q current:%v err:%v", first.CredentialValue(), current, err)
+	}
+	second, current, err := owner.ObserveValueMatchingSeal(ctx, evidence)
+	if err != nil || current || second.CredentialValue() != "provider-b" {
+		t.Fatalf("rotated sealed observation = value:%q current:%v err:%v", second.CredentialValue(), current, err)
+	}
+	if store.currentCalls != 0 {
+		t.Fatalf("sealed observation used separate currentness read %d times", store.currentCalls)
+	}
+}
+
+type rotatingSealObservationStore struct {
+	values       []string
+	snapshots    int
+	currentCalls int
+}
+
+func (s *rotatingSealObservationStore) Get(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (s *rotatingSealObservationStore) Set(context.Context, string, string) error { return nil }
+func (s *rotatingSealObservationStore) List(context.Context) ([]string, error)    { return nil, nil }
+func (s *rotatingSealObservationStore) Delete(context.Context, string) error      { return nil }
+func (s *rotatingSealObservationStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, error) {
+	index := s.snapshots
+	if index >= len(s.values) {
+		index = len(s.values) - 1
+	}
+	s.snapshots++
+	return NewAtomicSnapshot(Metadata{Key: key, Present: true, Source: SourceFile, Writable: true}, s.values[index]), nil
+}
+func (s *rotatingSealObservationStore) hasDurableValueSealKeyHome() bool { return true }
+func (s *rotatingSealObservationStore) sealCurrentValue(context.Context, string) (ValueEvidence, error) {
+	return ValueEvidence{}, errors.New("unexpected seal")
+}
+func (s *rotatingSealObservationStore) currentValueMatchesSeal(context.Context, ValueEvidence) (bool, error) {
+	s.currentCalls++
+	return true, nil
+}
+func (s *rotatingSealObservationStore) observedValueMatchesSeal(_ context.Context, _ ValueEvidence, value string) (bool, error) {
+	return value == "provider-a", nil
+}
+
 func TestCredentialValueSealValidationNeverMintsMissingKey(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "credentials.json")

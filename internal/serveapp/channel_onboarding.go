@@ -662,16 +662,15 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		if !ok || storeKey == "" || admission.StoreKey != storeKey {
 			return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation credential role %q is not admitted by the current activation", logical)
 		}
-		current, err := d.credentials.CurrentValueMatchesSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
+		observed, current, err := d.credentials.ObserveValueMatchingSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 		if err != nil {
 			return channelonboarding.ConfirmationResult{}, err
 		}
+		if !observed.Present || strings.TrimSpace(observed.CredentialValue()) == "" {
+			return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation credential role %q is not usable", logical)
+		}
 		if !current {
 			return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation credential role %q is no longer current", logical)
-		}
-		observed, err := d.credentials.ObserveSecretBinding(ctx, storeKey)
-		if err != nil || !observed.Bound() {
-			return channelonboarding.ConfirmationResult{}, errors.Join(fmt.Errorf("channel confirmation credential role %q is not usable", logical), err)
 		}
 		credentials[logical] = observed.CredentialValue()
 	}

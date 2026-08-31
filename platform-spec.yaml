@@ -10031,7 +10031,8 @@ tool_model:
         pending or failed proof materialization responsibility without repeating claim or binding mutation. When the
         exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
         validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
-        and complete the selected-store responsibility without rewriting the proof; any mismatch fails closed. A retained
+        and complete the selected-store responsibility without rewriting the proof or consulting later credential
+        currentness; currentness gates only a new proof-file write. Any mismatch fails closed. A retained
         interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation. V1 or digest-less proof
         documents are unsupported stale material: they may be classified and quarantined, but no identity fact is decoded,
         copied, adapted, migrated, or rewritten into v2 authority. Fresh v2 evidence requires a new confirmation ceremony.
@@ -10197,6 +10198,8 @@ tool_model:
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
         inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
         and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+        Each dispatched credential value is the exact single observation validated against the activation's durable value
+        seal; validate-then-reread and any other split currentness/value path are forbidden.
         The journal retains the authorizing onboarding revision and complete durable/live context coordinate. A proven
         prelaunch failure may clear and remint the confirmation operation only in the successor-coordinate CAS; terminal
         success retains its operation identity, and launched, response-observed, or uncertain work is never redispatched.

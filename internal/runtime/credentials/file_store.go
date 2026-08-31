@@ -283,6 +283,13 @@ func (s *FileStore) currentValueMatchesSeal(_ context.Context, evidence ValueEvi
 	return subtleSealEqual(want, evidence.Seal), nil
 }
 
+func (s *FileStore) observedValueMatchesSeal(ctx context.Context, evidence ValueEvidence, value string) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	return s.matchExactValue(ctx, evidence.Key, value, evidence.Seal)
+}
+
 func (s *FileStore) sealExactValue(_ context.Context, key, value string) (ValueSeal, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {

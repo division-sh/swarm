@@ -102,3 +102,18 @@ func TestPublicChannelConfirmationConsumesOnboardingCoordinator(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelConfirmationConsumesOneSealValidatedCredentialObservation(t *testing.T) {
+	repo := filepath.Clean(filepath.Join("..", "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(repo, "internal", "serveapp", "channel_onboarding.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, "d.credentials.ObserveValueMatchingSeal(") {
+		t.Fatal("channel confirmation does not consume the atomic seal-validated observation owner")
+	}
+	if strings.Contains(source, "d.credentials.CurrentValueMatchesSeal(") || strings.Contains(source, "d.credentials.ObserveSecretBinding(") {
+		t.Fatal("channel confirmation retains a split credential validation/read path")
+	}
+}
