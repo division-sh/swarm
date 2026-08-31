@@ -688,16 +688,29 @@ type ContinuationObservation struct {
 	Invariant   error
 }
 
-// RecoveryInventory is the exact normal-authority bundle scope inspected
-// before startup may activate or rewrite durable delivery authority.
-type RecoveryInventory struct {
+type RecoveryRunInventory struct {
+	RunID      string
 	Pending    int
 	Failed     int
 	InProgress int
 }
 
-func (i RecoveryInventory) Total() int {
+func (i RecoveryRunInventory) Total() int {
 	return i.Pending + i.Failed + i.InProgress
+}
+
+// RecoveryInventory preserves run identity so startup can classify every
+// obligation before applying generic recovery admission.
+type RecoveryInventory struct {
+	Runs []RecoveryRunInventory
+}
+
+func (i RecoveryInventory) Total() int {
+	total := 0
+	for _, run := range i.Runs {
+		total += run.Total()
+	}
+	return total
 }
 
 func (i RecoveryInventory) HasWork() bool {

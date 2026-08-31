@@ -16,6 +16,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -327,13 +328,13 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 }
 
 func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresOwner, tx *sql.Tx, request runtimeinbound.Request) error {
-	var packageKey, flowID, instanceID, entityID, runID, effectiveState, publicationState string
+	var packageKey, flowID, instanceID, entityID, runID, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT package_key, flow_id, instance_id, entity_id::text, current_run_id::text,
-		       current_generation, publication_sequence, effective_state, publication_state
+		       current_generation, publication_sequence, publication_state
 		FROM standing_services WHERE service_id = $1::uuid FOR UPDATE
-	`, request.StableServiceID).Scan(&packageKey, &flowID, &instanceID, &entityID, &runID, &generation, &publicationSequence, &effectiveState, &publicationState)
+	`, request.StableServiceID).Scan(&packageKey, &flowID, &instanceID, &entityID, &runID, &generation, &publicationSequence, &publicationState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
 	}
@@ -343,8 +344,12 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresO
 	if packageKey != request.PackageKey || flowID != request.FlowID || instanceID != request.InstanceID || entityID != request.EntityID || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
 		return fmt.Errorf("stale or conflicting inbound standing target")
 	}
-	if effectiveState != "active" || publicationState != "published" {
-		return fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
+	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, request.ResolvedRunID)
+	if err != nil {
+		return fmt.Errorf("classify inbound standing target: %w", err)
+	}
+	if !disposition.Executable() || publicationState != "published" {
+		return fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, disposition.Kind, publicationState)
 	}
 	if err := s.RunLifecyclePostgresOwner.RequireActiveTx(ctx, tx, request.ResolvedRunID); err != nil {
 		return fmt.Errorf("admit inbound target run lifecycle: %w", err)

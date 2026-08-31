@@ -1246,8 +1246,8 @@ func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (delive
 	return s.deliveryPostgresOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *PostgresStore) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
-	return s.pipelinePostgresOwner.StandingRunUsesIntrinsicRecovery(ctx, runID)
+func (s *PostgresStore) StandingRunRestartDisposition(ctx context.Context, runID string) (pipeline.StandingRestartDisposition, error) {
+	return s.pipelinePostgresOwner.StandingRunRestartDisposition(ctx, runID)
 }
 
 func (s *PostgresStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -2450,8 +2450,8 @@ func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (d
 	return s.deliverySQLiteOwner.Snapshot(ctx, deliveryID)
 }
 
-func (s *SQLiteRuntimeStore) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
-	return s.pipelineSQLiteOwner.StandingRunUsesIntrinsicRecovery(ctx, runID)
+func (s *SQLiteRuntimeStore) StandingRunRestartDisposition(ctx context.Context, runID string) (pipeline.StandingRestartDisposition, error) {
+	return s.pipelineSQLiteOwner.StandingRunRestartDisposition(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {

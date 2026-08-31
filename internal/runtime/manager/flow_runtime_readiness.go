@@ -114,7 +114,7 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 	if err != nil {
 		return err
 	}
-	projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,42 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	if am == nil || am.workflowInstances == nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 	}
-	return am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+	projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	if am.roles.StandingRestarts == nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart disposition reader")
+	}
+	cache := make(map[string]runtimepipeline.StandingRestartDisposition)
+	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+		filtered := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
+		for _, item := range items {
+			runID := strings.TrimSpace(item.Plan.RunID)
+			disposition, ok := cache[runID]
+			if !ok {
+				disposition, err = am.roles.StandingRestarts.StandingRunRestartDisposition(ctx, runID)
+				if err != nil {
+					return nil, fmt.Errorf("classify dynamic flow runtime readiness run %s: %w", runID, err)
+				}
+				cache[runID] = disposition
+			}
+			if disposition.UsesGenericRecovery() || disposition.Executable() {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered, nil
+	}
+	if projection.CurrentCompleted, err = filter(projection.CurrentCompleted); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	if projection.CurrentPending, err = filter(projection.CurrentPending); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	if projection.SourceTransitionRequired, err = filter(projection.SourceTransitionRequired); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	return projection, nil
 }
 
 func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.BundleSourceFact, replayAllowed bool) (DynamicFlowRuntimeStartupReadiness, error) {

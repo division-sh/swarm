@@ -162,6 +162,10 @@ func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context
 }
 
 func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
+	return managedNormalEffectStoreTestContextForRun(t, ctx, authority, managedNormalEffectStoreTestRunID(authority.Normal.AgentID))
+}
+
+func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, runID string) context.Context {
 	t.Helper()
 	ctx = managedExecutionStoreTestContext(t, ctx)
 	admission, _ := managedexecution.FromContext(ctx)
@@ -171,7 +175,6 @@ func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, auth
 	}
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-turn:"+principal)).String()
 	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-session:"+principal)).String()
-	runID := managedNormalEffectStoreTestRunID(authority.Normal.AgentID)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
 		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),

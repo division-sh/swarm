@@ -68,6 +68,7 @@ type StandingActivation struct {
 	FlowInstance        string
 	EntityID            string
 	EffectiveState      string
+	RestartDisposition  runtimepipeline.StandingRestartDisposition
 	Created             bool
 }
 
@@ -575,28 +576,21 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 		instance := plan.instance
 		result := results[i]
 		reconciliation := result.Reconciliation
-		if reconciliation.EffectiveState != "active" {
+		if !reconciliation.RestartDisposition.Executable() {
 			activations = append(activations, StandingActivation{
 				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
 				FlowID: declaration.FlowID, RunID: reconciliation.RunID, Generation: reconciliation.Generation,
 				PublicationSequence: reconciliation.PublicationSequence, InstanceID: instance.InstanceID,
 				FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
-				EffectiveState: reconciliation.EffectiveState, Created: false,
+				EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: false,
 			})
-			for _, target := range plan.targets {
-				target.BundleHash = fact.BundleHash()
-				target.RunID = reconciliation.RunID
-				target.Generation = reconciliation.Generation
-				target.PublicationSequence = reconciliation.PublicationSequence
-				targets = append(targets, target.normalized())
-			}
 			continue
 		}
 		activations = append(activations, StandingActivation{
 			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
 			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: result.PublicationSequence, InstanceID: instance.InstanceID,
 			FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
-			EffectiveState: reconciliation.EffectiveState, Created: result.Created,
+			EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: result.Created,
 		})
 		for _, target := range plan.targets {
 			target.BundleHash = fact.BundleHash()
@@ -617,7 +611,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	restored := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
 		runID := strings.TrimSpace(activation.RunID)
-		if activation.Created || activation.EffectiveState != "active" || runID == "" {
+		if activation.Created || !activation.RestartDisposition.Executable() || runID == "" {
 			continue
 		}
 		if _, ok := restored[runID]; ok {

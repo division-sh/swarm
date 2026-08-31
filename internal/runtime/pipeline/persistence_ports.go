@@ -88,7 +88,7 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 			}
 		}
 		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
-		if reconciliation.EffectiveState == "active" {
+		if reconciliation.RestartDisposition.Executable() {
 			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
 				return nil, err
 			}
@@ -283,8 +283,8 @@ func (pc *PipelineCoordinator) PublishStandingService(ctx context.Context, servi
 	return pc.workflowStore.PublishStandingService(ctx, serviceID, runID, generation)
 }
 
-func (pc *PipelineCoordinator) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
-	return pc.workflowStore.StandingRunUsesIntrinsicRecovery(ctx, runID)
+func (pc *PipelineCoordinator) StandingRunRestartDisposition(ctx context.Context, runID string) (StandingRestartDisposition, error) {
+	return pc.workflowStore.StandingRunRestartDisposition(ctx, runID)
 }
 
 func (pc *PipelineCoordinator) ListStandingServiceStatuses(ctx context.Context) ([]StandingServiceStatus, error) {

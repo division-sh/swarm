@@ -12,6 +12,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/mailbox"
+	"github.com/division-sh/swarm/internal/operatorread"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -140,6 +143,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 
 func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	repo, contractsPath, opts := devScratchRuntimeFixture(t)
+	promoteDevScratchFixtureToStanding(t, contractsPath)
 	durablePath := filepath.Join(repo, ".swarm", "stores", "dev.db")
 	if err := os.MkdirAll(filepath.Dir(durablePath), 0o700); err != nil {
 		t.Fatal(err)
@@ -154,6 +158,8 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	var firstIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, firstEndpoint+"/v1/rpc", "runtime.identity", map[string]any{}, &firstIdentity)
 	firstHash := firstIdentity.BundleSources[0].BundleHash
+	firstStanding := requireSingleServedStandingRun(t, firstEndpoint+"/v1/rpc", firstHash)
+	firstHistory := requireServedStandingHistory(t, firstEndpoint+"/v1/rpc", firstStanding.RunID)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first dev scratch process exit code = %d\n%s", code, first.outputString())
 	}
@@ -180,6 +186,15 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	if secondHash == firstHash || secondIdentity.BundleSources[0].BundleSource != "persisted" {
 		t.Fatalf("second identity = %#v, want new persisted source replacing %s", secondIdentity, firstHash)
 	}
+	secondStanding := requireSingleServedStandingRun(t, secondEndpoint+"/v1/rpc", secondHash)
+	if secondStanding.RunID != firstStanding.RunID || !secondStanding.Origin.Equal(firstStanding.Origin) {
+		t.Fatalf("fresh dev semantic identity = %#v, want deterministic recurrence of %#v", secondStanding, firstStanding)
+	}
+	if !secondStanding.StartedAt.After(firstStanding.StartedAt) {
+		t.Fatalf("fresh dev started_at = %s, want later than predecessor %s", secondStanding.StartedAt, firstStanding.StartedAt)
+	}
+	secondHistory := requireServedStandingHistory(t, secondEndpoint+"/v1/rpc", secondStanding.RunID)
+	assertServedStandingHistoryReplaced(t, firstHistory, secondHistory)
 
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()
@@ -193,6 +208,105 @@ func TestRunServeRuntimeDevScratchNextInvocationHasNoPredecessor(t *testing.T) {
 	durable, err := os.ReadFile(durablePath)
 	if err != nil || string(durable) != "normal-durable-state" {
 		t.Fatalf("normal dev.db changed: body=%q err=%v", durable, err)
+	}
+}
+
+func promoteDevScratchFixtureToStanding(t *testing.T, contractsPath string) {
+	t.Helper()
+	packagePath := filepath.Join(contractsPath, "package.yaml")
+	body, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary := "  - {id: fulfillment, flow: fulfillment, mode: static}"
+	standing := "  - id: fulfillment\n    flow: fulfillment\n    mode: singleton\n    activation: standing"
+	updated := strings.Replace(string(body), ordinary, standing, 1)
+	if updated == string(body) {
+		t.Fatalf("dev scratch fixture flow declaration was not replaceable:\n%s", body)
+	}
+	if err := os.WriteFile(packagePath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	schemaPath := filepath.Join(contractsPath, "flows", "fulfillment", "schema.yaml")
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSchema := strings.Replace(string(schema), "mode: static", "mode: singleton", 1)
+	if updatedSchema == string(schema) {
+		t.Fatalf("dev scratch fixture flow schema mode was not replaceable:\n%s", schema)
+	}
+	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsPath, "flows", "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requireSingleServedStandingRun(t *testing.T, endpoint, bundleHash string) operatorread.RunHeader {
+	t.Helper()
+	var result struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
+	var standing []operatorread.RunHeader
+	for _, run := range result.Runs {
+		if run.Origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
+			standing = append(standing, run)
+		}
+	}
+	if len(standing) != 1 {
+		t.Fatalf("run.list for bundle %s returned %d standing runs, want one: %#v", bundleHash, len(standing), result.Runs)
+	}
+	return standing[0]
+}
+
+type servedStandingHistory struct {
+	eventIDs    map[string]struct{}
+	deliveryIDs map[string]struct{}
+	mailboxIDs  map[string]struct{}
+}
+
+func requireServedStandingHistory(t *testing.T, endpoint, runID string) servedStandingHistory {
+	t.Helper()
+	var events operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+		"filter": map[string]any{"run_id": runID}, "limit": 500,
+	}, &events)
+	var listed struct {
+		Items []mailbox.V1Item `json:"items"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{"run_id": runID, "limit": 200}, &listed)
+	history := servedStandingHistory{
+		eventIDs:    make(map[string]struct{}, len(events.Events)),
+		deliveryIDs: make(map[string]struct{}),
+		mailboxIDs:  make(map[string]struct{}, len(listed.Items)),
+	}
+	for _, event := range events.Events {
+		history.eventIDs[event.EventID] = struct{}{}
+		for _, delivery := range event.Deliveries {
+			history.deliveryIDs[delivery.DeliveryID] = struct{}{}
+		}
+	}
+	for _, item := range listed.Items {
+		history.mailboxIDs[item.MailboxID] = struct{}{}
+	}
+	return history
+}
+
+func assertServedStandingHistoryReplaced(t *testing.T, predecessor, fresh servedStandingHistory) {
+	t.Helper()
+	for label, pair := range map[string][2]map[string]struct{}{
+		"event":    {predecessor.eventIDs, fresh.eventIDs},
+		"delivery": {predecessor.deliveryIDs, fresh.deliveryIDs},
+		"mailbox":  {predecessor.mailboxIDs, fresh.mailboxIDs},
+	} {
+		for id := range pair[0] {
+			if _, exists := pair[1][id]; exists {
+				t.Fatalf("fresh dev history retained predecessor %s %s", label, id)
+			}
+		}
 	}
 }
 

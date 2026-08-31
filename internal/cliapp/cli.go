@@ -327,7 +327,6 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 				opts.WorkspaceBackend = backend
 			}
 			if opts.Dev {
-				opts.AbandonActiveRuns = true
 				opts.NoRequireBundleMatch = true
 			}
 			if opts.NoRequireBundleMatch {

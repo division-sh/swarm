@@ -179,6 +179,9 @@ func (managedNativeDurableRoles) RecordDeadLetter(context.Context, runtimedeadle
 func (managedNativeDurableRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
+func (managedNativeDurableRoles) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
+	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
+}
 
 func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) runtimebus.DurableDependencies {
 	roles := managedNativeDurableRoles{}
@@ -188,7 +191,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		WorkflowInstances:     roles,
 		PreparedEvents:        roles,
-		TargetFailureRecorder: roles, RunOrigins: roles,
+		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
 	}
 }
 

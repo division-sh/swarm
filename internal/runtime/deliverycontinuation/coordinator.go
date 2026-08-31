@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const (
@@ -46,6 +47,7 @@ type synchronizationRequest struct {
 // durable queue or a second eligibility clock.
 type Coordinator struct {
 	store      runtimedelivery.Store
+	restarts   runtimepipeline.StandingRestartDispositionReader
 	authority  runtimedelivery.ExecutionAuthority
 	workOwner  worklifetime.Occurrence
 	dispatcher Dispatcher
@@ -64,6 +66,7 @@ type Coordinator struct {
 
 func New(
 	store runtimedelivery.Store,
+	restarts runtimepipeline.StandingRestartDispositionReader,
 	authority runtimedelivery.ExecutionAuthority,
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
@@ -71,6 +74,9 @@ func New(
 ) (*Coordinator, error) {
 	if store == nil {
 		return nil, errors.New("delivery continuation selected store is required")
+	}
+	if restarts == nil {
+		return nil, errors.New("delivery continuation standing restart reader is required")
 	}
 	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
 		return nil, errors.New("normal delivery continuation coordinator requires normal execution authority")
@@ -85,7 +91,7 @@ func New(
 		return nil, errors.New("delivery continuation dispatcher is required")
 	}
 	return &Coordinator{
-		store: store, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
+		store: store, restarts: restarts, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
 		entries: make(map[string]entry), wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
 	}, nil
 }
@@ -415,6 +421,15 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 			return 0, false, err
 		}
 		for _, item := range page.Items {
+			if item.Snapshot.RunID != "" && item.Disposition != runtimedelivery.ClaimAbsent && item.Disposition != runtimedelivery.ClaimInvariantInvalid {
+				disposition, err := c.restarts.StandingRunRestartDisposition(ctx, item.Snapshot.RunID)
+				if err != nil {
+					return 0, false, fmt.Errorf("classify delivery continuation %s standing disposition: %w", item.DeliveryID, err)
+				}
+				if disposition.ExactCurrent() && !disposition.Executable() {
+					continue
+				}
+			}
 			if after, ok := item.Wake.After(); ok {
 				next, wake = earlierWake(next, wake, after)
 			}

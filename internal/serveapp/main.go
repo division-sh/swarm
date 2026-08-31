@@ -1987,10 +1987,31 @@ func reconcileServeRuntimeStandingTargets(
 			FlowInstance:        targets[i].FlowInstance,
 			EntityID:            reconciliation.EntityID,
 			EffectiveState:      reconciliation.EffectiveState,
+			RestartDisposition:  reconciliation.RestartDisposition,
 			Created:             reconciliation.Transition == "created",
 		})
 	}
 	return targets, activations, nil
+}
+
+func serveRuntimeContextStandingTargets(
+	executable []runtime.StandingTarget,
+	declared []runtime.StandingTarget,
+	activations []runtime.StandingActivation,
+) []runtime.StandingTarget {
+	nonExecutable := make(map[string]struct{}, len(activations))
+	for _, activation := range activations {
+		if !activation.RestartDisposition.Executable() {
+			nonExecutable[activation.ServiceID] = struct{}{}
+		}
+	}
+	targets := append([]runtime.StandingTarget(nil), executable...)
+	for _, target := range declared {
+		if _, ok := nonExecutable[target.ServiceID]; ok {
+			targets = append(targets, target)
+		}
+	}
+	return targets
 }
 
 type serveStandingServiceController struct {
@@ -2114,7 +2135,7 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	if err := transition.Retire(ctx); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("retire reset standing service occurrence: %w", err)
 	}
-	if result.EffectiveState == "active" {
+	if result.RestartDisposition.Executable() {
 		if err := c.publishActiveService(ctx, result, owner); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -2193,6 +2214,9 @@ func (c *serveStandingServiceController) failClosedAfterReopen(serviceID string,
 
 func (c *serveStandingServiceController) publishActiveService(ctx context.Context, result runtimepipeline.StandingServiceReconciliation, owner *runtime.Runtime) error {
 	serviceID := strings.TrimSpace(result.ServiceID)
+	if !result.RestartDisposition.Executable() {
+		return fmt.Errorf("standing service %s disposition %s is not executable", serviceID, result.RestartDisposition.Kind)
+	}
 	if owner == nil {
 		return fmt.Errorf("standing service %s runtime owner is unavailable", serviceID)
 	}
@@ -2226,24 +2250,28 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 		return err
 	}
 	for _, status := range statuses {
-		switch status.EffectiveState {
-		case "active":
+		switch status.RestartDisposition.Kind {
+		case runtimepipeline.StandingRestartActiveIntrinsic:
 			if status.PublicationState != "published" {
 				return fmt.Errorf("standing service %s is active but publication is %s", status.ServiceID, status.PublicationState)
 			}
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s %s run=%s generation=%d source=%s\n", status.ServiceID, status.Transition, status.RunID, status.Generation, status.BundleHash)
 			}
-		case "suspended":
+		case runtimepipeline.StandingRestartSuspended:
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
 			}
-		case "orphaned":
+		case runtimepipeline.StandingRestartOrphaned:
 			if out != nil {
-				fmt.Fprintf(out, "standing service %s orphaned declaration_removed=true run=%s generation=%d timers=quiesced\n", status.ServiceID, status.RunID, status.Generation)
+				fmt.Fprintf(out, "standing service %s orphaned declaration_removed=true run=%s generation=%d remediation=%s\n", status.ServiceID, status.RunID, status.Generation, status.RestartDisposition.RunControlGuidance())
+			}
+		case runtimepipeline.StandingRestartTerminalDeclared, runtimepipeline.StandingRestartTerminalOrphaned, runtimepipeline.StandingRestartInvalidCurrent:
+			if out != nil {
+				fmt.Fprintf(out, "standing service %s %s run=%s generation=%d remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.RunControlGuidance())
 			}
 		default:
-			return fmt.Errorf("standing service %s has unsupported effective state %q", status.ServiceID, status.EffectiveState)
+			return fmt.Errorf("standing service %s has unsupported restart disposition %q", status.ServiceID, status.RestartDisposition.Kind)
 		}
 	}
 	return nil
@@ -2510,8 +2538,9 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 			return err
 		}
 		if manager != nil {
+			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
 			for _, activation := range activations {
-				if activation.EffectiveState == "active" {
+				if activation.RestartDisposition.Executable() {
 					continue
 				}
 				if err := manager.SuppressStandingServiceTargets(activation.ServiceID); err != nil {
@@ -2527,7 +2556,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 				Runtime:                    contextDef.runtime,
 				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
-				StandingTargets:            targets,
+				StandingTargets:            contextTargets,
 				ProviderTriggerGeneration:  contextDef.providerTriggerGeneration,
 				InstalledTriggerSubjects:   contextDef.installedTriggerSubjects,
 				PackInventoryDigest:        contextDef.packInventoryDigest,
@@ -2564,7 +2593,7 @@ func newServeStartupStandingRecoveryOwner(
 ) (*serveStartupStandingRecoveryOwner, error) {
 	active := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
-		if activation.EffectiveState == "active" {
+		if activation.RestartDisposition.Executable() {
 			active[activation.ServiceID] = struct{}{}
 		}
 	}

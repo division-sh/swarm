@@ -422,6 +422,25 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	}
 }
 
+func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t *testing.T) {
+	active := runtimepkg.StandingTarget{ServiceID: "active-service", RunID: "active-run", Provider: "telegram"}
+	stopped := runtimepkg.StandingTarget{ServiceID: "stopped-service", RunID: "stopped-run", Provider: "telegram"}
+	got := serveRuntimeContextStandingTargets(
+		[]runtimepkg.StandingTarget{active},
+		[]runtimepkg.StandingTarget{{ServiceID: active.ServiceID, Provider: active.Provider}, stopped},
+		[]runtimepkg.StandingActivation{
+			{ServiceID: active.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartActiveIntrinsic}},
+			{ServiceID: stopped.ServiceID, RestartDisposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartTerminalDeclared}},
+		},
+	)
+	if len(got) != 2 {
+		t.Fatalf("runtime context standing targets = %#v, want active plus stopped declaration", got)
+	}
+	if !reflect.DeepEqual(got[0], active) || !reflect.DeepEqual(got[1], stopped) {
+		t.Fatalf("runtime context standing targets = %#v, want executable current target and exact stopped declaration", got)
+	}
+}
+
 type terminalSourceSetCapability struct {
 	runtimestartupownership.ProcessCapability
 	err error

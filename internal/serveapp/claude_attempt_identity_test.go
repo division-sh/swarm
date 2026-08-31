@@ -102,6 +102,7 @@ type claudeAttemptProofStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
+	runtimepipeline.StandingRestartDispositionReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -667,13 +668,14 @@ func newClaudeAttemptProofEventBus(
 			DeliveryLifecycle: backend.store, FlowRoutes: backend.store, FlowRouteRecords: backend.store,
 			FlowRouteSets: backend.store, FlowRouteTopology: backend.store, FlowRouteRollback: backend.store, ActiveAgents: backend.store,
 			ActiveFlows: backend.store, TargetOwners: backend.store, WorkflowInstances: backend.store, PreparedEvents: backend.store,
-			TargetFailureRecorder: backend.store, RunOrigins: backend.store,
+			TargetFailureRecorder: backend.store, RunOrigins: backend.store, StandingRestarts: backend.store,
 		},
 	})
 	if err != nil {
 		t.Fatalf("new Claude proof event bus: %v", err)
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
+		backend.store,
 		backend.store,
 		authority,
 		workOwner,

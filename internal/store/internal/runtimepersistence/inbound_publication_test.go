@@ -253,6 +253,22 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelClaimProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	if _, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "inbound-proof"}); err != nil {
+		t.Fatalf("suspend inbound standing service: %v", err)
+	}
+	blocked := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "delivery-suspended")
+	if _, err := runInboundPublicationProofMutation(t, store, ctx, blocked, func(mutation inboundPublicationProofMutation) error {
+		publications, evidence := inboundPublicationProofEvents(t, blocked)
+		for index := range publications {
+			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
+				return err
+			}
+		}
+		return mutation.FinalizeInboundPublication(mutation.Context(), runtimeinbound.Finalization{EvidenceEvent: evidence, Events: publications})
+	}); err == nil || !strings.Contains(err.Error(), "suspended") {
+		t.Fatalf("suspended standing inbound error = %v, want typed suspended disposition", err)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, blocked.ProviderEventID, 0)
 }
 
 func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {

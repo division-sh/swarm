@@ -583,7 +583,7 @@ func (a *Adapter) InspectRecovery(
 	}
 	bundleHash, bundleSource := source.StorageValues()
 	query := `
-		SELECT
+		SELECT run_id::text,
 			COUNT(*) FILTER (WHERE status='pending'),
 			COUNT(*) FILTER (WHERE status='failed'),
 			COUNT(*) FILTER (WHERE status='in_progress')
@@ -591,11 +591,13 @@ func (a *Adapter) InspectRecovery(
 		WHERE execution_authority_kind='normal_runtime'
 		  AND authority_bundle_hash=$1
 		  AND authority_bundle_source=$2
-		  AND status IN ('pending','failed','in_progress')`
+		  AND status IN ('pending','failed','in_progress')
+		GROUP BY run_id
+		ORDER BY run_id`
 	args := []any{bundleHash, bundleSource}
 	if a.dialect == DialectSQLite {
 		query = `
-			SELECT
+			SELECT run_id,
 				SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),
 				SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
 				SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END)
@@ -603,15 +605,29 @@ func (a *Adapter) InspectRecovery(
 			WHERE execution_authority_kind='normal_runtime'
 			  AND authority_bundle_hash=?
 			  AND authority_bundle_source=?
-			  AND status IN ('pending','failed','in_progress')`
+			  AND status IN ('pending','failed','in_progress')
+			GROUP BY run_id
+			ORDER BY run_id`
 	}
-	var pending, failed, inProgress sql.NullInt64
-	if err := q.QueryRowContext(ctx, query, args...).Scan(&pending, &failed, &inProgress); err != nil {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
 		return RecoveryInventory{}, fmt.Errorf("inspect delivery recovery inventory: %w", err)
 	}
-	return RecoveryInventory{
-		Pending: int(pending.Int64), Failed: int(failed.Int64), InProgress: int(inProgress.Int64),
-	}, nil
+	defer rows.Close()
+	inventory := RecoveryInventory{}
+	for rows.Next() {
+		var run RecoveryRunInventory
+		var pending, failed, inProgress sql.NullInt64
+		if err := rows.Scan(&run.RunID, &pending, &failed, &inProgress); err != nil {
+			return RecoveryInventory{}, fmt.Errorf("scan delivery recovery inventory: %w", err)
+		}
+		run.Pending, run.Failed, run.InProgress = int(pending.Int64), int(failed.Int64), int(inProgress.Int64)
+		inventory.Runs = append(inventory.Runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return RecoveryInventory{}, fmt.Errorf("read delivery recovery inventory: %w", err)
+	}
+	return inventory, nil
 }
 
 // CommitPipelineHandoff records the durable transition from event-level

@@ -494,6 +494,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("inspect initial delivery recovery inventory: %v", err)
 				}
+				beforeRun := deliveryRecoveryInventoryRun(t, before, event.RunID())
 
 				failedClaim, err := storetest.ClaimDelivery(ctx, backend.store, event, failedRoute)
 				if err != nil {
@@ -516,13 +517,14 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("inspect transitioned delivery recovery inventory: %v", err)
 				}
-				want := runtimedelivery.RecoveryInventory{
-					Pending:    before.Pending - 2,
-					Failed:     before.Failed + 1,
-					InProgress: before.InProgress + 1,
+				want := runtimedelivery.RecoveryRunInventory{
+					RunID:      beforeRun.RunID,
+					Pending:    beforeRun.Pending - 2,
+					Failed:     beforeRun.Failed + 1,
+					InProgress: beforeRun.InProgress + 1,
 				}
-				if after != want {
-					t.Fatalf("delivery recovery inventory = %#v, want %#v", after, want)
+				if got := deliveryRecoveryInventoryRun(t, after, event.RunID()); got != want {
+					t.Fatalf("delivery recovery inventory for run %s = %#v, want %#v", event.RunID(), got, want)
 				}
 
 				foreignSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(
@@ -1585,6 +1587,17 @@ func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Conte
 	if matches != 1 {
 		t.Fatalf("matching renewed attempt and obligation leases = %d, want 1", matches)
 	}
+}
+
+func deliveryRecoveryInventoryRun(t testing.TB, inventory runtimedelivery.RecoveryInventory, runID string) runtimedelivery.RecoveryRunInventory {
+	t.Helper()
+	for _, run := range inventory.Runs {
+		if run.RunID == runID {
+			return run
+		}
+	}
+	t.Fatalf("delivery recovery inventory has no row for run %s: %#v", runID, inventory)
+	return runtimedelivery.RecoveryRunInventory{}
 }
 
 func deliveryLifecycleEvent(label string) events.Event {

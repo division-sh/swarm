@@ -6216,16 +6216,17 @@ engine:
       excludes:
       - delivery release/abandon and replay behavior owned by #1087
     - name: serve_active_run_abandon_quiescence_rows
-      owner: runtimerunquiescence.ServeAbandonStore consumed by internal/serveapp for swarm serve --abandon-active-runs and --dev
+      owner: runtimerunquiescence.ServeAbandonStore consumed by internal/serveapp only for explicit swarm serve --abandon-active-runs
       promoted_by: '#1251'
       sqlite_owner: internal/store.SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
       postgres_owner: internal/store.PostgresStore.ApplyServeAbandonActiveRunQuiescence
       scope: >
-        The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local/dev
-        and Postgres production/external backends apply the same `server_restart_abandon` semantics over active runs,
+        The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local
+        and Postgres production/external backends apply the same `server_restart_abandon` semantics over active non-standing runs,
         same-run recoverable agent/node deliveries, exact delivery outcomes, and platform pipeline receipts before
         runtime startup can reclaim work. `swarm serve` consumes this typed selected-store owner and must not infer
-        support from raw Postgres handles or skip the operation on SQLite.
+        support from raw Postgres handles or skip the operation on SQLite. The exact current generation named by
+        standing_services.current_run_id is excluded; only explicit standing reset may create its successor.
       excludes:
       - destructive reset/runtime.nuke container and row-deletion semantics
       - broader startup recovery/replay policy outside the rows explicitly terminalized by serve abandon
@@ -11836,6 +11837,7 @@ flow_model:
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan
         durable_identity_and_desired_state: private runtime/pipeline workflow persistence over standing_services plus standing_service_generations plus standing_service_journal
+        restart_disposition: internal/runtime/pipeline.ClassifyStandingRestart over the complete selected-store exact-current fact product
         startup_reconciliation: internal/runtime/pipeline.PipelineCoordinator.ReconcileStandingServiceSet
         lifecycle_materialization: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
@@ -11866,8 +11868,10 @@ flow_model:
         - signing_secret is an explicit deployment credential reference required only by the compiled authentication policy; package data never carries the value
         - every provider binding requires an exact compatible external input pin under its compiled event-name policy
       lifecycle_authority: >
-        The stable standing service identity is the deterministic service_id derived from package_key plus flow_id. Bundle
-        hash and bundle source are revision metadata, never lifecycle identity or admission gates. Before readiness, one
+        The standing service identity is the deterministic service_id derived from package_key plus flow_id. A destructive
+        project-local dev scratch epoch may therefore recreate the same authored service_id and generation-one run_id after
+        deleting every predecessor durable fact; recurrence of those semantic IDs does not adopt the predecessor occurrence.
+        Bundle hash and bundle source are revision metadata, never lifecycle identity or admission gates. Before readiness, one
         selected-store transaction validates the complete declaration set, creates or revises every declared service, and
         orphans every previously declared service omitted from that complete set. A retained declaration keeps its current
         nonterminal run and generation while its source revision and journal advance. A removed, renamed, or non-standing
@@ -11881,12 +11885,21 @@ flow_model:
         run-scoped bundle diagnosis remains inclusive and reports the current standing run's actual source and availability.
         First materialization consumes the full canonical ActivateFlowInstance path, including routes, agents, initial
         timers, schedules, and creation effects. Restart rehydrates durable state and process-local effects without replaying
-        creation effects. A restart-abandoned generation may advance only through the explicit repair rule after proving the
-        predecessor owns no live work. Repair creates the successor, copies its canonical entity state, and, when the durable
-        operator override is suspended, transitions the successor run to paused through the lifecycle owner before requesting
-        completion. That request remains mandatory and returns deferred_paused; it is never skipped or interpreted locally.
-        Only the real operator resume clears the override, writes running, and owns the next immediate completion request.
-        Every other terminal current generation requires the explicit standing reset command.
+        creation effects. One selected-store reader joins the exact current pointer, declaration presence, effective state,
+        operator override, referenced run lifecycle, generation, and identity integrity before returning the canonical typed
+        restart disposition. Only active_intrinsic is executable. Suspended, orphaned, terminal_declared, terminal_orphaned,
+        and invalid_current remain durable typed service-local evidence and never become generic recovery work, process targets,
+        publication, ingress, timers, manager work, activity/effect recovery, or standing leases. An unprovable pointer,
+        identity, lifecycle, or selected-store relation fails boot closed. An ordinary result is possible only when the run is
+        not the exact current pointer, including historical standing lineage. Explicit standing reset is the sole operation
+        that retires N and creates N+1; startup reconciliation never repairs or advances a terminal generation. Restoring a
+        terminal orphan retains terminal N as terminal_declared and teaches reset. A terminal or invalid member is a typed
+        per-service result and cannot abort healthy or renamed-new siblings in complete-set reconciliation.
+        Reconciliation normalizes an active_intrinsic declaration to running while retaining exact N. A generic public
+        run.pause changes only run-scoped control and does not create the durable standing suspension override, so restart
+        writes control_reason=standing_reconcile and resumes intrinsic execution. Only standing.suspend owns persistent
+        standing suspension; standing resume clears that override, writes running, and owns the next immediate completion
+        request. Restoring an orphan likewise normalizes lifecycle according to its retained override.
         service_id, current_generation, current_run_id, instance_id, and entity_id are the standing semantic authority. The
         standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
         source-equality validator, entity_state scan, or alternate route matcher is forbidden.
@@ -11929,7 +11942,7 @@ flow_model:
       - duplicate standing service_id or package_key/flow_id owner
       - standing identity conflict between service_id, package/flow owner, instance_id, or entity_id
       - missing selected-store desired-state owner or missing persisted lifecycle predecessor during restart/reset
-      - current generation terminal outside explicit restart-abandon repair or operator reset
+      - unprovable current generation pointer, identity, lifecycle, or selected-store relation
       - stale standing generation, run status, or publication sequence during inbound publication
       readback: >
         Basic describe projects activation, alias, providers, signing-secret references, and authored admission kind, pack
@@ -11948,6 +11961,9 @@ flow_model:
       - discarding a resolved run_id and publishing empty-run root ingress
       - treating seeded entities or request-context run injection as supported served-path proof
       - encoding standing ownership in a special flow-instance path namespace
+      - reconstructing exact-current restart posture from declaration, effective state, or run lifecycle alone
+      - automatic server-restart repair or any successor-generation owner other than explicit standing reset
+      - treating terminal, orphaned, suspended, or invalid exact-current residue as generic recovery work
     escape_hatches:
       static_multi_entity_flows:
         status: retired_unsupported
@@ -14177,7 +14193,7 @@ platform_tables:
             INDEX idx_standing_generations_run (run_id)
         );
     standing_service_journal:
-      description: Immutable journal of standing desired-state, repair, override, orphan, and reset transitions.
+      description: Immutable journal of standing desired-state, terminal restoration, override, orphan, and reset transitions.
       ddl: |
         CREATE TABLE standing_service_journal (
             service_id              UUID NOT NULL REFERENCES standing_services(service_id),
@@ -14185,7 +14201,7 @@ platform_tables:
             operation_id            UUID NOT NULL,
             generation              BIGINT NOT NULL CHECK (generation > 0),
             run_id                  UUID NOT NULL REFERENCES runs(run_id),
-            transition              TEXT NOT NULL CHECK (transition IN ('created', 'resumed', 'revised', 'repaired', 'suspended', 'operator_resumed', 'orphaned', 'reset')),
+            transition              TEXT NOT NULL CHECK (transition IN ('created', 'resumed', 'revised', 'restored_stopped', 'suspended', 'operator_resumed', 'orphaned', 'reset')),
             previous_effective_state TEXT,
             effective_state         TEXT NOT NULL CHECK (effective_state IN ('active', 'suspended', 'orphaned')),
             actor                   TEXT NOT NULL,
@@ -26413,11 +26429,12 @@ cli_specification:
           the quiescence owner is a serve startup failure; serve MUST NOT continue with partial abandon state.
         backend_ownership: >
           The selected runtime store implements this owner for its backend: `PostgresStore` for explicit Postgres and
-          `SQLiteRuntimeStore` for the local/dev SQLite default. Serve MUST call the selected owner for both direct
-          `--abandon-active-runs` and `--dev`; it MUST NOT special-case SQLite as a skip/no-op and MUST NOT use raw
-          Postgres handle presence as the capability decision.
+          `SQLiteRuntimeStore` for the local SQLite default. Serve calls the selected owner only when
+          `--abandon-active-runs` is explicit; `--dev` does not imply abandon. Serve MUST NOT special-case SQLite as a
+          skip/no-op and MUST NOT use raw Postgres handle presence as the capability decision.
         active_run_scope: >
-          The owner selects all active source runs with `runs.status` in `running` or `paused`. Each selected run is terminalized
+          The owner selects active non-standing source runs with `runs.status` in `running` or `paused`, excluding exactly each
+          `standing_services.current_run_id`. Each selected run is terminalized
           as `runs.status=cancelled`, with `run_control_state.control_status=stopped`, `reason=server_restart_abandon`, and
           `controlled_by=swarm.serve.abandon_active_runs`.
         delivery_scope: >
@@ -26466,20 +26483,25 @@ cli_specification:
           `--dev`, dev entity-container shutdown cleanup, `platform.shutdown` event persistence, and persisted delivery/receipt
           interruption reasons remain outside this owner and under #750 unless a later child promotes them.
       dev_mode_lifecycle_composition:
-        implemented_by: '#830/#2010 boot-presentation first slice'
+        implemented_by: '#830/#2010/#2360/#2364'
         flag: --dev
         owner: >
-          `internal/cliapp` owns command-line composition; existing internal/serveapp startup owners perform active-run abandon,
-          bundle-match admission, and concise lifecycle presentation; `internal/runtime/workspace` plus
+          `internal/cliapp` owns command-line composition; internal/store/devscratch.EpochAuthority owns replacement with a
+          fresh project-local SQLite scratch epoch before store open; existing internal/serveapp startup owners perform
+          bundle-match admission and concise lifecycle presentation; `internal/runtime/workspace` plus
           `internal/runtime/containeridentity` own dev entity-container cleanup and preservation.
         composition:
-        - sets `--abandon-active-runs`
         - sets `--no-require-bundle-match`
+        - replaces the predecessor project-local SQLite scratch epoch before opening the selected store
+        - recreates deterministic standing semantic IDs when the same package and flow are authored, while predecessor event,
+          delivery, card, and other durable history remains absent and the fresh run has a later started_at
+        - does not imply `--abandon-active-runs`; an explicit abandon flag is evaluated only against the fresh epoch
         - consumes concise serve boot/readiness presentation without setting `--verbose`
         - enables dev entity-container cleanup after runtime shutdown/drain
         conflict_rules:
         - '`--dev --require-bundle-match` or `--dev --require-bundle-match=true` fails before runtime boot because dev mode disables bundle-match admission.'
-        - '`--dev --require-bundle-match=false`, `--dev --no-require-bundle-match`, and `--dev --abandon-active-runs` are redundant but valid.'
+        - '`--dev --require-bundle-match=false` and `--dev --no-require-bundle-match` are redundant but valid.'
+        - '`--dev --abandon-active-runs` is explicit and valid, but the fresh epoch contains no predecessor runs to abandon.'
         - '`--dev --verbose` is valid and selects explicit 22-step presentation; it is not redundant.'
         shutdown_ordering: >
           On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. Dev cleanup runs

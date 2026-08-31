@@ -143,19 +143,24 @@ type pipelineTestStandingServices struct {
 	store *workflowInstanceStore
 }
 
-func (p pipelineTestStandingServices) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
+func (p pipelineTestStandingServices) StandingRunRestartDisposition(ctx context.Context, runID string) (StandingRestartDisposition, error) {
 	if p.store == nil || p.store.testDB() == nil {
-		return false, errors.New("pipeline test standing-service reader requires selected store")
+		return StandingRestartDisposition{}, errors.New("pipeline test standing-service reader requires selected store")
 	}
-	query := `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = ? AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+	query := `SELECT service_id, current_run_id, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = ?`
 	if !p.store.isSQLite() {
-		query = `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = $1::uuid AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+		query = `SELECT service_id::text, current_run_id::text, current_generation, declaration_present, effective_state, operator_override, COALESCE(r.status, '') FROM standing_services LEFT JOIN runs r ON r.run_id = current_run_id WHERE current_run_id = $1::uuid`
 	}
-	var found bool
-	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(&found); err != nil {
-		return false, err
+	fact := StandingRestartFact{ExactCurrent: true}
+	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(
+		&fact.ServiceID, &fact.RunID, &fact.Generation, &fact.DeclarationPresent,
+		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
+	); errors.Is(err, sql.ErrNoRows) {
+		return ClassifyStandingRestart(StandingRestartFact{})
+	} else if err != nil {
+		return StandingRestartDisposition{}, err
 	}
-	return found, nil
+	return ClassifyStandingRestart(fact)
 }
 
 type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
@@ -280,57 +285,6 @@ const (
 	pipelineTestTimerObligationPostgres pipelineTestTimerObligationDialect = iota
 	pipelineTestTimerObligationSQLite
 )
-
-func (s *workflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
-	if s.deliveryStore == nil {
-		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
-	}
-	deliverySummary, err := s.deliveryStore.SummarizeRun(ctx, runID)
-	if err != nil {
-		return false, fmt.Errorf("inspect standing run delivery work: %w", err)
-	}
-	if !deliverySummary.Settled() {
-		return true, nil
-	}
-	if s.pipelineStore == nil {
-		return false, fmt.Errorf("inspect standing run pipeline work: pipeline obligation store is required")
-	}
-	pipelineSummary, err := s.pipelineStore.SummarizeRun(ctx, runID)
-	if err != nil {
-		return false, fmt.Errorf("inspect standing run pipeline work: %w", err)
-	}
-	if pipelineSummary.HasOpenWork() {
-		return true, nil
-	}
-	query := `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended'))`
-	args := []any{runID}
-	dialect := pipelineTestTimerObligationSQLite
-	if !s.isSQLite() {
-		query = `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended'))`
-		args = []any{runID}
-		dialect = pipelineTestTimerObligationPostgres
-	}
-	var live bool
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&live); err != nil {
-		return false, fmt.Errorf("inspect standing run live work: %w", err)
-	}
-	if live {
-		return true, nil
-	}
-	scope, err := runtimetimerobligation.Run(runID)
-	if err != nil {
-		return false, err
-	}
-	snapshot, err := readPipelineTestTimerObligations(ctx, tx, dialect, scope, observedAt)
-	if err != nil {
-		return false, fmt.Errorf("inspect standing run timer work: %w", err)
-	}
-	run, ok := snapshot.Run(runID)
-	if !ok {
-		return false, fmt.Errorf("inspect standing run timer work: snapshot omitted requested run")
-	}
-	return run.Totals().ActiveCount > 0, nil
-}
 
 func (r pipelineTestTimerObligationReader) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
 	if tx, ok := PipelineSQLTxFromContext(ctx); ok && tx != nil {

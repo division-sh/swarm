@@ -232,6 +232,7 @@ func TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres(t 
 			})
 			coordinator, err := runtimedeliverycontinuation.New(
 				fixture.store,
+				fixture.store,
 				snapshot.Authority,
 				owner,
 				fixture.bus,
@@ -665,6 +666,7 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 		t.Fatalf("configure complete-event delivery authority: %v", err)
 	}
 	coordinator, err := runtimedeliverycontinuation.New(
+		f.store,
 		f.store,
 		snapshot.Authority,
 		generation.owner,

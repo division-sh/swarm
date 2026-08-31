@@ -394,6 +394,7 @@ type runtimeTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
+	runtimepipeline.StandingRestartDispositionReader
 }
 
 func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {
@@ -402,7 +403,7 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
 		ActiveFlows: durable, TargetOwners: durable, WorkflowInstances: durable, PreparedEvents: durable,
-		TargetFailureRecorder: durable, RunOrigins: durable,
+		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
 

@@ -83,6 +83,7 @@ type apiTestDurableEventStore interface {
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
+	runtimepipeline.StandingRestartDispositionReader
 }
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
@@ -182,6 +183,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			PreparedEvents:        durable,
 			TargetFailureRecorder: durable,
 			RunOrigins:            durable,
+			StandingRestarts:      durable,
 		}
 	}
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)
@@ -233,6 +235,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if hasDeliveryStore && opts.PipelineObligations != nil {
 		coordinator, err := runtimedeliverycontinuation.New(
 			deliveryStore,
+			opts.Durable.StandingRestarts,
 			opts.DeliveryAuthority,
 			opts.WorkOwner,
 			bus,

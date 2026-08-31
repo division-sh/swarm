@@ -1499,7 +1499,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := pg.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatalf("activate delivery authority: %v", err)
 	}
-	continuations, err := runtimedeliverycontinuation.New(pg, authority, workOwner, bus, nil)
+	continuations, err := runtimedeliverycontinuation.New(pg, pg, authority, workOwner, bus, nil)
 	if err != nil {
 		t.Fatalf("construct delivery continuation coordinator: %v", err)
 	}
