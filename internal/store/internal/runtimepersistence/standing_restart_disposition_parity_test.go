@@ -423,6 +423,52 @@ func TestInvalidOrphanStandingRestoreThenResetParity(t *testing.T) {
 	}
 }
 
+func TestInvalidOrphanStandingSameSourceRestoreThenResetParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		for _, override := range []string{"none", "suspended"} {
+			override := override
+			t.Run(backend+"/"+override, func(t *testing.T) {
+				fixture := openStandingDispositionParityFixture(t, backend)
+				ctx := testAuthorActivityRuntimeContext()
+				candidate := fixture.candidate("invalid-orphan-same-source-" + override)
+				created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+				if err != nil {
+					t.Fatalf("create standing service: %v", err)
+				}
+				fixture.setDesiredState(t, created.ServiceID, false, "orphaned", override)
+				assertStandingDisposition(t, ctx, fixture, created.RunID, runtimepipeline.StandingRestartInvalidCurrent)
+
+				restored, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
+				if err != nil {
+					t.Fatalf("restore same-source invalid orphan declaration: %v", err)
+				}
+				wantRestored := runtimepipeline.StandingRestartActiveIntrinsic
+				wantReset := runtimepipeline.StandingRestartActiveIntrinsic
+				if override == "suspended" {
+					wantRestored = runtimepipeline.StandingRestartInvalidCurrent
+					wantReset = runtimepipeline.StandingRestartSuspended
+				}
+				if restored.RestartDisposition.Kind != wantRestored || !restored.RestartDisposition.DeclarationPresent || restored.BundleHash != candidate.Source.BundleHash() {
+					t.Fatalf("restored same-source invalid orphan = %#v, want disposition %s", restored, wantRestored)
+				}
+				if loaded, found, err := fixture.workflow.LoadReconciledStandingService(ctx, candidate); err != nil || !found || loaded.RestartDisposition.Kind != wantRestored {
+					t.Fatalf("load restored same-source invalid orphan = %#v found=%t err=%v", loaded, found, err)
+				}
+
+				reset, err := fixture.workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"})
+				if err != nil {
+					t.Fatalf("reset restored same-source invalid orphan: %v", err)
+				}
+				if reset.RestartDisposition.Kind != wantReset {
+					t.Fatalf("same-source invalid orphan reset = %#v, want disposition %s", reset, wantReset)
+				}
+				fixture.assertRunSource(t, ctx, reset.RunID, candidate.Source.BundleHash())
+			})
+		}
+	}
+}
+
 func TestSuspendedStandingResetInstallsSuccessorBeforePauseParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
