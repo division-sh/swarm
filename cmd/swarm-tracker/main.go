@@ -258,7 +258,7 @@ func runCheck(args []string) error {
 	}
 
 	var missingMilestone, missingAgent, missingComplexity, missingPriority []string
-	var unblocked, staleMusts, phantoms, cycles, unassignedMusts, triageDebt []string
+	var unblocked, staleMusts, phantoms, cycles, unassignedMusts, triageDebt, untriaged []string
 
 	now := time.Now()
 	for _, is := range issues {
@@ -291,6 +291,12 @@ func runCheck(args []string) error {
 		}
 		if isMust(is) && agentOf(is) == "" {
 			unassignedMusts = append(unassignedMusts, ref)
+		}
+		// score 0 = the value judgment was never recorded: the issue has not
+		// been triaged, whatever its labels claim. Missing block and explicit
+		// zero are the same fact.
+		if is.Score == 0 {
+			untriaged = append(untriaged, ref)
 		}
 		if isMust(is) && now.Sub(is.UpdatedAt) > time.Duration(*staleDays)*24*time.Hour {
 			staleMusts = append(staleMusts,
@@ -330,6 +336,7 @@ func runCheck(args []string) error {
 	section("UNBLOCKED — blockers all closed, ready to start", unblocked)
 	section("UNASSIGNED MUSTS — P0/P1 or score≥50, no owner", unassignedMusts)
 	section("TRIAGE DEBT — missing 2+ classification facts, newest first", triageDebt)
+	section("UNTRIAGED — no delivery score recorded (score 0/missing)", untriaged)
 	section("STALE MUSTS — P0/P1 or score≥50 going forgotten", staleMusts)
 	section("PHANTOM ASSIGNMENTS — assigned but silent", phantoms)
 	section("BLOCKER CYCLES", cycles)
