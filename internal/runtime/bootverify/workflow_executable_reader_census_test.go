@@ -174,9 +174,41 @@ func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
 	if len(readers) != 1 || readers[0].Kind != "guard.checks[0]" || readers[0].Expression != "payload.ready" {
 		t.Fatalf("reader census = %#v, want only guard.checks[0] payload.ready", readers)
 	}
-	conditions := handlerConditions(handler)
-	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].Context != runtimepipeline.WorkflowConditionContextGuard {
+	conditions := handlerConditionExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
+	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].ConditionContext != runtimepipeline.WorkflowConditionContextGuard {
 		t.Fatalf("handler conditions = %#v, want only active guard collection check", conditions)
+	}
+}
+
+func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard:      &runtimecontracts.GuardSpec{Check: "payload.ready"},
+		Query:      &runtimecontracts.QuerySpec{Source: "payload.items", Filter: "item.ready", StoreAs: "metadata.queried"},
+		Filter:     &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "item.ready", StoreAs: "metadata.filtered"},
+		Count:      &runtimecontracts.CountSpec{ItemsFrom: "payload.items", Condition: "item.ready", StoreAs: "metadata.counted"},
+		Rules:      []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
+	}
+	want := map[string]runtimepipeline.WorkflowConditionContext{
+		"guard.check":              runtimepipeline.WorkflowConditionContextGuard,
+		"query.filter":             runtimepipeline.WorkflowConditionContextQueryFilter,
+		"filter.condition":         runtimepipeline.WorkflowConditionContextFilter,
+		"count.condition":          runtimepipeline.WorkflowConditionContextCount,
+		"rules[0].condition":       runtimepipeline.WorkflowConditionContextRule,
+		"on_complete[0].condition": runtimepipeline.WorkflowConditionContextOnComplete,
+	}
+	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
+		context, expected := want[reader.Kind]
+		if !expected {
+			continue
+		}
+		if !reader.HasConditionContext || reader.ConditionContext != context {
+			t.Errorf("reader %s disposition = (%t, %s), want %s", reader.Kind, reader.HasConditionContext, reader.ConditionContext, context)
+		}
+		delete(want, reader.Kind)
+	}
+	if len(want) != 0 {
+		t.Fatalf("condition compiler census omitted rows: %#v", want)
 	}
 }
 

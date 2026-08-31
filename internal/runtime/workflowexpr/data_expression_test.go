@@ -574,6 +574,56 @@ func TestValidateValueExpression_AllowsFanOutAliasAndStringLiteralTargetText(t *
 	}
 }
 
+func TestValidateValueExpressionRejectsDirectLookupFromConfiguredStructuralAlias(t *testing.T) {
+	textType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}
+	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "Candidate", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "tags", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &textType}},
+	}}
+	opts := ValueExpressionOptions{ItemAlias: "candidate", ItemType: &itemType}
+	if err := ValidateValueExpressionWithOptions(`candidate.tags[0]`, opts); err == nil || !strings.Contains(err.Error(), "not presence-safe") {
+		t.Fatalf("direct alias lookup error = %v, want presence-safe rejection", err)
+	}
+	if err := ValidateValueExpressionWithOptions(`candidate.tags[?0].orValue("missing")`, opts); err != nil {
+		t.Fatalf("optional alias lookup: %v", err)
+	}
+	forwarding := opts
+	forwarding.ResultType = &textType
+	forwarding.ResultOptional = true
+	if err := ValidateValueExpressionWithOptions(`candidate.tags[?0]`, forwarding); err != nil {
+		t.Fatalf("optional alias forwarding: %v", err)
+	}
+	absent, err := EvalValueResultWithOptions(`candidate.tags[?0]`, ValueContext{FanOut: map[string]any{"item": map[string]any{"tags": []any{}}}}, forwarding)
+	if err != nil {
+		t.Fatalf("evaluate absent optional alias forwarding: %v", err)
+	}
+	if absent.Present() {
+		t.Fatalf("absent alias result = %#v, want omission", absent.Value())
+	}
+	present, err := EvalValueResultWithOptions(`candidate.tags[?0]`, ValueContext{FanOut: map[string]any{"item": map[string]any{"tags": []any{"ready"}}}}, forwarding)
+	if err != nil {
+		t.Fatalf("evaluate present optional alias forwarding: %v", err)
+	}
+	if !present.Present() || present.Value() != "ready" {
+		t.Fatalf("present alias result = (%#v, %t), want (ready, true)", present.Value(), present.Present())
+	}
+}
+
+func TestValidateValueExpressionRejectsDirectLookupFromStructuralComprehensionBinding(t *testing.T) {
+	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "Candidate", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "tags", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}},
+	}}
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "CandidateBatch", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "items", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &itemType}},
+	}}
+	opts := ValueExpressionOptions{PayloadType: &payloadType}
+	if err := ValidateValueExpressionWithOptions(`payload.items.map(candidate, candidate.tags[0])`, opts); err == nil || !strings.Contains(err.Error(), "not presence-safe") {
+		t.Fatalf("direct lambda lookup error = %v, want presence-safe rejection", err)
+	}
+	if err := ValidateValueExpressionWithOptions(`payload.items.map(candidate, candidate.tags[?0].orValue("missing"))`, opts); err != nil {
+		t.Fatalf("optional lambda lookup: %v", err)
+	}
+}
+
 func TestValidateValueExpression_RejectsRetiredFanOutItem(t *testing.T) {
 	for _, expression := range []string{`fan_out.item`, `fan_out.item.target`, `fan_out["item"]`} {
 		t.Run(expression, func(t *testing.T) {

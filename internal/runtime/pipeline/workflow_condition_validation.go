@@ -10,11 +10,12 @@ import (
 type WorkflowConditionContext string
 
 const (
-	WorkflowConditionContextGuard      WorkflowConditionContext = "guard"
-	WorkflowConditionContextRule       WorkflowConditionContext = "rule"
-	WorkflowConditionContextOnComplete WorkflowConditionContext = "on_complete"
-	WorkflowConditionContextFilter     WorkflowConditionContext = "filter"
-	WorkflowConditionContextCount      WorkflowConditionContext = "count"
+	WorkflowConditionContextGuard       WorkflowConditionContext = "guard"
+	WorkflowConditionContextRule        WorkflowConditionContext = "rule"
+	WorkflowConditionContextOnComplete  WorkflowConditionContext = "on_complete"
+	WorkflowConditionContextFilter      WorkflowConditionContext = "filter"
+	WorkflowConditionContextCount       WorkflowConditionContext = "count"
+	WorkflowConditionContextQueryFilter WorkflowConditionContext = "query_filter"
 )
 
 func ValidateConditionCEL(expression string, context WorkflowConditionContext) error {
@@ -44,7 +45,7 @@ func ValidateConditionCELWithOptions(expression string, context WorkflowConditio
 		return fmt.Errorf("computed.* is only available in rule and on_complete conditions")
 	}
 	opts.RequireBool = true
-	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount
+	opts.AllowBareItem = context == WorkflowConditionContextFilter || context == WorkflowConditionContextCount || context == WorkflowConditionContextQueryFilter
 	opts.AllowAccumulated = context == WorkflowConditionContextOnComplete || opts.AllowBareItem
 	return workflowexpr.ValidateValueExpressionWithOptions(normalized, opts)
 }
@@ -157,7 +158,7 @@ func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string
 	switch context {
 	case WorkflowConditionContextOnComplete:
 		roots = append(roots, "accumulated")
-	case WorkflowConditionContextFilter, WorkflowConditionContextCount:
+	case WorkflowConditionContextFilter, WorkflowConditionContextCount, WorkflowConditionContextQueryFilter:
 		roots = append(roots, "accumulated", "item")
 	}
 	return roots
