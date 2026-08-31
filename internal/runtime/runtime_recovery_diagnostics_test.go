@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -1118,6 +1120,25 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	}
 	if _, ok := boot["timer_obligations"].(runtimetimerobligation.Snapshot); !ok {
 		t.Fatalf("boot timer_obligations = %#v, want typed snapshot", boot["timer_obligations"])
+	}
+}
+
+func TestStartupRecoveryDecisionBootPayloadOmitsNilCollections(t *testing.T) {
+	boot := startupRecoveryDecisionReport{
+		Snapshot: startupRecoverySnapshot{InspectionComplete: true},
+	}.bootPayload()
+
+	encoded, err := json.Marshal(boot)
+	if err != nil {
+		t.Fatalf("marshal boot payload: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("null")) {
+		t.Fatalf("boot payload contains null: %s", encoded)
+	}
+	for _, want := range []string{`"global_families":[]`, `"runs":[]`, `"activations":[]`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("boot payload = %s, want %s", encoded, want)
+		}
 	}
 }
 

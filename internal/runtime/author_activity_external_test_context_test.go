@@ -510,6 +510,11 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}
+	if binder, ok := store.(interface {
+		SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
+	}); ok {
+		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
+	}
 	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
 		owner := newExternalTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
 		opts.TemplateInstancePlanner = owner

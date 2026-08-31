@@ -132,10 +132,16 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if opts.BundleSourceFact.BundleHash() == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
+	if opts.PayloadAdmitter == nil && opts.ContractBundle != nil {
+		opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.BundleSourceFact)
+	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
+	}
+	if binder, ok := eventStore.(runtimepkg.EventPayloadAdmissionBinder); ok {
+		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok && opts.BundleSourceFact.IsEphemeral() {
 		catalog := durabledata.Catalog{BundleHash: opts.BundleSourceFact.BundleHash()}

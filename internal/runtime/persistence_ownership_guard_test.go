@@ -22,9 +22,9 @@ func TestRuntimeCorePersistenceRolesAreConstructorInputs(t *testing.T) {
 	})
 	runtimeSource := readOwnershipSource(t, root, "internal/runtime/runtime.go")
 	assertOwnershipSourceContains(t, runtimeSource,
-		"WorkflowPersistence            runtimepipeline.WorkflowPersistence",
-		"LiveSessionAcquirer            llm.LiveSessionAcquirer",
-		"SessionResetter                sessions.Resetter",
+		"WorkflowPersistence           runtimepipeline.WorkflowPersistence",
+		"LiveSessionAcquirer           llm.LiveSessionAcquirer",
+		"SessionResetter               sessions.Resetter",
 	)
 	assertOwnershipSourceExcludes(t, runtimeSource, "type Stores struct", "Stores Stores", "Stores *Stores")
 }
