@@ -1617,6 +1617,12 @@ states: [queued]
 validation_request:
   request_id: text
 `,
+		"validation/events.yaml": `
+request.received:
+  request_id: text
+request.accepted:
+  request_id: text
+`,
 		"validation/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -2178,6 +2184,12 @@ states: [queued]
 subject:
   kill_reason: text
 `,
+					"scoring/events.yaml": `
+custom.trigger:
+  reason: text
+custom.emitted:
+  label: text
+`,
 					"scoring/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -2512,14 +2524,14 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{
 				ID:        "high",
-				Condition: "payload.score >= 80",
+				Condition: "payload.score >= 80.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"high"`),
 				}},
 			},
 			{
 				ID:        "medium",
-				Condition: "payload.score >= 40",
+				Condition: "payload.score >= 40.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"medium"`),
 				}},
@@ -2643,6 +2655,18 @@ func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle 
 
 func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
 	eventType = strings.TrimSpace(eventType)
+	eventsByType := map[string]runtimecontracts.EventCatalogEntry{
+		eventType: entry,
+		"custom.trigger": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"reason": {Type: "string"},
+					"score":  {Type: "number"},
+				},
+				Required: []string{"reason", "score"},
+			},
+		},
+	}
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ExecutionType: "system_node"},
@@ -2651,9 +2675,7 @@ func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimec
 			Name:    "test",
 			Version: "v-test",
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventType: entry,
-		},
+		Events: eventsByType,
 	}
 }
 
@@ -2741,7 +2763,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  "payload.score >= 70",
+			Check:  "payload.score >= 70.0",
 			OnFail: "escalate:guard.failed",
 		},
 	}, workflowTriggerContext{
@@ -2806,7 +2828,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check: "payload.score >= 70",
+			Check: "payload.score >= 70.0",
 			OnFailSpec: runtimecontracts.GuardFailureSpec{
 				Action: runtimecontracts.GuardFailureActionEscalate,
 				Escalation: runtimecontracts.EmitSpec{

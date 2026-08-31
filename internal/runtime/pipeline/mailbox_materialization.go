@@ -51,7 +51,8 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	if nodeID == "" {
 		return fmt.Errorf("mailbox_write requires node id")
 	}
-	itemType, err := requiredMailboxString(execCtx.Base, spec.ItemType, "mailbox.item_type")
+	expressionOptions := executionExpressionOptions(execCtx)
+	itemType, err := requiredMailboxString(execCtx.Base, spec.ItemType, "mailbox.item_type", expressionOptions)
 	if err != nil {
 		return err
 	}
@@ -59,13 +60,13 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	if err != nil {
 		return fmt.Errorf("mailbox.item_type: %w", err)
 	}
-	summary, err := requiredMailboxString(execCtx.Base, spec.Summary, "mailbox.summary")
+	summary, err := requiredMailboxString(execCtx.Base, spec.Summary, "mailbox.summary", expressionOptions)
 	if err != nil {
 		return err
 	}
 	severity := "normal"
 	if !spec.Severity.IsZero() {
-		severity, err = requiredMailboxString(execCtx.Base, spec.Severity, "mailbox.severity")
+		severity, err = requiredMailboxString(execCtx.Base, spec.Severity, "mailbox.severity", expressionOptions)
 		if err != nil {
 			return err
 		}
@@ -79,20 +80,20 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 		entityID = strings.TrimSpace(execCtx.Request.EntityID.String())
 	}
 	if !spec.EntityID.IsZero() {
-		entityID, err = requiredMailboxString(execCtx.Base, spec.EntityID, "mailbox.entity_id")
+		entityID, err = requiredMailboxString(execCtx.Base, spec.EntityID, "mailbox.entity_id", expressionOptions)
 		if err != nil {
 			return err
 		}
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(execCtx.Request.Event.FlowInstance()), "/")
 	if !spec.FlowInstance.IsZero() {
-		flowInstance, err = requiredMailboxString(execCtx.Base, spec.FlowInstance, "mailbox.flow_instance")
+		flowInstance, err = requiredMailboxString(execCtx.Base, spec.FlowInstance, "mailbox.flow_instance", expressionOptions)
 		if err != nil {
 			return err
 		}
 		flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	}
-	payload, err := mailboxWritePayload(execCtx.Base, spec.Payload)
+	payload, err := mailboxWritePayload(execCtx.Base, spec.Payload, expressionOptions)
 	if err != nil {
 		return err
 	}
@@ -146,8 +147,16 @@ func deterministicMailboxItemID(sourceEventID, nodeID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
 }
 
-func requiredMailboxString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
-	value, ok, err := evalMailboxExpressionValue(base, expr)
+func executionExpressionOptions(execCtx runtimeengine.ExecutionContext) workflowexpr.ValueExpressionOptions {
+	if execCtx.PayloadType == nil {
+		return workflowexpr.ValueExpressionOptions{}
+	}
+	payloadType := execCtx.PayloadType.Clone()
+	return workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}
+}
+
+func requiredMailboxString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {
+	value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", field, err)
 	}
@@ -165,7 +174,7 @@ func requiredMailboxString(base runtimeengine.BaseContext, expr runtimecontracts
 	return out, nil
 }
 
-func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue) (any, bool, error) {
+func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) (any, bool, error) {
 	if expr.IsZero() {
 		return nil, false, nil
 	}
@@ -181,7 +190,7 @@ func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecont
 		value, ok := base.Lookup(expr.RefPath)
 		return value, ok, nil
 	case runtimecontracts.ExpressionKindCEL:
-		value, err := workflowexpr.EvalValueExpressionWithOptions(expr.CEL, workflowexpr.ValueContext{
+		result, err := workflowexpr.EvalValueResultWithOptions(expr.CEL, workflowexpr.ValueContext{
 			Entity:         base.Entity.Raw(),
 			PlatformEntity: base.PlatformEntity.Raw(),
 			Event:          base.Event.Raw(),
@@ -190,24 +199,24 @@ func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecont
 			Computed:       base.Computed.Raw(),
 			FanOut:         base.FanOut.Raw(),
 			Loop:           base.Loop.Raw(),
-		}, workflowexpr.ValueExpressionOptions{})
+		}, opts)
 		if err != nil {
 			return nil, false, err
 		}
-		return value, true, nil
+		return result.Value(), result.Present(), nil
 	default:
 		return nil, false, fmt.Errorf("unsupported expression kind %q", expr.Kind)
 	}
 }
 
-func mailboxWritePayload(base runtimeengine.BaseContext, fields map[string]runtimecontracts.ExpressionValue) (map[string]any, error) {
+func mailboxWritePayload(base runtimeengine.BaseContext, fields map[string]runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	out := map[string]any{}
 	for target, expr := range fields {
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
 		}
-		value, ok, err := evalMailboxExpressionValue(base, expr)
+		value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", target, err)
 		}

@@ -1,2 +1,2 @@
 item.received:
-  kind: string?
+  kind: string

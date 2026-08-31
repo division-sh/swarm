@@ -9,11 +9,11 @@ scorer:
           - source_field: value
             target_field: score
       on_complete:
-        - condition: "payload.value >= 75"
+        - condition: "payload.value >= 75.0"
           advances_to: high
           emit:
             event: result.high
-        - condition: "payload.value >= 50"
+        - condition: "payload.value >= 50.0"
           advances_to: mid
         - condition: "else"
           advances_to: low

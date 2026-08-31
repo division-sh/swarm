@@ -1,4 +1,4 @@
 order.submitted:
-  amount: integer?
+  amount: integer
 order.validated: {}
 order.finalized: {}

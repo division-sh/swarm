@@ -1,2 +1,2 @@
 task.submitted:
-  score: number?
+  score: number

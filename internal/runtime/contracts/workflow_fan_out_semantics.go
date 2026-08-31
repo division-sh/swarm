@@ -444,11 +444,11 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 		return FanOutEffectiveSemantics{}, err
 	}
 
-	collectionType, err := b.resolveFanOutCollectionType(node, eventType, itemsPath)
+	collectionType, err := b.resolveWorkflowCollectionType(node, eventType, itemsPath)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
 	}
-	itemType, err := resolveFanOutCollectionItemType(collectionType)
+	itemType, err := resolveWorkflowCollectionItemType(collectionType, itemsPath.Segments[1:])
 	if err != nil {
 		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q %w", strings.TrimSpace(spec.ItemsFrom), err)
 	}
@@ -481,7 +481,7 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 	}, nil
 }
 
-func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentity.ExecutableNode, eventType string, path paths.Path) (CatalogTypeReference, error) {
+func (b *WorkflowContractBundle) resolveWorkflowCollectionType(node runtimeidentity.ExecutableNode, eventType string, path paths.Path) (CatalogTypeReference, error) {
 	if b == nil {
 		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from requires a loaded contract bundle")
 	}
@@ -509,6 +509,20 @@ func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentit
 	}
 }
 
+// ResolveWorkflowCollectionItemType binds collection item expressions to the
+// same recursive catalog type used by fan-out compilation.
+func (b *WorkflowContractBundle) ResolveWorkflowCollectionItemType(node runtimeidentity.ExecutableNode, eventType, itemsFrom string) (ResolvedCatalogType, error) {
+	path := paths.Parse(strings.TrimSpace(itemsFrom))
+	if path.IsZero() || len(path.Segments) == 0 {
+		return ResolvedCatalogType{}, fmt.Errorf("collection source is required")
+	}
+	collection, err := b.resolveWorkflowCollectionType(node, eventType, path)
+	if err != nil {
+		return ResolvedCatalogType{}, err
+	}
+	return resolveWorkflowCollectionItemType(collection, path.Segments[1:])
+}
+
 func defaultFanOutEventLabel(eventType string) string {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
@@ -517,8 +531,20 @@ func defaultFanOutEventLabel(eventType string) string {
 	return eventType
 }
 
-func resolveFanOutCollectionItemType(ref CatalogTypeReference) (ResolvedCatalogType, error) {
+func resolveWorkflowCollectionItemType(ref CatalogTypeReference, nested []string) (ResolvedCatalogType, error) {
 	resolved, err := ref.Resolve()
+	if err == nil {
+		for _, segment := range nested {
+			if resolved.Kind != CatalogTypeObject {
+				return ResolvedCatalogType{}, fmt.Errorf("collection path segment %q traverses non-object type %s", segment, resolved.Kind)
+			}
+			field, ok := resolved.Field(segment)
+			if !ok {
+				return ResolvedCatalogType{}, fmt.Errorf("collection path references undeclared field %s", segment)
+			}
+			resolved = field.Type.Clone()
+		}
+	}
 	if err == nil && resolved.Kind == CatalogTypeList && resolved.Element != nil {
 		return *resolved.Element, nil
 	}
@@ -532,7 +558,7 @@ func resolveFanOutCollectionItemType(ref CatalogTypeReference) (ResolvedCatalogT
 		return ref.ResolveReference(inner)
 	}
 	if lower == "array" || strings.HasPrefix(lower, "array ") || strings.HasPrefix(lower, "array(") {
-		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
+		return ResolvedCatalogType{}, fmt.Errorf("must declare an exact collection item type; untyped array is not executable item authority")
 	}
 	if err != nil {
 		return ResolvedCatalogType{}, fmt.Errorf("must reference a collection field: %v", err)

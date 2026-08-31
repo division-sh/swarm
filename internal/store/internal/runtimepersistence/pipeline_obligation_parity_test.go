@@ -129,6 +129,10 @@ func provePipelineExactPayloadRecovery(
 		uuid.NewString(), events.EventType("recovery.payload_bytes"), "runtime", "", payload,
 		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Add(-time.Minute),
 	)
+	wantAdmission, err := eventtest.PayloadAdmission(event, event.RoutingSource().Route().FlowID, string(event.Type()))
+	if err != nil {
+		t.Fatalf("build recovery payload admission: %v", err)
+	}
 	if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
 		t.Fatalf("commit recovery event: %v", err)
 	}
@@ -138,6 +142,10 @@ func provePipelineExactPayloadRecovery(
 	}
 	if got := work.Event.Payload(); !bytes.Equal(got, payload) {
 		t.Fatalf("recovery payload = %q, want %q", got, payload)
+	}
+	gotAdmission, ok := work.Event.PayloadAdmission()
+	if !ok || !gotAdmission.Binding().Equal(wantAdmission.Binding()) {
+		t.Fatalf("recovery payload binding = %#v/%v, want exact persisted binding", gotAdmission.Binding(), ok)
 	}
 	if _, err := selected.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("settle recovery event: %v", err)

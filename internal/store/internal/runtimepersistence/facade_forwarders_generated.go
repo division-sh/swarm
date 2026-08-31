@@ -1187,8 +1187,8 @@ func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID
 	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
-func (s *PostgresStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
-	s.eventPostgresOwner.SetEventPayloadValidator(validator)
+func (s *PostgresStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
+	s.eventPostgresOwner.SetEventPayloadAdmitter(admitter)
 }
 
 func (s *PostgresStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target ingress.Status, eventID string, transitionAt time.Time) (bool, error) {
@@ -2399,8 +2399,8 @@ func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, e
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
 
-func (s *SQLiteRuntimeStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
-	s.eventSQLiteOwner.SetEventPayloadValidator(validator)
+func (s *SQLiteRuntimeStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
+	s.eventSQLiteOwner.SetEventPayloadAdmitter(admitter)
 }
 
 func (s *SQLiteRuntimeStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target ingress.Status, eventID string, transitionAt time.Time) (bool, error) {

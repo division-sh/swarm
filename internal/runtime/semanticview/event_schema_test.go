@@ -95,6 +95,29 @@ required:
 	if resolution.EventKey != "mailbox.card_decided" {
 		t.Fatalf("EventKey = %q, want mailbox.card_decided", resolution.EventKey)
 	}
+	if !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaPlatform {
+		t.Fatalf("classification = %q/%v, want platform", resolution.Classification, resolution.HasClassification)
+	}
+}
+
+func TestResolveEventSchema_DoesNotInventSchemaForReferenceOnlyPlatformEvent(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+defined_in: platform_tables.diagnostics_encoding
+schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
+note: Full payload schema is owned by the diagnostic subtype.
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"platform.runtime_log": *doc.Content[0],
+	}
+
+	resolution := ResolveEventSchema(Wrap(bundle), "", "platform.runtime_log")
+	if resolution.HasSchema {
+		t.Fatalf("reference-only platform event resolved as payload schema: %#v", resolution)
+	}
 }
 
 func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *testing.T) {

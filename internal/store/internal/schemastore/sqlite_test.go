@@ -69,6 +69,23 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}
 	}
+	for _, column := range []string{
+		"payload_schema_bundle_hash",
+		"payload_schema_bundle_source",
+		"payload_schema_flow_id",
+		"payload_schema_event_key",
+		"payload_schema_digest",
+		"payload_schema_class",
+	} {
+		var count int
+		if err := sqliteStore.backend.ConstructionHandle().QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = ?", column).Scan(&count); err != nil {
+			t.Fatalf("inspect events.%s: %v", column, err)
+		}
+		if count != 1 {
+			t.Fatalf("events.%s column count = %d, want 1", column, count)
+		}
+	}
 }
 
 func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.T) {
@@ -121,6 +138,24 @@ func TestSQLiteStatementsForPlanTranslatesLifecycleBundleHashExactly(t *testing.
 	}
 	if strings.Contains(statements[0], "lifecycle_(") || !strings.Contains(statements[0], "length(lifecycle_bundle_hash) = 81") {
 		t.Fatalf("translated lifecycle bundle hash predicate = %q", statements[0])
+	}
+}
+
+func TestSQLiteStatementsForPlanTranslatesPayloadSchemaEvidenceExactly(t *testing.T) {
+	t.Parallel()
+
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "events",
+		SchemaKind: "platform_spec",
+		Statements: []string{
+			"CREATE TABLE IF NOT EXISTS events (\n    payload_schema_bundle_hash TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    payload_schema_digest TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$')\n)",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], "length(payload_schema_bundle_hash) = 81") || !strings.Contains(statements[0], "length(payload_schema_digest) = 71") {
+		t.Fatalf("translated payload schema evidence = %#v", statements)
 	}
 }
 

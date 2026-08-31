@@ -23,6 +23,115 @@ func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any)
 	return validateSchemaObject("$", CanonicalAcceptanceSchema(schema), payload)
 }
 
+// NormalizeOptionalFieldNulls applies the event wire-boundary null rule.
+// Null denotes omission only for a declared optional object field. Required
+// fields, list elements, map values, and undeclared members never acquire a
+// second internal null/presence meaning.
+func NormalizeOptionalFieldNulls(schema map[string]any, payload map[string]any) (map[string]any, error) {
+	normalized := cloneSchemaValue(payload).(map[string]any)
+	if normalized == nil {
+		normalized = map[string]any{}
+	}
+	if err := normalizeObjectOptionalNulls("$", CanonicalAcceptanceSchema(schema), normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func normalizeObjectOptionalNulls(path string, schema map[string]any, value map[string]any) error {
+	required := map[string]struct{}{}
+	for _, field := range exactRequiredList(schema["required"]) {
+		required[field] = struct{}{}
+	}
+	properties := schemaProperties(schema["properties"])
+	_, additionalSchema := schemaAdditionalProperties(schema["additionalProperties"])
+	for name, item := range value {
+		fieldSchema, declared := properties[name]
+		if !declared {
+			if item == nil {
+				return fmt.Errorf("schema validation failed: %s.%s null is not a declared optional field", path, name)
+			}
+			if additionalSchema != nil {
+				if err := normalizeNestedOptionalNulls(path+"."+name, additionalSchema, item); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if item == nil {
+			if _, isRequired := required[name]; isRequired {
+				return fmt.Errorf("schema validation failed: %s.%s is required and cannot be null", path, name)
+			}
+			delete(value, name)
+			continue
+		}
+		if err := normalizeNestedOptionalNulls(path+"."+name, fieldSchema, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeNestedOptionalNulls(path string, schema map[string]any, value any) error {
+	if value == nil {
+		return fmt.Errorf("schema validation failed: %s cannot be null", path)
+	}
+	schemaType := strings.TrimSpace(asString(schema["type"]))
+	if schemaType == "" {
+		switch {
+		case len(schemaProperties(schema["properties"])) > 0 || len(exactRequiredList(schema["required"])) > 0:
+			schemaType = "object"
+		case schema["items"] != nil:
+			schemaType = "array"
+		}
+	}
+	switch schemaType {
+	case "object":
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		return normalizeObjectOptionalNulls(path, schema, object)
+	case "array":
+		items, ok := value.([]any)
+		if !ok {
+			return nil
+		}
+		itemSchema, _ := schema["items"].(map[string]any)
+		for index, item := range items {
+			itemPath := fmt.Sprintf("%s[%d]", path, index)
+			if item == nil {
+				return fmt.Errorf("schema validation failed: %s cannot be null", itemPath)
+			}
+			if itemSchema != nil {
+				if err := normalizeNestedOptionalNulls(itemPath, itemSchema, item); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func cloneSchemaValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneSchemaValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = cloneSchemaValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
 // ValidateValueAgainstSchema validates one value against an already-resolved
 // JSON schema. Contract admission uses this for literal fields before a full
 // event payload exists; runtime publication uses ValidatePayloadAgainstSchema.
