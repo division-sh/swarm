@@ -291,7 +291,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 	}
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
-	errs = append(errs, validateIntraPackageEventSchemaOwnership(bundle)...)
+	errs = append(errs, validateCompiledConnectEventSchemaOwnership(bundle)...)
 	errs = append(errs, validateEventBusinessKeys(bundle)...)
 	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)

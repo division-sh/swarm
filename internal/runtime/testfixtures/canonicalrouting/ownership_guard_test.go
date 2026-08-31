@@ -1319,7 +1319,7 @@ func outerManifestRoots(t testing.TB, repo string) []string {
 		}
 		rel, err := filepath.Rel(repo, dir)
 		if err != nil {
-			t.Fatalf("relative package root %s: %v", dir, err)
+			t.Fatalf("relative fixture root %s: %v", dir, err)
 		}
 		roots = append(roots, filepath.ToSlash(rel))
 	}

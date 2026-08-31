@@ -354,7 +354,6 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: bundleSource,
 			},
-				"support.reply_drafted",
 				"support/send_support_reply.revision_requested",
 				"support/send_support_reply.rejected",
 			)
@@ -794,7 +793,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: bundleSource,
-			}, "support.reply_drafted")
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionCensus(t *testing.T) {
 	type manifestation struct {
 		bundle          string
 		from            string
@@ -331,7 +331,7 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 				}},
 				eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{"consumer": rows},
 			}
-			errs := validateIntraPackageEventSchemaOwnership(bundle)
+			errs := validateCompiledConnectEventSchemaOwnership(bundle)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), "multiple connected producer schema owners") || !strings.Contains(errs[0].Error(), "producer-a") || !strings.Contains(errs[0].Error(), "producer-b") {
 				t.Fatalf("ownership errors = %v, want deterministic distinct-producer rejection", errs)
 			}
@@ -364,7 +364,7 @@ func TestConnectedEventSchemaOwnershipPreservesSingleProducerFanIn(t *testing.T)
 	}
 }
 
-func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
+func TestCompiledConnectEventConsumerRestatementFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "parent-connect")
 	root := filepath.Join(t.TempDir(), "parent-connect")
@@ -375,11 +375,11 @@ func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
 	}
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err == nil || !contractErrorContains(err, "restates producer-owned schema") || !contractErrorContains(err, "remove the consumer declaration") {
-		t.Fatalf("load error = %v, want intra-package restatement teaching error", err)
+		t.Fatalf("load error = %v, want compiled-connect restatement teaching error", err)
 	}
 }
 
-func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionProvenance(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -397,7 +397,7 @@ func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
 	}
 }
 
-func TestIntraPackageEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
+func TestCompiledConnectEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := filepath.Join(repo, "examples", "routing", "template-select-existing")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))

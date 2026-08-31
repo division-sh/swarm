@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	eventConsumerProjectionRule = "intra_package_event_consumer_projection/v1"
+	eventConsumerProjectionRule = "compiled_connect_event_consumer_projection/v1"
 	eventReceiverProjectionRule = "compiled_receiver_delivery_projection/v1"
 )
 
@@ -114,7 +114,7 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 	}, true
 }
 
-func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
+func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
 	var errs []error
 	rows := effectiveEventSchemaOwnershipRows(bundle)
 	ownersByReceiver := make(map[string]map[string]eventSchemaOwnershipRow)
