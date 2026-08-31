@@ -341,7 +341,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 }
 
 func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
-	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.issues")
+	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.raw.issues")
 	eventStore := &capturingInboundEventStore{}
 	bus, err := newRuntimeTestEventBus(t, eventStore)
 	if err != nil {
