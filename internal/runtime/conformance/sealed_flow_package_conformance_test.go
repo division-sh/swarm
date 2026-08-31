@@ -195,7 +195,7 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		events.EventType("producer/audit.seen"),
 		"producer",
 		"",
-		json.RawMessage(`{"flow_instance":"consumer"}`),
+		json.RawMessage(`{"work_id":"work-sibling"}`),
 		1,
 		events.EventLineage{RunID: eventtest.UUID("run-sealed-package-conformance"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{

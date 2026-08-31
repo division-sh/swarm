@@ -97,8 +97,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 		t.Fatalf("materialize requester route: %v", err)
 	}
 	request := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), uuid.NewString(), templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/account-a", map[string]any{
-		"provider_request_id": "ignored-for-default",
-		"account_id":          "account-a",
+		"account_id": "account-a",
 	})
 	if err := eb.Publish(ctx, request); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -401,7 +400,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 	} {
 		t.Run(backendCase.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			source := templatereply.LoadSource(t, templatereply.Options{OptionalReplyCorrelation: true})
+			source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 			backend := backendCase.setup(t)
 			runID := uuid.NewString()
 			seedDurableReplyConformanceRun(t, ctx, backend, runID)
@@ -409,11 +408,12 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 			eb := newDurableReplyConformanceBus(t, ctx, backend, source)
 
 			for _, invalid := range []struct {
-				name    string
-				value   string
-				include bool
+				name               string
+				value              string
+				include            bool
+				wantAdmissionError string
 			}{
-				{name: "absent_value"},
+				{name: "absent_value", wantAdmissionError: "$.provider_request_id is required"},
 				{name: "inconsistent_value", value: "different-request", include: true},
 			} {
 				t.Run(invalid.name, func(t *testing.T) {
@@ -450,6 +450,19 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 					)
 					publishCtx := events.WithDeliveryContext(ctx, deliveryContext)
 					preflight, err := eb.CheckPublishRecipientPlan(publishCtx, reply)
+					if invalid.wantAdmissionError != "" {
+						if err == nil || !strings.Contains(err.Error(), invalid.wantAdmissionError) {
+							t.Fatalf("reply preflight error = %v, want %q", err, invalid.wantAdmissionError)
+						}
+						if err := eb.Publish(publishCtx, reply); err == nil || !strings.Contains(err.Error(), invalid.wantAdmissionError) {
+							t.Fatalf("publish invalid reply error = %v, want %q", err, invalid.wantAdmissionError)
+						}
+						if routes, err := backend.ListEventDeliveryRoutes(ctx, replyID); err != nil || len(routes) != 0 {
+							t.Fatalf("schema-rejected reply routes = %#v err=%v, want none", routes, err)
+						}
+						assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
+						return
+					}
 					if err != nil {
 						t.Fatalf("reply preflight: %v", err)
 					}
@@ -780,11 +793,23 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 
 func replyConformanceCardLifecycleEvent(t *testing.T, card decisioncard.Card, eventID, eventType string, at time.Time) events.Event {
 	t.Helper()
-	payload, err := canonicaljson.Bytes(map[string]any{
-		"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "anchor": card.Anchor.SemanticValue().Interface(),
-		"decision_id": card.Snapshot.Decision, "verdict": card.Verdict, "card_content_hash": card.CardContentHash,
-		"decision_schema_hash": card.DecisionSchemaHash, "bundle_hash": card.BundleHash, "fields": card.Fields.Interface(),
-	})
+	fields := map[string]any{"card_id": card.CardID}
+	switch eventType {
+	case "mailbox.card_deferred":
+		fields["until"] = card.DeferredUntil.UTC().Format(time.RFC3339Nano)
+	case "mailbox.card_decided":
+		fields["anchor_kind"] = card.Anchor.Kind()
+		fields["anchor"] = card.Anchor.SemanticValue().Interface()
+		fields["decision_id"] = card.Snapshot.Decision
+		fields["verdict"] = card.Verdict
+		fields["card_content_hash"] = card.CardContentHash
+		fields["decision_schema_hash"] = card.DecisionSchemaHash
+		fields["bundle_hash"] = card.BundleHash
+		fields["fields"] = card.Fields.Interface()
+	default:
+		t.Fatalf("unsupported decision-card lifecycle event %q", eventType)
+	}
+	payload, err := canonicaljson.Bytes(fields)
 	if err != nil {
 		t.Fatal(err)
 	}

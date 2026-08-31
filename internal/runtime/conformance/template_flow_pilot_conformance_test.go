@@ -477,19 +477,20 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	tests := []struct {
-		name          string
-		payload       json.RawMessage
-		flowInstances []runtimebus.ActiveFlowInstanceDescriptor
-		wantFailure   string
+		name               string
+		payload            json.RawMessage
+		flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
+		wantFailure        string
+		wantAdmissionError string
 	}{
 		{
-			name:        "missing account key",
-			payload:     json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
-			wantFailure: runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(),
+			name:               "missing account key",
+			payload:            json.RawMessage(`{"command":"refresh"}`),
+			wantAdmissionError: "$.account_id is required",
 		},
 		{
 			name:    "ambiguous account key",
-			payload: json.RawMessage(`{"portfolio_id":"portfolio","account_id":"acct-a","command":"refresh"}`),
+			payload: json.RawMessage(`{"account_id":"acct-a","command":"refresh"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
 				{InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 				{InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
@@ -531,6 +532,12 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				time.Now().UTC(),
 			)
 			preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
+			if tc.wantAdmissionError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantAdmissionError) {
+					t.Fatalf("CheckPublishRecipientPlan error = %v, want %q", err, tc.wantAdmissionError)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
