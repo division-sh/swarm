@@ -97,6 +97,72 @@ func TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity(t *testi
 			if err != nil || reset.Phase != channelonboarding.PhasePreparing || reset.IdentityOperationID != "" || reset.BindingRevision != 0 || len(reset.CredentialAdmissions) != 0 {
 				t.Fatalf("credential-stale reset = %#v err=%v", reset, err)
 			}
+
+			boundOp := reset
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+			} {
+				req := channelonboarding.AdvanceRequest{
+					OperationID: boundOp.OperationID, ExpectedRevision: boundOp.Revision, Phase: phase,
+					Now: now.Add(2*time.Minute + time.Duration(boundOp.Revision)*time.Second),
+				}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = uuid.NewString()
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+					req.BindingRevision = 7
+				}
+				boundOp, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance bound parent %s: %v", phase, err)
+				}
+			}
+			boundReset, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: boundOp.OperationID, ExpectedRevision: boundOp.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, RetainBindingRevision: true, Now: now.Add(3 * time.Minute),
+			})
+			if err != nil || boundReset.Phase != channelonboarding.PhasePreparing || boundReset.IdentityOperationID != "" || boundReset.BindingRevision != 7 || len(boundReset.CredentialAdmissions) != 0 {
+				t.Fatalf("bound credential-stale reset = %#v err=%v", boundReset, err)
+			}
+			publishingOp := boundReset
+			for _, phase := range []channelonboarding.Phase{
+				channelonboarding.PhaseCredentialsAdmitted,
+				channelonboarding.PhaseActivatingProvider,
+				channelonboarding.PhaseAwaitingExternalIdentity,
+				channelonboarding.PhaseAwaitingOperatorConfirmation,
+				channelonboarding.PhasePublishingActivation,
+			} {
+				req := channelonboarding.AdvanceRequest{
+					OperationID: publishingOp.OperationID, ExpectedRevision: publishingOp.Revision, Phase: phase,
+					Now: now.Add(4*time.Minute + time.Duration(publishingOp.Revision)*time.Second),
+				}
+				if phase == channelonboarding.PhaseCredentialsAdmitted {
+					req.CredentialAdmissions, req.ReplaceCredentialAdmissions = admissions, true
+				}
+				if phase == channelonboarding.PhaseAwaitingExternalIdentity {
+					req.IdentityOperationID = uuid.NewString()
+				}
+				if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+					req.BindingRevision = 8
+				}
+				publishingOp, err = selected.AdvanceChannelOnboarding(ctx, req)
+				if err != nil {
+					t.Fatalf("advance publishing parent %s: %v", phase, err)
+				}
+			}
+			publishingReset, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: publishingOp.OperationID, ExpectedRevision: publishingOp.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, RetainBindingRevision: true, Now: now.Add(5 * time.Minute),
+			})
+			if err != nil || publishingReset.Phase != channelonboarding.PhasePreparing || publishingReset.IdentityOperationID != "" || publishingReset.BindingRevision != 8 || len(publishingReset.CredentialAdmissions) != 0 {
+				t.Fatalf("publishing credential-stale reset = %#v err=%v", publishingReset, err)
+			}
 		})
 	}
 }
