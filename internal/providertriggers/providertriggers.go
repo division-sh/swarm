@@ -424,12 +424,11 @@ func triggerEventDescriptors(manifest Manifest) []packs.TriggerEventDescriptor {
 		}
 		descriptor := packs.TriggerEventDescriptor{Event: name, Kind: string(output.Kind)}
 		if entry, ok := entries[name]; ok {
-			required := map[string]struct{}{}
-			for _, field := range entry.Payload.Required {
-				required[field] = struct{}{}
-			}
 			for fieldName, field := range entry.Payload.Properties {
-				_, isRequired := required[fieldName]
+				isRequired := output.Kind == OutputKindRaw
+				if projection, declared := output.Fields[fieldName]; declared {
+					isRequired = !projection.Optional
+				}
 				descriptor.Fields = append(descriptor.Fields, packs.TriggerEventFieldDescriptor{
 					Name: fieldName, Type: field.Type, Required: isRequired,
 					CarryEligible: output.Kind == OutputKindNormalized && isRequired,

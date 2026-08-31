@@ -102,9 +102,9 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s uses emit.from; stage gates support only one frozen event emitted to the current entity", verdict))}
 	}
 	eventType := strings.TrimSpace(outcome.Emit.EventType())
-	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(plan.FlowID, eventType)
+	_, _, ok := c.source.ResolveFlowEventCatalogEntry(plan.FlowID, eventType)
 	if !ok {
-		entry, ok = c.source.EventEntry(eventType)
+		_, ok = c.source.EventEntry(eventType)
 	}
 	if !ok {
 		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s emits unknown event %s", verdict, eventType))}
@@ -126,7 +126,7 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 	allLiteral := true
 	for rawField, expression := range outcome.Emit.Fields {
 		field := strings.TrimSpace(rawField)
-		_, declared := entry.Payload.Properties[field]
+		_, declared := resolution.Field(field)
 		if !declared {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s is not declared by event %s", verdict, field, eventType)))
 			allLiteral = false
@@ -181,7 +181,7 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 		}
 		findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s uses expression %q; stage gate emits support only literals or exact decision.<field> references", verdict, field, text)))
 	}
-	for _, required := range entry.Payload.Required {
+	for _, required := range resolution.RequiredFieldNames() {
 		required = strings.TrimSpace(required)
 		if required == "" {
 			continue

@@ -1118,18 +1118,6 @@ payload:
   source_entity_id: uuid
   decided_by: text
   decided_at: timestamp
-required:
-  - mailbox_id
-  - mailbox_decision_id
-  - decision
-  - decision_payload
-  - item_type
-  - mailbox_payload
-  - source_event_id
-  - source_flow
-  - source_entity_id
-  - decided_by
-  - decided_at
 `),
 		},
 		{
@@ -3966,6 +3954,8 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
+	entry.Payload.Properties["current_state"] = runtimecontracts.EventFieldSpec{Type: "text"}
 	entry.Payload.Required = []string{"entity_id", "current_state"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
@@ -4263,7 +4253,7 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4284,7 +4274,7 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4309,7 +4299,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4331,7 +4321,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
 	entry.Payload.Required = nil
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4352,8 +4342,12 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
 	entry.Payload.Required = []string{"entity_id"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 

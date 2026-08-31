@@ -1118,7 +1118,7 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	pins := bundle.FlowInputEventPins("account")
-	if len(pins) != 2 || pins[1].Resolution().From != "payload.external_account_id" {
+	if len(pins) != 1 || pins[0].Resolution().From != "payload.external_account_id" {
 		t.Fatalf("renamed source fixture pins = %#v, want account_ready from payload.external_account_id", pins)
 	}
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))

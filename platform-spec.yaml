@@ -731,9 +731,9 @@ contract_formats:
       producer-owned payload fields.
       The platform validates emit calls against the declared payload
       contract and populates envelope fields separately.
-      Runtime emit-payload validators MUST validate against the
+      Runtime emit-payload admission MUST consume the
       canonical type-aware event schema lowered through the active
-      Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
+      Wave 1 type catalog. Runtime admission MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
       Authored `swarm.source`, `swarm.producer`, and `swarm.consumer`
@@ -2221,7 +2221,7 @@ type_system:
         type. Non-equality predicates, provenance checks, external file
         checks, rule IDs, and failure routing are not schema refinements.
     runtime_consumption: |
-      Event payload validators, entity materialization/write normalization,
+      Event payload admission, entity materialization/write normalization,
       and generated entity/tool schemas that derive from the shared
       type/schema owner MUST consume the same refinement model. A consumer may
       omit a refinement only when it is a different semantic concept or an

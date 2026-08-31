@@ -40,7 +40,8 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 		return nil
 	}
 	builder := authoredEmitSiteBuilder{
-		seen: map[string]struct{}{},
+		source: source,
+		seen:   map[string]struct{}{},
 	}
 	if bundle, ok := Bundle(source); ok {
 		builder.bundle = bundle
@@ -75,6 +76,7 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 
 type authoredEmitSiteBuilder struct {
 	bundle *runtimecontracts.WorkflowContractBundle
+	source Source
 	seen   map[string]struct{}
 	sites  []AuthoredEmitSite
 }
@@ -89,6 +91,7 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 				Node:             node,
 				TriggerEventType: handlerEvent,
 				Site:             siteKey,
+				SchemaProvider:   b.source,
 			}, spec); err == nil {
 				spec = lowered
 			}

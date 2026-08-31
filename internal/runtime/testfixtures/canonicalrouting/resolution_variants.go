@@ -148,6 +148,21 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
 		"  id: account-node\n", "  id: account-node-{instance_id}\n")
 	applyClosedReplacement(t, packageFile, "  - event: account.setup\n    from: producer\n    to: account\n", "")
+	applyClosedReplacement(t, accountSchema,
+		"      - event: account.setup\n        resolution:\n          mode: select-or-create\n",
+		"")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
+		"  subscribes_to: [account.setup, account.ready]\n  event_handlers:\n    account.setup: {}\n    account.ready: {}\n",
+		"  subscribes_to: [account.ready]\n  event_handlers:\n    account.ready: {}\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "schema.yaml"),
+		"      - event: account.setup.requested\n        source: external\n",
+		"")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "schema.yaml"),
+		"      - account.setup\n",
+		"")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"),
+		"  subscribes_to: [account.setup.requested, account.work.requested]\n  produces: [account.setup, account.ready]\n  event_handlers:\n    account.setup.requested:\n      emit:\n        event: account.setup\n        fields:\n          account_id: payload.account_id\n    account.work.requested:\n",
+		"  subscribes_to: [account.work.requested]\n  produces: [account.ready]\n  event_handlers:\n    account.work.requested:\n")
 	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
 		"      - event: account.ready\n        resolution:\n          mode: select\n",

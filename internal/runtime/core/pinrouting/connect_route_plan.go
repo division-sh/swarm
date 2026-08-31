@@ -3138,19 +3138,8 @@ func connectOutputRequiredPayloadFieldExists(source semanticview.Source, flowID 
 	if field == "" || strings.Contains(field, ".") {
 		return false
 	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
-	if !ok {
-		return false
-	}
-	if _, ok := entry.Payload.Properties[field]; !ok {
-		return false
-	}
-	for _, required := range entry.Payload.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
-	return false
+	resolved, ok := semanticview.ResolveEventSchema(source, flowID, pin.EventType()).Field(field)
+	return ok && !resolved.IsOptional
 }
 
 func resolvedCompositionConnectsTo(source semanticview.Source, flowID, pinName string) []resolvedCompositionConnect {

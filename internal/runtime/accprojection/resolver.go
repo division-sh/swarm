@@ -462,14 +462,8 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 }
 
 func validateEventTypedView(source semanticview.Source, types runtimecontracts.TypeCatalogDocument, binding Binding) []Issue {
-	entry, ok := source.EventEntry(binding.SourceEventType)
-	if !ok {
-		canonical := source.ResolveExecutableNodeEventReference(binding.SourceNode, binding.SourceEventType)
-		if canonical != "" {
-			entry, ok = source.EventEntry(canonical)
-		}
-	}
-	if !ok {
+	resolution := semanticview.ResolveEventSchema(source, binding.FlowID, binding.SourceEventType)
+	if !resolution.HasStructural {
 		return []Issue{scopedIssue(binding, "unknown_source_event", binding.SourceNode.Key(), fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType))}
 	}
 	issues := make([]Issue, 0)
@@ -477,29 +471,20 @@ func validateEventTypedView(source semanticview.Source, types runtimecontracts.T
 	for _, fieldName := range sortedTypeFields(binding.SourceType) {
 		sourceField, _ := binding.SourceType.Field(fieldName)
 		expected := strings.TrimSpace(sourceField.TypeRef)
-		payloadField, ok := entry.Payload.Properties[fieldName]
+		payloadField, ok := resolution.Field(fieldName)
 		if !ok {
 			if !sourceField.IsOptional {
 				issues = append(issues, scopedIssue(binding, "typed_view_missing_field", loc, fmt.Sprintf("event %q payload missing field %q required by accumulator element type %s", binding.SourceEventType, fieldName, binding.SourceItemType)))
 			}
 			continue
 		}
-		if !typesAssignable(types, payloadField.Type, expected) {
-			issues = append(issues, scopedIssue(binding, "typed_view_type_mismatch", loc, fmt.Sprintf("event %q payload field %q has type %s not assignable to accumulator element type field %q type %s", binding.SourceEventType, fieldName, strings.TrimSpace(payloadField.Type), fieldName, expected)))
-		} else if !sourceField.IsOptional && !containsString(entry.Payload.Required, fieldName) {
+		if !runtimecontracts.StructuralCatalogTypeAssignable(payloadField.Type, sourceField.Type) {
+			issues = append(issues, scopedIssue(binding, "typed_view_type_mismatch", loc, fmt.Sprintf("event %q payload field %q has type %s not assignable to accumulator element type field %q type %s", binding.SourceEventType, fieldName, strings.TrimSpace(payloadField.TypeRef), fieldName, expected)))
+		} else if !sourceField.IsOptional && payloadField.IsOptional {
 			issues = append(issues, scopedIssue(binding, "typed_view_presence_mismatch", loc, fmt.Sprintf("event %q payload field %q is optional but accumulator element type %s requires it", binding.SourceEventType, fieldName, binding.SourceItemType)))
 		}
 	}
 	return issues
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if strings.TrimSpace(value) == strings.TrimSpace(target) {
-			return true
-		}
-	}
-	return false
 }
 
 func nodeStateField(node runtimecontracts.SystemNodeContract, name string) (runtimecontracts.NodeStateField, bool) {

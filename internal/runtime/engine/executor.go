@@ -3321,6 +3321,7 @@ func (e *Executor) lowerEmitSpecForFrame(frame *executionFrame, site string, spe
 		Node:             frame.req.Node,
 		TriggerEventType: triggerEvent,
 		Site:             site,
+		SchemaProvider:   e.deps.Source,
 	}, spec)
 }
 

@@ -732,11 +732,8 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 	if source == nil {
 		return false
 	}
-	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryDeclaresPayloadField(entry, field) {
-		return true
-	}
-	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	return eventEntryDeclaresPayloadField(proof.Entry, field)
+	_, ok := semanticview.ResolveEventSchema(source, flowID, eventType).Field(field)
+	return ok
 }
 
 func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, handlerEvent string, mode runtimecontracts.FlowInputResolutionMode) bool {
@@ -749,22 +746,6 @@ func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, hand
 	}
 	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, handlerEvent).Endpoint()
 	return ok && endpoint.ResolutionMode == mode
-}
-
-func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return false
-	}
-	if _, ok := entry.Payload.Properties[field]; ok {
-		return true
-	}
-	for _, required := range entry.Payload.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
-	return false
 }
 
 func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {

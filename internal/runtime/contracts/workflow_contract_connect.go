@@ -581,7 +581,7 @@ func compileIntrinsicFlowInputProjection(bundle *WorkflowContractBundle, flowID 
 	if err != nil {
 		return CompiledFlowInputPin{}, err
 	}
-	evidence, err := bundle.resolveFlowInputInstanceSourceType(bundle, flowID, pin, instance, false)
+	evidence, err := bundle.resolveFlowInputInstanceSourceType(nil, flowID, pin, instance, false)
 	if err != nil {
 		return CompiledFlowInputPin{}, err
 	}
@@ -624,7 +624,7 @@ func deriveFlowInputReceiverEventSchema(producerSchema CompiledEventSchema, proj
 	}
 	readback := projection.Readback()
 	fieldSchema, _ := eventSchemaForTypeRef(readback.SourceType, TypeCatalogDocument{}, map[string]struct{}{})
-	return producerSchema.withRequiredField(readback.Field, fieldSchema)
+	return producerSchema.withRequiredField(readback.Field, readback.SourceType, fieldSchema)
 }
 
 func compileFlowOutputPins(bundle *WorkflowContractBundle, flowID, flowPath, sourceFile string, in []FlowOutputEventPin) ([]CompiledFlowOutputPin, error) {

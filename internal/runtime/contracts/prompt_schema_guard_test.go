@@ -93,10 +93,13 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		EmitEvents:     []string{"review.completed"},
 	}
 	events := map[string]EventCatalogEntry{
-		"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
+		"review.completed": {Payload: EventPayloadSpec{
+			Properties: map[string]EventFieldSpec{"review_id": {Type: "uuid"}},
+			Required:   []string{"review_id"},
+		}},
 	}
 	flow := FlowContractView{
-		Paths:  FlowContractPaths{ID: "review", Flow: "review"},
+		Paths:  FlowContractPaths{ID: "review", Flow: "review", PackageKey: ".", EventsFile: "flows/review/events.yaml"},
 		Path:   "review",
 		Agents: map[string]AgentRegistryEntry{"reviewer": flowAgent},
 		Events: events,
@@ -104,7 +107,7 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 	bundle := &WorkflowContractBundle{
 		Events: events,
 		projectContracts: map[string]ProjectContractView{
-			".": {Paths: ProjectPackagePaths{Key: "."}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}, Events: events},
+			".": {Paths: ProjectPackagePaths{Key: ".", ProjectEventsFile: "events.yaml"}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}, Events: events},
 		},
 		FlowTree: flowmodel.Tree[FlowContractView]{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
 	}

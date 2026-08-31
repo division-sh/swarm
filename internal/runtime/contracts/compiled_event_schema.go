@@ -30,6 +30,12 @@ type CompiledEventSchemaProvider interface {
 	CompiledEventSchemas() ([]CompiledEventSchema, error)
 }
 
+// FlowEventStructuralTypeProvider exposes one effective, presence-aware event
+// schema without exposing its JSON-schema readback projection.
+type FlowEventStructuralTypeProvider interface {
+	ResolveFlowEventStructuralType(flowID, eventType string) (ResolvedCatalogType, bool)
+}
+
 type compiledEventFieldValue struct {
 	name       string
 	schema     map[string]any
@@ -171,7 +177,30 @@ func (s CompiledEventSchema) StructuralType() (ResolvedCatalogType, bool) {
 	return s.value.structuralType.Clone(), true
 }
 
-func (s CompiledEventSchema) withRequiredField(name string, fieldSchema map[string]any) (CompiledEventSchema, error) {
+func (s CompiledEventSchema) StructuralField(name string) (ResolvedCatalogField, bool) {
+	structural, ok := s.StructuralType()
+	if !ok {
+		return ResolvedCatalogField{}, false
+	}
+	return structural.Field(name)
+}
+
+func (s CompiledEventSchema) RequiredFieldNames() []string {
+	structural, ok := s.StructuralType()
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(structural.Fields))
+	for _, field := range structural.Fields {
+		if name := strings.TrimSpace(field.Name); name != "" && !field.IsOptional {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (s CompiledEventSchema) withRequiredField(name, typeRef string, fieldSchema map[string]any) (CompiledEventSchema, error) {
 	name = strings.TrimSpace(name)
 	if s.value == nil {
 		return CompiledEventSchema{}, fmt.Errorf("receiver event schema is unavailable")
@@ -216,10 +245,17 @@ func (s CompiledEventSchema) withRequiredField(name string, fieldSchema map[stri
 	value.acceptanceSchema = cloneEventSchemaMap(acceptanceSchema)
 	value.canonicalSchema = append([]byte(nil), canonicalSchema...)
 	value.acceptanceSchemaDigest = canonicaljson.HashBytes(canonicalSchema)
-	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
+	structuralType := s.value.structuralType.Clone()
+	fieldType, err := ResolveJSONSchemaStructuralType(fieldSchema, "event."+value.acceptanceSchemaDigest+"."+name)
 	if err != nil {
 		return CompiledEventSchema{}, fmt.Errorf("receiver structural schema: %w", err)
 	}
+	structuralType.Fields = append(structuralType.Fields, ResolvedCatalogField{
+		Name:    name,
+		TypeRef: strings.TrimSpace(typeRef),
+		Type:    fieldType,
+	})
+	sort.Slice(structuralType.Fields, func(i, j int) bool { return structuralType.Fields[i].Name < structuralType.Fields[j].Name })
 	value.structuralType = structuralType
 	return CompiledEventSchema{value: &value}, nil
 }
@@ -247,6 +283,24 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 		}
 	}
 	return CompiledEventSchema{}, false, nil
+}
+
+// ResolveEffectiveCompiledFlowEventSchema returns the exact receiver schema
+// when a flow input pin owns one, otherwise the producer declaration. It does
+// not rebuild structural evidence from the JSON-schema readback projection.
+func (b *WorkflowContractBundle) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
+	if b == nil {
+		return CompiledEventSchema{}, false, nil
+	}
+	if pin, ok := b.flowInputEventPinForResolvedEvent(flowID, eventType); ok {
+		if schema, owned := pin.ReceiverEventSchema(); owned {
+			return schema, true, nil
+		}
+		if schema, owned := pin.ProducerEventSchema(); owned {
+			return schema, true, nil
+		}
+	}
+	return b.ResolveCompiledFlowEventSchema(flowID, eventType)
 }
 
 type currentEventDeclarationRecord struct {
@@ -517,6 +571,15 @@ func newCompiledEventSchema(
 	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
 	if err != nil {
 		return CompiledEventSchema{}, fmt.Errorf("compiled structural schema: %w", err)
+	}
+	for index := range structuralType.Fields {
+		field := &structuralType.Fields[index]
+		declaration, ok := entry.Payload.Properties[field.Name]
+		if !ok {
+			continue
+		}
+		field.TypeRef = strings.TrimSpace(declaration.Type)
+		field.Refinements = declaration.Refinements
 	}
 	value.structuralType = structuralType
 	if strings.TrimSpace(businessKeyField) != "" {

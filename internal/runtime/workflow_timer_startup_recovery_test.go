@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -96,6 +98,8 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 }
 
 func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/testdata/workflow-timer-startup"))
+
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
@@ -795,12 +799,7 @@ func workflowTimerStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflow
 
 func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"package.yaml":  "name: workflow-timer-startup\nversion: 1\nplatform_version: '>=0.7.0 <0.8.0'\n",
-		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\npins:\n  inputs:\n    events:\n      - event: generic.tick\n        source: external\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "generic.tick: {}\n",
-	})
+	bundle := loadRuntimeBundleRoot(t, filepath.Join("testdata", "workflow-timer-startup"))
 	bundle.Semantics.Name = "workflow-timer-startup"
 	bundle.Semantics.Version = "1"
 	bundle.Semantics.InitialStage = "waiting"
