@@ -21956,31 +21956,34 @@ test_specification:
         to that child. Selected stores begin empty; secrets are set through the public command; RPC and webhook traffic
         use public listeners. Provider credentials and discoverable Claude, Docker, or Podman executables are absent.
       journeys:
-        J1_sqlite_graceful: Plain serve with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, entity, bundle, and route before one fresh same-conversation ingress converges.
+        J1_sqlite_graceful: Plain serve with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
         J2_postgres_graceful: J1 against an isolated host-PostgreSQL database.
         J3_sqlite_refuse_then_recover: >
           Plain SQLite serve is publicly paused at one exact pending normal-authority delivery and killed. Omitted-recovery
           restart must refuse before readiness and fully exit. Changing only recovery_on_startup to true then admits the
           same store/source, retains exact identities, observes the active standing declaration normalize to running with
           standing_reconcile, automatically converges the interrupted chain once, and converges one fresh transport identity
-          using the same conversation/entity/route once. Generic run.pause does not persist standing suspension.
+          using the same conversation and downstream entity/route once. Generic run.pause does not persist standing suspension.
         J4_postgres_refuse_then_recover: J3 against an isolated host-PostgreSQL database.
         J5_sqlite_dev_fresh_epoch: >
           Project-local serve --dev reaches the same public paused/pending checkpoint and is killed. Its next invocation
           uses a fresh SQLite scratch epoch. The same authored package/flow may rederive identical service, generation-one
-          run, and entity IDs; freshness requires a strictly later public run started_at and absence of every predecessor
+          run, and standing ingress entity IDs; freshness requires a strictly later public run started_at and absence of every predecessor
           exact event, delivery, and card fact before one new ingress converges exactly once. PostgreSQL, authored-path,
           borrowed-project, custom-store dev behavior, and production identity salting are outside this profile.
       public_checkpoint: >
-        Forced-death journeys first pause the exact run through public RPC, send one signed webhook, observe its normalized
-        input event and exact pending non-terminal agent delivery to the expected existing entity and route, and observe
-        run.diagnose reporting paused status with active deliveries. A deadline is failure, not success.
+        Forced-death journeys first pause the exact run through public RPC, send one signed webhook, join its accepted
+        standing entity and exact ordered raw/normalized child receipt to event.list, prove the raw child has the standing
+        entity and no_subscriber_by_design settlement, then observe the normalized input event and one exact pending
+        non-terminal agent delivery to the expected existing downstream entity and route. The normalized transport lookup
+        independently resolves exactly that receipt child. run.diagnose must report paused status with exactly one active
+        delivery. A deadline is failure, not success.
       manifestations:
         M1: Every package root below the dedicated fixture root has exactly one executable or support classification.
         M2: Verify and serve use the same production-shaped YAML-only relative invocation root.
-        M3: Exact authored connector mock response admission succeeds and a missing or mismatched response fails verify.
+        M3: Exact authored connector mock response admission succeeds and a missing response fails verify.
         M4: Cold plain serve reaches committed readiness on both selected stores with recovery omitted.
-        M5: Signed ingress preserves exact event, run, entity, delivery-route, and no-dead-letter truth.
+        M5: Signed ingress proves the exact ordered receipt from its raw standing-entity event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target, with no dead letter.
         M6: The package-owned mock agent executes without external provider or container discovery and exposes mock provenance.
         M7: One workflow timer advances once with exact platform.stage_timer event cardinality.
         M8: One decision card is listed, read, approved, and read back as decided through public RPC.
@@ -21988,15 +21991,15 @@ test_specification:
         M10: Public run/event/mailbox/health reads reach quiescence; SQL and logs remain failure diagnostics only.
         M11: Graceful SQLite restart retains standing service, run, generation, and bundle identity.
         M12: Graceful PostgreSQL restart retains the same identity set.
-        M13: The forced-death checkpoint contains one exact pending normal-authority delivery.
+        M13: The forced-death checkpoint contains exactly the receipt's normalized event, one pending normal-authority delivery, and one active diagnosis obligation.
         M14: Omitted-recovery restart refuses before readiness on SQLite and PostgreSQL.
-        M15: The refusing process exits and releases selected-store possession before config changes.
+        M15: The refusing process is observed exiting nonzero, rather than timing out, and releases selected-store possession before config changes.
         M16: Changing only recovery_on_startup to true admits the same store and source.
         M17: Active standing reconciliation exposes running plus standing_reconcile and automatically converges the interrupted delivery exactly once on both stores.
-        M18: A new transport and idempotency identity with the same conversation selects the same entity and route.
-        M19: Old event and delivery cardinalities remain unchanged after the fresh post-recovery chain.
-        M20: Both recovery journeys retain exact service, run, generation, entity, bundle, target, and delivery authority.
-        M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and entity IDs may recur.
+        M18: A new transport and idempotency identity with the same conversation selects the same downstream entity, flow instance, subscriber, and existing-entity route.
+        M19: Every old public event and delivery fact remains byte-for-byte unchanged after exactly one fresh post-recovery chain.
+        M20: Both recovery journeys retain exact service, run, generation, standing ingress entity, bundle, downstream target, and delivery authority.
+        M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The lifecycle executable/support registry and canonical-routing overlay registry remain distinct total owners.
         M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
