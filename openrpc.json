@@ -2599,6 +2599,65 @@
           }
         },
         {
+          "code": -32017,
+          "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_CREDENTIAL_REQUIRED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId",
+                    "description": "Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another."
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "remediation": {
+                    "description": "Exact executable command `swarm channel resume \u003coperation_id\u003e --credential-stdin` for continuing the same responsibility.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "role": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "store_key": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "operation_id",
+                  "role",
+                  "store_key",
+                  "remediation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32046,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
@@ -19777,6 +19836,9 @@
             ],
             "type": "string"
           },
+          "onboarding_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
           "operation_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
@@ -19816,6 +19878,7 @@
               "awaiting_confirmation",
               "bound",
               "rejected",
+              "credential_stale",
               "expired",
               "unbound"
             ],

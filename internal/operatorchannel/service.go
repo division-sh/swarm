@@ -159,7 +159,7 @@ func (s *Service) ResolveInterface(selector string) (InterfaceIdentity, error) {
 	return matches[0], nil
 }
 
-func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash string, providerCredential runtimecredentials.ValueEvidence, saveProof bool, now time.Time) (Operation, error) {
+func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, providerCredential runtimecredentials.ValueEvidence, saveProof bool, now time.Time) (Operation, error) {
 	if err := providerCredential.Validate(); err != nil {
 		return Operation{}, fmt.Errorf("%w: provider credential evidence is required", ErrInvalidRequest)
 	}
@@ -194,7 +194,8 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 	return s.store.BeginChannelBinding(ctx, BeginRequest{
 		OperationID: NewOperationID(), Kind: kind, PrincipalID: principal.ID, Interface: identity,
 		ExpectedRevision: expectedRevision, RequestKeyHash: requestKey, RequestHash: requestHash,
-		SaveProof: saveProof, PlannedProofID: plannedProofID, PlannedProofRevision: plannedProofRevision,
+		OnboardingOperationID: strings.TrimSpace(onboardingOperationID),
+		SaveProof:             saveProof, PlannedProofID: plannedProofID, PlannedProofRevision: plannedProofRevision,
 		ProviderCredential: providerCredential,
 		RequestedAt:        now, ExpiresAt: now.Add(DefaultChallengeTTL),
 	})
@@ -209,14 +210,22 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 	if err != nil {
 		return Operation{}, Binding{}, err
 	}
-	if approve {
-		current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, operation.ProviderCredential)
-		if currentErr != nil || !current {
-			return operation, Binding{}, errors.Join(fmt.Errorf("%w: reconnect with fresh provider credentials before confirming identity", ErrCredentialStale), currentErr)
-		}
+	providerCredentialCurrent := false
+	var currentErr error
+	if approve && !operation.State.Terminal() {
+		current, err := s.credentials.CurrentValueMatchesSeal(ctx, operation.ProviderCredential)
+		currentErr = err
+		providerCredentialCurrent = currentErr == nil && current
 	}
-	op, binding, err := s.store.ConfirmChannelBinding(ctx, ConfirmRequest{OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID, ExpectedRevision: expectedRevision, Approve: approve, ConfirmedAt: now})
+	op, binding, err := s.store.ConfirmChannelBinding(ctx, ConfirmRequest{
+		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
+		ExpectedRevision: expectedRevision, Approve: approve,
+		ProviderCredentialCurrent: providerCredentialCurrent, ConfirmedAt: now,
+	})
 	if err != nil {
+		if errors.Is(err, ErrCredentialStale) {
+			return op, binding, errors.Join(err, currentErr)
+		}
 		if operation.Kind == OperationReconnect && errors.Is(err, ErrConflict) && strings.Contains(err.Error(), "reconnect claimant differs") {
 			return op, binding, fmt.Errorf("%w; run swarm channel rebind <provider> --credential-stdin to bind a different claimant", err)
 		}

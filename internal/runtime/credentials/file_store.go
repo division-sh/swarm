@@ -240,6 +240,9 @@ func (s *FileStore) sealCurrentValue(_ context.Context, key string) (ValueEviden
 		if !found {
 			return fmt.Errorf("credential %q is not present", key)
 		}
+		if !credentialValueUsable(item.Value) {
+			return fmt.Errorf("%w: credential %q cannot be admitted", ErrCredentialValueUnusable, key)
+		}
 		seal, changed, err := sealValueInDocument(&doc, key, item.Value)
 		if err != nil {
 			return err
@@ -273,6 +276,9 @@ func (s *FileStore) currentValueMatchesSeal(_ context.Context, evidence ValueEvi
 	if !found {
 		return false, nil
 	}
+	if !credentialValueUsable(item.Value) {
+		return false, nil
+	}
 	want := credentialValueSeal(key, evidence.Key, item.Value)
 	return subtleSealEqual(want, evidence.Seal), nil
 }
@@ -281,6 +287,9 @@ func (s *FileStore) sealExactValue(_ context.Context, key, value string) (ValueS
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", fmt.Errorf("credential key is required")
+	}
+	if !credentialValueUsable(value) {
+		return "", fmt.Errorf("%w: credential %q cannot be admitted", ErrCredentialValueUnusable, key)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,6 +315,9 @@ func (s *FileStore) sealExactValue(_ context.Context, key, value string) (ValueS
 func (s *FileStore) matchExactValue(_ context.Context, key, value string, seal ValueSeal) (bool, error) {
 	if _, err := ParseValueSeal(seal.String()); err != nil {
 		return false, err
+	}
+	if !credentialValueUsable(value) {
+		return false, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

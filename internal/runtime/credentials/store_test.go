@@ -3,6 +3,7 @@ package credentials
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -380,6 +381,44 @@ func TestCredentialValueSealOwnsExactKeyAndValueCurrentness(t *testing.T) {
 	}
 	if otherKey.Seal == first.Seal {
 		t.Fatal("same value under different keys produced the same seal")
+	}
+}
+
+func TestCredentialValueSealRejectsUnusableFileAndEffectiveOverlayValues(t *testing.T) {
+	ctx := context.Background()
+	for _, value := range []string{"", " \t\n"} {
+		for _, source := range []string{"file", "effective_overlay"} {
+			t.Run(source+"/"+fmt.Sprintf("%q", value), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "credentials.json")
+				file, err := NewFileStore(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var store Store = file
+				set := file.Set
+				if source == "effective_overlay" {
+					t.Setenv("PROVIDER", "token-a")
+					store = NewOverlayStore(EnvStore{}, file)
+					set = func(_ context.Context, _, next string) error { return os.Setenv("PROVIDER", next) }
+				}
+				if err := set(ctx, "provider", "token-a"); err != nil {
+					t.Fatal(err)
+				}
+				evidence, err := SealCurrentValue(ctx, store, "provider")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := set(ctx, "provider", value); err != nil {
+					t.Fatal(err)
+				}
+				if current, err := CurrentValueMatchesSeal(ctx, store, evidence); err != nil || current {
+					t.Fatalf("unusable value currentness = %v, %v; want false, nil", current, err)
+				}
+				if _, err := SealCurrentValue(ctx, store, "provider"); !errors.Is(err, ErrCredentialValueUnusable) {
+					t.Fatalf("unusable value seal error = %v, want ErrCredentialValueUnusable", err)
+				}
+			})
+		}
 	}
 }
 

@@ -309,12 +309,16 @@ func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, p
 		if storeKey == "" {
 			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q has no explicit store-key mapping", key, logical)
 		}
-		snapshot, err := c.opts.CredentialOwner.Observe(ctx, storeKey)
+		binding, err := c.opts.CredentialOwner.ObserveSecretBinding(ctx, storeKey)
 		if err != nil {
 			return nil, runtimecredentials.AdmittedSnapshot{}, err
 		}
-		if !snapshot.Present {
-			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q is missing", key, storeKey)
+		if !binding.Bound() {
+			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q is UNBOUND", key, storeKey)
+		}
+		snapshot, err := binding.AdmittedSnapshot()
+		if err != nil {
+			return nil, runtimecredentials.AdmittedSnapshot{}, err
 		}
 		provider[logical] = snapshot
 	}

@@ -74,13 +74,14 @@ const (
 	StateAwaitingConfirmation OperationState = "awaiting_confirmation"
 	StateBound                OperationState = "bound"
 	StateRejected             OperationState = "rejected"
+	StateCredentialStale      OperationState = "credential_stale"
 	StateExpired              OperationState = "expired"
 	StateUnbound              OperationState = "unbound"
 )
 
 func (s OperationState) Terminal() bool {
 	switch s {
-	case StateBound, StateRejected, StateExpired, StateUnbound:
+	case StateBound, StateRejected, StateCredentialStale, StateExpired, StateUnbound:
 		return true
 	default:
 		return false
@@ -235,27 +236,29 @@ func (c InboundClaim) Validate() error {
 }
 
 type BeginRequest struct {
-	OperationID          string                           `json:"operation_id"`
-	Kind                 OperationKind                    `json:"kind"`
-	PrincipalID          string                           `json:"principal_id"`
-	Interface            InterfaceIdentity                `json:"interface"`
-	ExpectedRevision     int64                            `json:"expected_revision"`
-	RequestKeyHash       string                           `json:"request_key_hash"`
-	RequestHash          string                           `json:"request_hash"`
-	SaveProof            bool                             `json:"save_proof"`
-	PlannedProofID       string                           `json:"planned_proof_id,omitempty"`
-	PlannedProofRevision int64                            `json:"planned_proof_revision,omitempty"`
-	ProviderCredential   runtimecredentials.ValueEvidence `json:"-"`
-	RequestedAt          time.Time                        `json:"requested_at"`
-	ExpiresAt            time.Time                        `json:"expires_at"`
+	OperationID           string                           `json:"operation_id"`
+	Kind                  OperationKind                    `json:"kind"`
+	PrincipalID           string                           `json:"principal_id"`
+	Interface             InterfaceIdentity                `json:"interface"`
+	ExpectedRevision      int64                            `json:"expected_revision"`
+	RequestKeyHash        string                           `json:"request_key_hash"`
+	RequestHash           string                           `json:"request_hash"`
+	OnboardingOperationID string                           `json:"onboarding_operation_id,omitempty"`
+	SaveProof             bool                             `json:"save_proof"`
+	PlannedProofID        string                           `json:"planned_proof_id,omitempty"`
+	PlannedProofRevision  int64                            `json:"planned_proof_revision,omitempty"`
+	ProviderCredential    runtimecredentials.ValueEvidence `json:"-"`
+	RequestedAt           time.Time                        `json:"requested_at"`
+	ExpiresAt             time.Time                        `json:"expires_at"`
 }
 
 type ConfirmRequest struct {
-	OperationID      string    `json:"operation_id"`
-	PrincipalID      string    `json:"principal_id"`
-	ExpectedRevision int64     `json:"expected_revision"`
-	Approve          bool      `json:"approve"`
-	ConfirmedAt      time.Time `json:"confirmed_at"`
+	OperationID               string    `json:"operation_id"`
+	PrincipalID               string    `json:"principal_id"`
+	ExpectedRevision          int64     `json:"expected_revision"`
+	Approve                   bool      `json:"approve"`
+	ProviderCredentialCurrent bool      `json:"-"`
+	ConfirmedAt               time.Time `json:"confirmed_at"`
 }
 
 type ExpireRequest struct {
@@ -304,6 +307,7 @@ type Operation struct {
 	ExpiresAt               time.Time                        `json:"expires_at,omitzero"`
 	ClaimedAt               time.Time                        `json:"claimed_at,omitzero"`
 	CompletedAt             time.Time                        `json:"completed_at,omitzero"`
+	OnboardingOperationID   string                           `json:"onboarding_operation_id,omitempty"`
 	RequestHash             string                           `json:"-"`
 	ExpectedBindingRevision int64                            `json:"-"`
 	PlannedProofID          string                           `json:"-"`

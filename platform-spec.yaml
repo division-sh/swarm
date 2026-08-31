@@ -9999,7 +9999,10 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. After same-request replay handling, an unresolved
+        return the original outcome while changed input conflicts. Credential currentness gates only a pending approved
+        mutation after terminal replay classification. A stale provider credential terminally settles that pending identity
+        ceremony as credential_stale; its parent onboarding responsibility releases the old admissions, resets to preparing,
+        and accepts replacement hidden input into a fresh identity ceremony. After same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
@@ -14427,11 +14430,12 @@ platform_tables:
             semantic_generation TEXT NOT NULL,
             provider_credential_key TEXT,
             provider_credential_value_seal TEXT,
+            onboarding_operation_id UUID,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
             expected_binding_revision BIGINT NOT NULL CHECK (expected_binding_revision >= 0),
             challenge TEXT UNIQUE,
-            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','expired','unbound')),
+            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','credential_stale','expired','unbound')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             binding_revision BIGINT CHECK (binding_revision > 0),
             external_account_reference TEXT,
@@ -14457,7 +14461,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
             CHECK ((operation_kind = 'unbind' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL) OR (operation_kind <> 'unbind' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL)),
-            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
             CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
@@ -32790,11 +32794,12 @@ api_specification:
         required: [operation_id, kind, principal_id, interface, state, revision, save_proof, proof_status, requested_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          onboarding_operation_id: {$ref: '#/components/schemas/OpaqueId'}
           kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
           challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
-          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, expired, unbound]}
+          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
           external_account_reference: {type: string}
@@ -37397,7 +37402,7 @@ api_specification:
       - {name: approve, required: true, schema: {type: boolean}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
     channel.unbind:
       tier: must_have
       description: Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.

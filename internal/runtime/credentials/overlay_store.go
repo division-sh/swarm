@@ -163,6 +163,9 @@ func (s *OverlayStore) sealCurrentValue(ctx context.Context, key string) (ValueE
 	if !snapshot.Present {
 		return ValueEvidence{}, fmt.Errorf("credential %q is not present", strings.TrimSpace(key))
 	}
+	if !credentialValueUsable(snapshot.CredentialValue()) {
+		return ValueEvidence{}, fmt.Errorf("%w: credential %q cannot be admitted", ErrCredentialValueUnusable, snapshot.Key)
+	}
 	home, ok := s.writable.(valueSealKeyHome)
 	if !ok || home == nil {
 		return ValueEvidence{}, fmt.Errorf("%w: configure a writable credential file tier before admitting durable channel credentials", ErrValueSealKeyUnavailable)
@@ -187,6 +190,9 @@ func (s *OverlayStore) currentValueMatchesSeal(ctx context.Context, evidence Val
 		return false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
 	}
 	if !snapshot.Present {
+		return false, nil
+	}
+	if !credentialValueUsable(snapshot.CredentialValue()) {
 		return false, nil
 	}
 	return home.matchExactValue(ctx, evidence.Key, snapshot.CredentialValue(), evidence.Seal)

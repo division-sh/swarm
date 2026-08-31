@@ -216,7 +216,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		}
 		confirmed, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 			OperationID: operation.OperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Revision,
-			Approve: true, ConfirmedAt: now.Add(time.Duration(index+1)*time.Minute - time.Second),
+			Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(time.Duration(index+1)*time.Minute - time.Second),
 		})
 		if err != nil || confirmed.State != operatorchannel.StateBound || binding.Revision != int64(index+1) || binding.ConversationScope != claim.scope {
 			t.Fatalf("%s confirmation = operation:%#v binding:%#v err:%v", claim.chatKind, confirmed, binding, err)

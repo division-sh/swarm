@@ -3,6 +3,8 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -418,6 +420,43 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 
 func serveTestValueSeal(digit byte) runtimecredentials.ValueSeal {
 	return runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat(string(digit), 64))
+}
+
+func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
+	plan := loadSupportedTelegramChannelPlan(t)
+	binding, err := packs.NewOutboundBindingPlanWithRegistration(
+		"telegram", plan, "42", nil,
+		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "signing"},
+		"ingress:telegram-package:telegram-chat:telegram",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"bot", "signing"} {
+		for _, value := range []string{"", " \t\n "} {
+			t.Run(key+"/"+fmt.Sprintf("%q", value), func(t *testing.T) {
+				store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for credentialKey, credentialValue := range map[string]string{"bot": "provider-token", "signing": "signing-token"} {
+					if credentialKey == key {
+						credentialValue = value
+					}
+					if err := store.Set(context.Background(), credentialKey, credentialValue); err != nil {
+						t.Fatal(err)
+					}
+				}
+				owner, err := runtimecredentials.NewSnapshotOwner(store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := declaredActivationCredentialAdmissions(context.Background(), owner, channelonboarding.ChannelRuntimeContextCoordinate{}, binding); !errors.Is(err, runtimecredentials.ErrCredentialValueUnusable) {
+					t.Fatalf("declared activation unusable credential error = %v", err)
+				}
+			})
+		}
+	}
 }
 
 func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {

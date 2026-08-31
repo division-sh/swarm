@@ -246,7 +246,7 @@ methods:
   - method: channel.confirm
     transport: http
     required_params: [operation_id, expected_revision, approve]
-    declared_errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    declared_errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}

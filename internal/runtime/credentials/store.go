@@ -55,7 +55,10 @@ type ReceiptDeleter interface {
 
 const valueSealPrefix = "credential-value-seal-v1:"
 
-var ErrValueSealKeyUnavailable = errors.New("credential value seal key is unavailable")
+var (
+	ErrValueSealKeyUnavailable = errors.New("credential value seal key is unavailable")
+	ErrCredentialValueUnusable = errors.New("credential value is empty or whitespace")
+)
 
 // ValueSeal is opaque, non-secret evidence that one exact credential key had
 // one exact value when a consumer admitted it.
@@ -144,6 +147,10 @@ func credentialValueSeal(key []byte, storeKey, value string) ValueSeal {
 	_, _ = mac.Write(length[:])
 	_, _ = mac.Write([]byte(value))
 	return ValueSeal(valueSealPrefix + hex.EncodeToString(mac.Sum(nil)))
+}
+
+func credentialValueUsable(value string) bool {
+	return strings.TrimSpace(value) != ""
 }
 
 func newValueSealKey() (string, error) {
@@ -338,7 +345,7 @@ func (o *SnapshotOwner) ObserveSecretBinding(ctx context.Context, key string) (S
 		return SecretBinding{}, &SecretBindingObservationError{Key: key, Err: err}
 	}
 	status := SecretBindingUnbound
-	if snapshot.Present && strings.TrimSpace(snapshot.CredentialValue()) != "" {
+	if snapshot.Present && credentialValueUsable(snapshot.CredentialValue()) {
 		status = SecretBindingBound
 	}
 	return SecretBinding{status: status, snapshot: snapshot}, nil

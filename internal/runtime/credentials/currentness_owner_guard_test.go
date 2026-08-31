@@ -85,3 +85,20 @@ func TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors(t *t
 		}
 	}
 }
+
+func TestPublicChannelConfirmationConsumesOnboardingCoordinator(t *testing.T) {
+	repo := filepath.Clean(filepath.Join("..", "..", ".."))
+	raw, err := os.ReadFile(filepath.Join(repo, "internal", "apiv1", "operator_channel.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, "opts.Confirmation.ConfirmIdentity(") {
+		t.Fatal("channel.confirm does not consume the onboarding confirmation coordinator")
+	}
+	for _, bypass := range []string{"opts.Channels.Confirm(", "opts.Channels.GetOperation("} {
+		if strings.Contains(source, bypass) {
+			t.Fatalf("public channel confirmation bypass %q is live", bypass)
+		}
+	}
+}
