@@ -259,6 +259,7 @@ func runCheck(args []string) error {
 
 	var missingMilestone, missingAgent, missingComplexity, missingPriority []string
 	var unblocked, staleMusts, phantoms, cycles, unassignedMusts, triageDebt, untriaged []string
+	var leadQueue, quietWatchpoints []string
 
 	now := time.Now()
 	for _, is := range issues {
@@ -289,7 +290,26 @@ func runCheck(args []string) error {
 		if len(gaps) >= 2 {
 			triageDebt = append(triageDebt, fmt.Sprintf("%s  ⟵ missing %s", ref, strings.Join(gaps, "+")))
 		}
-		if isMust(is) && agentOf(is) == "" {
+		// Non-lane states, each with its own wake owner (never forgotten,
+		// never falsely "unassigned"):
+		//   status:lead-decision — parked on a lead ruling; the LEAD QUEUE
+		//     prints every run so the lead carries the same standing
+		//     accountability as the lanes. agent: stays the implementer.
+		//   status:umbrella — tracking container; its children are its
+		//     tracker blockers, so the existing UNBLOCKED section is its
+		//     completion detector (last child closes -> "close or decompose").
+		//   status:watchpoint — evidence ledger; remembered by being posted
+		//     into, pulse-checked below when it goes quiet.
+		leadParked := set["status:lead-decision"]
+		tracking := set["status:umbrella"] || set["status:watchpoint"]
+		if leadParked {
+			leadQueue = append(leadQueue, ref)
+		}
+		if set["status:watchpoint"] && now.Sub(is.UpdatedAt) > 60*24*time.Hour {
+			quietWatchpoints = append(quietWatchpoints,
+				fmt.Sprintf("%s  (silent %dd)", ref, int(now.Sub(is.UpdatedAt).Hours()/24)))
+		}
+		if isMust(is) && agentOf(is) == "" && !leadParked && !tracking {
 			unassignedMusts = append(unassignedMusts, ref)
 		}
 		// score 0 = the value judgment was never recorded: the issue has not
@@ -335,6 +355,8 @@ func runCheck(args []string) error {
 	section("DISCIPLINE — open PR branch vs issue assignment mismatch", discipline)
 	section("UNBLOCKED — blockers all closed, ready to start", unblocked)
 	section("UNASSIGNED MUSTS — P0/P1 or score≥50, no owner", unassignedMusts)
+	section("LEAD QUEUE — parked on a lead ruling", leadQueue)
+	section("QUIET WATCHPOINTS — ledger silent 60d+, is the class dead or forgotten?", quietWatchpoints)
 	section("TRIAGE DEBT — missing 2+ classification facts, newest first", triageDebt)
 	section("UNTRIAGED — no delivery score recorded (score 0/missing)", untriaged)
 	section("STALE MUSTS — P0/P1 or score≥50 going forgotten", staleMusts)

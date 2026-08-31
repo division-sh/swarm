@@ -81,6 +81,21 @@ must preserve the block; deleting it makes the issue UNTRIAGED.
 | DISCIPLINE | a PR branch working an issue its author isn't assigned to |
 | BLOCKER CYCLES | the graph lies; fix the edges |
 
+## Non-lane states (owned, never forgotten)
+
+`agent:` always names the **implementer** — never who is blocking. Three states
+exist outside the lane queues, each with its own wake owner:
+
+| Label | Meaning | Forgotten-proofing |
+|---|---|---|
+| `status:lead-decision` | parked on a lead/strategic ruling (the implementer label may coexist) | LEAD QUEUE section prints every check run |
+| `status:umbrella` | tracking container; list open children as tracker `blockers` | surfaces in UNBLOCKED when the last child closes: close it or decompose further |
+| `status:watchpoint` | evidence ledger; work happens in the classes it routes | QUIET WATCHPOINTS pulse after 60 silent days |
+
+All three are exempt from UNASSIGNED MUSTS — they are owned, differently.
+Below-must-line backlog stays `agent:unassigned` with no special label: it is
+correctly unowned and the graph keeps it visible in rank order.
+
 Process rules that ride the rubric: assignment is the `agent:` label alone (no
 assignment comments); scores and rulings land on the tracker, never only in
 conversation; a design-gated issue (`triage:needs-design-gate`) is triaged when
