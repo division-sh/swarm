@@ -520,6 +520,11 @@ func goldenDatabaseName(t *testing.T) string {
 
 func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool, options goldenWorkloadOptions) {
 	t.Helper()
+	const (
+		configOperand    = "swarm.yaml"
+		contractsOperand = "contracts"
+		tokenOperand     = "api-token"
+	)
 	if len(options.candidateIDs) < 2 {
 		t.Fatalf("golden workload requires at least two candidates, got %v", options.candidateIDs)
 	}
@@ -532,18 +537,23 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	assertGoldenFixtureHasSingleMockOwner(t)
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("create release project: %v", err)
+		t.Fatalf("create golden workload root: %v", err)
 	}
-	contracts := filepath.Join(root, "contracts")
+	// This ancestor module is an adversarial canary: the authored child project has no Go-module authority.
+	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-hostile-ancestor\n\ngo 1.23.0\n")
+	projectRoot := filepath.Join(root, "yaml-project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("create YAML-only release project: %v", err)
+	}
+	contracts := filepath.Join(projectRoot, contractsOperand)
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
-	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-agent-release-e2e\n\ngo 1.23.0\n")
-	configPath := filepath.Join(root, "swarm.yaml")
+	configPath := filepath.Join(projectRoot, configOperand)
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
-	tokenFile := filepath.Join(root, "api-token")
+	tokenFile := filepath.Join(projectRoot, tokenOperand)
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
-	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath, "verify", "--config", configPath, "--contracts", contracts, "--json")
+	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", "--config", configOperand, "--contracts", contractsOperand, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -558,13 +568,13 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
-			WorkingDir: root,
-			ConfigPath: configPath,
-			Contracts:  contracts,
+			WorkingDir: projectRoot,
+			ConfigPath: configOperand,
+			Contracts:  contractsOperand,
 			Store:      store.name,
 			APIPort:    apiPort,
 			MCPPort:    mcpPort,
-			TokenFile:  tokenFile,
+			TokenFile:  tokenOperand,
 			Token:      goldenAPIToken,
 			Env:        env,
 		})
