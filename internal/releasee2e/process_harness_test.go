@@ -195,7 +195,7 @@ func (p *releaseServeProcess) waitForExit(timeout time.Duration) error {
 	defer timer.Stop()
 	select {
 	case <-p.exited:
-		return p.waitError()
+		return nil
 	case <-timer.C:
 		return fmt.Errorf("serve did not exit within %s", timeout)
 	}

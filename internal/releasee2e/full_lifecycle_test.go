@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -255,10 +256,10 @@ func runFullLifecycleGracefulJourney(
 	standing fullLifecycleRun,
 ) {
 	t.Helper()
-	sendFullLifecycleTelegramUpdate(t, process, 1001, 42)
+	firstReceipt := sendFullLifecycleTelegramUpdate(t, process, 1001, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-first")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	first := requireFullLifecycleNormalizedEvent(t, process.rpc, standing.RunID, 1001)
+	first := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1001, firstReceipt)
 	if err := process.stopAndWait(10 * time.Second); err != nil {
 		t.Fatalf("graceful lifecycle stop: %v\n%s", err, process.output.String())
 	}
@@ -270,10 +271,10 @@ func runFullLifecycleGracefulJourney(
 	if restored.RunID != standing.RunID {
 		t.Fatalf("graceful restart standing run = %s, want %s", restored.RunID, standing.RunID)
 	}
-	sendFullLifecycleTelegramUpdate(t, process, 1002, 42)
+	secondReceipt := sendFullLifecycleTelegramUpdate(t, process, 1002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-second")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
-	second := requireFullLifecycleNormalizedEvent(t, process.rpc, standing.RunID, 1002, first.EventID)
+	second := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1002, secondReceipt)
 	assertFullLifecycleSameRoute(t, first, second)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
@@ -287,19 +288,22 @@ func runFullLifecycleRefuseRecoverJourney(
 	standing fullLifecycleRun,
 ) {
 	t.Helper()
-	sendFullLifecycleTelegramUpdate(t, process, 2000, 42)
+	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 2000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovery-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	baseline := requireFullLifecycleNormalizedEvent(t, process.rpc, standing.RunID, 2000)
+	baseline := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2000, baselineReceipt)
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
-	sendFullLifecycleTelegramUpdate(t, process, 2001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 2001)
+	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 2001, 42)
+	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 2001, checkpointReceipt)
 	if err := process.killAndWait(10 * time.Second); err != nil {
 		t.Fatalf("force lifecycle process death: %v\n%s", err, process.output.String())
 	}
 
 	denied := startReleaseServe(t, project.process)
-	if err := denied.waitForExit(fullLifecycleStartupLimit); err == nil {
+	if err := denied.waitForExit(fullLifecycleStartupLimit); err != nil {
+		t.Fatalf("omitted-recovery restart did not exit: %v\n%s", err, denied.output.String())
+	}
+	if exitErr := denied.waitError(); exitErr == nil {
 		t.Fatalf("omitted-recovery restart exited successfully, want fail-closed refusal\n%s", denied.output.String())
 	}
 	assertFullLifecycleRecoveryRefusal(t, denied, standing.RunID, checkpoint.EventID)
@@ -319,14 +323,14 @@ func runFullLifecycleRefuseRecoverJourney(
 	assertFullLifecycleDeliveryCompleted(t, process.rpc, standing.RunID, checkpoint)
 	old := requireFullLifecycleEventByID(t, process.rpc, standing.RunID, checkpoint.EventID)
 	assertFullLifecycleSameRoute(t, baseline, old)
-	before := fullLifecycleEventCardinality(t, process.rpc, standing.RunID)
+	before := captureFullLifecycleEvidence(t, process.rpc, standing.RunID)
 
-	sendFullLifecycleTelegramUpdate(t, process, 2002, 42)
+	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 2002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-fresh")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 3)
-	fresh := requireFullLifecycleNormalizedEvent(t, process.rpc, standing.RunID, 2002, baseline.EventID, old.EventID)
+	fresh := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2002, freshReceipt)
 	assertFullLifecycleSameRoute(t, old, fresh)
-	assertFullLifecycleOldOutcomeUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
+	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
 
@@ -339,12 +343,13 @@ func runFullLifecycleDevFreshJourney(
 	lifecycleCardID string,
 ) {
 	t.Helper()
-	sendFullLifecycleTelegramUpdate(t, process, 3000, 42)
+	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 3000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "dev-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
+	requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 3000, baselineReceipt)
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
-	sendFullLifecycleTelegramUpdate(t, process, 3001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 3001)
+	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 3001, 42)
+	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 3001, checkpointReceipt)
 	predecessorHistory := captureFullLifecycleHistory(t, process.rpc, standing.RunID)
 	predecessorHistory.EventIDs[checkpoint.EventID] = true
 	predecessorHistory.DeliveryIDs[checkpoint.Delivery.DeliveryID] = true
@@ -366,10 +371,10 @@ func runFullLifecycleDevFreshJourney(
 	decideFullLifecycleCard(t, process.rpc, card, "lifecycle-gate-"+fresh.RunID)
 	assertFullLifecycleCardDecided(t, process.rpc, card.CardID)
 	waitForFullLifecycleRunStatus(t, process.rpc, fresh.RunID, "running")
-	sendFullLifecycleTelegramUpdate(t, process, 3002, 42)
+	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 3002, 42)
 	approveFullLifecycleEffect(t, process.rpc, fresh.RunID, "dev-fresh")
 	waitForFullLifecycleConvergence(t, process, fresh.RunID, 1)
-	requireFullLifecycleNormalizedEvent(t, process.rpc, fresh.RunID, 3002)
+	requireFullLifecycleReceiptEvents(t, process.rpc, fresh.RunID, 3002, freshReceipt)
 }
 
 func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess) {
@@ -605,7 +610,15 @@ func approveFullLifecycleEffect(t *testing.T, rpc *releaseRPCClient, runID, key 
 	assertFullLifecycleCardDecided(t, rpc, card.CardID)
 }
 
-func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) string {
+type fullLifecycleIngressReceipt struct {
+	Status        string   `json:"status"`
+	EntityID      string   `json:"entity_id"`
+	PublicationID string   `json:"publication_id"`
+	EventIDs      []string `json:"event_ids"`
+	EventNames    []string `json:"event_names"`
+}
+
+func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) fullLifecycleIngressReceipt {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"lifecycle %d"}}`, updateID, updateID, chatID, chatID, updateID))
 	request, err := http.NewRequest(http.MethodPost, process.apiBase+"/webhooks/chat/telegram", bytes.NewReader(body))
@@ -623,18 +636,35 @@ func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess,
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	var receipt fullLifecycleIngressReceipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
 		t.Fatalf("decode lifecycle webhook status=%d body=%q: %v", response.StatusCode, raw, err)
 	}
 	if response.StatusCode != http.StatusAccepted {
-		t.Fatalf("lifecycle webhook status=%d payload=%#v\n%s", response.StatusCode, payload, process.output.String())
+		t.Fatalf("lifecycle webhook status=%d receipt=%#v\n%s", response.StatusCode, receipt, process.output.String())
 	}
-	entityID := strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
-	if entityID == "" {
-		t.Fatalf("lifecycle webhook omitted entity_id: %#v", payload)
+	if receipt.Status != "accepted" || strings.TrimSpace(receipt.EntityID) == "" || strings.TrimSpace(receipt.PublicationID) == "" {
+		t.Fatalf("lifecycle webhook receipt omitted accepted identity: %#v", receipt)
 	}
-	return entityID
+	wantNames := []string{"inbound.telegram", "inbound.telegram.text_message"}
+	if len(receipt.EventIDs) != len(wantNames) || len(receipt.EventNames) != len(wantNames) {
+		t.Fatalf("lifecycle webhook child receipt = ids:%#v names:%#v, want exact ordered two-child receipt", receipt.EventIDs, receipt.EventNames)
+	}
+	identities := []string{receipt.EntityID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
+	seen := make(map[string]bool, len(identities))
+	for _, identity := range identities {
+		identity = strings.TrimSpace(identity)
+		if identity == "" || seen[identity] {
+			t.Fatalf("lifecycle webhook receipt has empty or duplicate identity: %#v", receipt)
+		}
+		seen[identity] = true
+	}
+	for i, want := range wantNames {
+		if receipt.EventNames[i] != want {
+			t.Fatalf("lifecycle webhook child %d = (%s, %q), want (%s, %q): %#v", i, receipt.EventIDs[i], receipt.EventNames[i], receipt.EventIDs[i], want, receipt)
+		}
+	}
+	return receipt
 }
 
 func pauseFullLifecycleRun(t *testing.T, rpc *releaseRPCClient, runID string) {
@@ -649,19 +679,25 @@ func pauseFullLifecycleRun(t *testing.T, rpc *releaseRPCClient, runID string) {
 }
 
 type fullLifecycleEvent struct {
-	EventID       string                       `json:"event_id"`
-	EventName     string                       `json:"event_name"`
-	EntityID      string                       `json:"entity_id"`
-	RunID         string                       `json:"run_id"`
-	ExecutionMode string                       `json:"execution_mode"`
-	Payload       map[string]any               `json:"payload"`
-	Deliveries    []fullLifecycleEventDelivery `json:"deliveries"`
-	NoDelivery    *fullLifecycleNoDelivery     `json:"no_delivery"`
-	DeadLetters   []json.RawMessage            `json:"dead_letters"`
+	EventID                  string                       `json:"event_id"`
+	EventName                string                       `json:"event_name"`
+	EntityID                 string                       `json:"entity_id"`
+	RunID                    string                       `json:"run_id"`
+	SourceEventID            string                       `json:"source_event_id"`
+	OperatorReferenceEventID string                       `json:"operator_reference_event_id"`
+	CreatedAt                time.Time                    `json:"created_at"`
+	Source                   string                       `json:"source"`
+	ProducerType             string                       `json:"producer_type"`
+	ExecutionMode            string                       `json:"execution_mode"`
+	Payload                  map[string]any               `json:"payload"`
+	Deliveries               []fullLifecycleEventDelivery `json:"deliveries"`
+	NoDelivery               *fullLifecycleNoDelivery     `json:"no_delivery"`
+	DeadLetters              []map[string]any             `json:"dead_letters"`
 }
 
 type fullLifecycleNoDelivery struct {
-	Reason string `json:"reason"`
+	Reason string           `json:"reason"`
+	Plans  []map[string]any `json:"plans"`
 }
 
 type fullLifecycleEventDelivery struct {
@@ -669,9 +705,17 @@ type fullLifecycleEventDelivery struct {
 	SubscriberType string                      `json:"subscriber_type"`
 	SubscriberID   string                      `json:"subscriber_id"`
 	Target         fullLifecycleDeliveryTarget `json:"target"`
+	SessionID      string                      `json:"session_id"`
 	Status         string                      `json:"status"`
-	Terminal       bool                        `json:"terminal"`
 	ReasonCode     string                      `json:"reason_code"`
+	Failure        map[string]any              `json:"failure"`
+	RetryCount     int                         `json:"retry_count"`
+	RetryScheduled bool                        `json:"retry_scheduled"`
+	Terminal       bool                        `json:"terminal"`
+	CreatedAt      *time.Time                  `json:"created_at"`
+	StartedAt      *time.Time                  `json:"started_at"`
+	FinishedAt     *time.Time                  `json:"finished_at"`
+	DeadLetters    []map[string]any            `json:"dead_letters"`
 }
 
 type fullLifecycleDeliveryTarget struct {
@@ -822,7 +866,7 @@ type fullLifecycleCrashCheckpoint struct {
 	EntityID string
 }
 
-func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProcess, runID string, providerMessageReference int) fullLifecycleCrashCheckpoint {
+func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProcess, runID string, providerMessageReference int, receipt fullLifecycleIngressReceipt) fullLifecycleCrashCheckpoint {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
@@ -833,31 +877,27 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 		if err != nil {
 			return false, err
 		}
-		for _, event := range events {
-			if event.EventName != "inbound.telegram.text_message" {
-				continue
-			}
-			if !fullLifecycleEventHasTransport(event, providerMessageReference, "42") {
-				continue
-			}
-			for _, delivery := range event.Deliveries {
-				if delivery.SubscriberType != "agent" || delivery.Status != "pending" || delivery.Terminal {
-					continue
-				}
-				if !strings.Contains(delivery.SubscriberID, "phrase-bot") || delivery.Target.Kind != "existing_entity" ||
-					delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" || delivery.Target.EntityID == "" {
-					return false, fmt.Errorf("pending normalized route target is not exact: event=%#v delivery=%#v", event, delivery)
-				}
-				checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery, EntityID: delivery.Target.EntityID}
-			}
+		_, event, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference)
+		if err != nil {
+			return false, err
 		}
-		if checkpoint.EventID == "" {
+		if len(event.Deliveries) == 0 {
 			return false, nil
 		}
+		if len(event.Deliveries) != 1 {
+			return false, fmt.Errorf("crash checkpoint delivery count = %d, want exactly 1: %#v", len(event.Deliveries), event)
+		}
+		delivery := event.Deliveries[0]
+		if delivery.SubscriberType != "agent" || delivery.Status != "pending" || delivery.Terminal ||
+			!strings.Contains(delivery.SubscriberID, "phrase-bot") || delivery.Target.Kind != "existing_entity" ||
+			delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" {
+			return false, fmt.Errorf("pending normalized route target is not exact: receipt=%#v event=%#v delivery=%#v", receipt, event, delivery)
+		}
+		checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery, EntityID: event.EntityID}
 		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 			return false, err
 		}
-		return diagnosis.Run.Status == "paused" && diagnosis.TestQuiescence.ActiveDeliveries > 0, nil
+		return diagnosis.Run.Status == "paused" && diagnosis.TestQuiescence.ActiveDeliveries == 1, nil
 	})
 	if err != nil {
 		t.Fatalf("wait for public lifecycle crash checkpoint: %v; checkpoint=%#v diagnosis=%#v\n%s", err, checkpoint, diagnosis, process.output.String())
@@ -988,7 +1028,7 @@ func assertFullLifecycleTimerCardinality(t *testing.T, rpc *releaseRPCClient, ru
 	}
 }
 
-func requireFullLifecycleNormalizedEvent(t *testing.T, rpc *releaseRPCClient, runID string, providerMessageReference int, excludeIDs ...string) fullLifecycleEvent {
+func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runID string, providerMessageReference int, receipt fullLifecycleIngressReceipt) fullLifecycleEvent {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -996,29 +1036,50 @@ func requireFullLifecycleNormalizedEvent(t *testing.T, rpc *releaseRPCClient, ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	excluded := make(map[string]bool, len(excludeIDs))
-	for _, eventID := range excludeIDs {
-		excluded[eventID] = true
+	_, normalized, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference)
+	if err != nil {
+		t.Fatalf("join lifecycle webhook receipt to public events: %v; receipt=%#v all=%#v", err, receipt, events)
 	}
-	var matches []fullLifecycleEvent
+	return normalized
+}
+
+func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecycleIngressReceipt, providerMessageReference int) (fullLifecycleEvent, fullLifecycleEvent, error) {
+	byID := make(map[string]fullLifecycleEvent, len(events))
+	var transportMatches []fullLifecycleEvent
 	for _, event := range events {
-		if event.EventName == "inbound.telegram.text_message" && !excluded[event.EventID] &&
-			fullLifecycleEventHasTransport(event, providerMessageReference, "42") {
-			matches = append(matches, event)
+		byID[event.EventID] = event
+		if event.EventName == "inbound.telegram.text_message" && fullLifecycleEventHasTransport(event, providerMessageReference, "42") {
+			transportMatches = append(transportMatches, event)
 		}
 	}
-	if len(matches) != 1 {
-		t.Fatalf("normalized event matches run=%s provider_message_reference=%d excludes=%v = %d, want 1: matches=%#v all=%#v", runID, providerMessageReference, excludeIDs, len(matches), matches, events)
+	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 ||
+		receipt.EventNames[0] != "inbound.telegram" || receipt.EventNames[1] != "inbound.telegram.text_message" {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("receipt is not the exact ordered raw/normalized pair: %#v", receipt)
 	}
-	if len(matches[0].Deliveries) != 1 {
-		t.Fatalf("normalized event %s deliveries = %#v, want exactly one", matches[0].EventID, matches[0].Deliveries)
+	raw, rawOK := byID[receipt.EventIDs[0]]
+	normalized, normalizedOK := byID[receipt.EventIDs[1]]
+	if !rawOK || !normalizedOK {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("event.list omitted receipt children raw=%t normalized=%t", rawOK, normalizedOK)
 	}
-	if (matches[0].Deliveries[0].Target.Kind != "existing_entity" && matches[0].Deliveries[0].Target.Kind != "materializing_entity") ||
-		matches[0].Deliveries[0].Target.FlowID != "telegram-chat" ||
-		matches[0].Deliveries[0].Target.FlowInstance == "" || matches[0].Deliveries[0].Target.EntityID == "" {
-		t.Fatalf("normalized event %s route target is not exact: %#v", matches[0].EventID, matches[0].Deliveries[0])
+	if raw.EventName != receipt.EventNames[0] || raw.EntityID != receipt.EntityID || len(raw.Deliveries) != 0 ||
+		raw.NoDelivery == nil || raw.NoDelivery.Reason != "no_subscriber_by_design" || len(raw.DeadLetters) != 0 {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("raw standing event does not match exact receipt settlement: receipt=%#v event=%#v", receipt, raw)
 	}
-	return matches[0]
+	if normalized.EventName != receipt.EventNames[1] || normalized.EntityID == "" || len(normalized.Deliveries) != 1 ||
+		normalized.NoDelivery != nil || len(normalized.DeadLetters) != 0 {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("normalized event does not match exact receipt child: receipt=%#v event=%#v", receipt, normalized)
+	}
+	delivery := normalized.Deliveries[0]
+	if delivery.SubscriberType != "agent" || !strings.Contains(delivery.SubscriberID, "phrase-bot") ||
+		delivery.Target.EntityID != normalized.EntityID ||
+		(delivery.Target.Kind != "existing_entity" && delivery.Target.Kind != "materializing_entity") ||
+		delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("normalized event/delivery target join is not exact: event=%#v delivery=%#v", normalized, delivery)
+	}
+	if len(transportMatches) != 1 || transportMatches[0].EventID != receipt.EventIDs[1] {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("transport occurrence matches = %#v, want only normalized receipt child %s", transportMatches, receipt.EventIDs[1])
+	}
+	return raw, normalized, nil
 }
 
 func fullLifecycleEventHasTransport(event fullLifecycleEvent, providerMessageReference int, conversationReference string) bool {
@@ -1064,7 +1125,12 @@ func assertFullLifecycleSameRoute(t *testing.T, first, second fullLifecycleEvent
 	}
 }
 
-func fullLifecycleEventCardinality(t *testing.T, rpc *releaseRPCClient, runID string) map[string]int {
+type fullLifecycleEvidenceSnapshot struct {
+	EventFacts  map[string]string
+	EventCounts map[string]int
+}
+
+func captureFullLifecycleEvidence(t *testing.T, rpc *releaseRPCClient, runID string) fullLifecycleEvidenceSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1072,26 +1138,51 @@ func fullLifecycleEventCardinality(t *testing.T, rpc *releaseRPCClient, runID st
 	if err != nil {
 		t.Fatal(err)
 	}
-	counts := make(map[string]int)
-	for _, event := range events {
-		counts[event.EventName]++
+	snapshot := fullLifecycleEvidenceSnapshot{
+		EventFacts:  make(map[string]string, len(events)),
+		EventCounts: make(map[string]int),
 	}
-	return counts
+	for _, event := range events {
+		if _, exists := snapshot.EventFacts[event.EventID]; exists {
+			t.Fatalf("duplicate event identity in evidence snapshot: %s", event.EventID)
+		}
+		stable := event
+		stable.Deliveries = append([]fullLifecycleEventDelivery(nil), event.Deliveries...)
+		sort.Slice(stable.Deliveries, func(i, j int) bool {
+			return stable.Deliveries[i].DeliveryID < stable.Deliveries[j].DeliveryID
+		})
+		encoded, err := json.Marshal(stable)
+		if err != nil {
+			t.Fatalf("marshal public event evidence %s: %v", event.EventID, err)
+		}
+		snapshot.EventFacts[event.EventID] = string(encoded)
+		snapshot.EventCounts[event.EventName]++
+	}
+	return snapshot
 }
 
-func assertFullLifecycleOldOutcomeUnchanged(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint, before map[string]int) {
+func assertFullLifecycleOldEvidenceUnchanged(t *testing.T, rpc *releaseRPCClient, runID string, checkpoint fullLifecycleCrashCheckpoint, before fullLifecycleEvidenceSnapshot) {
 	t.Helper()
 	assertFullLifecycleDeliveryCompleted(t, rpc, runID, checkpoint)
-	after := fullLifecycleEventCardinality(t, rpc, runID)
-	if after["platform.stage_timer"] != before["platform.stage_timer"] {
-		t.Fatalf("old timer cardinality changed after fresh ingress: before=%#v after=%#v", before, after)
+	after := captureFullLifecycleEvidence(t, rpc, runID)
+	for eventID, want := range before.EventFacts {
+		got, exists := after.EventFacts[eventID]
+		if !exists {
+			t.Fatalf("fresh ingress removed old event %s", eventID)
+		}
+		if got != want {
+			t.Fatalf("fresh ingress mutated old event/delivery facts for %s:\nbefore=%s\nafter=%s", eventID, want, got)
+		}
+	}
+	if after.EventCounts["platform.stage_timer"] != before.EventCounts["platform.stage_timer"] {
+		t.Fatalf("old timer cardinality changed after fresh ingress: before=%#v after=%#v", before.EventCounts, after.EventCounts)
 	}
 	for _, name := range []string{
 		"inbound.telegram.text_message",
 		"platform.activity_requested",
 	} {
-		if after[name] != before[name]+1 {
-			t.Fatalf("event %s cardinality after fresh ingress = %d, want %d (before=%#v after=%#v)", name, after[name], before[name]+1, before, after)
+		if after.EventCounts[name] != before.EventCounts[name]+1 {
+			t.Fatalf("event %s cardinality after fresh ingress = %d, want %d (before=%#v after=%#v)", name, after.EventCounts[name], before.EventCounts[name]+1, before.EventCounts, after.EventCounts)
 		}
 	}
 }
