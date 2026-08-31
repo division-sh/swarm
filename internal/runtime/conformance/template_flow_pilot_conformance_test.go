@@ -387,6 +387,28 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	eb.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			identity := route.AgentIdentity.Normalize()
+			if identity.RunID != event.RunID() {
+				return fmt.Errorf("fan-out agent route run %q does not match event run %q", identity.RunID, event.RunID())
+			}
+			admitted := false
+			for _, descriptor := range store.activeAgents {
+				if identity == descriptor.Identity.Normalize() {
+					admitted = true
+					break
+				}
+			}
+			if !admitted {
+				return fmt.Errorf("fan-out agent route %s has no committed active descriptor", identity.Description())
+			}
+		}
+		return nil
+	}))
 	for _, instanceID := range []string{"acct-a", "acct-b"} {
 		if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
 			Identity: runtimeflowidentity.RunScopedFlowInstance{

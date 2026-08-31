@@ -13861,6 +13861,11 @@ durable_data_resources:
     rule: Materialize one private read-only `/data` projection per execution actor. The generated host root is an ephemeral projection and is never parsed back, persisted as semantic authority, or exposed as an authored source. Paged resource-row tool reads bind the exact declaration and selected version through one fixed-size opaque target fingerprint; continuation state never embeds authored declaration bytes or accepts an older cursor form.
     verification: Reuse verifies the manifest, every canonical file byte, exact file set, regular-file kind, and immutable modes. Missing, modified, symlinked, mutable, or unexpected entries fail closed.
     container_binding: A managed Docker workspace container is bound to the complete typed container identity including exact run_id and bundle identity. A different managed identity is removed and recreated before use so a prior run's `/data` mount cannot survive; an unowned or malformed name collision fails closed.
+    capability_admission_execution: >
+      A normal pre-admission provider probe carries the exact runless agent plan as its actor owner and executes only in
+      an already-owned system or scaffold workspace. It MUST NOT materialize a data projection, create or select an agent
+      workspace, fabricate run identity, or treat startup infrastructure as live agent authority. A provider turn executes
+      only in the exact run-scoped live agent workspace. Startup and live workspace targets are not interchangeable.
     parity: Docker and host workspaces consume the same provider and logical paths. A backend may not add directory, config, environment, cwd, repository, or inherited-volume fallbacks.
   legacy_policy: Fresh schemas only. workspace.data_source, workspace.volumes_from, --data directory authority, SWARM_WORKSPACE_DATA_SOURCE, SWARM_WORKSPACE_DATA_MOUNT, ambient/default roots, runtime path reads, reverse parsing, dual readers, migration, and compatibility aliases are retired.
 platform_tables:
@@ -15719,7 +15724,7 @@ platform_tables:
             INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );
     managed_agent_capability_surfaces:
-      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines the complete typed concrete actor identity, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. actor_id is only an indexed projection of the typed actor identity retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow that plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
+      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines one closed typed actor owner, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. Normal pre-admission startup probes carry the exact runless declaration plan; provider turns and selected-contract-fork startup probes carry the exact concrete live actor identity. The two actor variants are mutually exclusive. actor_id is only an indexed projection of that typed owner retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow the plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, dual, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
       ddl: |
         CREATE TABLE managed_agent_capability_surfaces (
             surface_id               UUID PRIMARY KEY,
@@ -18140,7 +18145,8 @@ agent_identity_model:
   current_supported_posture: concrete_name_and_route_identity
   authority_rule: >
     This section is the merge-bearing source authority for agent identity semantics. A concrete live identity consists
-    of an explicitly sourced authored or runtime-created name plus an explicit flow route. The route is either present
+    of one required admitted run, an explicitly sourced authored or runtime-created name, and an explicit flow route.
+    The route is either present
     with scope_key, instance_id, and instance_path, or explicitly root with no route fields. agent_id remains the
     operator-facing authored/runtime name but is not by itself a live runtime, store, EventBus, delivery, session, timer,
     workspace, recovery, or control identity.
@@ -18162,9 +18168,13 @@ agent_identity_model:
         emit-schema, native-tool, and permission projections MUST consume this same value. This does not change
         required_agents fulfillment: required-agent sockets remain bound to the scoped agents.yaml map key.'
     concrete_live_identity:
-      source: agent name provenance plus explicit present-or-root route
+      source: admitted run_id plus agent name provenance plus explicit present-or-root route
       role: Durable composite primary key, runtime map key, EventBus target key, delivery/session/timer/workspace owner,
         recovery selector, and internal control identity.
+      pre_run_boundary: >
+        Declaration-owned compile-time and startup planning carries one runless agent plan containing the exact name and
+        route facts. It is not live authority. Only run admission composes that plan with a required run_id. Empty,
+        optional, ambient, inferred, or fabricated runs and runless live-identity constructors are forbidden.
       repeated_template_instances: >
         Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
         No ownership-bearing consumer may collapse those siblings to the display slug.
@@ -38476,6 +38486,7 @@ managed_agent_capability_surface:
     monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
+    actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-contract-fork probes consume the exact concrete fork-run actor identity because the fork run is already admitted. A startup surface cannot carry both forms, fabricate a run, infer a run from context, or reuse a provider-turn identity.
     startup_authority: >
       Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is
       strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus
@@ -38501,7 +38512,7 @@ managed_agent_capability_surface:
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
     managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. Normal-agent admission requires exact equality among lifecycle identity, usage-target identity, and capability-surface identity. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. For a normal provider delivery continuation, this fingerprint excludes only the process-generation execution authority and stateless session UUID; it retains exact actor, run, turn ordinal, provider contract, tool definitions, bindings, and effective callability. Selected-fork surfaces retain their exact execution coordinates. Forkchat attempts carry neither value.
   persistence:
-    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with its complete typed concrete actor identity; actor_id columns are derived index projections only. Settlement and recovery independently compare the persisted surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
+    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with exactly one typed actor owner; normal pre-admission startup surfaces carry a runless agent plan, while provider-turn and selected-contract-fork startup surfaces carry a typed concrete live identity. actor_id columns are derived index projections only. Settlement and recovery independently compare provider-turn surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
     migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
   proof:
     required: [API adapter delivery parity, Claude CLI positive-selection startup and first/resumed-turn evidence, Claude CLI zero/each/all native-family selection, Claude CLI incompatible-selector denial, Claude CLI unknown-builtin mismatch, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, recovery and replacement handoff ordering, selected-fork preflight and first/resumed-turn ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, public forkchat exact-policy selection and source-native non-interference, deterministic release-binary lifecycle, opt-in installed-Claude selector conformance, opt-in paid public-binary agentic lifecycle]
@@ -38514,7 +38525,7 @@ managed_external_effect_authority:
   context_authority:
     managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and exactly one live typed origin, either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
-    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Startup authority cannot authorize a provider turn or be reused after execution admission.
+    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Normal pre-admission probing carries the exact runless agent plan; selected-contract-fork probing carries the exact fork-run actor identity. Startup authority cannot authorize a provider turn or be reused after execution admission.
     serve_registration: >
       Channel-backed provider callback apply requires one closed serve-registration authority containing the current
       startup authority identity/state version and one process-local registration intent identity. The selected-store

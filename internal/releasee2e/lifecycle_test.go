@@ -302,7 +302,6 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		"image_inspect":    0,
 		"cli_preflight":    0,
 		"container_create": 0,
-		"container_remove": 0,
 		"container_start":  0,
 		"network_connect":  0,
 		"claude_startup":   0,
@@ -315,6 +314,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	for index, record := range records {
 		if record.Class == "unexpected" {
 			return fmt.Errorf("strict Docker emulator observed an unexpected command: %#v", record.Args)
+		}
+		if record.Class == "container_remove" {
+			return fmt.Errorf("release lifecycle replaced a workspace container between runless startup admission and live execution")
 		}
 		if _, ok := required[record.Class]; ok {
 			required[record.Class]++
@@ -442,11 +444,24 @@ func assertReleasePersistentWorkspacesPreserved(t *testing.T, root string) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode fake Docker state: %v", err)
 	}
-	for _, name := range []string{"swarm-scaffold", "swarm-system", releaseE2EAgentContainer} {
+	for _, name := range []string{"swarm-scaffold", "swarm-system"} {
 		container, ok := state.Containers[name]
 		if !ok || !container.Running {
 			t.Fatalf("persistent workspace %q state = %#v, want preserved and running", name, container)
 		}
+	}
+	agentContainers := 0
+	for name, container := range state.Containers {
+		if _, ok := releaseE2EAgentContainerFingerprint(name); !ok {
+			continue
+		}
+		agentContainers++
+		if !container.Running {
+			t.Fatalf("persistent workspace %q state = %#v, want preserved and running", name, container)
+		}
+	}
+	if agentContainers != 1 {
+		t.Fatalf("persistent agent workspace count = %d, want exactly one run-scoped agent", agentContainers)
 	}
 }
 

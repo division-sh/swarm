@@ -113,7 +113,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 			if err != nil {
 				t.Fatalf("create standing recovery owner: %v", err)
 			}
-			fixture.ctx = managedNormalEffectStoreTestContextForRun(t, fixture.ctx, fixture.authority, standing.RunID)
+			fixture = bindNeutralEffectFixtureToRun(t, fixture, standing.RunID)
 			handle := beginNeutralRecoveryAttempt(t, fixture, "authored_http_tool", "invalid-standing", false, false)
 			setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
 			attempts := []recoveryPostureAttempt{{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized, Expected: runtimeeffects.StateAuthorized}}
@@ -141,6 +141,33 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 			requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
 		})
 	}
+}
+
+func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixture, runID string) neutralEffectParityFixture {
+	t.Helper()
+	identity := mustTestAgentIdentityForRun(
+		runID,
+		fixture.authority.Normal.Identity.AgentID(),
+		fixture.authority.Normal.Identity.FlowInstance(),
+	)
+	seedTestAgentRow(t, testAuthorActivityContext(), fixture.db, !fixture.sqlite, identity, "active")
+	token := runtimeeffects.LifecycleToken{
+		RuntimeEpoch: 1,
+		Identity:     identity,
+		AgentID:      identity.AgentID(),
+		Generation:   1,
+	}
+	fixture.authority = runtimeeffects.NormalAgentAuthority(
+		token,
+		fixture.authority.ExecutionOwner,
+		fixture.authority.LeaseExpiresAt,
+	)
+	fixture.ctx = runtimeeffects.WithController(
+		runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token),
+		liveTestEffectController(fixture.store),
+	)
+	fixture.ctx = managedNormalEffectStoreTestContext(t, fixture.ctx, fixture.authority)
+	return fixture
 }
 
 func setStandingRecoveryOwnerDesiredState(t *testing.T, db *sql.DB, sqlite bool, serviceID, override, effective string) {

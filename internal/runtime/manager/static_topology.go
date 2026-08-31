@@ -937,6 +937,15 @@ func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Sou
 	return out, nil
 }
 
+// PreRunAgentMaterializationBlueprints returns the resolved declaration plans
+// that provider startup validation must inspect before a live run exists.
+func (am *AgentManager) PreRunAgentMaterializationBlueprints() ([]AgentMaterializationBlueprint, error) {
+	if am == nil {
+		return nil, nil
+	}
+	return am.resolvedStaticTopologyBlueprints(am.semanticSource)
+}
+
 func (am *AgentManager) resolvedStaticTopologyRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
 	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {

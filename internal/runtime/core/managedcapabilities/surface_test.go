@@ -27,6 +27,74 @@ func managedCapabilityTestRoutedIdentity(agentID, instanceID string) agentidenti
 	}
 }
 
+func managedCapabilityTestPlan(t *testing.T, agentID string) agentidentity.Plan {
+	t.Helper()
+	plan, err := managedCapabilityTestIdentity(agentID).Plan()
+	if err != nil {
+		t.Fatalf("build managed capability actor plan: %v", err)
+	}
+	return plan
+}
+
+func TestSurfaceActorOwnerVariantsFailClosed(t *testing.T) {
+	normalStartup := Authority{
+		Kind: AuthorityStartupProbe, ID: "00000000-0000-4000-8000-000000000801",
+		ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-owner",
+		StartupOwnerID: "startup-owner", StartupGeneration: 1,
+	}
+	selectedStartup := normalStartup
+	selectedStartup.ID = "00000000-0000-4000-8000-000000000802"
+	selectedStartup.ExecutionKind = ExecutionSelectedContractFork
+	selectedStartup.ExecutionAuthorityID = "00000000-0000-4000-8000-000000000803"
+	selectedStartup.RunID = managedCapabilityTestIdentity("worker").RunID
+	providerTurn := Authority{
+		Kind: AuthorityProviderTurn, ID: "00000000-0000-4000-8000-000000000804",
+		ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-owner",
+		RunID:     managedCapabilityTestIdentity("worker").RunID,
+		SessionID: "00000000-0000-4000-8000-000000000805", TurnOrdinal: 1,
+	}
+	base := Plan{RuntimeMode: "startup_probe", Provider: "test", Transport: "cli", ProviderContract: "test.v1", CreatedAt: time.Unix(1, 0).UTC()}
+
+	validNormal := base
+	validNormal.ActorPlan = managedCapabilityTestPlan(t, "worker")
+	validNormal.Authority = normalStartup
+	if surface, err := New(validNormal); err != nil || !surface.MatchesActorPlan(validNormal.ActorPlan) || surface.MatchesActor(managedCapabilityTestIdentity("worker")) {
+		t.Fatalf("normal startup actor owner = %#v err=%v", surface, err)
+	}
+
+	validSelected := base
+	validSelected.ActorIdentity = managedCapabilityTestIdentity("worker")
+	validSelected.Authority = selectedStartup
+	if surface, err := New(validSelected); err != nil || !surface.MatchesActor(validSelected.ActorIdentity) || surface.MatchesActorPlan(managedCapabilityTestPlan(t, "worker")) {
+		t.Fatalf("selected startup actor owner = %#v err=%v", surface, err)
+	}
+
+	validTurn := base
+	validTurn.RuntimeMode = "task"
+	validTurn.ActorIdentity = managedCapabilityTestIdentity("worker")
+	validTurn.Authority = providerTurn
+	if _, err := New(validTurn); err != nil {
+		t.Fatalf("provider-turn live actor owner: %v", err)
+	}
+
+	for _, test := range []struct {
+		name string
+		plan Plan
+	}{
+		{name: "normal_startup_live", plan: Plan{ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: base.RuntimeMode, Provider: base.Provider, Transport: base.Transport, ProviderContract: base.ProviderContract, Authority: normalStartup, CreatedAt: base.CreatedAt}},
+		{name: "selected_startup_runless", plan: Plan{ActorPlan: managedCapabilityTestPlan(t, "worker"), RuntimeMode: base.RuntimeMode, Provider: base.Provider, Transport: base.Transport, ProviderContract: base.ProviderContract, Authority: selectedStartup, CreatedAt: base.CreatedAt}},
+		{name: "provider_turn_runless", plan: Plan{ActorPlan: managedCapabilityTestPlan(t, "worker"), RuntimeMode: "task", Provider: base.Provider, Transport: base.Transport, ProviderContract: base.ProviderContract, Authority: providerTurn, CreatedAt: base.CreatedAt}},
+		{name: "dual_owner", plan: Plan{ActorIdentity: managedCapabilityTestIdentity("worker"), ActorPlan: managedCapabilityTestPlan(t, "worker"), RuntimeMode: base.RuntimeMode, Provider: base.Provider, Transport: base.Transport, ProviderContract: base.ProviderContract, Authority: normalStartup, CreatedAt: base.CreatedAt}},
+		{name: "missing_owner", plan: Plan{RuntimeMode: base.RuntimeMode, Provider: base.Provider, Transport: base.Transport, ProviderContract: base.ProviderContract, Authority: normalStartup, CreatedAt: base.CreatedAt}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := New(test.plan); err == nil {
+				t.Fatal("surface accepted an invalid actor owner variant")
+			}
+		})
+	}
+}
+
 func TestSurfaceIdentitySeparatesSameSlugConcreteActors(t *testing.T) {
 	plan := Plan{
 		ActorIdentity: managedCapabilityTestRoutedIdentity("worker", "inst-a"),

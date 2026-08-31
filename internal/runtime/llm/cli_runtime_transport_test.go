@@ -309,7 +309,7 @@ func testManagedCLISurfaceContext(t *testing.T, actor models.AgentConfig, tools 
 		caps = append(caps, toolcapabilities.Capability{Name: tool.Name, Visible: true, Callable: true})
 	}
 	ctx := models.WithActor(context.Background(), actor)
-	surface, err := managedCapabilityPlan(ctx, &ClaudeCLIRuntime{}, "test", tools, toolcapabilities.NewSet(caps), managedcapabilities.Authority{
+	surface, err := managedCapabilityPlanForTest(ctx, &ClaudeCLIRuntime{}, "test", tools, toolcapabilities.NewSet(caps), managedcapabilities.Authority{
 		Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 		ExecutionAuthorityID: uuid.NewString(), StartupOwnerID: "test-owner", StartupGeneration: 1,
 	})

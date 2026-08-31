@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -162,10 +163,6 @@ func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context
 }
 
 func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
-	return managedNormalEffectStoreTestContextForRun(t, ctx, authority, managedNormalEffectStoreTestRunID(authority.Normal.AgentID))
-}
-
-func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, runID string) context.Context {
 	t.Helper()
 	ctx = managedExecutionStoreTestContext(t, ctx)
 	admission, _ := managedexecution.FromContext(ctx)
@@ -175,9 +172,7 @@ func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context
 	}
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-turn:"+principal)).String()
 	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-session:"+principal)).String()
-	if runID != authority.Normal.Identity.RunID {
-		t.Fatalf("managed-effect fixture run_id %q does not match concrete identity run_id %q", runID, authority.Normal.Identity.RunID)
-	}
+	runID := authority.Normal.Identity.RunID
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
 		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
@@ -499,6 +494,57 @@ func applyManagedCompletionContextSurface(t testing.TB, ctx context.Context, tur
 
 type managedCapabilityTestStore interface {
 	SaveManagedCapabilitySurface(context.Context, managedcapabilities.Surface) error
+}
+
+func TestNormalStartupCapabilitySurfacePersistsRunlessActorPlanOnBothStores(t *testing.T) {
+	name, err := agentidentity.DeclaredName("startup-agent", "managed-startup-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorPlan, err := agentidentity.NewPlan(name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			surface, err := managedcapabilities.New(managedcapabilities.Plan{
+				ActorPlan: actorPlan, RuntimeMode: "startup_probe", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude-cli-test",
+				Authority: managedcapabilities.Authority{
+					Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+					ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "startup-authority",
+					StartupOwnerID: "startup-owner", StartupGeneration: 1,
+				},
+				CreatedAt: time.Unix(1, 0).UTC(),
+			})
+			if err != nil {
+				t.Fatalf("build normal startup surface: %v", err)
+			}
+			store, ok := fixture.store.(managedCapabilityTestStore)
+			if !ok {
+				t.Fatal("selected store does not expose managed capability persistence")
+			}
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err != nil {
+				t.Fatalf("persist normal startup surface: %v", err)
+			}
+			query := `SELECT surface, run_id FROM managed_agent_capability_surfaces WHERE surface_id=?`
+			if fixture.postgres {
+				query = `SELECT surface::text, run_id::text FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid`
+			}
+			var raw string
+			var runID sql.NullString
+			if err := fixture.db.QueryRowContext(context.Background(), query, surface.ID).Scan(&raw, &runID); err != nil {
+				t.Fatalf("read normal startup surface: %v", err)
+			}
+			var persisted managedcapabilities.Surface
+			if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
+				t.Fatalf("decode normal startup surface: %v", err)
+			}
+			if err := persisted.Validate(); err != nil || !persisted.MatchesActorPlan(actorPlan) || !persisted.ActorIdentity.IsZero() || runID.Valid {
+				t.Fatalf("normal startup readback = %#v run=%#v err=%v", persisted, runID, err)
+			}
+		})
+	}
 }
 
 func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {

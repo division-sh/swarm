@@ -861,7 +861,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM flow_instances
-		WHERE instance_id = $1
+		WHERE instance_path = $1
 		  AND created_at >= $2
 	`, instancePath, since).Scan(&instanceCount); err != nil {
 		t.Fatalf("query flow instance row: %v", err)
@@ -874,7 +874,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT config
 			FROM flow_instances
-			WHERE instance_id = $1
+			WHERE instance_path = $1
 			ORDER BY created_at DESC
 			LIMIT 1
 		`, instancePath).Scan(&raw)

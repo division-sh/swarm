@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const SurfaceVersion = "managed-agent-capability-surface.v2"
+const SurfaceVersion = "managed-agent-capability-surface.v3"
 
 type AuthorityKind string
 
@@ -50,6 +50,37 @@ func validateAuthorityActorRun(authority Authority, actor agentidentity.Identity
 		return fmt.Errorf("managed capability authority run does not match actor identity run")
 	}
 	return nil
+}
+
+func normalizeActorOwner(authority Authority, identity agentidentity.Identity, plan agentidentity.Plan) (agentidentity.Identity, agentidentity.Plan, string, error) {
+	identity = identity.Normalize()
+	plan = plan.Normalize()
+	hasIdentity := !identity.IsZero()
+	hasPlan := !plan.IsZero()
+	if hasIdentity == hasPlan {
+		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability surface requires exactly one typed actor owner")
+	}
+	requireLive := authority.Kind == AuthorityProviderTurn ||
+		(authority.Kind == AuthorityStartupProbe && authority.ExecutionKind == ExecutionSelectedContractFork)
+	if requireLive && !hasIdentity {
+		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability authority requires a live actor identity")
+	}
+	if !requireLive && !hasPlan {
+		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("normal startup capability authority requires a runless actor plan")
+	}
+	if hasIdentity {
+		if err := identity.Validate(); err != nil {
+			return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability actor identity: %w", err)
+		}
+		if err := validateAuthorityActorRun(authority, identity); err != nil {
+			return agentidentity.Identity{}, agentidentity.Plan{}, "", err
+		}
+		return identity, agentidentity.Plan{}, identity.AgentID(), nil
+	}
+	if err := plan.Validate(); err != nil {
+		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability actor plan: %w", err)
+	}
+	return agentidentity.Identity{}, plan, plan.AgentID(), nil
 }
 
 func (a Authority) Validate() error {
@@ -146,6 +177,7 @@ type Surface struct {
 	IntegrityHash    string                 `json:"integrity_hash"`
 	ActorID          string                 `json:"actor_id"`
 	ActorIdentity    agentidentity.Identity `json:"actor_identity"`
+	ActorPlan        agentidentity.Plan     `json:"actor_plan"`
 	RuntimeMode      string                 `json:"runtime_mode"`
 	Provider         string                 `json:"provider"`
 	Transport        string                 `json:"transport"`
@@ -169,6 +201,7 @@ type PlannedTool struct {
 
 type Plan struct {
 	ActorIdentity    agentidentity.Identity
+	ActorPlan        agentidentity.Plan
 	RuntimeMode      string
 	Provider         string
 	Transport        string
@@ -259,24 +292,22 @@ func (s Surface) planFingerprint(continuation bool) (string, error) {
 	return hashValue(struct {
 		Version          string
 		ActorIdentity    agentidentity.Identity
+		ActorPlan        agentidentity.Plan
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []plannedTool
-	}{s.Version, s.ActorIdentity, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, authority, tools})
+	}{s.Version, s.ActorIdentity, s.ActorPlan, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, authority, tools})
 }
 
 func New(plan Plan) (Surface, error) {
 	if err := plan.Authority.Validate(); err != nil {
 		return Surface{}, err
 	}
-	actorIdentity := plan.ActorIdentity.Normalize()
-	if err := actorIdentity.Validate(); err != nil {
-		return Surface{}, fmt.Errorf("managed capability actor identity: %w", err)
-	}
-	if err := validateAuthorityActorRun(plan.Authority, actorIdentity); err != nil {
+	actorIdentity, actorPlan, actorID, err := normalizeActorOwner(plan.Authority, plan.ActorIdentity, plan.ActorPlan)
+	if err != nil {
 		return Surface{}, err
 	}
 	if strings.TrimSpace(plan.Provider) == "" || strings.TrimSpace(plan.Transport) == "" || strings.TrimSpace(plan.ProviderContract) == "" {
@@ -284,8 +315,9 @@ func New(plan Plan) (Surface, error) {
 	}
 	s := Surface{
 		Version:          SurfaceVersion,
-		ActorID:          actorIdentity.AgentID(),
+		ActorID:          actorID,
 		ActorIdentity:    actorIdentity,
+		ActorPlan:        actorPlan,
 		RuntimeMode:      strings.TrimSpace(plan.RuntimeMode),
 		Provider:         strings.TrimSpace(plan.Provider),
 		Transport:        strings.TrimSpace(plan.Transport),
@@ -328,13 +360,14 @@ func New(plan Plan) (Surface, error) {
 	planHash, err := hashValue(struct {
 		Version          string
 		ActorIdentity    agentidentity.Identity
+		ActorPlan        agentidentity.Plan
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []Tool
-	}{s.Version, s.ActorIdentity, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, s.Authority, s.Tools})
+	}{s.Version, s.ActorIdentity, s.ActorPlan, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, s.Authority, s.Tools})
 	if err != nil {
 		return Surface{}, err
 	}
@@ -355,14 +388,11 @@ func (s Surface) Validate() error {
 	if err := s.Authority.Validate(); err != nil {
 		return err
 	}
-	actorIdentity := s.ActorIdentity.Normalize()
-	if err := actorIdentity.Validate(); err != nil {
-		return fmt.Errorf("managed capability actor identity: %w", err)
-	}
-	if err := validateAuthorityActorRun(s.Authority, actorIdentity); err != nil {
+	_, _, actorID, err := normalizeActorOwner(s.Authority, s.ActorIdentity, s.ActorPlan)
+	if err != nil {
 		return err
 	}
-	if actorIdentity.AgentID() != strings.TrimSpace(s.ActorID) {
+	if actorID != strings.TrimSpace(s.ActorID) {
 		return fmt.Errorf("managed capability actor id is not the typed identity projection")
 	}
 	if strings.TrimSpace(s.IntegrityHash) == "" || strings.TrimSpace(s.ActorID) == "" || strings.TrimSpace(s.RuntimeMode) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" || strings.TrimSpace(s.ProviderContract) == "" || s.CreatedAt.IsZero() {
@@ -674,8 +704,32 @@ func (s Surface) Clone() Surface {
 }
 
 func (s Surface) MatchesActor(identity agentidentity.Identity) bool {
+	if !s.ActorPlan.IsZero() {
+		return false
+	}
 	equal, err := agentidentity.Equal(s.ActorIdentity, identity)
 	return err == nil && equal && strings.TrimSpace(s.ActorID) == s.ActorIdentity.Normalize().AgentID()
+}
+
+func (s Surface) MatchesActorPlan(plan agentidentity.Plan) bool {
+	if !s.ActorIdentity.IsZero() {
+		return false
+	}
+	plan = plan.Normalize()
+	return plan.Validate() == nil && s.ActorPlan.Normalize() == plan && strings.TrimSpace(s.ActorID) == plan.AgentID()
+}
+
+// MatchesPreRunActorProjection verifies the runtime descriptor projections
+// available before a run exists. The complete declaration owner remains the
+// integrity-checked ActorPlan carried by the surface.
+func (s Surface) MatchesPreRunActorProjection(agentID, flowInstance string) bool {
+	if !s.ActorIdentity.IsZero() || s.ActorPlan.IsZero() {
+		return false
+	}
+	plan := s.ActorPlan.Normalize()
+	return plan.Validate() == nil &&
+		plan.AgentID() == strings.TrimSpace(agentID) &&
+		plan.FlowInstance() == strings.Trim(strings.TrimSpace(flowInstance), "/")
 }
 
 func (s *Surface) refreshIntegrityHash() error {
@@ -700,13 +754,14 @@ func (s Surface) planID() (string, error) {
 	planHash, err := hashValue(struct {
 		Version          string
 		ActorIdentity    agentidentity.Identity
+		ActorPlan        agentidentity.Plan
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []Tool
-	}{planned.Version, planned.ActorIdentity, planned.RuntimeMode, planned.Provider, planned.Transport, planned.ProviderContract, planned.Authority, planned.Tools})
+	}{planned.Version, planned.ActorIdentity, planned.ActorPlan, planned.RuntimeMode, planned.Provider, planned.Transport, planned.ProviderContract, planned.Authority, planned.Tools})
 	if err != nil {
 		return "", err
 	}

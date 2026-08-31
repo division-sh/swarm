@@ -646,8 +646,12 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 		controller := NewController(probe).WithExecutionPosture(executionposture.Live)
 		probeID := uuid.NewString()
 		executionAuthorityID := uuid.NewString()
+		actorPlan, err := target.AgentIdentity.Plan()
+		if err != nil {
+			t.Fatalf("build startup actor plan: %v", err)
+		}
 		startupSurface, err := managedcapabilities.New(managedcapabilities.Plan{
-			ActorIdentity: target.AgentIdentity, RuntimeMode: "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
+			ActorPlan: actorPlan, RuntimeMode: "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
 			Authority: managedcapabilities.Authority{
 				Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
 				ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: executionAuthorityID,
@@ -955,9 +959,13 @@ func TestMockOnlyPostureRejectsLiveStartupProbeBeforeAuthorization(t *testing.T)
 	probe := &effectStoreProbe{}
 	probeID := uuid.NewString()
 	executionAuthorityID := uuid.NewString()
+	actorPlan, err := effectLifecycleToken(t, 1, "startup-agent", 1).Identity.Plan()
+	if err != nil {
+		t.Fatalf("build startup actor plan: %v", err)
+	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: effectLifecycleToken(t, 1, "startup-agent", 1).Identity,
-		RuntimeMode:   "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
+		ActorPlan:   actorPlan,
+		RuntimeMode: "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
 			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: executionAuthorityID,

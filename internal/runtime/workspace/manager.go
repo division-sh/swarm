@@ -574,20 +574,21 @@ func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context
 	if err != nil {
 		return nil, err
 	}
-	workdir := m.cfg.EntityWorkdir
+	container := strings.TrimSpace(m.cfg.SystemContainer)
+	workdir := strings.TrimSpace(m.cfg.SystemWorkdir)
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		workdir = m.cfg.ScaffoldWorkdir
+		container = strings.TrimSpace(m.cfg.ScaffoldContainer)
+		workdir = strings.TrimSpace(m.cfg.ScaffoldWorkdir)
 	case "system":
-		workdir = m.cfg.SystemWorkdir
 	default:
 		if _, err := workspaceScopeForCapabilityAdmission(m.semanticSource(), actor); err != nil {
 			return nil, err
 		}
 	}
 	return &Target{
-		Container: "swarm-capability-admission",
-		Workdir:   strings.TrimSpace(workdir),
+		Container: container,
+		Workdir:   workdir,
 		Backend:   BackendDocker,
 		Mounts:    dockerExecutionMounts(m.cfg, false),
 	}, nil

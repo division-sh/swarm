@@ -666,6 +666,12 @@ func TestResolveWorkspaceForCapabilityAdmissionDoesNotMaterializeRunBoundData(t 
 	if !target.ExecutionTarget().Supports(ExecutionCapabilityClaudeCLI) {
 		t.Fatalf("capability-admission target = %#v, want Claude CLI support", target)
 	}
+	if target.Container != cfg.SystemContainer || target.Workdir != cfg.SystemWorkdir {
+		t.Fatalf("capability-admission target = %#v, want existing runless system workspace", target)
+	}
+	if len(created) != 0 {
+		t.Fatalf("capability admission created execution workspace: %v", created)
+	}
 	if strings.Contains(strings.Join(created, " "), ":/data:ro") {
 		t.Fatalf("capability-admission container received a run-bound data mount: %v", created)
 	}

@@ -28,6 +28,7 @@ const (
 	releaseE2EWorkspaceImage   = "swarm-workspace:latest"
 	releaseE2ENetwork          = "mas_default"
 	releaseE2EAgentWorkdir     = "/workspace"
+	releaseE2ESystemWorkdir    = "/opt/swarm"
 	releaseE2EManagedModel     = "sonnet"
 	releaseE2EAgentFingerprint = "1f16a79924a40cd1e6e42105063bd4b8d5e3332769c777508831bb193986d791"
 	releaseE2EAgentContainer   = "swarm-agent-" + releaseE2EAgentFingerprint
@@ -346,16 +347,19 @@ func validateReleaseDockerCreate(root string, args []string) error {
 		scope         string
 		requiredMount map[string]string
 	}
-	expected := map[string]expectation{
-		"swarm-scaffold": {
+	var expected expectation
+	switch create.name {
+	case "swarm-scaffold":
+		expected = expectation{
 			workdir:       "/opt/swarm/scaffold",
 			kind:          "scaffold",
 			resetEligible: "false",
 			source:        "workspace.EnsureSystemWorkspaces",
 			scope:         "scaffold",
 			requiredMount: map[string]string{"/opt/swarm/scaffold": "scaffold"},
-		},
-		"swarm-system": {
+		}
+	case "swarm-system":
+		expected = expectation{
 			workdir:       "/opt/swarm",
 			privileged:    true,
 			kind:          "system",
@@ -367,16 +371,21 @@ func validateReleaseDockerCreate(root string, args []string) error {
 				"/opt/swarm/nginx":    "nginx",
 				"/etc/systemd/system": "systemd",
 			},
-		},
-		releaseE2EAgentContainer: {
+		}
+	default:
+		fingerprint, ok := releaseE2EAgentContainerFingerprint(create.name)
+		if !ok {
+			return fmt.Errorf("unexpected create container %q", create.name)
+		}
+		expected = expectation{
 			workdir:       releaseE2EAgentWorkdir,
 			kind:          "agent",
 			resetEligible: "true",
 			source:        "workspace.ResolveWorkspace",
 			scope:         "per-agent",
-			requiredMount: map[string]string{releaseE2EAgentWorkdir: releaseE2EAgentVolume},
-		},
-	}[create.name]
+			requiredMount: map[string]string{releaseE2EAgentWorkdir: "workspaces_agent_" + fingerprint},
+		}
+	}
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
 		return fmt.Errorf("unexpected create workdir or privilege for %s", create.name)
 	}
@@ -547,7 +556,7 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 			return fmt.Errorf("create %s has invalid bundle hash identity", create.name)
 		}
 	}
-	if create.name == releaseE2EAgentContainer {
+	if _, ok := releaseE2EAgentContainerFingerprint(create.name); ok {
 		wantIdentityLabels := map[string]string{
 			"dev.swarm.agent_id":                 "release-worker",
 			"dev.swarm.agent_name_owner":         "claude-cli-release-lifecycle://flows/worker/release-worker",
@@ -604,8 +613,19 @@ func releaseE2EContainerName(name string) bool {
 	case "swarm-scaffold", "swarm-system":
 		return true
 	default:
-		return name == releaseE2EAgentContainer
+		_, ok := releaseE2EAgentContainerFingerprint(name)
+		return ok
 	}
+}
+
+func releaseE2EAgentContainerFingerprint(name string) (string, bool) {
+	const prefix = "swarm-agent-"
+	fingerprint := strings.TrimPrefix(name, prefix)
+	if len(fingerprint) != 64 || prefix+fingerprint != name || strings.ToLower(fingerprint) != fingerprint {
+		return "", false
+	}
+	decoded, err := hex.DecodeString(fingerprint)
+	return fingerprint, err == nil && len(decoded) == 32
 }
 
 func equalStrings(got, want []string) bool {
@@ -795,12 +815,6 @@ target:
 	}
 	container := args[index]
 	invocation.commandArgs = append([]string(nil), args[index+1:]...)
-	if container != releaseE2EAgentContainer {
-		return invocation, fmt.Errorf("Claude Docker exec container = %q, want %q", container, releaseE2EAgentContainer)
-	}
-	if workdir != releaseE2EAgentWorkdir {
-		return invocation, fmt.Errorf("Claude Docker exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
-	}
 	if len(env) != 2 || env["SWARM_TOOL_GATEWAY_URL"] != releaseE2ERawMCPURL ||
 		env["CLAUDE_CODE_OAUTH_TOKEN"] != releaseE2EOAuthToken {
 		return invocation, fmt.Errorf("Claude Docker exec environment is incomplete or invalid")
@@ -815,6 +829,21 @@ target:
 	invocation.startup = prompt == "Startup validation probe. Do not call any tools. Reply with the exact text ok."
 	if !invocation.startup && strings.Contains(prompt, "Startup validation probe") {
 		return invocation, fmt.Errorf("startup probe prompt is not exact")
+	}
+	if invocation.startup {
+		if container != "swarm-system" {
+			return invocation, fmt.Errorf("Claude startup probe container = %q, want runless system workspace", container)
+		}
+		if workdir != releaseE2ESystemWorkdir {
+			return invocation, fmt.Errorf("Claude startup probe workdir = %q, want %q", workdir, releaseE2ESystemWorkdir)
+		}
+	} else {
+		if _, ok := releaseE2EAgentContainerFingerprint(container); !ok {
+			return invocation, fmt.Errorf("Claude live exec container = %q, want run-scoped agent container", container)
+		}
+		if workdir != releaseE2EAgentWorkdir {
+			return invocation, fmt.Errorf("Claude live exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
+		}
 	}
 	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:], invocation.startup); err != nil {
 		return invocation, err

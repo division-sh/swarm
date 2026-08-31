@@ -2176,6 +2176,9 @@ func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabil
 		surface.Authority.RunID != runID {
 		t.Fatalf("selected Claude %s authority = %#v", authorityKind, surface.Authority)
 	}
+	if surface.ActorIdentity.RunID != runID || !surface.ActorPlan.IsZero() {
+		t.Fatalf("selected Claude %s actor owner = identity %#v plan %#v", authorityKind, surface.ActorIdentity, surface.ActorPlan)
+	}
 	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"emit_task_completed", "notify_human", "web_search"}) {
 		t.Fatalf("selected Claude %s effective capabilities = %v", authorityKind, got)
 	}

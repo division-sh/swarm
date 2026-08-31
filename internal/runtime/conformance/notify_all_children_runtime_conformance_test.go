@@ -1259,6 +1259,20 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
+			restartCtx := testAuthorActivityContextForBundle(ctx, restarted.bundleSourceFact)
+			startup, err := restarted.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(restartCtx, restarted.bundleSourceFact, true)
+			if err != nil {
+				t.Fatalf("canonicalize restarted dynamic topology: %v", err)
+			}
+			if err := restarted.manager.Run(managedConformanceExecutionContextForBundle(t, restartCtx, "notify-all-children-stale-route-restart", restarted.bundleSourceFact)); err != nil {
+				t.Fatalf("run restarted manager: %v", err)
+			}
+			if err := restarted.manager.CompleteDynamicFlowRuntimeStartupTopology(restartCtx, startup); err != nil {
+				t.Fatalf("complete restarted dynamic topology: %v", err)
+			}
+			if _, err := restarted.manager.HydrateForStartup(restartCtx); err != nil {
+				t.Fatalf("hydrate restarted manager: %v", err)
+			}
 			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
 			waitNotifyAllChildrenRuntime(t, restarted, runID)
 			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
@@ -1590,6 +1604,7 @@ func newNotifyAllChildrenRuntime(
 		LLMBackend:        llmBackend,
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
+	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), manager, source, bundleSourceFact, generationLifecycle)
 	if opts.enableGenericSchedules {
 		candidateOwner, ok := backend.(runtimerunlifecycle.CandidateOwner)

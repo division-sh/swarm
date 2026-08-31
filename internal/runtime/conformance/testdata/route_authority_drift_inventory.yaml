@@ -1195,7 +1195,7 @@ seam_families:
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
       - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
-    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority]
+    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority, descriptor_evidence]
     notes: >
       Catalog and fixture proofs are broader behavior consumers. Required PR
       smoke must cite focused rows; full route behavior stays in named full
