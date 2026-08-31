@@ -269,7 +269,7 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 
 func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, graph runtimepinrouting.CompiledConnectGraph, flowID, eventType string) []semanticview.AuthoredEventEndpoint {
 	byID := map[string]semanticview.AuthoredEventEndpoint{}
-	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
 		byID[endpoint.ID] = endpoint
 	}
 	for _, edge := range graph.Edges() {

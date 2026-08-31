@@ -601,12 +601,6 @@ func artifactRepoResultEventEntry(source semanticview.Source, flowID, resultEven
 	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, resultEvent); ok {
 		return entry, true
 	}
-	if entry, ok := source.EventEntry(resultEvent); ok {
-		return entry, true
-	}
-	if entry, ok := source.ResolvedEventCatalog()[resultEvent]; ok {
-		return entry, true
-	}
 	return runtimecontracts.EventCatalogEntry{}, false
 }
 

@@ -169,16 +169,13 @@ func admitNonImportAgentPattern(flowPath, raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
+	if strings.Contains(raw, "/") {
+		return "", fmt.Errorf("wildcard subscriptions must use a flow-local event pattern; declare output/input pins and connect in the nearest common ancestor schema.yaml for cross-flow delivery")
+	}
 	if flowPath == "" {
 		return raw, nil
 	}
-	if strings.HasPrefix(raw, flowPath+"/") {
-		return raw, nil
-	}
-	if !strings.Contains(raw, "/") || strings.HasPrefix(raw, "*/") || strings.HasPrefix(raw, "**/") {
-		return flowPath + "/" + raw, nil
-	}
-	return "", fmt.Errorf("qualified wildcard subscriptions cannot cross a flow boundary without typed wildcard/grant authority")
+	return flowPath + "/" + raw, nil
 }
 
 func normalizedAgentSubscriptionValues(values []string) []string {

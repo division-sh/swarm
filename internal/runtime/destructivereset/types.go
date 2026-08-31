@@ -200,7 +200,7 @@ type PreservedResources struct {
 	OperatorManagedBoundary string   `json:"operator_managed_boundary"`
 	SchemaMigrations        bool     `json:"schema_migrations"`
 	AuthTokens              bool     `json:"auth_tokens"`
-	SourceArtifacts         bool     `json:"bundle_contracts"`
+	SourceArtifacts         bool     `json:"source_artifacts"`
 }
 
 type DownstreamContract struct {

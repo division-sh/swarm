@@ -372,6 +372,11 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"component.scaffold_requested": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"items": {Type: "[json]"},
+				}},
+			},
 			"component.scaffolded": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -5542,8 +5547,8 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:        "component-entity",
 		Node:            testFlowExecutableNode(t, "component-scaffold", "component-node"),
-		HandlerEventKey: "repo_scaffold.repo_scaffolded",
-		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-route-namespace"), "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		HandlerEventKey: "component.scaffold_requested",
+		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-route-namespace"), "component-scaffold/component.scaffold_requested", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",

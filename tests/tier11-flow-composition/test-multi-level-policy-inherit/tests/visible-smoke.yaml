@@ -1,6 +1,6 @@
 name: test-multi-level-policy-inherit visible smoke
 steps:
-  - publish: child/grandchild/grandchild.check
+  - publish: grandchild.check
     payload:
       score: 65
 expect:

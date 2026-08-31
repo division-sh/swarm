@@ -4505,9 +4505,16 @@ func TestRun_RejectsHarnessInputWithInternalOrPlatformProducer(t *testing.T) {
 	t.Run("internal", func(t *testing.T) {
 		bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 		markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
-		bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{ID: "lifecycle-coordinator", EmitEvents: []string{"task.feedback"}}
-		addBootverifyAgentOwner(bundle, "", "", "lifecycle-coordinator")
-		report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
+		child, ok := bundle.FlowViewByID("child")
+		if !ok || child == nil {
+			t.Fatal("child flow missing")
+		}
+		if child.Agents == nil {
+			child.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+		}
+		child.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{ID: "lifecycle-coordinator", EmitEvents: []string{"task.feedback"}}
+		addBootverifyAgentOwner(bundle, "child", "child", "lifecycle-coordinator")
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 		if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
 			!reportContains(report.Errors(), "input_pin_wiring", "internal") {
 			t.Fatalf("expected internal/harness exclusivity error, got %#v", report.Errors())
@@ -4577,7 +4584,7 @@ func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 	}
 }
 
-func TestRun_DoesNotErrorForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
+func TestRun_RejectsUnconnectedSiblingFlowOutputPinAsInputProducerPath(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	producer, ok := bundle.FlowViewByID("producer_b")
@@ -4592,12 +4599,12 @@ func TestRun_DoesNotErrorForSiblingFlowOutputPinInputProducerPath(t *testing.T) 
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
-		t.Fatalf("unexpected input_pin_wiring error for sibling output pin proof, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("unconnected sibling output pin incorrectly proved input readiness: %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
+func TestRun_RejectsUnconnectedRootAgentEmitAsChildInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{
 		ID:         "lifecycle-coordinator",
@@ -4607,12 +4614,12 @@ func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring error for root agent emit proof, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unconnected root agent emit incorrectly proved child input readiness: %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotErrorForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
+func TestRun_RejectsUnconnectedRootNodeEmitAsChildInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	owner := bundleExecutableNodeByLocalID(t, bundle, "dispatcher")
 	writeBundleHandler(t, bundle, owner, "task.requested", runtimecontracts.SystemNodeEventHandler{
@@ -4621,8 +4628,8 @@ func TestRun_DoesNotErrorForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring error for root handler emit proof, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unconnected root handler emit incorrectly proved child input readiness: %#v", report.Errors())
 	}
 }
 
@@ -4762,16 +4769,13 @@ func TestRun_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testin
 	}
 }
 
-func TestRun_DoesNotWarnForImportedWildcardConsumer(t *testing.T) {
+func TestRun_DoesNotTreatImportedWildcardAsCrossFlowLiveness(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-wildcard-deep-subscription"))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "event_consumer_exists", "child/grandchild/task.done") {
-		t.Fatalf("imported wildcard consumer was omitted from canonical topology: %#v", report.Warnings())
-	}
-	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "child/grandchild/task.done") {
-		t.Fatalf("typed imported wildcard authorization was omitted from dead-schema liveness: %#v", report.Warnings())
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "child/grandchild/task.done") {
+		t.Fatalf("cross-flow wildcard incorrectly supplied liveness to an ancestor declaration: %#v", report.Warnings())
 	}
 }
 
@@ -4795,7 +4799,12 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 						Path:   "child",
 						Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 					}
-					root := runtimecontracts.FlowContractView{Nodes: map[string]runtimecontracts.SystemNodeContract{}, Children: []runtimecontracts.FlowContractView{child}}
+					root := runtimecontracts.FlowContractView{
+						Path:     ".",
+						Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
+						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
+						Children: []runtimecontracts.FlowContractView{child},
+					}
 					bundle := &runtimecontracts.WorkflowContractBundle{
 						FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]}},
 						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
@@ -6637,6 +6646,62 @@ func TestRun_ReportsMissingTransitionTriggerEvent(t *testing.T) {
 	}
 }
 
+func TestFlowEventExistsDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"root.only": {},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+
+	if flowEventExists(semanticview.Wrap(bundle), "child", "root.only") {
+		t.Fatal("another flow's event declaration satisfied transition reference validation")
+	}
+}
+
+func TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"artifact.completed": {},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+
+	if _, ok := artifactRepoResultEventEntry(semanticview.Wrap(bundle), "child", "artifact.completed"); ok {
+		t.Fatal("another flow's event declaration satisfied artifact result validation")
+	}
+}
+
 func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
 	bundle.Semantics.Transitions[0].ExecutableNode = identitytest.RootNode(t, "projector")
@@ -6681,8 +6746,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 73 {
-		t.Fatalf("bootCheckRegistry count = %d, want 73", got)
+	if got := len(bootCheckRegistry); got != 72 {
+		t.Fatalf("bootCheckRegistry count = %d, want 72", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

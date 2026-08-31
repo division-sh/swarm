@@ -7,6 +7,7 @@ import (
 
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 const (
@@ -17,6 +18,7 @@ const (
 	LabelContainerName         = "dev.swarm.container.name"
 	LabelWorkspaceScope        = "dev.swarm.workspace.scope"
 	LabelBundleHash            = "dev.swarm.bundle_hash"
+	LabelSourceProjection      = "dev.swarm.source_projection"
 	LabelRunID                 = "dev.swarm.run_id"
 	LabelEntityID              = "dev.swarm.entity_id"
 	LabelAgentID               = "dev.swarm.agent_id"
@@ -39,18 +41,19 @@ const (
 )
 
 type Identity struct {
-	Owner          string
-	Kind           string
-	ResetEligible  bool
-	CreationSource string
-	ContainerName  string
-	WorkspaceScope string
-	BundleHash     string
-	RunID          string
-	EntityID       string
-	AgentIdentity  runtimeagentidentity.Identity
-	FlowInstance   string
-	DataProjection runtimedataaccess.ProjectionID
+	Owner            string
+	Kind             string
+	ResetEligible    bool
+	CreationSource   string
+	ContainerName    string
+	WorkspaceScope   string
+	BundleHash       string
+	SourceProjection string
+	RunID            string
+	EntityID         string
+	AgentIdentity    runtimeagentidentity.Identity
+	FlowInstance     string
+	DataProjection   runtimedataaccess.ProjectionID
 }
 
 func (i Identity) Normalized() Identity {
@@ -60,6 +63,7 @@ func (i Identity) Normalized() Identity {
 	i.ContainerName = strings.TrimSpace(i.ContainerName)
 	i.WorkspaceScope = strings.TrimSpace(i.WorkspaceScope)
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
+	i.SourceProjection = strings.TrimSpace(i.SourceProjection)
 	i.RunID = strings.TrimSpace(i.RunID)
 	i.EntityID = strings.TrimSpace(i.EntityID)
 	i.AgentIdentity = i.AgentIdentity.Normalize()
@@ -83,6 +87,7 @@ func (i Identity) Labels() map[string]string {
 		LabelWorkspaceScope: i.WorkspaceScope,
 	}
 	addOptionalLabel(labels, LabelBundleHash, i.BundleHash)
+	addOptionalLabel(labels, LabelSourceProjection, i.SourceProjection)
 	addOptionalLabel(labels, LabelRunID, i.RunID)
 	addOptionalLabel(labels, LabelEntityID, i.EntityID)
 	if !i.AgentIdentity.IsZero() {
@@ -117,6 +122,17 @@ func (i Identity) Validate() error {
 	}
 	if i.ContainerName == "" {
 		return fmt.Errorf("container identity container name is required")
+	}
+	if (i.BundleHash == "") != (i.SourceProjection == "") {
+		return fmt.Errorf("container identity bundle_hash and source_projection must be declared together")
+	}
+	if i.BundleHash != "" {
+		if err := sourceartifact.ValidateHash(i.BundleHash); err != nil {
+			return fmt.Errorf("container identity bundle_hash is invalid: %w", err)
+		}
+		if err := sourceartifact.ValidateRuntimeProjectionIdentity(i.SourceProjection); err != nil {
+			return fmt.Errorf("container identity source_projection is invalid: %w", err)
+		}
 	}
 	if i.ResetEligible && !ResetEligibleKind(i.Kind) {
 		return fmt.Errorf("container kind %q cannot be reset eligible", i.Kind)
@@ -179,17 +195,18 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 		return Identity{}, true, err
 	}
 	identity := Identity{
-		Owner:          owner,
-		Kind:           labels[LabelKind],
-		ResetEligible:  resetEligible,
-		CreationSource: labels[LabelCreationSource],
-		ContainerName:  labels[LabelContainerName],
-		WorkspaceScope: labels[LabelWorkspaceScope],
-		BundleHash:     labels[LabelBundleHash],
-		RunID:          labels[LabelRunID],
-		EntityID:       labels[LabelEntityID],
-		FlowInstance:   labels[LabelFlowInstance],
-		DataProjection: runtimedataaccess.ProjectionID(labels[LabelDataProjectionID]),
+		Owner:            owner,
+		Kind:             labels[LabelKind],
+		ResetEligible:    resetEligible,
+		CreationSource:   labels[LabelCreationSource],
+		ContainerName:    labels[LabelContainerName],
+		WorkspaceScope:   labels[LabelWorkspaceScope],
+		BundleHash:       labels[LabelBundleHash],
+		SourceProjection: labels[LabelSourceProjection],
+		RunID:            labels[LabelRunID],
+		EntityID:         labels[LabelEntityID],
+		FlowInstance:     labels[LabelFlowInstance],
+		DataProjection:   runtimedataaccess.ProjectionID(labels[LabelDataProjectionID]),
 	}.Normalized()
 	if hasAnyAgentIdentityLabel(labels) {
 		agentIdentity, err := runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{

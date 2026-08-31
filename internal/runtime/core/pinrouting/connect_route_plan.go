@@ -2099,7 +2099,7 @@ func compileStaticConnectReceiverPinCollisions(source semanticview.Source, plans
 		if input == nil {
 			continue
 		}
-		matches, _ := census.ResolveTypedPubSubConsumerMatches(*input)
+		matches := census.ResolveTypedPubSubConsumerMatches(*input)
 		targets := append([]events.RouteIdentity(nil), plan.targetSet...)
 		if !plan.target.Empty() || len(targets) == 0 {
 			targets = append([]events.RouteIdentity{plan.target}, targets...)

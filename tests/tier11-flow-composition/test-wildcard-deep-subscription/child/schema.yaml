@@ -7,6 +7,9 @@ pins:
     events:
       - work.begin
       - task.done
+  outputs:
+    events:
+      - task.done
 connect:
   - event: task.done
     from: grandchild

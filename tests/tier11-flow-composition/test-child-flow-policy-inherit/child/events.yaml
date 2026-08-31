@@ -1,3 +1,1 @@
-check.requested:
-  score: integer?
 check.passed: {}

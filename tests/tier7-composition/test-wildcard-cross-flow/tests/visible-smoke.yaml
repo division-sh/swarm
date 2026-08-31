@@ -1,6 +1,6 @@
 name: test-wildcard-cross-flow visible smoke
 steps:
-  - publish: flow-alpha/trigger.alpha
+  - publish: trigger.alpha
     payload: {}
 expect:
   events:

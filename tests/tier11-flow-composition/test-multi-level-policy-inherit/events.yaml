@@ -1,3 +1,5 @@
 root.check:
   score: integer?
 root.done: {}
+grandchild.check:
+  score: integer?

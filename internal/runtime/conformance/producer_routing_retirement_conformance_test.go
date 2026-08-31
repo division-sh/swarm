@@ -274,7 +274,7 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 	}{
 		{id: "B045", fixture: "tests/tier11-flow-composition/test-child-flow-absolute-path", nodeID: "listener", trigger: "task.done", wantEmitted: "work.finished"},
 		{id: "B078", fixture: "tests/tier11-flow-composition/test-tool-override", nodeID: "root-node", trigger: "child.done", wantEmitted: "task.done"},
-		{id: "B081", fixture: "tests/tier11-flow-composition/test-wildcard-deep-subscription", nodeID: "collector", trigger: "child/task.done", wantEmitted: "pipeline.complete"},
+		{id: "B081", fixture: "tests/tier11-flow-composition/test-wildcard-deep-subscription", nodeID: "collector", trigger: "task.done", wantEmitted: "pipeline.complete"},
 		{id: "B100", fixture: "tests/tier4-cross-entity/test-create-entity", nodeID: "test-node", trigger: "entity.create_requested", payload: map[string]any{"child_id": "child-001"}, wantEmitted: "entity.created"},
 	}
 	for _, tc := range cases {

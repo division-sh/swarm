@@ -16,10 +16,6 @@ func checkEventChainIntegrity(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_chain_integrity")
 }
 
-func checkTypedPubSubAuthorization(c *checkerContext) []Finding {
-	return c.eventWarningsByCheck(semanticview.TypedPubSubFailureAuthorizationAmbiguous)
-}
-
 func checkEventConsumerExists(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_consumer_exists")
 }
@@ -53,34 +49,10 @@ func (c *checkerContext) eventWarnings() []Finding {
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	topology := routingtopology.Build(c.source)
 	connectGraph := runtimepinrouting.CompileConnectGraph(c.source)
-	rejectedProducers := map[string]struct{}{}
-	for _, issue := range topology.Issues {
-		if strings.TrimSpace(issue.Failure) != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
-			continue
-		}
-		subject := strings.TrimSpace(issue.From)
-		if subject == "" {
-			subject = strings.TrimSpace(issue.Location)
-		}
-		evidence := []string{fmt.Sprintf("rejected typed pub/sub relation %s -> %s", subject, issue.To)}
-		if detail := strings.TrimSpace(issue.Detail); detail != "" {
-			evidence = append(evidence, "authorization proofs: "+detail)
-		}
-		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding(
-			semanticview.TypedPubSubFailureAuthorizationAmbiguous,
-			issue.Location,
-			issue.Message,
-			issue.Remediation,
-			evidence...,
-		))
-		if producerID := strings.TrimSpace(issue.From); producerID != "" {
-			rejectedProducers[producerID] = struct{}{}
-		}
-	}
 	for _, subscription := range census.InvalidAuthoredSubscriptions() {
 		location := invalidAuthoredSubscriptionLocation(subscription)
 		message := subscription.Admission.Message()
-		remediation := "Use a receiver-local exact event name. Declare output/input pins and schema.yaml connect at the nearest common ancestor for delivery across a flow boundary; imported wildcard observation requires typed bind.observe authorization."
+		remediation := "Use a receiver-local exact event name. Declare output/input pins and schema.yaml connect at the nearest common ancestor for delivery across a flow boundary."
 		evidence := []string{fmt.Sprintf("rejected authored subscription %q at %q (%s)", subscription.Consumer.Event.Authored, location, subscription.Admission.Failure())}
 		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", location, message, remediation, evidence...))
 	}
@@ -105,9 +77,6 @@ func (c *checkerContext) eventWarnings() []Finding {
 				Message:  fmt.Sprintf("'%s' emitted but no schema in events.yaml", ref.DisplayName()),
 				Location: ref.DisplayName(),
 			})
-			continue
-		}
-		if _, rejected := rejectedProducers[strings.TrimSpace(entry.ID)]; rejected {
 			continue
 		}
 		if runtimepinrouting.OutputHarnessSink(c.source, ref.FlowID, ref.Authored) {

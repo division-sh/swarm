@@ -342,16 +342,19 @@ func TestEnsureWorkspaceContainerRejectsUnownedNameCollision(t *testing.T) {
 }
 
 func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *testing.T) {
-	const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const entityID = "22222222-2222-2222-2222-222222222222"
 	sourceProjection, _ := testRuntimeSourceProjection(t)
+	bundleHash := sourceProjection.BundleHash()
 	manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
 	cfg := DefaultDockerConfig()
 	cfg.SourceProjection = sourceProjection
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
-	manager.SetBundleScope(bundleHash)
+	if err := manager.BindSourceProjection(sourceProjection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
@@ -391,14 +394,16 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}
-	if target == nil || target.Container != "swarm-bundle-aaaaaaaaaaaa-agent-"+fingerprint {
+	prefix := manager.bundleScopedPrefix()
+	if target == nil || target.Container != prefix+"agent-"+fingerprint {
 		t.Fatalf("target = %#v, want bundle-scoped agent container", target)
 	}
 	joined := flattenDockerCalls(creates)
 	for _, expected := range []string{
-		"workspaces_" + volumeScopeKey("swarm-bundle-aaaaaaaaaaaa-agent_"+fingerprint) + ":/workspace",
+		"workspaces_" + volumeScopeKey(prefix+"agent_"+fingerprint) + ":/workspace",
 		"--label dev.swarm.bundle_hash=" + bundleHash,
-		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-agent-" + fingerprint,
+		"--label dev.swarm.source_projection=" + sourceProjection.Identity(),
+		"--label dev.swarm.container.name=" + prefix + "agent-" + fingerprint,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bundle-scoped agent workspace create args missing %q:\n%s", expected, joined)
@@ -411,10 +416,11 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	}
 	joined = flattenDockerCalls(creates)
 	for _, expected := range []string{
-		"create --name swarm-bundle-aaaaaaaaaaaa-acme",
-		"entities_swarm_bundle_aaaaaaaaaaaa_entity_acme:/workspace",
+		"create --name " + prefix + "acme",
+		"entities_" + volumeScopeKey(prefix+"entity_acme") + ":/workspace",
 		"--label dev.swarm.bundle_hash=" + bundleHash,
-		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-acme",
+		"--label dev.swarm.source_projection=" + sourceProjection.Identity(),
+		"--label dev.swarm.container.name=" + prefix + "acme",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bundle-scoped entity workspace create args missing %q:\n%s", expected, joined)

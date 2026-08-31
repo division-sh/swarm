@@ -10,10 +10,10 @@ dispatcher:
 collector:
   id: collector
   execution_type: system_node
-  subscribes_to: ["**/task.done"]
+  subscribes_to: [task.done]
   produces: [pipeline.complete]
   event_handlers:
-    "**/task.done":
+    task.done:
       advances_to: done
       emit:
         event: pipeline.complete

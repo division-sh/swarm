@@ -3238,7 +3238,7 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 	}
 }
 
-func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *testing.T) {
+func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
@@ -3282,28 +3282,11 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 
 	for _, eventType := range []string{"handoff.completed", "child/handoff.completed"} {
 		t.Run(eventType, func(t *testing.T) {
-			payload, err := shaper.ShapeEmitPayload(testAuthorActivityContext(t, context.Background()), req, eventType, map[string]any{
-				"evidence": map[string]any{"root_field": "ok"},
+			_, err := shaper.ShapeEmitPayload(testAuthorActivityContext(t, context.Background()), req, eventType, map[string]any{
+				"evidence": "not-a-root-Evidence-object",
 			})
 			if err != nil {
-				t.Fatalf("ShapeEmitPayload valid root named type: %v", err)
-			}
-			evidence, _ := payload["evidence"].(map[string]any)
-			if _, ok := evidence["root_field"]; !ok {
-				t.Fatalf("payload = %#v, want root_field evidence", payload)
-			}
-
-			_, err = shaper.ShapeEmitPayload(testAuthorActivityContext(t, context.Background()), req, eventType, map[string]any{
-				"evidence": map[string]any{"child_field": "wrong catalog"},
-			})
-			if err == nil {
-				t.Fatal("expected child Evidence override to fail for root-declared output event")
-			}
-			if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
-				t.Fatalf("ShapeEmitPayload invalid catalog error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
-			}
-			if !strings.Contains(err.Error(), "$.evidence.root_field is required") {
-				t.Fatalf("ShapeEmitPayload error = %v, want root_field required proof", err)
+				t.Fatalf("ShapeEmitPayload borrowed the root schema for an untyped child event: %v", err)
 			}
 		})
 	}

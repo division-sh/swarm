@@ -41,7 +41,7 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 		"preflight shape":  {"run", "definitely-not-a-valid-preflight"},
 		"inspect target":   {"inspect", "--format", "{{.State.Running}}", "wrong-container"},
 		"unscoped target":  {"inspect", "--format", "{{.State.Running}}", "swarm-scaffold"},
-		"malformed scope":  {"inspect", "--format", "{{.State.Running}}", "swarm-bundle-not-hex-scaffold"},
+		"malformed scope":  {"inspect", "--format", "{{.State.Running}}", "swarm-bundle-not-hex-projection-not-hex-scaffold"},
 		"lifecycle target": {"start", "wrong-container"},
 		"removal target":   {"rm", "--force", "wrong-container"},
 		"inventory shape":  {"container", "ls"},
@@ -355,6 +355,7 @@ func validReleaseScaffoldCreateArgs(sourceProjection string) []string {
 		"--label", "dev.swarm.creation_source=workspace.EnsureSystemWorkspaces",
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=false",
+		"--label", "dev.swarm.source_projection=" + releaseE2EProjectionID,
 		"--label", "dev.swarm.workspace.scope=scaffold",
 		"-v", sourceProjection + ":/opt/swarm/source:ro",
 		"-v", name + ":/opt/swarm/scaffold",
@@ -381,6 +382,7 @@ func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []strin
 		"--label", "dev.swarm.creation_source=workspace.ResolveWorkspace",
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=true",
+		"--label", "dev.swarm.source_projection=" + releaseE2EProjectionID,
 		"--label", "dev.swarm.workspace.scope=per-agent",
 	}
 	if runBound {

@@ -972,6 +972,20 @@ func requireFanInRoutePlan(t *testing.T, plans []ConnectRoutePlan) ConnectRouteP
 	return matches[0]
 }
 
+func requireReceiverPinRoutePlan(t *testing.T, plans []ConnectRoutePlan, pin string) ConnectRoutePlan {
+	t.Helper()
+	var matches []ConnectRoutePlan
+	for _, plan := range plans {
+		if plan.receiver.pin.value == pin {
+			matches = append(matches, plan)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("receiver pin %q route plans = %#v in all plans %#v, want exactly one", pin, matches, plans)
+	}
+	return matches[0]
+}
+
 func TestCompileConnectPlansRejectsAddresslessImplicitInstanceKey(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{})
@@ -993,8 +1007,13 @@ func TestCompileConnectPlansRejectsAddresslessImplicitInstanceKey(t *testing.T) 
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none without receiver resolution", plans)
 	}
-	if len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverResolutionMissing {
-		t.Fatalf("issues = %#v, want %q", issues, ConnectFailureReceiverResolutionMissing)
+	if len(issues) != 2 {
+		t.Fatalf("issues = %#v, want one missing-resolution issue per connected input", issues)
+	}
+	for _, issue := range issues {
+		if issue.Failure != ConnectFailureReceiverResolutionMissing {
+			t.Fatalf("issue = %#v, want %q", issue, ConnectFailureReceiverResolutionMissing)
+		}
 	}
 }
 
@@ -1122,11 +1141,15 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		t.Fatalf("renamed source fixture pins = %#v, want account_ready from payload.external_account_id", pins)
 	}
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 || len(plans) != 1 || plans[0].instanceKey == nil {
-		t.Fatalf("plans/issues = %#v/%#v, want one derived plan", plans, issues)
+	if len(issues) != 0 || len(plans) != 2 {
+		t.Fatalf("plans/issues = %#v/%#v, want both canonical fixture edges", plans, issues)
 	}
-	if readback := plans[0].instanceKey.Readback(); readback.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || readback.SourcePath != "payload.external_account_id" || plans[0].instanceKey.Field().Path() != "account_id" {
-		t.Fatalf("derived identity/source = %#v, want account_id from renamed payload source", plans[0].instanceKey)
+	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
+	if plan.instanceKey == nil {
+		t.Fatal("renamed account.ready plan has no instance key")
+	}
+	if readback := plan.instanceKey.Readback(); readback.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || readback.SourcePath != "payload.external_account_id" || plan.instanceKey.Field().Path() != "account_id" {
+		t.Fatalf("derived identity/source = %#v, want account_id from renamed payload source", plan.instanceKey)
 	}
 	for _, tc := range []struct {
 		name        string
@@ -1139,7 +1162,7 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			materialized := MaterializeConnectRoutePlan(plans[0], ConnectRoutePlanMaterializationInput{
+			materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
 				MatchValues: AdmitConnectRouteMatchValues(tc.matchValues),
 				Descriptors: []Descriptor{
 					{EntityID: "ent-authoritative", FlowInstance: "account/authoritative", AddressFields: map[string]string{"entity.account_id": "acct-authoritative"}},
@@ -1409,10 +1432,10 @@ func TestCompileConnectPlansUsesSelectInputResolution(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
+	if len(plans) != 2 {
+		t.Fatalf("plans = %#v, want both canonical fixture edges", plans)
 	}
-	plan := plans[0]
+	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
 		t.Fatal("InstanceKey = nil, want select resolution instance-key evidence")
 	}
@@ -1484,10 +1507,10 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
+	if len(plans) != 2 {
+		t.Fatalf("plans = %#v, want both canonical fixture edges", plans)
 	}
-	plan := plans[0]
+	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
 		t.Fatal("InstanceKey = nil, want select-or-create resolution instance-key evidence")
 	}
@@ -1571,11 +1594,13 @@ func TestCompileConnectPlansRejectsSelectCarryTypeMismatch(t *testing.T) {
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
+	if len(issues) != 2 {
+		t.Fatalf("issues = %#v, want one fail-closed issue per connected input", issues)
 	}
-	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
-		t.Fatalf("issue = %#v, want instance resolution invalid for select carry type mismatch", issues[0])
+	for _, issue := range issues {
+		if issue.Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issue.Detail, "key_types_incompatible") {
+			t.Fatalf("issue = %#v, want instance resolution invalid for select carry type mismatch", issue)
+		}
 	}
 }
 
@@ -1599,11 +1624,13 @@ func TestCompileConnectPlansRejectsSelectOrCreateCarryTypeMismatch(t *testing.T)
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select-or-create resolution", plans)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
+	if len(issues) != 2 {
+		t.Fatalf("issues = %#v, want one fail-closed issue per connected input", issues)
 	}
-	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
-		t.Fatalf("issue = %#v, want instance resolution invalid for select-or-create carry type mismatch", issues[0])
+	for _, issue := range issues {
+		if issue.Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issue.Detail, "key_types_incompatible") {
+			t.Fatalf("issue = %#v, want instance resolution invalid for select-or-create carry type mismatch", issue)
+		}
 	}
 }
 

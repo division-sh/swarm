@@ -54,7 +54,7 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
 			}))
-			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("SpawnAgent error = %v, want admission rejection", err)
 			}
 			if am.Count() != 0 {
@@ -94,7 +94,7 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 		ExecutionMode: "live",
 		Subscriptions: []string{"foreign/**/task.ready"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+	if err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 		t.Fatalf("ReconfigureAgent error = %v, want admission rejection", err)
 	}
 	after, ok := testExecutionSnapshot(t, am, initial.ID, initial.FlowPath)

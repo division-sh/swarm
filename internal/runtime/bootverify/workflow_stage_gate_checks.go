@@ -104,9 +104,6 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 	eventType := strings.TrimSpace(outcome.Emit.EventType())
 	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(plan.FlowID, eventType)
 	if !ok {
-		entry, ok = c.source.EventEntry(eventType)
-	}
-	if !ok {
 		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s emits unknown event %s", verdict, eventType))}
 	}
 	findings := make([]Finding, 0)

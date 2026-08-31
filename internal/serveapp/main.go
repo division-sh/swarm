@@ -444,7 +444,7 @@ func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRunt
 	return prepareServeSourceArtifact(ctx, persistence.sourceWriter, loaded.bundle)
 }
 
-func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
+func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (result serveRuntimeBundleContext, retErr error) {
 	loaded := req.Loaded
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
@@ -477,9 +477,18 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		return serveRuntimeBundleContext{}, fmt.Errorf("workspace lifecycle is not configured")
 	}
 	if workspaces != nil {
-		workspaces.SetBundleScope(sourceArtifactFact.BundleHash())
-	}
-	if workspaces != nil {
+		if loaded.sourceProjection == nil || loaded.sourceProjection.BundleHash() != sourceArtifactFact.BundleHash() {
+			return serveRuntimeBundleContext{}, fmt.Errorf("workspace runtime source projection does not match admitted bundle_hash")
+		}
+		if err := workspaces.BindSourceProjection(loaded.sourceProjection); err != nil {
+			return serveRuntimeBundleContext{}, fmt.Errorf("bind workspace source projection: %w", err)
+		}
+		workspaceOwned := true
+		defer func() {
+			if workspaceOwned && retErr != nil {
+				retErr = errors.Join(retErr, workspaces.ReleaseSourceProjection(context.WithoutCancel(req.Ctx)))
+			}
+		}()
 		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores); err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
@@ -492,6 +501,11 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
 			return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
 		}
+		defer func() {
+			if retErr == nil {
+				workspaceOwned = false
+			}
+		}()
 	}
 	posture, err := req.Config.ProcessExecutionPosture()
 	if err != nil {
@@ -1026,6 +1040,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			if opts.Dev && workspaces != nil {
 				_, cleanupErr := workspaces.CleanupDevEntityContainers(context.Background())
 				shutdownErr = errors.Join(shutdownErr, cleanupErr)
+			}
+			if workspaces != nil {
+				shutdownErr = errors.Join(shutdownErr, workspaces.ReleaseSourceProjection(context.Background()))
 			}
 		}
 		shutdownErr = errors.Join(shutdownErr, cleanupLoadedSourceArtifacts())
@@ -2213,7 +2230,11 @@ func closeServeRuntime(ctx context.Context, supervisor *processLifecycleSupervis
 	if opts.Dev && workspaces != nil {
 		_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
 	}
-	return errors.Join(shutdownErr, cleanupErr)
+	var projectionErr error
+	if workspaces != nil {
+		projectionErr = workspaces.ReleaseSourceProjection(ctx)
+	}
+	return errors.Join(shutdownErr, cleanupErr, projectionErr)
 }
 
 func runServeSourceArtifactStartupRecovery(
@@ -2425,10 +2446,11 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 		if manager != nil {
 			result := manager.DeactivateBundleHashWithOptions(contextDef.sourceArtifactFact.BundleHash(), runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
-			continue
-		}
-		if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}); err != nil {
+		} else if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
+		}
+		if contextDef.workspaces != nil {
+			shutdownErr = errors.Join(shutdownErr, contextDef.workspaces.ReleaseSourceProjection(ctx))
 		}
 	}
 	return shutdownErr

@@ -97,20 +97,8 @@ type Edge struct {
 }
 
 type TypedPubSub struct {
-	Match         string                         `json:"match"`
-	Boundary      string                         `json:"boundary"`
-	Authorization *TypedPubSubAuthorizationProof `json:"authorization,omitempty"`
-}
-
-type TypedPubSubAuthorizationProof struct {
-	SourceFlowPath string `json:"source_flow_path,omitempty"`
-	TargetFlowPath string `json:"target_flow_path"`
-	RouteLabel     string `json:"route_label,omitempty"`
-	Source         string `json:"source,omitempty"`
-	EventPattern   string `json:"event_pattern"`
-	MatchPattern   string `json:"match_pattern"`
-	LocalizedEvent string `json:"localized_event"`
-	RouteSource    string `json:"route_source"`
+	Match    string `json:"match"`
+	Boundary string `json:"boundary"`
 }
 
 type Boundary struct {
@@ -209,7 +197,7 @@ func Build(source semanticview.Source) Topology {
 		RootInputSources:  rootInputSourceViews(source),
 		BoundaryExposures: builder.sortedExposures(),
 		Edges:             builder.sortedEdges(),
-		Issues:            issueViews(planIssues, builder.relationIssues),
+		Issues:            issueViews(planIssues),
 	}
 	topology.Issues = append(topology.Issues, connectReceiverPinCollisionIssueViews(connectGraph.ReceiverPinCollisions())...)
 	sort.SliceStable(topology.Issues, func(i, j int) bool { return topology.Issues[i].ID < topology.Issues[j].ID })
@@ -301,16 +289,14 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 }
 
 type topologyBuilder struct {
-	census         semanticview.AuthoredEventEndpointCensus
-	edges          []Edge
-	exposures      []BoundaryExposure
-	seenEdges      map[string]struct{}
-	seenExposures  map[string]struct{}
-	relationIssues []semanticview.TypedPubSubConsumerIssue
+	census        semanticview.AuthoredEventEndpointCensus
+	edges         []Edge
+	exposures     []BoundaryExposure
+	seenEdges     map[string]struct{}
+	seenExposures map[string]struct{}
 }
 
 func (b *topologyBuilder) addTypedPubSubRelations(relations semanticview.TypedPubSubRelations) {
-	b.relationIssues = append(b.relationIssues, relations.Issues...)
 	for _, match := range relations.Matches {
 		if match.Producer.Direction == semanticview.EventEndpointProducer && !isExecutableEndpoint(match.Producer) {
 			continue
@@ -329,23 +315,10 @@ func (b *topologyBuilder) addTypedPubSubRelations(relations semanticview.TypedPu
 }
 
 func typedPubSubView(match semanticview.TypedPubSubConsumerMatch) *TypedPubSub {
-	view := &TypedPubSub{
+	return &TypedPubSub{
 		Match:    string(match.Kind),
 		Boundary: string(match.Boundary),
 	}
-	if match.Authorization != nil {
-		view.Authorization = &TypedPubSubAuthorizationProof{
-			SourceFlowPath: strings.TrimSpace(match.Authorization.SourceFlowPath),
-			TargetFlowPath: strings.TrimSpace(match.Authorization.TargetFlowPath),
-			RouteLabel:     strings.TrimSpace(match.Authorization.RouteLabel),
-			Source:         strings.TrimSpace(match.Authorization.Source),
-			EventPattern:   strings.TrimSpace(match.Authorization.EventPattern),
-			MatchPattern:   strings.TrimSpace(match.Authorization.MatchPattern),
-			LocalizedEvent: strings.TrimSpace(match.Authorization.LocalizedEvent),
-			RouteSource:    strings.TrimSpace(match.Authorization.RouteSource),
-		}
-	}
-	return view
 }
 
 func (b *topologyBuilder) addBoundaryExposures() {
@@ -561,8 +534,8 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 	return resolution
 }
 
-func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues []semanticview.TypedPubSubConsumerIssue) []Issue {
-	out := make([]Issue, 0, len(connectIssues)+len(relationIssues))
+func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue) []Issue {
+	out := make([]Issue, 0, len(connectIssues))
 	for _, issue := range connectIssues {
 		view := Issue{
 			OwnerFlowPath:    strings.TrimSpace(issue.Connect.OwnerFlowPath),
@@ -571,19 +544,6 @@ func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues
 			Failure:          issue.Failure.Code(),
 			Detail:           strings.TrimSpace(issue.Detail),
 			AuthoredLocation: strings.TrimSpace(issue.AuthoredLocation),
-		}
-		view.ID = issueID(view)
-		out = append(out, view)
-	}
-	for _, issue := range relationIssues {
-		view := Issue{
-			Location:    strings.TrimSpace(issue.Event.EventKey()),
-			From:        strings.TrimSpace(issue.Producer.ID),
-			To:          strings.TrimSpace(issue.Consumer.ID),
-			Failure:     strings.TrimSpace(issue.Failure),
-			Detail:      strings.Join(issue.Evidence(), ", "),
-			Message:     issue.Message(),
-			Remediation: issue.Remediation(),
 		}
 		view.ID = issueID(view)
 		out = append(out, view)
@@ -651,18 +611,6 @@ func edgeID(edge Edge) string {
 	parts := []string{string(edge.Scope), edge.Event.Canonical, edge.Producer.ID, edge.Consumer.ID}
 	if edge.TypedPubSub != nil {
 		parts = append(parts, edge.TypedPubSub.Match, edge.TypedPubSub.Boundary)
-		if edge.TypedPubSub.Authorization != nil {
-			parts = append(parts,
-				edge.TypedPubSub.Authorization.RouteSource,
-				edge.TypedPubSub.Authorization.SourceFlowPath,
-				edge.TypedPubSub.Authorization.TargetFlowPath,
-				edge.TypedPubSub.Authorization.RouteLabel,
-				edge.TypedPubSub.Authorization.Source,
-				edge.TypedPubSub.Authorization.EventPattern,
-				edge.TypedPubSub.Authorization.MatchPattern,
-				edge.TypedPubSub.Authorization.LocalizedEvent,
-			)
-		}
 	}
 	if edge.Boundary != nil {
 		parts = append(parts, edge.Boundary.OwnerFlowPath, edge.Boundary.From, edge.Boundary.To)

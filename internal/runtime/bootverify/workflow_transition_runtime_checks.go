@@ -108,10 +108,28 @@ func (c *checkerContext) transitionReferences() []Finding {
 }
 
 func flowEventExists(source semanticview.Source, flowID, eventType string) bool {
-	if proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType)); proof.HasSchema {
+	if source == nil {
+		return false
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if runtimecontracts.IsIntrinsicWorkflowRuntimeEvent(eventType) {
 		return true
 	}
-	return eventExists(source, eventType)
+	if !strings.Contains(eventType, "*") {
+		_, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
+		return ok
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	for candidate := range scope.Events {
+		if source.FlowEventMatches(flowID, eventType, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func transitionOwningFlowID(transition runtimecontracts.WorkflowTransitionContract) string {

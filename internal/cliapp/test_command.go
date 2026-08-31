@@ -1910,29 +1910,38 @@ func (r scenarioRunner) resolvePublishSchema(file scenarioTestFile, eventIdentit
 	if r.source == nil {
 		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload requires the effective semantic source")
 	}
+	flowID := strings.TrimSpace(file.FlowID)
+	eventIdentity = strings.TrimSpace(eventIdentity)
+	if split := strings.LastIndex(eventIdentity, "/"); split > 0 && split+1 < len(eventIdentity) {
+		candidateFlowID := strings.TrimSpace(eventIdentity[:split])
+		if _, ok := r.source.FlowScopeByID(candidateFlowID); ok {
+			flowID = candidateFlowID
+			eventIdentity = strings.TrimSpace(eventIdentity[split+1:])
+		}
+	}
 	if strings.TrimSpace(pinName) == "" {
-		association := semanticview.BuildAuthoredEventEndpointCensus(r.source).ResolveDeclaredInputEndpoint(file.FlowID, eventIdentity)
+		association := semanticview.BuildAuthoredEventEndpointCensus(r.source).ResolveDeclaredInputEndpoint(flowID, eventIdentity)
 		if endpoint, ok := association.Endpoint(); ok && strings.TrimSpace(eventIdentity) == strings.TrimSpace(endpoint.PinName) {
 			eventIdentity = endpoint.Event.EventKey()
 		}
 	}
-	canonicalEventKey := strings.TrimSpace(r.source.ResolveFlowEventReference(file.FlowID, eventIdentity))
+	canonicalEventKey := strings.TrimSpace(r.source.ResolveFlowEventReference(flowID, eventIdentity))
 	if canonicalEventKey == "" {
 		return semanticview.EventSchemaResolution{}, fmt.Errorf(
 			"publish payload for flow %q event %q has no canonical event identity",
-			scenarioFlowLabel(file.FlowID), strings.TrimSpace(eventIdentity),
+			scenarioFlowLabel(flowID), strings.TrimSpace(eventIdentity),
 		)
 	}
-	resolution := semanticview.ResolveEventSchema(r.source, file.FlowID, eventIdentity)
+	resolution := semanticview.ResolveEventSchema(r.source, flowID, eventIdentity)
 	if !resolution.HasSchema {
 		context := fmt.Sprintf("event %q", strings.TrimSpace(eventIdentity))
 		if strings.TrimSpace(pinName) != "" {
 			context = fmt.Sprintf("input pin %q event %q", strings.TrimSpace(pinName), strings.TrimSpace(eventIdentity))
 		}
-		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q %s has no resolved event schema; declare the event payload", scenarioFlowLabel(file.FlowID), context)
+		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q %s has no resolved event schema; declare the event payload", scenarioFlowLabel(flowID), context)
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
-		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q event %q: %w", scenarioFlowLabel(file.FlowID), resolution.EventKey, err)
+		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q event %q: %w", scenarioFlowLabel(flowID), resolution.EventKey, err)
 	}
 	// Schema resolution may select a wildcard declaration. Publication still
 	// carries the concrete event identity resolved from the effective source.

@@ -174,6 +174,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
 		}, err
 	}
+	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
 	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
 		RecipientPlanning: *model.RecipientPlanning,
 		AgentRuntime:      agentRuntime.Proof,

@@ -31,10 +31,12 @@ const (
 	releaseE2EAgentWorkdir     = "/workspace"
 	releaseE2EManagedModel     = "sonnet"
 	releaseE2EAgentFingerprint = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
-	releaseE2EFixtureScope     = "bundle-aaaaaaaaaaaa"
+	releaseE2EProjectionDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	releaseE2EProjectionID     = "runtime-projection-v1:" + releaseE2EProjectionDigest
+	releaseE2EFixtureScope     = "bundle-aaaaaaaaaaaa-projection-bbbbbbbbbbbb"
 	releaseE2EAgentSuffix      = "agent-" + releaseE2EAgentFingerprint
 	releaseE2EFixtureAgent     = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
-	releaseE2EFixtureAgentVol  = "workspaces_swarm_bundle_aaaaaaaaaaaa_agent_" + releaseE2EAgentFingerprint
+	releaseE2EFixtureAgentVol  = "workspaces_swarm_bundle_aaaaaaaaaaaa_projection_bbbbbbbbbbbb_agent_" + releaseE2EAgentFingerprint
 	releaseE2EOrphanKill       = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
@@ -619,8 +621,14 @@ func validateReleaseDockerLabels(create releaseDockerCreate, bundleScope, kind, 
 	}
 	bundleHash := create.labels["dev.swarm.bundle_hash"]
 	allowed["dev.swarm.bundle_hash"] = true
-	if !validReleaseBundleHash(bundleHash) || "bundle-"+strings.TrimPrefix(bundleHash, "bundle-v2:sha256:")[:12] != bundleScope {
+	bundleScopePrefix, projectionScope, found := strings.Cut(bundleScope, "-projection-")
+	if !found || !validReleaseBundleHash(bundleHash) || "bundle-"+strings.TrimPrefix(bundleHash, "bundle-v2:sha256:")[:12] != bundleScopePrefix {
 		return fmt.Errorf("create %s has invalid or mismatched bundle hash identity", create.name)
+	}
+	sourceProjection := create.labels["dev.swarm.source_projection"]
+	allowed["dev.swarm.source_projection"] = true
+	if !validReleaseSourceProjectionID(sourceProjection) || strings.TrimPrefix(sourceProjection, "runtime-projection-v1:")[:12] != projectionScope {
+		return fmt.Errorf("create %s has invalid or mismatched source projection identity", create.name)
 	}
 	if kind == "agent" {
 		wantIdentityLabels := map[string]string{
@@ -674,6 +682,16 @@ func validReleaseDataProjectionID(value string) bool {
 	return err == nil && len(decoded) == 32
 }
 
+func validReleaseSourceProjectionID(value string) bool {
+	const prefix = "runtime-projection-v1:"
+	digest := strings.TrimPrefix(strings.TrimSpace(value), prefix)
+	if len(digest) != 32 || prefix+digest != value || strings.ToLower(digest) != digest {
+		return false
+	}
+	decoded, err := hex.DecodeString(digest)
+	return err == nil && len(decoded) == 16
+}
+
 func releaseE2EContainerName(name string) bool {
 	_, _, ok := releaseE2EContainerIdentity(name)
 	return ok
@@ -685,7 +703,7 @@ func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool
 		return "", "", false
 	}
 	remainder := strings.TrimPrefix(name, prefix)
-	hash, suffix, found := strings.Cut(remainder, "-")
+	hash, remainder, found := strings.Cut(remainder, "-")
 	if !found || len(hash) != 12 || strings.ToLower(hash) != hash {
 		return "", "", false
 	}
@@ -693,11 +711,23 @@ func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool
 	if err != nil || len(decoded) != 6 {
 		return "", "", false
 	}
+	if !strings.HasPrefix(remainder, "projection-") {
+		return "", "", false
+	}
+	projection, suffix, found := strings.Cut(strings.TrimPrefix(remainder, "projection-"), "-")
+	if !found || len(projection) != 12 || strings.ToLower(projection) != projection {
+		return "", "", false
+	}
+	decoded, err = hex.DecodeString(projection)
+	if err != nil || len(decoded) != 6 {
+		return "", "", false
+	}
+	processScope := "bundle-" + hash + "-projection-" + projection
 	switch suffix {
 	case "scaffold", "system":
-		return suffix, "bundle-" + hash, true
+		return suffix, processScope, true
 	case releaseE2EAgentSuffix:
-		return "agent", "bundle-" + hash, true
+		return "agent", processScope, true
 	default:
 		return "", "", false
 	}

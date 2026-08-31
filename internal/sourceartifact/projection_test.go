@@ -3,6 +3,7 @@ package sourceartifact
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,8 +31,20 @@ func TestRuntimeProjectionOwnsExactGenerationAndLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectionRoot := projection.PrivateRoot()
-	if projection.BundleHash() != artifact.BundleHash() || projectionRoot == "" {
-		t.Fatalf("projection identity = %q %q", projection.BundleHash(), projectionRoot)
+	projectionIdentity := projection.Identity()
+	if projection.BundleHash() != artifact.BundleHash() || projectionIdentity == "" || retained.Identity() != projectionIdentity || projectionRoot == "" {
+		t.Fatalf("projection identity = %q %q %q", projection.BundleHash(), projectionIdentity, projectionRoot)
+	}
+	if err := ValidateRuntimeProjectionIdentity(projectionIdentity); err != nil {
+		t.Fatalf("projection identity %q is invalid: %v", projectionIdentity, err)
+	}
+	peer, err := MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Release()
+	if peer.Identity() == projectionIdentity || peer.PrivateRoot() == projectionRoot {
+		t.Fatalf("separate same-hash projection reused process identity or root: first=%q/%q peer=%q/%q", projectionIdentity, projectionRoot, peer.Identity(), peer.PrivateRoot())
 	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: mutated\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -65,5 +78,17 @@ func TestRuntimeProjectionOwnsExactGenerationAndLifetime(t *testing.T) {
 	}
 	if _, err := os.Stat(projectionRoot); !os.IsNotExist(err) {
 		t.Fatalf("released projection still exists: %v", err)
+	}
+}
+
+func TestRuntimeProjectionIdentityValidationRejectsNonCanonicalForms(t *testing.T) {
+	for _, invalid := range []string{
+		"runtime-projection-v1:deadbeef",
+		"runtime-projection-v1:" + strings.Repeat("A", 32),
+		"projection:" + strings.Repeat("a", 32),
+	} {
+		if err := ValidateRuntimeProjectionIdentity(invalid); err == nil {
+			t.Fatalf("ValidateRuntimeProjectionIdentity(%q) error = nil", invalid)
+		}
 	}
 }

@@ -1,12 +1,17 @@
 package sourceartifact
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
+
+const RuntimeProjectionIdentityPrefix = "runtime-projection-v1:"
 
 // RuntimeProjection is a disposable read-only filesystem projection of one
 // exact admitted source generation. The private root is never source authority;
@@ -19,6 +24,7 @@ type RuntimeProjection struct {
 type runtimeProjectionState struct {
 	mu         sync.Mutex
 	bundleHash string
+	identity   string
 	root       string
 	refs       int
 	removed    bool
@@ -30,6 +36,10 @@ func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimePro
 	}
 	if err := ValidateHash(artifact.BundleHash()); err != nil {
 		return nil, fmt.Errorf("runtime source projection bundle_hash: %w", err)
+	}
+	identity, err := newRuntimeProjectionIdentity()
+	if err != nil {
+		return nil, err
 	}
 	root, err := os.MkdirTemp("", "swarm-source-")
 	if err != nil {
@@ -56,7 +66,22 @@ func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimePro
 	if err := sealProjectionTree(root); err != nil {
 		return cleanup(err)
 	}
-	return &RuntimeProjection{state: &runtimeProjectionState{bundleHash: artifact.BundleHash(), root: root, refs: 1}}, nil
+	return &RuntimeProjection{state: &runtimeProjectionState{bundleHash: artifact.BundleHash(), identity: identity, root: root, refs: 1}}, nil
+}
+
+// Identity is the process-local identity of one materialized projection. It is
+// shared by retained handles and differs for separate materializations even
+// when their admitted bundle hashes are equal.
+func (p *RuntimeProjection) Identity() string {
+	if p == nil || p.state == nil || p.released {
+		return ""
+	}
+	p.state.mu.Lock()
+	defer p.state.mu.Unlock()
+	if p.state.removed {
+		return ""
+	}
+	return p.state.identity
 }
 
 func (p *RuntimeProjection) BundleHash() string {
@@ -142,4 +167,24 @@ func removeProjectionTree(root string) error {
 		return nil
 	})
 	return os.RemoveAll(root)
+}
+
+func newRuntimeProjectionIdentity() (string, error) {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return "", fmt.Errorf("mint runtime source projection identity: %w", err)
+	}
+	return RuntimeProjectionIdentityPrefix + hex.EncodeToString(entropy[:]), nil
+}
+
+func ValidateRuntimeProjectionIdentity(value string) error {
+	if len(value) != len(RuntimeProjectionIdentityPrefix)+32 || !strings.HasPrefix(value, RuntimeProjectionIdentityPrefix) {
+		return fmt.Errorf("runtime projection identity must be %s<32 lowercase hex>", RuntimeProjectionIdentityPrefix)
+	}
+	for _, char := range value[len(RuntimeProjectionIdentityPrefix):] {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return fmt.Errorf("runtime projection identity must be %s<32 lowercase hex>", RuntimeProjectionIdentityPrefix)
+		}
+	}
+	return nil
 }

@@ -2511,12 +2511,14 @@ typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:EnsureEntityWorkspace	func(ctx context.Context, entityID string) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:EnsurePrereqs	func(ctx context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:EnsureSystemWorkspaces	func(ctx context.Context) error
-typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:SetBundleScope	func(bundleHash string)
+typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:BindSourceProjection	func(*github.com/division-sh/swarm/internal/sourceartifact.RuntimeProjection) error
+typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:ReleaseSourceProjection	func(context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:StopEntityWorkspace	func(ctx context.Context, entityID string) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Lifecycle	method:ValidateSource	func(ctx context.Context, source github.com/division-sh/swarm/internal/runtime/semanticview.Source) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	OrphanKiller	method:KillOrphanProcesses	func(ctx context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	Resolver	method:ResolveWorkspace	func(ctx context.Context, actor github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) (*github.com/division-sh/swarm/internal/runtime/workspace.Target, error)
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	SourceProjectionBinding	method:SourceProjectionBundleHash	func() string
+typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	SourceProjectionBinding	method:SourceProjectionIdentity	func() string
 typed-process-local	interface-method	typed	internal/runtime/workspace/manager.go	SourceProjectionRebinder	method:RebindSourceProjection	func(*github.com/division-sh/swarm/internal/sourceartifact.RuntimeProjection, github.com/division-sh/swarm/internal/runtime/semanticview.Source) (github.com/division-sh/swarm/internal/runtime/workspace.Lifecycle, error)
 typed-process-local	interface-method	typed	internal/runtime/workspace/persistence.go	Lookup	method:ListRuntimeWorkspaceContainers	func(context.Context, string) (github.com/division-sh/swarm/internal/runtime/workspace.RuntimeWorkspaceContainerSet, error)
 typed-process-local	interface-method	typed	internal/runtime/workspace/persistence.go	Lookup	method:LookupWorkspaceEntity	func(context.Context, github.com/division-sh/swarm/internal/runtime/currentstate.Identity) (github.com/division-sh/swarm/internal/runtime/workspace.WorkspaceEntityLookup, error)

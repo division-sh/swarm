@@ -129,6 +129,41 @@ func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testin
 	}
 }
 
+func TestValidateEventTypedViewDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"score.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"score": {Type: "integer"}}}},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+	binding := Binding{
+		SourceNode:      identitytest.FlowNode(t, "child", "scorer"),
+		SourceEventType: "score.completed",
+		AccumulatorName: "scores",
+		SourceNamedType: runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+	}
+
+	issues := validateEventTypedView(semanticview.Wrap(bundle), runtimecontracts.TypeCatalogDocument{}, binding)
+	if !issuesContain(issues, "no event catalog entry exists") {
+		t.Fatalf("cross-flow event schema issues = %#v, want unknown source event", issues)
+	}
+}
+
 func issuesContain(issues []Issue, want string) bool {
 	for _, issue := range issues {
 		if strings.Contains(issue.Message, want) {

@@ -1,5 +1,6 @@
 pipeline.start: {}
 pipeline.complete: {}
+task.done: {}
 child/work.begin: {}
 child/work.finished: {}
 child/grandchild/task.start: {}

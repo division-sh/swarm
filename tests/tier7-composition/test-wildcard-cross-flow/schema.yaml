@@ -2,3 +2,10 @@ name: test-wildcard-cross-flow
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]
+pins:
+  inputs:
+    events: [trigger.alpha]
+connect:
+  - event: trigger.alpha
+    from: .
+    to: flow-alpha

@@ -367,10 +367,8 @@ func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(
 	if resolvedScope {
 		view, ok := resolution.semanticScope.OwningFlow()
 		if ok {
-			for current := view; current != nil; current = current.Parent {
-				if entry, key, found := lookup(current.Events); found {
-					return entry, key, true
-				}
+			if entry, key, found := lookup(view.Events); found {
+				return entry, key, true
 			}
 		}
 	}
@@ -394,7 +392,7 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeid
 	if !ok {
 		return pattern
 	}
-	resolved := strings.TrimSpace(resolution.eventScope.ResolveSubscriptionPattern(pattern, resolution.descendants))
+	resolved := strings.TrimSpace(resolution.eventScope.ResolveSubscriptionPattern(pattern, nil))
 	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
 		return resolved
 	}
@@ -675,20 +673,48 @@ func (b *WorkflowContractBundle) resolveAuthoredFlowEventCatalogEntry(flowID, ev
 	if b == nil {
 		return EventCatalogEntry{}, "", false
 	}
-	catalog := b.ResolvedEventCatalog()
+	flowID = strings.TrimSpace(flowID)
 	rawKey := eventidentity.Normalize(eventType)
-	if entry, ok := catalog[rawKey]; ok {
-		return entry, rawKey, true
+	if rawKey == "" {
+		return EventCatalogEntry{}, "", false
 	}
 	resolvedKey := b.ResolveFlowEventReference(flowID, eventType)
-	if resolvedKey == rawKey {
-		return EventCatalogEntry{}, "", false
+	entries := b.Events
+	if b.FlowTree.Root != nil {
+		view, ok := b.exactFlowEventDeclarationView(flowID)
+		if !ok || view == nil {
+			return EventCatalogEntry{}, "", false
+		}
+		entries = view.Events
 	}
-	entry, ok := catalog[resolvedKey]
-	if !ok {
-		return EventCatalogEntry{}, "", false
+	for _, localKey := range sortedContractKeys(entries) {
+		entry := entries[localKey]
+		localKey = eventidentity.Normalize(localKey)
+		canonicalKey := b.ResolveFlowEventReference(flowID, localKey)
+		if localKey == rawKey || localKey == resolvedKey || canonicalKey == rawKey || canonicalKey == resolvedKey {
+			return entry, canonicalKey, true
+		}
 	}
-	return entry, resolvedKey, true
+	if entry, ok := b.GeneratedActivityEventEntries()[rawKey]; ok {
+		return entry, rawKey, true
+	}
+	if resolvedKey != rawKey {
+		if entry, ok := b.GeneratedActivityEventEntries()[resolvedKey]; ok {
+			return entry, resolvedKey, true
+		}
+	}
+	return EventCatalogEntry{}, "", false
+}
+
+func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*FlowContractView, bool) {
+	if b == nil || b.FlowTree.Root == nil {
+		return nil, false
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" || flowID == "." {
+		return b.FlowTree.Root, true
+	}
+	return b.FlowViewByID(flowID)
 }
 func clonePolicyDocument(in PolicyDocument) PolicyDocument {
 	return flowmodel.ClonePolicyDocument(in)
@@ -953,11 +979,11 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 }
 func (b *WorkflowContractBundle) ResolveFlowEventPattern(flowID, pattern string) string {
 	scope := b.flowEventScope(flowID)
-	return scope.ResolveSubscriptionPattern(pattern, b.flowEventDescendants(flowID))
+	return scope.ResolveSubscriptionPattern(pattern, nil)
 }
 func (b *WorkflowContractBundle) FlowEventMatches(flowID, subscription, eventType string) bool {
 	scope := b.flowEventScope(flowID)
-	return scope.Matches(subscription, eventType, b.flowEventDescendants(flowID))
+	return scope.Matches(subscription, eventType, nil)
 }
 func (b *WorkflowContractBundle) FlowRequiredAgents(flowID string) []FlowRequiredAgent {
 	return FlowRequiredAgentsFromFacts(b.FlowRequiredAgentFacts(flowID))

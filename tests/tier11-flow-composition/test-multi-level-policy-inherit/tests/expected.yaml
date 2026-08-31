@@ -1,5 +1,5 @@
 trigger:
-  event: child/grandchild/grandchild.check
+  event: grandchild.check
   payload:
     score: 65
 expected:

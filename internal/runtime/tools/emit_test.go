@@ -298,6 +298,51 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 	}
 }
 
+func TestGenerateEmitToolsForActor_DoesNotBorrowRootSchemaForChildEvent(t *testing.T) {
+	root := t.TempDir()
+	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-flow-emits\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "events.yaml"), "local.done:\n  root_only: text\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "local.done:\n  child_only: text\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
+child-agent:
+  id: child-agent
+  role: child_agent
+  intent: {inline: "Emit the child event."}
+  emit_events: [local.done]
+`)
+
+	repoRoot, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	registry := NewEmitRegistry(semanticview.Wrap(bundle), nil)
+	defs := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID:         "child-agent",
+		Role:       "child_agent",
+		FlowID:     "child",
+		FlowPath:   "child",
+		EmitEvents: []string{"local.done"},
+	}, nil)
+	if len(defs) != 1 {
+		t.Fatalf("tools = %#v, want one exact-flow emit tool", defs)
+	}
+	schema, ok := defs[0].Schema.(map[string]any)
+	if !ok {
+		t.Fatalf("schema = %#v, want object", defs[0].Schema)
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"child_only": "ok"}); err != nil {
+		t.Fatalf("child payload rejected: %v", err)
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"root_only": "borrowed"}); err == nil {
+		t.Fatal("child emit tool borrowed the root event schema")
+	}
+}
+
 func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *testing.T) {
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{

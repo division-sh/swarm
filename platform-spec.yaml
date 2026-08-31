@@ -1167,8 +1167,8 @@ contract_formats:
       description: 'Routing is derived from two mechanisms:'
       typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
         nodes.yaml subscribes_to, and event_handlers keys. The platform matches canonical event identity
-        through same-flow declarations or governed import-boundary wildcard authorization.'
-      inter_flow_connect: Between flows, authored topology derives from LCA schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, template receivers declare one scalar instance identity field, receiver input pins declare an explicit resolution mode and derive the same-named typed payload source unless `resolution.from` selects one supported exceptional source, and parent connect lowers the edge into concrete route-plan facts. See flow_model.composition_routing and engine.cross_flow_routing for details. Qualified exact subscriptions cannot cross a flow boundary. Imported cross-boundary wildcard observation requires governed bind.observe authorization and is not an exact-delivery escape hatch.
+        only within one exact flow identity. Canonical name equality and filesystem ancestry never authorize cross-flow delivery.'
+      inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, template receivers declare one scalar instance identity field, receiver input pins declare an explicit resolution mode and derive the same-named typed payload source unless `resolution.from` selects one supported exceptional source, and the LCA connect lowers the edge into concrete route-plan facts. See flow_model.composition_routing and engine.cross_flow_routing for details. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
       input_source_resolution:
         canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
@@ -1178,9 +1178,10 @@ contract_formats:
           intent (`source: harness` on the input pin), platform source, and internal topology producer. Harness intent is
           static producer proof only: it MUST be exclusive of every other accepted producer source and MUST NOT create a
           route, topology edge, producer pattern, alias, standing target, provider ingress, subscriber, or runtime delivery
-          authority. Internal topology producer proof proves the event is
-          produced inside the authored topology by sibling flow outputs, root/flow agent or node emits, timers, fan_out,
-          or root/flow `auto_emit_on_create`, but it MUST NOT generate producer-scoped auto-wire route patterns.
+          authority. Internal topology producer proof is exact-flow-local: same-flow agent or node emits, timers, fan_out,
+          or `auto_emit_on_create` may satisfy the input, but a producer or output pin in any other flow cannot. Cross-flow
+          producer proof exists only through the immutable compiled parent-connect edge, regardless of matching event spelling,
+          qualification, or filesystem ancestry. Internal proof MUST NOT generate producer-scoped auto-wire route patterns.
           Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
           RoutePlan, not a raw subscription fallback.
           A RouteTable root_input_flow node route is executable only for an admitted root_ingress event or an
@@ -1188,7 +1189,8 @@ contract_formats:
           event. An unadmitted child, operator-injected, replay, runtime, or platform event with the same event name cannot
           acquire external-input receiver authority and MUST fail before event-delivery or receiver mutation.
         retired_paths: |
-          Unique same-name sibling output-pin inference is retired as producer-pattern authority. `swarm.source: external`
+          Unique same-name sibling output-pin inference and unconnected root/sibling emit inference are retired as both producer
+          proof and producer-pattern authority. `swarm.source: external`
           on events.yaml is not input-pin producer proof; it remains external metadata for non-input event roles such as
           dead-event and accumulator producer-source checks.
       delivery_rules:
@@ -4210,7 +4212,7 @@ handler_specification:
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
-          Open/windowed stream accumulation derives no timeout subscription. Wildcard/import-boundary escape-hatch
+          Open/windowed stream accumulation derives no timeout subscription. Slash-free flow-local wildcard
           subscriptions remain explicit.
         produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
           from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
@@ -4364,28 +4366,27 @@ engine:
     resolution_rules:
       contracts_always_local: 'Exact node subscribes_to values, handler keys, and event definitions in events.yaml use local
         names. Flow-owned agent subscription admission accepts local exact values and may retain an already-normalized exact
-        identity only when it resolves to that same flow. Exact subscriptions never cross a flow boundary. Imported
-        cross-boundary wildcard observation is pattern-only and requires typed bind.observe authorization.'
+        identity only when it resolves to that same flow. Exact subscriptions never cross a flow boundary. Wildcard
+        subscriptions are slash-free and flow-local; they never observe another flow.'
       bus_always_external: 'The event bus stores and routes events using external names. An event
         emitted by a node in the scoring flow is stored as scoring/vertical.shortlisted in the events
         table.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
-        applies to connected input-pin delivery and admitted typed pub/sub, including governed
-        import-boundary wildcard observation.
+        applies to connected input-pin delivery and admitted same-flow typed pub/sub.
         Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
         node that declares vertical.shortlisted in any of those surfaces.'
-      root_events_are_global: 'Events emitted at root level have no flow prefix. They can be routed
-        to flows that declare them as input pins or have agents/nodes subscribing by local name, but pin-declared root emits
-        still require canonical typed consumers or topology under engine.cross_flow_routing.'
+      root_events_are_global: 'Events emitted at root level have no flow prefix. They route directly only to root-local
+        consumers. Delivery into a child flow requires root and child pins plus an exact nearest-LCA connect row under
+        engine.cross_flow_routing.'
     canonical_resolver: 'The platform MUST provide a single resolver module used by all subsystems:
       Localize(flowID, eventName) → local name. Externalize(flowID, eventName) → external name.
       Match(pattern, eventName) → bool. ResolveInputAlias(flowID, eventName) → local handler key.
       No subsystem may implement its own name resolution logic.'
   cross_flow_routing:
-    description: 'Composition-first pin routing is the canonical cross-flow routing surface. Parent package
-      connect entries own only the inter-flow edge, output pins declare the event identity being produced,
+    description: 'Composition-first pin routing is the canonical cross-flow routing surface. Exact least-common-ancestor
+      FlowNode schema.yaml connect entries own only the inter-flow edge, output pins declare the event identity being produced,
       input pins declare receiver selection, lifecycle, cardinality, and reply resolution, and the analyzer lowers those facts into
       concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
       identity, not by unconstrained event-type broadcast.'
@@ -4611,13 +4612,13 @@ engine:
       required_agent_fulfillment: Required-agent subscription declarations prove role fulfillment only. They are not
         executable subscribers, event-liveness evidence, or runtime route authority.
       inter_flow_delivery: Declare output/input pins and parent connect, then subscribe to the receiver-local input event.
-      wildcard_observation: Imported cross-boundary wildcard observation is separately governed by typed bind.observe
-        authorization and cannot become qualified exact delivery authority.
+      wildcard_observation: Wildcard subscriptions are slash-free and flow-local. They cannot become cross-flow delivery
+        authority; cross-flow delivery requires output/input pins and nearest-LCA connect.
     contract_authoring_rules:
       handler_keys: Always local names. Never flow-prefixed.
       subscribes_to: Exact node subscriptions use local names. Flow-owned agent exact subscriptions may be local or an
         already-normalized same-scope identity accepted by typed admission. Cross-boundary slash-qualified and full-URI exact
-        values are invalid. Imported cross-boundary patterns require typed bind.observe authorization.
+        values are invalid. Wildcard subscriptions are slash-free and flow-local; cross-flow delivery requires pins/connect.
       timer_event_references: Always local exact names. Timers do not resolve qualified or wildcard subscription paths.
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
@@ -4625,11 +4626,11 @@ engine:
         is not route or producer authority. Receiver-owned resolution materializes concrete instance recipients after
         connect lowering.
     wildcards:
-      description: Pattern matching for subscriptions across flow instances. Imported cross-boundary patterns require typed
-        bind.observe authorization. Wildcards do not override target filtering when event.target or event.target_set is set.
+      description: Pattern matching for subscriptions within one exact flow identity. Slash-qualified patterns are invalid
+        and wildcards do not override target filtering when event.target or event.target_set is set.
       patterns:
-        '*/order.completed': Any direct child flow's order.completed event
-        '**/item.processed': Any flow at any depth
+        'order.*': Any local order event
+        '*.completed': Any local completed event
   contract_merger:
     description: After the flow tree walker collects all flows, the merger builds the runtime registry. Every node, agent,
       and event gets a full URI. No global merge — everything is scoped by flow instance.
@@ -4648,8 +4649,8 @@ engine:
     subscription_resolution: After all URIs are constructed, resolve subscriptions through their typed owners. Node exact
       subscriptions resolve from local names within the same flow instance. Flow-owned agent admission may retain an
       already-normalized same-scope exact identity. Slash-qualified or full-URI exact subscriptions that cross a flow boundary
-      fail closed rather than resolving globally. Wildcard subscriptions expand only within the candidate set admitted by
-      wildcard_subscription_scope and typed bind.observe evidence where required.
+      fail closed rather than resolving globally. Wildcard subscriptions are slash-free and resolve only against events in
+      the exact same flow identity.
     tools: Tools are NOT URI-scoped. They are shared resources. Root flow tools are available to all child flows. Child flow
       tools are available only within that flow. If a child declares a tool with the same ID as a root tool, the child's version
       takes precedence within that flow.
@@ -4889,7 +4890,7 @@ engine:
         action: 'Build runtime registries keyed by path: nodes, agents, events, tools, policy. Tools are flat (shared). Policy is hierarchical (child overrides parent).'
       - step: 6
         name: resolve_subscriptions
-        action: Resolve all agent and node subscriptions through the typed subscription owners. Node exact values resolve from local names within the same flow. Flow-owned agent admission may retain an already-normalized same-scope identity. Slash-qualified or full-URI exact values that cross a flow boundary fail closed. Wildcards expand only inside their admitted same-scope or typed import-boundary candidate set.
+        action: Resolve all agent and node subscriptions through the typed subscription owners. Node exact values resolve from local names within the same flow. Flow-owned agent admission may retain an already-normalized same-scope identity. Slash-qualified or full-URI exact values that cross a flow boundary fail closed. Wildcards are slash-free and expand only inside the exact same flow identity.
       - step: 7
         name: validate_pins
         action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: parent connect topology, input pin source:external, validation-only input pin source:harness, platform source, or internal topology producer. Harness source is accepted only by the verify policy, is labeled non-production-valid in human and machine readback, and MUST be rejected by serve and every shared production boot path before route/runtime materialization. Pin-declared production outputs require a typed same-flow consumer, lowered parent connect, structural ParentRoute, eligible static-child delivery route, or accepted external consumer. A structured output pin may instead declare sink:harness only for explicit validation/catalog observation; readback marks production_valid:false, production admission rejects it, and it creates no route or delivery authority. emit.target and emit.broadcast are rejected on presence. No two flows may write the same entity field (write conflict = boot error).'
@@ -8278,7 +8279,7 @@ compliance:
     - All handoff events must have both an emitter (source flow) and subscriber (target flow or declarative handoff)
   node_coherence:
   - The effective runtime subscription surface includes every event in event_handlers. Explicit subscribes_to is required
-    only for wildcard/import-boundary escape hatches that cannot be derived from exact handler keys.
+    only for slash-free flow-local wildcards that cannot be derived from exact handler keys.
   - Every event in the effective production surface must have a payload schema in events.yaml. Explicit produces, when
     authored, is an assertion checked against handler-derived emits.
   - Guards must reference fields that exist on the entity or in policy.yaml
@@ -11436,49 +11437,32 @@ flow_model:
             Delivery between authored producers and consumers has exactly two canonical scopes. Standing ingress is
             admission into a declared event boundary, not a third authored producer-to-consumer delivery scope.
           delivery_scopes:
-          - typed_pubsub delivery between authored producers and consumers, with match exact|pattern and boundary same_flow|import_boundary proof
+          - typed_pubsub delivery between authored producers and consumers in one exact flow identity, with match exact|pattern and boundary same_flow proof
           - inter_flow_connect delivery between authored producers and consumers, lowered from declared output pin through parent connect to declared input pin
           root_input_source_rule: >
             `root_input_sources` is the deterministic admission-provenance projection for declared standing ingress. Each
             entry names the authored alias, provider, admission kind/pin/authentication/event/acknowledgement facts,
-            package/flow target, and authored package location. It does not claim compiled pack identity, catalog generation,
+            flow target and admitted authored source location. It does not claim compiled pack identity, catalog generation,
             or effective request authentication; create a producer endpoint or route edge; participate in delivery-scope
             counts; or authorize delivery.
             After admission, the canonical declared-input association and typed pub/sub relation owners govern the event's
             ordinary delivery. Flow-entry ingress declarations remain the semantic source; the projection is read-only.
           typed_pubsub_rule: >
-            One semanticview relation resolver evaluates each producer-or-input/consumer pair exactly once. Same canonical
-            flow identity may return exact or pattern with boundary same_flow. Different canonical flow identity may return
-            only pattern with boundary import_boundary and a stable normalized authorization proof naming the authorizing
-            parent package, child package, import label/source, event pattern, and route source. Bounded observe-grant patterns
-            intersect imported wildcard subscriptions over the declared typed event catalog. Each finite witness retains one
-            source-relative local identity paired with its source-qualified canonical identity; these identities must not be
-            flattened into independent candidates. The authored consumer pattern may match either identity according to its
-            namespace, while the normalized grant pattern matches the canonical identity. For a static source, runtime route
-            matching uses that canonical identity. For a template source, the finite witness retains the authorized source
-            template identity and concrete source-local event. RouteTable registers that relation as deferred authority and
-            materializes an exact `{instance_path}/{local_event}` route only from lifecycle proof that the instance belongs to
-            that same source template; it removes the exact route with the source or consumer instance lifecycle. Concrete path
-            shape or presence in the global authored event-path inventory is not instance-ownership proof. An authored static
-            descendant remains unauthorized even when its path has the same segment shape as a template instance. Before any
-            route-state mutation, flow-instance materialization MUST reject an instance path that aliases or would capture an
-            authored static scope, or overlaps a non-instance event identity; canonical namespace collision is a hard invalidity
-            and MUST leave existing event paths, observers, and sibling instance routes unchanged. A declared nested template
-            scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof.
-            RouteTable is the canonical lifecycle identity owner and stores one complete normalized `(scope_key, instance_id,
-            instance_path)` route per instance path. Normal template creation, recovery, and ad hoc fallback use the same
-            admission function. Exact replay of the complete identity is idempotent. A different identity at an owned path is a
-            hard conflict; presence requires the complete identity; removal must match the complete stored owner before either
-            persisted or in-memory authority is changed. All identity and authored-namespace collisions are validated before
-            event paths, observers, or routes mutate. The static
-            witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
-            event or static flow.
-            That paired witness drives semantic relation proof, runtime route inclusion, and ambiguity enumeration. Exact duplicate proofs collapse deterministically;
-            distinct proofs for one relation are a typed ambiguity and produce an issue, not an edge. Authorization-conflict
-            enumeration also evaluates every declared materializable event independently of current producer-census membership,
+            One semanticview relation resolver evaluates each producer-or-input/consumer pair exactly once. It may return
+            exact or pattern only when producer and consumer have the same canonical flow identity, always with boundary
+            same_flow. A different flow identity returns no typed-pubsub relation regardless of canonical event-name equality,
+            relative path shape, filesystem ancestry, or wildcard match. Cross-flow delivery authority exists only as an
+            immutable compiled inter_flow_connect edge lowered from output/input pins and the exact nearest-LCA schema.yaml
+            connect row. Contract lookup, schema lookup, endpoint census, boot verification, topology, RouteTable/EventBus,
+            and describe projections MUST consume this same distinction and MUST NOT search ancestors, descendants, or the
+            all-flow catalog as delivery authority. Slash-qualified node, timer, or agent patterns are rejected with a teaching
+            error naming pins/connect. Flow-local exact and slash-free pattern subscriptions remain valid. RouteTable remains
+            the lifecycle identity owner for concrete template instances, but materialization can only specialize an already
+            admitted same-flow relation or compiled connect edge; it cannot broaden one into another authored flow.
+            Relation enumeration also evaluates every declared same-flow materializable event independently of current producer-census membership,
             because low-level event.publish can publish a declared event without an authored static producer endpoint. The
             complete ordered relation result is consumed by static topology projection, boot verification, and runtime route
-            admission. Typed authorization ambiguity is a hard invalidity: runtime contract validation, route-table construction,
+            admission. Typed relation ambiguity is a hard invalidity: runtime contract validation, route-table construction,
             and EventBus construction fail closed without runtime delivery authority, including when a caller supplies a prebuilt
             route table. Canonical name equality alone never authorizes a cross-flow edge.
           connect_source_rule: Every inter_flow_connect edge preserves exact admitted schema.yaml file:line provenance; no path reconstruction is allowed. Missing provenance fails with connect_source_location_missing.
@@ -11492,15 +11476,15 @@ flow_model:
             recipient. Receiver resolution.mode fan-out remains non-runnable under #1934. Invalid or unlowerable
             declarations appear only as typed issues and never as executable edges.
           identity_rule: >
-            Every endpoint and edge carries authored, local, and canonical event identity plus stable flow/package
+            Every endpoint and edge carries authored, local, and canonical event identity plus stable filesystem-flow
             scope. Declared-input and fan-in associations fail closed on zero or multiple matches.
           qualified_cross_flow_subscription_retirement: >
             A concrete qualified subscription that crosses a flow boundary is a hard invalidity and never creates a
             route, recipient, or topology edge. The authored endpoint census may retain exact file:line evidence only
             to produce the retirement diagnostic. Inter-flow delivery must use declared output/input pins plus parent
-            connect, while the receiver subscribes to its local event identity. Imported wildcard subscriptions are a
-            distinct typed relation governed by wildcard_subscription_scope; raw exact qualification is never an
-            authorization proof or compatibility path.
+            connect, while the receiver subscribes to its local event identity. Slash-qualified wildcard subscriptions
+            are rejected by the same boundary rule; neither exact qualification nor wildcard ancestry is authorization
+            proof or a compatibility path.
           supported_outputs:
           - swarm describe routes
           - swarm describe routes --json
@@ -11548,7 +11532,7 @@ flow_model:
       a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
       or trigger/complete the flow appear in pins.
-    routing_authority: Output event pins are the activation switch for source/target pin routing. Input event pins define the allowed receiving interface and receiver-owned typed resolution. Parent package connect entries own common inter-flow topology. Runtime implementation and flow migration must consume flow_model.composition_routing and engine.cross_flow_routing as the authoritative source for composed route semantics.
+    routing_authority: Output event pins are the activation switch for source/target pin routing. Input event pins define the allowed receiving interface and receiver-owned typed resolution. Exact least-common-ancestor FlowNode schema.yaml connect entries own inter-flow topology. Runtime implementation and flow migration must consume flow_model.composition_routing and engine.cross_flow_routing as the authoritative source for composed route semantics.
   required_agents:
     description: 'Each flow has effective required-agent facts. If schema.required_agents is omitted, the platform derives
       those facts from same-scope agents.yaml map keys plus subscriptions and emit_events. If schema.required_agents is
@@ -11570,11 +11554,12 @@ flow_model:
       entity table columns. Input data pins are validated against available outputs. Two flows writing the same field is a
       conflict (boot error).
   cross_flow_events:
-    rule: An event schema is defined ONCE, in the flow that emits it. Consuming flows reference it by absolute path — they
-      do NOT redefine the schema. If both flows need the schema for validation, the consuming flow imports it by reference,
-      not by copy.
+    rule: An event schema is defined once in the flow that emits it. A consuming flow declares an input pin, and the nearest
+      common ancestor schema.yaml connects the producer output pin to that receiver input. The compiled connect edge carries
+      the producer schema to the receiver projection; absolute subscription paths, ancestor lookup, all-flow lookup, and
+      schema restatement are not cross-flow authority.
     enforcement: >-
-      Intra-package connect consumers compile their effective payload view from
+      Cross-flow connect consumers compile their effective payload view from
       the exact connected producer declaration before any generic same-name
       declaration lookup. Schema registry, semantic event proof, executable-node
       proof, emit lowering, pin routing, boot verification, instance-source
@@ -11588,8 +11573,8 @@ flow_model:
       carries may add delivery-owned fields to the effective consumer projection;
       payload aliases copy the producer field's complete admitted semantics,
       while generated.uuid and event.id lower with intrinsic UUID semantics and
-      explicit derived provenance. Cross-package boundary snapshots are a
-      distinct frozen contract concept and are not classified as intra-package
+      explicit derived provenance. Cross-flow boundary snapshots are a
+      distinct frozen contract concept and are not classified as receiver-authored
       restatements.
     connected_owner_cardinality: >-
       One effective receiver event has exactly one connected producer schema
@@ -12486,10 +12471,6 @@ flow_model:
         - live subscription list used to invent missing connect topology
         - any authored producer emit.target or emit.broadcast field
         - select_entity used to repair an in-topology broadcast
-    pin_alias_interface_adaptation:
-      rule: |
-        Import-boundary `requires`/`bind` pin aliases from #1452 are lower-level name-adaptation inputs to connect lowering. They may rename the parent-facing input/output pin, but they do not rewrite source event identity, replay scope, target metadata, receiver resolution, correlation, or cardinality.
-      owner_consumed: platform-spec.yaml#flow_model.import_boundary.pin_alias_interface_adaptation
     producer_routing_retirement:
       role: |
         `emit.target` and `emit.broadcast` are retired on presence in every emit surface. Producers own event identity and payload only; typed consumers, parent connect, receiver resolution/reply, structural routes, and accepted external boundaries own recipient identity and cardinality.
@@ -12498,8 +12479,7 @@ flow_model:
       runtime_route_consumption: '#1473 established EventBus publish/preflight/outbox consumption; #1474 closed agent/node parity; #2114 closed selected-contract frontier/history consumption through the compiled evaluator; #1466 is closed; and #2086 supersedes #1475 and closes producer target/broadcast completely.'
       parser_model_support: '#2086 closes strict parser/model retirement for emit.target and emit.broadcast on every authored emit surface; no follow-up parser or runtime interpreter remains.'
       policy_credential_resolution: '#1453 remains separate.'
-      wildcard_scoping: '#1454 remains separate.'
-      final_e2e_package_proof: '#1455 proof lives in internal/runtime/bus/sealed_flow_package_fixture_test.go and internal/runtime/conformance/sealed_flow_package_conformance_test.go.'
+      wildcard_scoping: 'Closed by the same-flow-only typed-pubsub rule; cross-flow wildcard ancestry is retired and cross-flow delivery uses compiled connect.'
       route_explain_describe: '#1442 tooling remains separate.'
       agent_output_pin_static_verify: '#1444 closes static bootverify coverage for agent emit_events under composition-first route authority; runtime generated-agent route-plan admission closed by #1474.'
 versioning:
@@ -17075,7 +17055,7 @@ agent_identity_model:
       owner: contracts.AgentDeclarationRecord and semanticview.AgentExecutionSemanticScope
       source: >
         Strict contract loading emits one immutable semantic record for each physical agents.yaml declaration. The
-        private physical key is the exact source file plus local declaration key; consumers receive the exact package,
+        private physical key is the exact source file plus local declaration key; consumers receive the exact declaration identity,
         declaration owner URI, owning flow or explicit root absence, local declaration key, and effective declaration.
       invariant_ids:
         runtime.agent.declaration_execution_scope:
@@ -17089,16 +17069,16 @@ agent_identity_model:
             - path: internal/runtime/semanticview/agent_name_ownership_guard_test.go
               test: TestDeclaredAgentNameOwnershipBoundary
       ownership_derivation: >
-        Package ownership is established only by exact structural containment beneath a declared flow directory or by
-        an already-established parent package owning-flow fact. The number of flows declared by a parent package is not
-        ownership evidence: an unrelated child package remains root-owned even when its parent declares exactly one flow.
+        Declaration ownership is established only by the immutable filesystem FlowNode containing the declaration.
+        Directory ancestry outside the admitted FlowNode trie, declaration counts, and leaf-name equality are never
+        ownership evidence.
       owner_grouped_consumption: >
         EventBus route templates and static routes, inferred required-agent facts, explicit required-agent fulfillment,
         and generated authoring projections consume the complete canonical declaration set grouped by exact OwnerFlowID.
-        They preserve each declaration's physical package, owner URI, local key, effective public name, and source file.
+        They preserve each declaration's typed identity, owner URI, local key, effective public name, and source file.
         They MUST NOT select declarations by physical source layer, flatten distinct physical declarations into a map
         keyed only by local ID, or substitute a flow-local agents.yaml map. Multiple declarations for one required-agent
-        role are ambiguous and fail closed; they are never resolved by package order or a preferred source layer.
+        role are ambiguous and fail closed; they are never resolved by filesystem order or a preferred source layer.
       execution_agreement: >
         Source admission combines one declared record with one concrete live identity. The declared name and owner URI,
         owning flow presence or explicit root absence, flow mode, and concrete route MUST agree exactly. Static and
@@ -19732,8 +19712,8 @@ static_analyzer:
         rule: Root-level handlers or agents referencing a root-declared event by local name keep only the root declaration alive.
       connected_cross_flow_usage:
         rule: A typed compiled connect edge from the declaring output to the consuming input keeps the declaration alive.
-          Raw qualified exact subscription text is not a liveness proof. Governed imported wildcard observation counts only
-          through its admitted typed authorization.
+          Raw qualified exact or slash-qualified wildcard subscription text is not a liveness proof. Cross-flow liveness
+          counts only through the immutable compiled connect edge.
       external_annotations:
         rule: "Accepted `swarm.source` beginning with external or platform, or accepted external `swarm.consumer` metadata on the declared event entry, counts as an active external role. Internal topology roles must be derived from topology owners and fail closed if restated through `swarm.*`."
       same_flow_timer_references:
@@ -36118,7 +36098,7 @@ filesystem_source_model:
   flow_tree:
     root_path: .
     derivation: |
-      Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its slash-relative path from the selected root. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
+      Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
     schema_owner: |
       schema.yaml owns mode, activation, ingress, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. There is no connect.yaml or manifest-owned routing surface.
     discovery_output: |
@@ -36159,7 +36139,7 @@ filesystem_source_model:
     owner: internal/sourceartifact projection lifecycle
     mount: /opt/swarm/source
     rule: |
-      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one exact process/runtime-context instance. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the bundle binding before prerequisite or system-workspace creation, including a single-context serve; Docker system container names and runtime identities therefore cannot reuse mounts from another source artifact. Shutdown releases only the projection owned by that exact process/runtime context. Hash-keyed queues and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
+      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by exact owned-name removal and a released lifecycle cannot restart. Hash-only identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
   retired_surface:
     behavior: fail_closed_with_teaching_error_or_absent_public_surface
     no_compatibility: true

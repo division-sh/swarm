@@ -168,7 +168,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	}
 	assertReleaseDockerEvidence(t, records)
 	assertReleaseExternalProcessesExited(t, fakeRoot)
-	assertReleasePersistentWorkspacesPreserved(t, fakeRoot)
+	assertReleaseProjectionWorkspacesReleased(t, fakeRoot, records)
 }
 
 func exactReleaseDockerRecord(t *testing.T, records []fakeDockerRecord, class string) fakeDockerRecord {
@@ -434,7 +434,7 @@ func assertReleaseExternalProcessesExited(t *testing.T, root string) {
 	}
 }
 
-func assertReleasePersistentWorkspacesPreserved(t *testing.T, root string) {
+func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, records []fakeDockerRecord) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, "state.json"))
 	if err != nil {
@@ -444,24 +444,67 @@ func assertReleasePersistentWorkspacesPreserved(t *testing.T, root string) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode fake Docker state: %v", err)
 	}
-	seen := map[string]string{}
-	for name, container := range state.Containers {
-		kind, _, ok := releaseE2EContainerIdentity(name)
-		if !ok {
-			t.Fatalf("persistent workspace %q does not have canonical bundle-scoped identity", name)
+	if len(state.Containers) != 0 {
+		t.Fatalf("projection-scoped containers survived process shutdown: %#v", state.Containers)
+	}
+	created := map[string]string{}
+	createdCount := map[string]int{}
+	removed := map[string]int{}
+	processScope := ""
+	projectionRoot := ""
+	for _, record := range records {
+		switch record.Class {
+		case "container_create":
+			name := dockerOptionValue(record.Args, "--name")
+			kind, scope, ok := releaseE2EContainerIdentity(name)
+			if !ok {
+				continue
+			}
+			if prior := created[kind]; prior != "" && prior != name {
+				t.Fatalf("projection workspace kind %q changed identity within one process: %q then %q", kind, prior, name)
+			}
+			if processScope == "" {
+				processScope = scope
+			} else if scope != processScope {
+				t.Fatalf("projection workspace %q scope = %q, want shared process scope %q", name, scope, processScope)
+			}
+			created[kind] = name
+			createdCount[kind]++
+			for index := 0; index+1 < len(record.Args); index++ {
+				if record.Args[index] != "-v" {
+					continue
+				}
+				mount := record.Args[index+1]
+				if !strings.HasSuffix(mount, ":/opt/swarm/source:ro") {
+					continue
+				}
+				root := strings.TrimSuffix(mount, ":/opt/swarm/source:ro")
+				if projectionRoot == "" {
+					projectionRoot = root
+				} else if root != projectionRoot {
+					t.Fatalf("projection workspace %q mounted %q, want exact process root %q", name, root, projectionRoot)
+				}
+			}
+		case "container_remove":
+			if len(record.Args) == 3 && record.Args[0] == "rm" && record.Args[1] == "--force" {
+				removed[record.Args[2]]++
+			}
 		}
-		if prior := seen[kind]; prior != "" {
-			t.Fatalf("persistent workspace kind %q has duplicate containers %q and %q", kind, prior, name)
-		}
-		if !container.Running {
-			t.Fatalf("persistent workspace %q state = %#v, want preserved and running", name, container)
-		}
-		seen[kind] = name
 	}
 	for _, kind := range []string{"scaffold", "system", "agent"} {
-		if seen[kind] == "" {
-			t.Fatalf("persistent workspace kind %q is missing; state=%#v", kind, state.Containers)
+		name := created[kind]
+		if name == "" {
+			t.Fatalf("projection workspace kind %q was not created; records=%#v", kind, records)
 		}
+		if removed[name] != createdCount[kind] {
+			t.Fatalf("projection workspace %q create/removal counts = %d/%d, want exact teardown after every lifecycle", name, createdCount[kind], removed[name])
+		}
+	}
+	if projectionRoot == "" {
+		t.Fatal("projection workspace records omitted the read-only source mount")
+	}
+	if _, err := os.Stat(projectionRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("runtime source projection %q survived container teardown: %v", projectionRoot, err)
 	}
 }
 

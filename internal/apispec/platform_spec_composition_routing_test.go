@@ -107,7 +107,9 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		}
 	}
 
-	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_interface_adaptation", "owner_consumed"), "pin_alias_interface_adaptation")
+	if hasMappingKey(composition, "pin_alias_interface_adaptation") {
+		t.Fatal("composition_routing retains retired pin alias interface adaptation")
+	}
 	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "role"), "retired on presence")
 	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "migration"), "fails strict admission")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 established EventBus publish/preflight/outbox")
@@ -282,7 +284,7 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "parent_route", "read_rule"), "no lowered parent connect route applies")
 
 	pinAuthority := mustYAMLPath(t, root, "flow_model", "pins", "routing_authority")
-	assertScalarContains(t, pinAuthority, "Parent package connect entries own common inter-flow topology")
+	assertScalarContains(t, pinAuthority, "least-common-ancestor FlowNode schema.yaml connect entries own inter-flow topology")
 	assertScalarContains(t, pinAuthority, "flow_model.composition_routing")
 	assertScalarContains(t, mustYAMLPath(t, root, "flow_model", "pins", "output_event_pins", "description"), "no lowered connect route applies")
 
@@ -333,14 +335,14 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 
 	routingDerivation := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation")
 	interFlow := mustMappingValue(t, routingDerivation, "inter_flow_connect")
-	assertScalarContains(t, interFlow, "Qualified exact subscriptions cannot cross a flow boundary")
-	assertScalarContains(t, interFlow, "bind.observe")
+	assertScalarContains(t, interFlow, "Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary")
+	assertScalarContains(t, interFlow, "slash-qualified wildcard subscriptions cannot cross a flow boundary")
 
 	resolutionRules := mustYAMLPath(t, root, "engine", "event_identity", "resolution_rules")
 	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "already-normalized exact identity only when it resolves to that same flow")
 	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "Exact subscriptions never cross a flow boundary")
-	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "bind.observe")
-	assertScalarContains(t, mustMappingValue(t, resolutionRules, "handler_lookup_localizes"), "governed import-boundary wildcard observation")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "Wildcard subscriptions are slash-free and flow-local")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "handler_lookup_localizes"), "admitted same-flow typed pub/sub")
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "ambiguity"), "explicit event-centric parent connect")
@@ -352,7 +354,8 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "required_agent_fulfillment"), "not executable subscribers")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "required_agent_fulfillment"), "or runtime route authority")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "inter_flow_delivery"), "parent connect")
-	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "bind.observe")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "slash-free and flow-local")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "nearest-LCA connect")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "already-normalized same-scope identity")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "Cross-boundary slash-qualified and full-URI exact values are invalid")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "timer_event_references"), "Always local exact names")
@@ -363,7 +366,7 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 
 	contractMerger := mustYAMLPath(t, root, "engine", "contract_merger")
 	assertScalarContains(t, mustMappingValue(t, contractMerger, "subscription_resolution"), "fail closed rather than resolving globally")
-	assertScalarContains(t, mustMappingValue(t, contractMerger, "subscription_resolution"), "wildcard_subscription_scope")
+	assertScalarContains(t, mustMappingValue(t, contractMerger, "subscription_resolution"), "exact same flow identity")
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	resolveSubscriptions := mustSequenceMappingByScalarField(t, bootSteps, "name", "resolve_subscriptions")
@@ -372,7 +375,7 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 
 	eventCatalog := mustYAMLPath(t, root, "static_analyzer", "slice_5_dead_declared_event_schema_surface", "active_role_carriers")
 	assertScalarContains(t, mustYAMLPath(t, eventCatalog, "connected_cross_flow_usage", "rule"), "typed compiled connect edge")
-	assertScalarContains(t, mustYAMLPath(t, eventCatalog, "connected_cross_flow_usage", "rule"), "Raw qualified exact subscription text is not a liveness proof")
+	assertScalarContains(t, mustYAMLPath(t, eventCatalog, "connected_cross_flow_usage", "rule"), "Raw qualified exact or slash-qualified wildcard subscription text is not a liveness proof")
 
 	lowered := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "lowered_connect_route_plan_consumption")
 	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "selected_contract_runfork_readiness"), "Closed by #2114")

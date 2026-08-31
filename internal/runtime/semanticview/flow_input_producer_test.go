@@ -170,15 +170,15 @@ func TestResolveFlowInputProducer_ClassifiesPlatformSource(t *testing.T) {
 	}
 }
 
-func TestResolveFlowInputProducer_ClassifiesInternalTopologyWithoutAutoWirePattern(t *testing.T) {
+func TestResolveFlowInputProducer_DoesNotClassifyUnconnectedSiblingOutput(t *testing.T) {
 	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.requested",
 	}, nil)
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
-	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerInternalTopology) {
-		t.Fatalf("evidence = %#v, want internal topology producer", resolution.Evidence)
+	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerInternalTopology) || resolution.HasEvidence() {
+		t.Fatalf("evidence = %#v, unconnected sibling output must not prove child input readiness", resolution.Evidence)
 	}
 	if len(resolution.ProducerPatterns()) != 0 {
 		t.Fatalf("patterns = %#v, want no sibling-output auto-wire pattern", resolution.ProducerPatterns())

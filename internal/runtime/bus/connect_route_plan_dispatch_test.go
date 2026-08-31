@@ -58,6 +58,21 @@ func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.
 	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.authorizations)
 }
 
+func (s providerOutputAuthorizedTestSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	if entry, key, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
+		return entry, key, true
+	}
+	eventType = strings.TrimSpace(eventType)
+	for _, authorization := range s.authorizations {
+		if authorization.Event() != eventType {
+			continue
+		}
+		entry, ok := s.Source.EventEntry(eventType)
+		return entry, eventType, ok
+	}
+	return runtimecontracts.EventCatalogEntry{}, "", false
+}
+
 type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
 	flowInstances               []ActiveFlowInstanceDescriptor

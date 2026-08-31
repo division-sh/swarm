@@ -64,6 +64,35 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 	}
 }
 
+func TestWorkflowEventPolicyDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.done": {RuntimeHandling: "consuming"},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+
+	policy := deriveWorkflowEventPolicy(semanticview.Wrap(bundle), pipelineFlowPathNode(t, "child", "listener"), "task.done")
+	if policy.Consume || policy.VisibleDownstream {
+		t.Fatalf("child event policy = %#v, want no policy from another flow's declaration", policy)
+	}
+}
+
 func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProducerScopedEvent(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
