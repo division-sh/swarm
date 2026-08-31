@@ -3,3 +3,4 @@ types:
     open_gates: [text]
   IntakeItem:
     id: text
+    score: number

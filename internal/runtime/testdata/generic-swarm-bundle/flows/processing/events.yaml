@@ -1,6 +1,7 @@
 item.review_requested:
   emitter:
     - intake-router
+  score: number
 item.completed:
   emitter:
     - processing-node

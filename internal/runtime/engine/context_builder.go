@@ -38,7 +38,7 @@ func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 	materializedState.StateCarrier.Fields = materializedFields
 	base.Entity = values.Wrap(materializedState.EntityContext())
 	base.PlatformEntity = values.Wrap(materializedState.PlatformEntityContext(contextFlowInstance(input.State, input.Event, input.FlowID)))
-	base.FlowID = firstNonEmpty(strings.TrimSpace(input.State.WorkflowName), strings.TrimSpace(input.FlowID))
+	base.FlowID = firstNonEmpty(strings.TrimSpace(input.FlowID), strings.TrimSpace(input.State.WorkflowName))
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Fields))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))

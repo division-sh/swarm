@@ -19,9 +19,13 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		t.Fatalf("unexpected fan_out spec: %+v", created.FanOut)
 	}
 	fannedOut := previewHandler(t, bundle, "intake-router", "item.created", map[string]any{
-		"item_id":   "item-123",
-		"priority":  "urgent",
-		"items":     []map[string]any{{"id": "a"}, {"id": "b"}, {"id": "c"}},
+		"item_id":  "item-123",
+		"priority": "urgent",
+		"items": []map[string]any{
+			{"id": "a", "score": 70.0},
+			{"id": "b", "score": 80.0},
+			{"id": "c", "score": 90.0},
+		},
 		"entity_id": "item-123",
 	}, runtimepipeline.WorkflowState{
 		EntityID: "item-123",
@@ -42,6 +46,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	}
 	completed := previewHandler(t, bundle, "intake-router", "item.processed", map[string]any{
 		"entity_id":        "item-123",
+		"score":            80.0,
 		"expected_workers": 1,
 		"result":           map[string]any{"worker": "done"},
 		"source":           "worker-a",
