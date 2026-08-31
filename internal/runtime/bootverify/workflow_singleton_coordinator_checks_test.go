@@ -177,7 +177,7 @@ func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersAndIntrins
 		wantTarget string
 	}{
 		{
-			name: "group_by key",
+			name: "group_by source",
 			entities: `
 coordinator_state:
   verticals:
@@ -191,11 +191,11 @@ coordinator-node:
   event_handlers:
     job.received:
       group_by:
-        items_from: payload.job
-        key: entity.verticals
+        items_from: entity.verticals
+        key: status
         store_as: metadata.grouped
 `,
-			wantKind:   "entity_read.group_by.key",
+			wantKind:   "entity_read.group_by.items_from",
 			wantTarget: "entity.verticals",
 		},
 		{
