@@ -91,7 +91,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints",
 		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
 		"receiver input same-named required payload source or exact resolution.from override and resolution mode",
-		"import-boundary event bindings",
+		"finite filesystem FlowNode ownership and exact child-flow endpoints",
 		"explicit receiver-event rename",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "consumes"), want) {
@@ -498,6 +498,13 @@ func TestPlatformSpecCompositionRoutingRejectsStaleParentRouteAuthorityPhrases(t
 		"checks only sibling flow output pins",
 		"pin target mechanism",
 		"explicit_target_wins",
+		"FlowPackageConnect",
+		"package_key:",
+		"package-root",
+		"package-visible",
+		"intra_package_event_consumer_projection",
+		"bind.inputs",
+		"bind.outputs",
 	} {
 		if strings.Contains(text, phrase) {
 			t.Fatalf("platform-spec.yaml still contains stale composition-routing authority phrase %q", phrase)
