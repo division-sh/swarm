@@ -243,7 +243,9 @@ func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
 		"manager_replay_count":         r.ManagerReplayCount,
 		"manager_skip_count":           r.ManagerSkipCount,
 		"manager_drop_count":           r.ManagerDropCount,
-		"failure":                      runtimefailures.CloneEnvelope(r.Failure),
+	}
+	if r.Failure != nil {
+		payload["failure"] = *runtimefailures.CloneEnvelope(r.Failure)
 	}
 	if r.Snapshot.InspectionComplete {
 		payload["startup_blocking_timer_count"] = r.Snapshot.StartupBlockingTimers
