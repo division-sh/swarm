@@ -25,11 +25,33 @@ import (
 
 const operatorChannelSupportedSurfaceToken = "operator-channel-supported-surface-token"
 
-type operatorChannelCredentialCurrentness struct{ current *bool }
+type operatorChannelCredentialCurrentness struct {
+	current    *bool
+	currentErr *error
+}
+
+type failNthOperatorChannelCredentialCurrentness struct {
+	calls  int
+	failAt int
+}
+
+func (c *failNthOperatorChannelCredentialCurrentness) CurrentValueMatchesSeal(_ context.Context, evidence runtimecredentials.ValueEvidence) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	c.calls++
+	if c.calls == c.failAt {
+		return false, errInjectedCredentialCurrentnessRead
+	}
+	return true, nil
+}
 
 func (c operatorChannelCredentialCurrentness) CurrentValueMatchesSeal(_ context.Context, evidence runtimecredentials.ValueEvidence) (bool, error) {
 	if err := evidence.Validate(); err != nil {
 		return false, nil
+	}
+	if c.currentErr != nil && *c.currentErr != nil {
+		return false, *c.currentErr
 	}
 	return c.current == nil || *c.current, nil
 }
@@ -44,7 +66,127 @@ func operatorChannelProviderEvidence() runtimecredentials.ValueEvidence {
 var (
 	errInjectedOperatorChannelProofWrite      = errors.New("injected operator channel proof write failure")
 	errInjectedOperatorChannelProofCompletion = errors.New("injected operator channel proof completion failure")
+	errInjectedCredentialCurrentnessRead      = errors.New("injected credential currentness read failure")
 )
+
+func TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremonySelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			identity := operatorChannelContractIdentity("currentness-read-failure-" + backend)
+			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var currentErr error
+			service, err := operatorchannel.NewService(
+				fixture.store,
+				proofs,
+				operatorChannelCredentialCurrentness{currentErr: &currentErr},
+				[]operatorchannel.InterfaceIdentity{identity},
+				uuid.NewString(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 8, 31, 20, 0, 0, 0, time.UTC)
+			if _, _, err := service.Bootstrap(ctx, now); err != nil {
+				t.Fatal(err)
+			}
+			op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				"currentness-read-failure-key", "currentness-read-failure-request", "",
+				operatorChannelProviderEvidence(), false, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settlement, err := fixture.settle(ctx, operatorChannelContractClaim(
+				op, operatorchannel.ConversationScopeDirect, "account-currentness-read", "conversation-currentness-read", uuid.NewString(),
+			), now.Add(time.Second))
+			if err != nil || settlement.Operation.State != operatorchannel.StateAwaitingConfirmation {
+				t.Fatalf("claim settlement = %#v err=%v", settlement, err)
+			}
+
+			currentErr = errInjectedCredentialCurrentnessRead
+			observed, binding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(2*time.Second))
+			if !errors.Is(err, errInjectedCredentialCurrentnessRead) || observed != settlement.Operation || binding != (operatorchannel.Binding{}) {
+				t.Fatalf("failed currentness observation = op:%#v binding:%#v err:%v", observed, binding, err)
+			}
+			persisted, err := service.GetOperation(ctx, op.OperationID)
+			if err != nil || persisted != settlement.Operation {
+				t.Fatalf("persisted operation after observation failure = %#v err=%v", persisted, err)
+			}
+
+			currentErr = nil
+			confirmed, confirmedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
+			if err != nil || confirmed.State != operatorchannel.StateBound || confirmedBinding.Revision != 1 {
+				t.Fatalf("retried confirmation = op:%#v binding:%#v err:%v", confirmed, confirmedBinding, err)
+			}
+
+			currentErr = errInjectedCredentialCurrentnessRead
+			if _, err := service.CurrentBinding(ctx, identity); !errors.Is(err, errInjectedCredentialCurrentnessRead) || errors.Is(err, operatorchannel.ErrCredentialStale) {
+				t.Fatalf("trusted binding observation error = %v", err)
+			}
+			if _, err := service.Readback(ctx); !errors.Is(err, errInjectedCredentialCurrentnessRead) || errors.Is(err, operatorchannel.ErrCredentialStale) {
+				t.Fatalf("readback observation error = %v", err)
+			}
+		})
+	}
+}
+
+func TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilitySelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			identity := operatorChannelContractIdentity("proof-currentness-read-failure-" + backend)
+			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentness := &failNthOperatorChannelCredentialCurrentness{failAt: 3}
+			service, err := operatorchannel.NewService(fixture.store, proofs, currentness,
+				[]operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 8, 31, 20, 15, 0, 0, time.UTC)
+			if _, _, err := service.Bootstrap(ctx, now); err != nil {
+				t.Fatal(err)
+			}
+			op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+				"proof-currentness-read-failure-key", "proof-currentness-read-failure-request", "",
+				operatorChannelProviderEvidence(), true, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settlement, err := fixture.settle(ctx, operatorChannelContractClaim(
+				op, operatorchannel.ConversationScopeDirect, "account-proof-currentness", "conversation-proof-currentness", uuid.NewString(),
+			), now.Add(time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			confirmed, binding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(2*time.Second))
+			if !errors.Is(err, errInjectedCredentialCurrentnessRead) || confirmed.State != operatorchannel.StateBound || confirmed.ProofStatus != operatorchannel.ProofPending || binding.Revision != 1 {
+				t.Fatalf("proof currentness observation failure = op:%#v binding:%#v err:%v", confirmed, binding, err)
+			}
+			responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+			if err != nil || len(responsibilities) != 1 || responsibilities[0].Operation.ProofStatus != operatorchannel.ProofPending {
+				t.Fatalf("pending responsibility after observation failure = %#v err=%v", responsibilities, err)
+			}
+
+			replayed, replayedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
+			if err != nil || replayed.State != operatorchannel.StateBound || replayed.ProofStatus != operatorchannel.ProofActive || replayedBinding.Revision != binding.Revision {
+				t.Fatalf("proof currentness retry = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
+			}
+			responsibilities, err = fixture.store.ListPendingProofResponsibilities(ctx)
+			if err != nil || len(responsibilities) != 0 {
+				t.Fatalf("responsibility after retry = %#v err=%v", responsibilities, err)
+			}
+		})
+	}
+}
 
 type failOnceOperatorChannelProofStore struct {
 	delegate operatorchannel.ProofStore

@@ -108,7 +108,10 @@ func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Bi
 			continue
 		}
 		current, err := s.credentials.CurrentValueMatchesSeal(ctx, proof.ProviderCredential)
-		if err != nil || !current {
+		if err != nil {
+			return Principal{}, nil, fmt.Errorf("observe provider credential for retained proof: %w", err)
+		}
+		if !current {
 			continue
 		}
 		binding, err := s.store.BindOperatorChannelFromProof(ctx, BootBindRequest{PrincipalID: principal.ID, Interface: identity, Proof: proof, RequestedAt: now})
@@ -164,8 +167,11 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 		return Operation{}, fmt.Errorf("%w: provider credential evidence is required", ErrInvalidRequest)
 	}
 	current, err := s.credentials.CurrentValueMatchesSeal(ctx, providerCredential)
-	if err != nil || !current {
-		return Operation{}, errors.Join(fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale), err)
+	if err != nil {
+		return Operation{}, fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
+	}
+	if !current {
+		return Operation{}, fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
 	}
 	principal, err := s.Principal()
 	if err != nil {
@@ -211,11 +217,12 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		return Operation{}, Binding{}, err
 	}
 	providerCredentialCurrent := false
-	var currentErr error
 	if approve && !operation.State.Terminal() {
 		current, err := s.credentials.CurrentValueMatchesSeal(ctx, operation.ProviderCredential)
-		currentErr = err
-		providerCredentialCurrent = currentErr == nil && current
+		if err != nil {
+			return operation, Binding{}, fmt.Errorf("observe provider credential before identity confirmation: %w", err)
+		}
+		providerCredentialCurrent = current
 	}
 	op, binding, err := s.store.ConfirmChannelBinding(ctx, ConfirmRequest{
 		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
@@ -223,9 +230,6 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		ProviderCredentialCurrent: providerCredentialCurrent, ConfirmedAt: now,
 	})
 	if err != nil {
-		if errors.Is(err, ErrCredentialStale) {
-			return op, binding, errors.Join(err, currentErr)
-		}
 		if operation.Kind == OperationReconnect && errors.Is(err, ErrConflict) && strings.Contains(err.Error(), "reconnect claimant differs") {
 			return op, binding, fmt.Errorf("%w; run swarm channel rebind <provider> --credential-stdin to bind a different claimant", err)
 		}
@@ -348,8 +352,11 @@ func (s *Service) materializeProof(ctx context.Context, responsibility ProofResp
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
 	current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, proof.ProviderCredential)
-	if currentErr != nil || !current {
-		err := errors.Join(fmt.Errorf("%w: provider credential changed before proof materialization", ErrCredentialStale), currentErr)
+	if currentErr != nil {
+		return fmt.Errorf("observe provider credential before proof materialization: %w", currentErr)
+	}
+	if !current {
+		err := fmt.Errorf("%w: provider credential changed before proof materialization", ErrCredentialStale)
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, responsibility.Operation.ProofID, responsibility.Operation.ProofRevision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
@@ -601,8 +608,11 @@ func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity
 			continue
 		}
 		current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, binding.ProviderCredential)
-		if currentErr != nil || !current {
-			return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale, currentErr)
+		if currentErr != nil {
+			return binding, errors.Join(ErrBindingUnavailable, currentErr)
+		}
+		if !current {
+			return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
 		}
 		return binding, nil
 	}
@@ -674,7 +684,10 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			continue
 		}
 		credentialCurrent, credentialErr := s.credentials.CurrentValueMatchesSeal(ctx, binding.ProviderCredential)
-		if credentialErr != nil || !credentialCurrent {
+		if credentialErr != nil {
+			return nil, fmt.Errorf("observe provider credential for channel readback: %w", credentialErr)
+		}
+		if !credentialCurrent {
 			read.Status, read.Reason = BindingStale, "provider credential changed; reconnect with fresh credentials"
 			out = append(out, read)
 			continue
