@@ -1903,7 +1903,7 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 		}
 	}
 	payload := mustJSON(map[string]any{
-		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"failure": *decision.Failure, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if rt.Bus != nil {
 		recoveryEvent, publishErr := newStandaloneRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now(), rt.ExecutionPosture)
