@@ -40,6 +40,7 @@ func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 				ConsumerID:   "consumer",
 				FlowID:       "child",
 				FlowPath:     "child",
+				LocalEvents:  map[string]struct{}{"task.done": {}},
 				Authored:     tc.authored,
 			})
 			if admission.Class() != tc.wantClass || admission.Failure() != tc.wantFail {
@@ -47,6 +48,33 @@ func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 			}
 			if got := admission.Admitted(); got != (tc.wantFail == "") {
 				t.Fatalf("Admitted() = %t, want %t", got, tc.wantFail == "")
+			}
+		})
+	}
+}
+
+func TestClassifyAuthoredSubscriptionRejectsUndeclaredReceiverExactForEveryConsumerKind(t *testing.T) {
+	for _, kind := range []AuthoredSubscriptionConsumerKind{
+		AuthoredSubscriptionConsumerNode,
+		AuthoredSubscriptionConsumerAgent,
+		AuthoredSubscriptionConsumerTimer,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+				ConsumerKind: kind,
+				ConsumerID:   "listener",
+				FlowID:       "child",
+				FlowPath:     "child",
+				LocalEvents:  map[string]struct{}{"child.ready": {}},
+				Authored:     "root.started",
+			})
+			if admission.Admitted() || admission.Failure() != AuthoredSubscriptionFailureReceiverEventMissing {
+				t.Fatalf("admission = class %q failure %q message %q", admission.Class(), admission.Failure(), admission.Message())
+			}
+			for _, want := range []string{"receiver-local event", "input pin", "nearest common ancestor schema.yaml"} {
+				if !strings.Contains(admission.Message(), want) {
+					t.Fatalf("message = %q, want %q", admission.Message(), want)
+				}
 			}
 		})
 	}

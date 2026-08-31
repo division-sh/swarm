@@ -167,6 +167,7 @@ type DockerConfig struct {
 	EntityWorkdir         string
 	BundleHash            string
 	BundleScope           string
+	ProcessScope          string
 	SourceProjectionID    string
 }
 
@@ -430,14 +431,17 @@ func (m *DockerManager) BindSourceProjection(projection *sourceartifact.RuntimeP
 	cfg.SourceProjection = projection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = projectionID
-	cfg.BundleScope = projectionScopeKey(cfg.BundleHash, projectionID)
+	cfg.BundleScope = bundleScopeKey(cfg.BundleHash)
+	cfg.ProcessScope = projectionScopeKey(cfg.BundleHash, projectionID)
 	if cfg.BundleScope != "" {
-		cfg.ScaffoldContainer = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldContainer, "scaffold")
-		cfg.SystemContainer = scopedRuntimeName(cfg.BundleScope, cfg.SystemContainer, "system")
 		cfg.ScaffoldVolume = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldVolume, "scaffold")
 		cfg.SystemEntitiesVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemEntitiesVolume, "entities")
 		cfg.SystemNginxVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemNginxVolume, "nginx")
 		cfg.SystemSystemdVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemSystemdVolume, "systemd")
+	}
+	if cfg.ProcessScope != "" {
+		cfg.ScaffoldContainer = scopedRuntimeName(cfg.ProcessScope, cfg.ScaffoldContainer, "scaffold")
+		cfg.SystemContainer = scopedRuntimeName(cfg.ProcessScope, cfg.SystemContainer, "system")
 	}
 	m.cfg = cfg
 	m.ownedProjection = ownedProjection
@@ -565,10 +569,7 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 		return fmt.Errorf("entity %s slug is required for workspace container", entityID)
 	}
 	container := m.EntityContainerName(slug)
-	volume := fmt.Sprintf("entities_%s", slug)
-	if strings.TrimSpace(m.cfg.BundleScope) != "" {
-		volume = "entities_" + volumeScopeKey(m.bundleScopedPrefix()+"entity_"+slug)
-	}
+	volume := m.entityWorkspaceVolume(slug)
 	runID, err := workspaceRunID(ctx)
 	if err != nil {
 		return err
@@ -592,6 +593,15 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 			m.cfg.WorkspaceImage,
 			"sleep", "infinity",
 		}...))
+}
+
+func (m *DockerManager) entityWorkspaceVolume(slug string) string {
+	slug = SanitizeSlug(slug)
+	volume := fmt.Sprintf("entities_%s", slug)
+	if m != nil && strings.TrimSpace(m.cfg.BundleScope) != "" {
+		volume = "entities_" + volumeScopeKey(m.bundleScopedPrefix()+"entity_"+slug)
+	}
+	return volume
 }
 
 func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string) error {
@@ -925,7 +935,7 @@ func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, acto
 		}
 		containerScopeKey += "-agent-" + fingerprint
 	}
-	if strings.TrimSpace(m.cfg.BundleScope) == "" {
+	if strings.TrimSpace(m.cfg.ProcessScope) == "" && strings.TrimSpace(m.cfg.BundleScope) == "" {
 		switch scope {
 		case "per-flow-instance":
 			return "swarm-flow-" + containerScopeKey, "workspaces_flow_" + scopeKey, nil
@@ -933,12 +943,13 @@ func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, acto
 			return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey, nil
 		}
 	}
-	containerPrefix := m.bundleScopedPrefix()
+	containerPrefix := m.processScopedPrefix()
+	volumePrefix := m.bundleScopedPrefix()
 	switch scope {
 	case "per-flow-instance":
-		return containerPrefix + "flow-" + containerScopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"flow_"+scopeKey), nil
+		return containerPrefix + "flow-" + containerScopeKey, "workspaces_" + volumeScopeKey(volumePrefix+"flow_"+scopeKey), nil
 	default:
-		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"agent_"+scopeKey), nil
+		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(volumePrefix+"agent_"+scopeKey), nil
 	}
 }
 
@@ -1534,10 +1545,21 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 
 func (m *DockerManager) EntityContainerName(slug string) string {
 	slug = SanitizeSlug(slug)
-	if strings.TrimSpace(m.cfg.BundleScope) == "" {
+	if strings.TrimSpace(m.cfg.ProcessScope) == "" {
 		return m.cfg.EntityContainerPrefix + slug
 	}
-	return m.bundleScopedPrefix() + strings.TrimPrefix(m.cfg.EntityContainerPrefix, "swarm-") + slug
+	return m.processScopedPrefix() + strings.TrimPrefix(m.cfg.EntityContainerPrefix, "swarm-") + slug
+}
+
+func (m *DockerManager) processScopedPrefix() string {
+	if m == nil {
+		return "swarm-"
+	}
+	scope := strings.TrimSpace(m.cfg.ProcessScope)
+	if scope == "" {
+		return "swarm-"
+	}
+	return "swarm-" + SanitizeSlug(scope) + "-"
 }
 
 func (m *DockerManager) bundleScopedPrefix() string {

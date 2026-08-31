@@ -1220,7 +1220,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		for _, pattern := range patterns {
 			admission := routeClassifyAuthoredSubscription(source, subscriberAgent, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
 			if !admission.Admitted() {
-				return nil, fmt.Errorf("route subscriber agent %s: %s", key, admission.Message())
+				return nil, fmt.Errorf("route subscriber agent %s in flow %s: %s", key, scope.ID, admission.Message())
 			}
 		}
 		out = append(out, routeSubscriberTemplate{
@@ -1247,7 +1247,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		for _, pattern := range patterns {
 			admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
 			if !admission.Admitted() {
-				return nil, fmt.Errorf("route subscriber node %s: %s", semanticNodeID, admission.Message())
+				return nil, fmt.Errorf("route subscriber node %s in flow %s: %s", semanticNodeID, scope.ID, admission.Message())
 			}
 		}
 		out = append(out, routeSubscriberTemplate{
@@ -1340,7 +1340,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 	}
 	admission := routeClassifyAuthoredSubscription(source, kind, flowID, inputEvents, authorityPath, localEvents, raw)
 	if !admission.Admitted() {
-		return nil, fmt.Errorf("route subscriber %s", admission.Message())
+		return nil, fmt.Errorf("route subscriber in flow %s: %s", flowID, admission.Message())
 	}
 	localEvent := admission.LocalEvent()
 	if !admission.Pattern() && flowID != "" && source != nil && source.FlowHasInputEvent(flowID, localEvent) {

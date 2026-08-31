@@ -33,6 +33,7 @@ func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 }
 
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
+	ensureManagerTestSemanticSource(am)
 	var err error
 	cfg, err = bindRuntimeCreatedIdentity(cfg, "manager.test.static_agent")
 	if err != nil {
@@ -129,6 +130,7 @@ func installManagerTestStaticTopology(
 }
 
 func registerManagerTestEphemeralAgent(ctx context.Context, am *AgentManager, rec PersistedAgent) error {
+	ensureManagerTestSemanticSource(am)
 	var err error
 	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission("11111111-1111-4111-8111-111111111111", "runtime_shard")
 	if err != nil {
@@ -160,6 +162,9 @@ func managerTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
 }
 
 func managerTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
+	if strings.TrimSpace(cfg.FlowID) == "" && cfg.CanonicalFlowPath() == "" {
+		cfg.FlowID = "."
+	}
 	if cfg.Intent.Empty() {
 		cfg.Intent = managerTestResolvedIntent(cfg.ID)
 	}

@@ -134,8 +134,9 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture := newCompleteEventDispatchFixture(t, backend, surface == "decision_obligation")
+				subscriptions := []string{string(fixture.event.Type())}
 				admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-					AgentID: fixture.agentID, Subscriptions: []string{string(fixture.event.Type())},
+					AgentID: fixture.agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 				})
 				if err != nil {
 					t.Fatalf("admit complete-event route: %v", err)
@@ -376,7 +377,7 @@ func (f completeEventDispatchFixture) subscribe(t testing.TB, eventTypes ...even
 		subscriptions = append(subscriptions, string(eventType))
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), Subscriptions: subscriptions,
+		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit complete-event route: %v", err)
@@ -616,7 +617,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 func completeEventAgentSource(agentID, subscription string, intent runtimeagentintent.Resolved) semanticview.Source {
 	ownerURI := completeEventAgentOwnerURI(agentID)
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "global"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "global"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{subscription: {}},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			agentID: {
 				ID: agentID, Type: "recording", Role: "complete-event-proof", Model: "regular",

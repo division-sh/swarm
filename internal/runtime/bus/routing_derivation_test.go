@@ -278,6 +278,7 @@ shared:
 		dir := filepath.Join(root, "orders", name)
 
 		eventName := strings.ReplaceAll(name, "-", "_")
+		write(filepath.Join(dir, "events.yaml"), eventName+".start: {}\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
   id: shared
@@ -1221,7 +1222,8 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "discovery",
+		Path:   "discovery",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
 				ID:           "scan-orchestrator",
@@ -1271,7 +1273,8 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "consumer",
+		Path:   "consumer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
 				ID: "consumer-node",
@@ -1444,7 +1447,8 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
-		Path: "consumer",
+		Path:   "consumer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"ticket.ready": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
 				ID: "consumer-node",

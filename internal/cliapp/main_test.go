@@ -3545,6 +3545,23 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 }
 
+func TestRunVerifyCommandRejectsAncestorEventNameWithoutReceiverLocalDeclarationOrConnect(t *testing.T) {
+	root := canonicalrouting.CopyAncestorEventWithoutReceiverMembership(t)
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("verify exit code = 0, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	}
+	for _, want := range []string{"receiver-local event", "input pin", "nearest common ancestor schema.yaml", "root.started"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
 func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
@@ -3758,6 +3775,9 @@ writer:
     case:
       save:
       - research_context
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
+task.assigned: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 closer:

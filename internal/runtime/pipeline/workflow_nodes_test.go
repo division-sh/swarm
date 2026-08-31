@@ -343,6 +343,10 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 
 func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.start": {},
+			"task.done":  {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

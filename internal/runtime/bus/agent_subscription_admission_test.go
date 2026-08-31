@@ -3,11 +3,13 @@ package bus
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -59,11 +61,16 @@ func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
 func testAgentSubscriptionAdmissionForFlow(t *testing.T, agentID, flowPath string, eventTypes ...events.EventType) semanticview.FlowOwnedAgentSubscriptionAdmission {
 	t.Helper()
 	values := make([]string, 0, len(eventTypes))
+	localEvents := make(map[string]struct{}, len(eventTypes))
 	for _, eventType := range eventTypes {
-		values = append(values, string(eventType))
+		value := string(eventType)
+		values = append(values, value)
+		if local := eventidentity.LeafName(value); local != "" && !strings.Contains(local, "*") {
+			localEvents[local] = struct{}{}
+		}
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: agentID, FlowPath: flowPath, Subscriptions: values,
+		AgentID: agentID, FlowPath: flowPath, LocalEvents: localEvents, Subscriptions: values,
 	})
 	if err != nil {
 		t.Fatalf("admit test agent subscriptions: %v", err)

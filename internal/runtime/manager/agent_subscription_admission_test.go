@@ -79,6 +79,7 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 		ExecutionMode: "live",
 		ID:            "reviewer",
 		Identity:      runtimeagentidentitytest.Runtime(t, "reviewer", "subscription-admission-test", "review", "inst-1", "review/inst-1"),
+		FlowID:        "review",
 		FlowPath:      "review/inst-1",
 		Subscriptions: []string{"task.ready"},
 	})

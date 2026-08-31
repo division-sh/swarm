@@ -82,7 +82,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							}
 							var deliveries <-chan *runtimebus.LocalDelivery
 							if realSubscriber {
-								deliveries = subscribeProviderRawSettlementAgent(t, bus, target.FlowPath, flowInstance, agentID, provider.eventName)
+								deliveries = subscribeProviderRawSettlementAgent(t, bus, source, target.FlowPath, flowInstance, agentID, provider.eventName)
 							}
 							gateway := newTestInboundGateway(t, bus, nil, nil, selected)
 							response := httptest.NewRecorder()
@@ -128,7 +128,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							if !realSubscriber {
 								replayAgentID := provider.provider + "-" + backend + "-current-topology-only"
 								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowPath, flowInstance, entityID, replayAgentID, provider.eventName)
-								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, target.FlowPath, flowInstance, replayAgentID, provider.eventName)
+								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, source, target.FlowPath, flowInstance, replayAgentID, provider.eventName)
 								if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 									Event: record.Events[0].Event, Scope: runtimepipelineobligation.ScopeSubscribed,
 								}, nil); err != nil {
@@ -240,9 +240,9 @@ func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected 
 	}
 }
 
-func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
+func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, source semanticview.Source, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID: agentID, FlowID: flowID, FlowPath: flowInstance, Subscriptions: []string{eventName},
 	})
 	if err != nil {

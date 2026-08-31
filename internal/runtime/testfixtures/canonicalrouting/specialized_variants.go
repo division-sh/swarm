@@ -330,7 +330,7 @@ func CopyVerifyLintEvidence(t testing.TB, missingEmitSchema bool) string {
     _unused_reason: verify lint evidence child primary entity proof field
 `)
 	if missingEmitSchema {
-		writeClosedVariantFile(t, root, "agents.yaml", `strict-schema-agent:
+		writeClosedVariantFile(t, root, "child/agents.yaml", `strict-schema-agent:
   id: strict-schema-agent
   role: strict_schema_agent
   intent: prompts/strict-schema-agent.md
@@ -338,7 +338,7 @@ func CopyVerifyLintEvidence(t testing.TB, missingEmitSchema bool) string {
   subscriptions: [task.assigned]
   emit_events: [missing.event]
 `)
-		writeClosedVariantFile(t, root, "prompts/strict-schema-agent.md", "Emit the missing event when requested.\n")
+		writeClosedVariantFile(t, root, "child/prompts/strict-schema-agent.md", "Emit the missing event when requested.\n")
 	}
 	return root
 }

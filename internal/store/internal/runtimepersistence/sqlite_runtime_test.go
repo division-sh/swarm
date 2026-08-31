@@ -838,6 +838,9 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Path:  "review",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.started": {},
+		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
 				ID:            "reviewer",

@@ -10,6 +10,7 @@ func TestAdmitFlowOwnedAgentSubscriptionsCanonicalizesSameScopeExactAndPattern(t
 	admission, err := AdmitFlowOwnedAgentSubscriptions(nil, FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "reviewer",
 		FlowPath:      "review/inst-1",
+		LocalEvents:   map[string]struct{}{"task.ready": {}, "task.done": {}},
 		Subscriptions: []string{"task.ready", "task.*", "review/inst-1/task.done"},
 	})
 	if err != nil {
@@ -42,6 +43,7 @@ func TestAdmitFlowOwnedAgentSubscriptionsRejectsForeignExactAndPattern(t *testin
 func TestAdmitFlowOwnedAgentSubscriptionsRejectsRootCrossFlowWildcard(t *testing.T) {
 	_, err := AdmitFlowOwnedAgentSubscriptions(nil, FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "root-observer",
+		LocalEvents:   map[string]struct{}{"task.ready": {}},
 		Subscriptions: []string{"task.ready", "**/task.done"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "connect in the nearest common ancestor schema.yaml") {
@@ -52,6 +54,7 @@ func TestAdmitFlowOwnedAgentSubscriptionsRejectsRootCrossFlowWildcard(t *testing
 func TestFlowOwnedAgentSubscriptionAdmissionCarrierOnlyRetainsIdentityWithoutRoutes(t *testing.T) {
 	admission, err := AdmitFlowOwnedAgentSubscriptions(nil, FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "selected-agent",
+		LocalEvents:   map[string]struct{}{"task.ready": {}},
 		Subscriptions: []string{"task.ready"},
 	})
 	if err != nil {

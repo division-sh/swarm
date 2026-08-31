@@ -4874,6 +4874,23 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 		for _, pin := range flow.outputs {
 			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
 		}
+		declareExact := func(eventType string) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" || strings.ContainsAny(eventType, "*/") {
+				return
+			}
+			view.Events[eventType] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
+		}
+		for _, agent := range flow.agents {
+			for _, subscription := range agent.Subscriptions {
+				declareExact(subscription)
+			}
+		}
+		for _, node := range flow.nodes {
+			for _, subscription := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
+				declareExact(subscription)
+			}
+		}
 		views[flowPath] = view
 		flowSchemas[flowPath] = schema
 		flowSources[flowPath] = runtimecontracts.FlowSource{FlowPath: flowPath, Schema: view.Paths.SchemaFile}

@@ -204,6 +204,7 @@ func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req 
 
 func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
 	t.Helper()
+	ensureManagerTestSemanticSource(am)
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(store.agents))
 	for i := range store.agents {

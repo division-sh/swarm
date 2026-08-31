@@ -351,6 +351,9 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
+		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{
+			"scan.other_requested": {},
+		}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 			ID:           "scan-orchestrator",
 			SubscribesTo: []string{"scan.other_requested"},

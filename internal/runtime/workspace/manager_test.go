@@ -394,16 +394,17 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}
-	prefix := manager.bundleScopedPrefix()
-	if target == nil || target.Container != prefix+"agent-"+fingerprint {
+	containerPrefix := manager.processScopedPrefix()
+	volumePrefix := manager.bundleScopedPrefix()
+	if target == nil || target.Container != containerPrefix+"agent-"+fingerprint {
 		t.Fatalf("target = %#v, want bundle-scoped agent container", target)
 	}
 	joined := flattenDockerCalls(creates)
 	for _, expected := range []string{
-		"workspaces_" + volumeScopeKey(prefix+"agent_"+fingerprint) + ":/workspace",
+		"workspaces_" + volumeScopeKey(volumePrefix+"agent_"+fingerprint) + ":/workspace",
 		"--label dev.swarm.bundle_hash=" + bundleHash,
 		"--label dev.swarm.source_projection=" + sourceProjection.Identity(),
-		"--label dev.swarm.container.name=" + prefix + "agent-" + fingerprint,
+		"--label dev.swarm.container.name=" + containerPrefix + "agent-" + fingerprint,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bundle-scoped agent workspace create args missing %q:\n%s", expected, joined)
@@ -416,11 +417,11 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	}
 	joined = flattenDockerCalls(creates)
 	for _, expected := range []string{
-		"create --name " + prefix + "acme",
-		"entities_" + volumeScopeKey(prefix+"entity_acme") + ":/workspace",
+		"create --name " + containerPrefix + "acme",
+		"entities_" + volumeScopeKey(volumePrefix+"entity_acme") + ":/workspace",
 		"--label dev.swarm.bundle_hash=" + bundleHash,
 		"--label dev.swarm.source_projection=" + sourceProjection.Identity(),
-		"--label dev.swarm.container.name=" + prefix + "acme",
+		"--label dev.swarm.container.name=" + containerPrefix + "acme",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bundle-scoped entity workspace create args missing %q:\n%s", expected, joined)

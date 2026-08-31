@@ -5,15 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+type projectionDockerCall struct {
+	manager string
+	args    []string
+}
 
 func testRuntimeSourceProjection(t *testing.T) (*sourceartifact.RuntimeProjection, string) {
 	return testRuntimeSourceProjectionNamed(t, "workspace-test")
@@ -110,52 +118,155 @@ func TestBundleScopedSystemWorkspacesDoNotReusePriorSourceMount(t *testing.T) {
 func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStoppedPredecessors(t *testing.T) {
 	for _, predecessorRunning := range []bool{true, false} {
 		t.Run(fmt.Sprintf("predecessor_running_%t", predecessorRunning), func(t *testing.T) {
+			ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
 			first, _ := testRuntimeSourceProjectionNamed(t, "same-source")
 			second, _ := testRuntimeSourceProjectionNamed(t, "same-source")
 			if first.BundleHash() != second.BundleHash() || first.Identity() == second.Identity() {
 				t.Fatalf("same artifact projection identities = first %s/%s second %s/%s", first.BundleHash(), first.Identity(), second.BundleHash(), second.Identity())
 			}
-			bind := func(projection *sourceartifact.RuntimeProjection) *DockerManager {
-				manager := NewDockerManager(nil)
+			const entityID = "22222222-2222-2222-2222-222222222222"
+			semanticSource := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+					"workspace_classes": {Value: map[string]any{
+						"dedicated": map[string]any{"workspace_scope": "per-agent"},
+						"shared":    map[string]any{"workspace_scope": "per-flow-instance"},
+					}},
+				}},
+			})
+			var calls []projectionDockerCall
+			bind := func(name string, projection *sourceartifact.RuntimeProjection) *DockerManager {
+				manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
 				cfg := DefaultDockerConfig()
 				cfg.SourceProjection = projection
 				cfg.WorkspaceNetwork = ""
+				cfg.WorkspaceImage = "test-image"
 				manager.SetConfig(cfg)
 				if err := manager.BindSourceProjection(projection); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
+				manager.SetSemanticSource(semanticSource)
+				manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+					calls = append(calls, projectionDockerCall{manager: name, args: append([]string(nil), args...)})
+					if args[0] == "inspect" {
+						return "", fmt.Errorf("no such object")
+					}
+					return "", nil
+				})
 				return manager
 			}
-			firstManager := bind(first)
-			secondManager := bind(second)
+			firstManager := bind("first", first)
+			secondManager := bind("second", second)
 			if firstManager.cfg.ScaffoldContainer == secondManager.cfg.ScaffoldContainer || firstManager.cfg.SystemContainer == secondManager.cfg.SystemContainer {
 				t.Fatalf("same-hash projections reused process container names: first=%#v second=%#v", firstManager.cfg, secondManager.cfg)
 			}
-			oldNames := map[string]bool{
-				firstManager.cfg.ScaffoldContainer: predecessorRunning,
-				firstManager.cfg.SystemContainer:   predecessorRunning,
-			}
-			var created []string
-			secondManager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
-				switch args[0] {
-				case "inspect":
-					if running, ok := oldNames[args[len(args)-1]]; ok {
-						return fmt.Sprintf("%t", running), nil
-					}
-					return "", fmt.Errorf("no such object")
-				case "create":
-					created = append(created, args[2])
+			for _, volumes := range [][2]string{
+				{firstManager.cfg.ScaffoldVolume, secondManager.cfg.ScaffoldVolume},
+				{firstManager.cfg.SystemEntitiesVolume, secondManager.cfg.SystemEntitiesVolume},
+				{firstManager.cfg.SystemNginxVolume, secondManager.cfg.SystemNginxVolume},
+				{firstManager.cfg.SystemSystemdVolume, secondManager.cfg.SystemSystemdVolume},
+			} {
+				if volumes[0] == "" || volumes[0] != volumes[1] {
+					t.Fatalf("same-hash process replacement changed bundle-owned system volume: first=%q second=%q", volumes[0], volumes[1])
 				}
-				return "", nil
-			})
+			}
+			if firstManager.cfg.ProcessScope == secondManager.cfg.ProcessScope || firstManager.cfg.BundleScope != secondManager.cfg.BundleScope {
+				t.Fatalf("projection and bundle scopes = first %q/%q second %q/%q", firstManager.cfg.ProcessScope, firstManager.cfg.BundleScope, secondManager.cfg.ProcessScope, secondManager.cfg.BundleScope)
+			}
+
+			flowActor := models.AgentConfig{
+				ID:             "reviewer",
+				FlowPath:       "review/inst-1",
+				Identity:       runtimeagentidentitytest.Runtime(t, "reviewer", "workspace-process-replacement", "review", "inst-1", "review/inst-1"),
+				WorkspaceClass: "shared",
+			}
+			agentActor := models.AgentConfig{
+				ID:             "dedicated-agent",
+				Identity:       runtimeagentidentitytest.RootDeclared(t, "dedicated-agent", "test/agents.yaml"),
+				WorkspaceClass: "dedicated",
+			}
+			for _, workspace := range []struct {
+				name  string
+				actor models.AgentConfig
+			}{
+				{name: "per-agent", actor: agentActor},
+				{name: "per-flow-instance", actor: flowActor},
+			} {
+				firstTarget, err := firstManager.ResolveWorkspaceForCapabilityAdmission(ctx, workspace.actor)
+				if err != nil {
+					t.Fatalf("first %s workspace: %v", workspace.name, err)
+				}
+				secondTarget, err := secondManager.ResolveWorkspaceForCapabilityAdmission(ctx, workspace.actor)
+				if err != nil {
+					t.Fatalf("second %s workspace: %v", workspace.name, err)
+				}
+				assertSameDurableVolumeAttachment(t, calls, workspace.name, firstTarget.Container, secondTarget.Container)
+			}
+			if err := firstManager.EnsureEntityWorkspace(ctx, entityID); err != nil {
+				t.Fatalf("first entity workspace: %v", err)
+			}
+			if err := secondManager.EnsureEntityWorkspace(ctx, entityID); err != nil {
+				t.Fatalf("second entity workspace: %v", err)
+			}
+			assertSameDurableVolumeAttachment(t, calls, "entity", firstManager.EntityContainerName("acme"), secondManager.EntityContainerName("acme"))
+
+			if err := firstManager.EnsureSystemWorkspaces(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			if err := secondManager.EnsureSystemWorkspaces(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if len(created) != 2 || created[0] == firstManager.cfg.ScaffoldContainer || created[1] == firstManager.cfg.SystemContainer {
-				t.Fatalf("created containers = %#v, want only fresh process projection names", created)
+			for _, call := range calls {
+				if call.manager != "second" || len(call.args) == 0 || call.args[0] != "inspect" {
+					continue
+				}
+				inspected := call.args[len(call.args)-1]
+				if inspected == firstManager.cfg.ScaffoldContainer || inspected == firstManager.cfg.SystemContainer {
+					t.Fatalf("replacement process inspected %s predecessor container %q instead of its fresh projection identity", map[bool]string{true: "running", false: "stopped"}[predecessorRunning], inspected)
+				}
+			}
+			assertSameDurableVolumeAttachment(t, calls, "scaffold", firstManager.cfg.ScaffoldContainer, secondManager.cfg.ScaffoldContainer)
+			assertSameDurableVolumeAttachment(t, calls, "system", firstManager.cfg.SystemContainer, secondManager.cfg.SystemContainer)
+
+			if err := firstManager.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := secondManager.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range calls {
+				if len(call.args) > 0 && call.args[0] == "volume" {
+					t.Fatalf("projection release attempted durable volume mutation: manager=%s args=%#v", call.manager, call.args)
+				}
 			}
 		})
+	}
+}
+
+func assertSameDurableVolumeAttachment(t *testing.T, calls []projectionDockerCall, workspace, firstContainer, secondContainer string) {
+	t.Helper()
+	if firstContainer == "" || firstContainer == secondContainer {
+		t.Fatalf("%s process containers = first %q second %q, want distinct non-empty names", workspace, firstContainer, secondContainer)
+	}
+	createdVolumes := func(container string) []string {
+		for _, call := range calls {
+			if len(call.args) < 3 || call.args[0] != "create" || call.args[1] != "--name" || call.args[2] != container {
+				continue
+			}
+			var volumes []string
+			for i := 3; i+1 < len(call.args); i++ {
+				if call.args[i] == "-v" && !strings.HasSuffix(call.args[i+1], ":ro") {
+					volumes = append(volumes, call.args[i+1])
+				}
+			}
+			sort.Strings(volumes)
+			return volumes
+		}
+		return nil
+	}
+	firstVolumes := createdVolumes(firstContainer)
+	secondVolumes := createdVolumes(secondContainer)
+	if len(firstVolumes) == 0 || strings.Join(firstVolumes, "\n") != strings.Join(secondVolumes, "\n") {
+		t.Fatalf("%s durable attachments changed across process replacement: first=%q second=%q", workspace, firstVolumes, secondVolumes)
 	}
 }
 
@@ -459,7 +570,7 @@ func TestWorkspaceManagersRebindSelectedSourceWithoutMutatingBootLifecycle(t *te
 		if selected.cfg.SourceProjection != projection || selected.cfg.BundleHash != projection.BundleHash() {
 			t.Fatalf("selected Docker source binding = %#v", selected.cfg)
 		}
-		if selected.cfg.BundleScope == "" || !strings.Contains(selected.cfg.ScaffoldContainer, selected.cfg.BundleScope) {
+		if selected.cfg.ProcessScope == "" || !strings.Contains(selected.cfg.ScaffoldContainer, selected.cfg.ProcessScope) {
 			t.Fatalf("selected Docker names are not bundle scoped: %#v", selected.cfg)
 		}
 		mountArgs := strings.Join(selected.standardMountArgs(), " ")

@@ -507,6 +507,7 @@ func TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute(t *testing.T)
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.Runtime(t, agentID, "selected-fork-test", "review", "inst-1", "review/inst-1"),
+		FlowID:        "review",
 		FlowPath:      "review/inst-1",
 		Subscriptions: []string{"task.ready", "task.*"},
 	})}); err != nil {

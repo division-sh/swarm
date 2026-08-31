@@ -9,12 +9,15 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -189,6 +192,47 @@ func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
 	})
 }
 
+func managerTestSemanticSource() semanticview.Source {
+	events := map[string]runtimecontracts.EventCatalogEntry{}
+	for _, eventName := range []string{
+		"review.ready",
+		"task.ready",
+		"test.in",
+		"test.intervention",
+		"test.intervention.settlement",
+		"test.lane.child",
+		"test.lane.root",
+		"test.new",
+		"test.old",
+		"test.source_set_cancelled",
+		"test.source_set_wait",
+		"test.transition",
+	} {
+		events[eventName] = runtimecontracts.EventCatalogEntry{}
+	}
+	review := runtimecontracts.FlowContractView{
+		Path:   "review",
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
+		Events: events,
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Events: events, Children: []runtimecontracts.FlowContractView{review}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":      &root,
+				"review": &root.Children[0],
+			},
+		},
+	})
+}
+
+func ensureManagerTestSemanticSource(am *AgentManager) {
+	if am != nil && am.semanticSource == nil {
+		am.semanticSource = managerTestSemanticSource()
+	}
+}
+
 func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
 	if !opts.ExecutionPosture.Valid() {
@@ -199,6 +243,9 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newTestManagerWorkOwner(t)
+	}
+	if opts.SemanticSource == nil {
+		opts.SemanticSource = managerTestSemanticSource()
 	}
 	if opts.DeliveryStore == nil && len(stores) > 0 {
 		if deliveryStore, ok := any(stores[0]).(runtimedelivery.Store); ok {

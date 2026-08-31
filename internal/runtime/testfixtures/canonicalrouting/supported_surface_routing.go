@@ -190,6 +190,7 @@ connect:
         id: selected_owner
         check: '_entity.id != ""'
 `)
+	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 mode: template
 instance: producer_id

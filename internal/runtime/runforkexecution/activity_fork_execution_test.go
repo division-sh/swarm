@@ -265,7 +265,8 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "flow_a"},
 		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", Mode: mode, InitialState: "pending", States: []string{"pending"}},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"review.requested": {}}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},

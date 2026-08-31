@@ -398,6 +398,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:               executionposture.Live,
+		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,
@@ -507,6 +508,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:               executionposture.Live,
+		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,

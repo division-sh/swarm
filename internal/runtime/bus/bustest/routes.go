@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -66,11 +67,16 @@ type testRoute struct {
 func Subscribe(t TestingT, eventBus *runtimebus.EventBus, agentID string, eventTypes ...events.EventType) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
 	subscriptions := make([]string, 0, len(eventTypes))
+	localEvents := make(map[string]struct{}, len(eventTypes))
 	for _, eventType := range eventTypes {
-		subscriptions = append(subscriptions, string(eventType))
+		subscription := string(eventType)
+		subscriptions = append(subscriptions, subscription)
+		if local := eventidentity.LeafName(subscription); local != "" && !strings.Contains(local, "*") {
+			localEvents[local] = struct{}{}
+		}
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: agentID, Subscriptions: subscriptions,
+		AgentID: agentID, LocalEvents: localEvents, Subscriptions: subscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit test agent route: %v", err)
