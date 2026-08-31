@@ -412,11 +412,11 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 				t.Fatalf("conflicting duplicate error = %v", err)
 			}
 			nestedID := uuid.NewString()
-			nested := eventtest.RunCreatingRootIngress(nestedID, "duplicate.nested", "gateway", "task", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, baseEvent.CreatedAt())
+			nested := eventtest.RunCreatingRootIngress(nestedID, "duplicate.nested", "gateway", "task", []byte(`{"nested":{"a":1}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, baseEvent.CreatedAt())
 			if outcome, err := commitSemanticEventFixtureOutcome(ctx, store, nested, nil, "direct"); err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("nested initial commit: outcome=%v err=%v", outcome, err)
 			}
-			nestedConflict := eventtest.RunCreatingRootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":null}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
+			nestedConflict := eventtest.RunCreatingRootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":1}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, nestedConflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("nested null-key duplicate error = %v", err)
 			}

@@ -122,6 +122,12 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			event_class TEXT NOT NULL, event_id TEXT PRIMARY KEY, run_id TEXT, event_name TEXT NOT NULL,
 			task_id TEXT, entity_id TEXT, flow_instance TEXT, scope TEXT NOT NULL, payload BLOB NOT NULL,
 			payload_bytes BLOB NOT NULL,
+			payload_schema_bundle_hash TEXT NOT NULL,
+			payload_schema_bundle_source TEXT NOT NULL,
+			payload_schema_flow_id TEXT,
+			payload_schema_event_key TEXT NOT NULL,
+			payload_schema_digest TEXT NOT NULL,
+			payload_schema_class TEXT NOT NULL,
 			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
@@ -441,7 +447,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	}
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -548,7 +554,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	}
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 

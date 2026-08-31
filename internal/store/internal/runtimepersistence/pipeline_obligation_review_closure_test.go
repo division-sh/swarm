@@ -823,6 +823,16 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 }
 
 func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
+	if _, ok := event.PayloadAdmission(); !ok {
+		admission, err := eventtest.PayloadAdmission(event, "", string(event.Type()))
+		if err != nil {
+			return err
+		}
+		event, err = events.ApplyPayloadAdmission(event, admission)
+		if err != nil {
+			return err
+		}
+	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
