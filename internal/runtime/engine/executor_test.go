@@ -24,6 +24,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -431,14 +432,23 @@ func sourceWithPolicy(values map[string]any) semanticview.Source {
 	for key, value := range values {
 		policy.Values[key] = runtimecontracts.PolicyValue{Value: value}
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: policy, Events: map[string]runtimecontracts.EventCatalogEntry{
-		"digest.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-			"score": {Type: "integer"}, "items": {Type: "[json]"},
-		}),
-		"items.submitted": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-			"category": {Type: "text"}, "items": {Type: "[json]"},
-		}),
-	}})
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: policy,
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"score":  {Type: "integer"},
+				"active": {Type: "boolean"},
+			}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"digest.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"score": {Type: "integer"}, "items": {Type: "[ScoredItem]"},
+			}),
+			"items.submitted": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"category": {Type: "text"}, "items": {Type: "[ScoredItem]"},
+			}),
+		},
+	})
 }
 
 func stubSourceWithRootEntityContract() semanticview.Source {
@@ -3356,9 +3366,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
-			"items.submitted": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}}),
-		}),
+		Source:        sourceWithPolicy(nil),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3539,6 +3547,95 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "undeclared reference") {
 		t.Fatalf("Execute error = %v, want undeclared reference", err)
 	}
+}
+
+func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
+	repo := &orderedStateRepo{order: &[]string{}}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        entityCollectionExpressionSource(),
+		StateRepo:     repo,
+		MutationOwner: stubMutationOwner{state: repo},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID:        "entity-1",
+		Node:            identitytest.RootNode(t, "filter-node"),
+		HandlerEventKey: "filter.requested",
+		Event:           eventtest.RunCreatingRootIngress("evt-entity-filter", "filter.requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+			ItemsFrom: "entity.items",
+			Condition: "item.score > 5",
+			StoreAs:   "entity.filtered",
+		}},
+		State: testStateSnapshot("pending", map[string]any{
+			"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rows, ok := result.StateMutation.Fields["filtered"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("filtered rows = %#v, want one exact entity item", result.StateMutation.Fields["filtered"])
+	}
+}
+
+func TestExecutorChainedCollectionConditionUsesCompiledItemType(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        sourceWithPolicy(nil),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID:        "entity-1",
+		Node:            identitytest.RootNode(t, "collection-node"),
+		HandlerEventKey: "digest.requested",
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-chained-filter", "digest.requested", "", "",
+			json.RawMessage(`{"score":0,"items":[{"score":7,"active":true},{"score":3,"active":true}]}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Query: &runtimecontracts.QuerySpec{Source: "payload.items", StoreAs: "computed.queried"},
+			Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "computed.queried", Condition: "item.score > 5", StoreAs: "computed.filtered",
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rows, ok := result.Computed["filtered"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("computed.filtered = %#v, want one chained item", result.Computed["filtered"])
+	}
+}
+
+func entityCollectionExpressionSource() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+		}},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"work_state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"items":    {Type: "[ScoredItem]"},
+				"filtered": {Type: "[ScoredItem]"},
+			}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"filter.requested": {Payload: runtimecontracts.EventPayloadSpec{}},
+		},
+	})
 }
 
 func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {

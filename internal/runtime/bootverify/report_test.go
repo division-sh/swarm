@@ -3240,6 +3240,115 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 	}
 }
 
+func TestRunQueryFilterUsesSchemaBoundConditionAdmission(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		wantError  string
+	}{
+		{name: "valid presence decision", expression: `has(item.note) ? item.note == "ready" : false`},
+		{name: "malformed", expression: `item ==`, wantError: "CEL parse failed"},
+		{name: "unknown field", expression: `item.missing == "ready"`, wantError: "undefined field"},
+		{name: "unsafe optional", expression: `item.note == "ready"`, wantError: "read without a presence decision"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := schemaBoundQueryFilterSource(tc.expression)
+			report := Run(context.Background(), source, Options{})
+			if tc.wantError == "" {
+				if reportContains(report.Errors(), "condition_expression_validation", "query") {
+					t.Fatalf("query filter condition findings = %#v", report.Errors())
+				}
+				return
+			}
+			if !reportContains(report.Errors(), "condition_expression_validation", tc.wantError) {
+				t.Fatalf("query filter findings = %#v, want %q", report.Errors(), tc.wantError)
+			}
+		})
+	}
+}
+
+func schemaBoundQueryFilterSource(expression string) semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"id":   {Type: "text"},
+				"note": {Type: "text", IsOptional: true},
+			}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[WorkItem]"}},
+				Required:   []string{"items"},
+			}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"query-node": {
+				ID: "query-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"work.received": {Query: &runtimecontracts.QuerySpec{Source: "payload.items", Filter: expression, StoreAs: "metadata.rows"}},
+				},
+			},
+		},
+	})
+}
+
+func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "direct payload",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "payload.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
+			}},
+		},
+		{
+			name: "direct entity",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "entity.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
+			}},
+		},
+		{
+			name: "query intermediate",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query: &runtimecontracts.QuerySpec{Source: "payload.items", StoreAs: "computed.queried"},
+				Filter: &runtimecontracts.FilterSpec{
+					ItemsFrom: "computed.queried", Condition: "item.score > 5", StoreAs: "computed.filtered",
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+					"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+				}},
+				RootEntities: runtimecontracts.EntityContractsDocument{
+					"work_state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[ScoredItem]"}}},
+				},
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+						Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[ScoredItem]"}},
+						Required:   []string{"items"},
+					}},
+				},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"collection-node": {ID: "collection-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": tc.handler}},
+				},
+			})
+			report := Run(context.Background(), source, Options{})
+			for _, finding := range report.Errors() {
+				if finding.CheckID == "condition_expression_validation" {
+					t.Fatalf("condition admission finding = %#v", finding)
+				}
+			}
+		})
+	}
+}
+
 func TestRun_RejectsFanOutNamespaceInGuardConditions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

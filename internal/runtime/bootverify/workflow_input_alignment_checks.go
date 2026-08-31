@@ -42,7 +42,7 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForExecutableNode(node))
 		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
-			for _, cond := range handlerConditions(handler) {
+			for _, cond := range handlerConditionExpressionsForSource(c.source, node, eventType, handler) {
 				for _, ref := range policyReferences(cond.Expression) {
 					if policyFieldExists(resolvedPolicy, ref) {
 						continue
@@ -77,7 +77,7 @@ func (c *checkerContext) conditionPayloadAlignment() []Finding {
 			if !eventExists {
 				continue
 			}
-			for _, cond := range handlerConditions(handler) {
+			for _, cond := range handlerConditionExpressionsForSource(c.source, node, eventType, handler) {
 				for _, ref := range payloadReferences(cond.Expression) {
 					if !payloadFieldExists(payloadFields, ref) {
 						c.conditionPayloadFindings = append(c.conditionPayloadFindings, Finding{

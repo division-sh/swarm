@@ -4061,7 +4061,7 @@ handler_specification:
       purpose: Cross-entity read and aggregation.
       sub_fields:
         entities: string — entity table name
-        filter: string — optional condition
+        filter: string — optional CEL condition compiled during boot and runtime against the exact query collection item type when it reads `item`
         group_by: string — field to group by
         count: boolean — count per group
         select: list — literal object field names to include; entries are not expressions or lifecycle entity reads
@@ -4421,7 +4421,7 @@ handler_specification:
       example: build_evidence
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
+      rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
       are contract errors.'
     namespaces:
@@ -4497,10 +4497,10 @@ handler_specification:
           decisions: '`payload.?field.orValue(default)`, `has(payload.field) ? payload.field : default`, and the logically equivalent negated conditional are supported when types agree.'
           short_circuit: '`has(payload.field) && predicate(payload.field)` and `!has(payload.field) || predicate(payload.field)` prove presence on the evaluated branch. `has(payload.field) || predicate(payload.field)` and `!has(payload.field) && predicate(payload.field)` do not.'
           nested_records: Optional parent to required child uses `payload.?parent.optMap(p, p.child)`; optional parent to optional child uses `payload.?parent.optFlatMap(p, p.?child)`.
-          lookup: Map/list optional lookup uses stock CEL `m[?key]` and `l[?index]`. Named records use typed dot or optional field selection; bracket lookup on a named record is invalid.
+          lookup: Map/list optional lookup uses stock CEL `m[?key]` and `l[?index]`. Named records use typed dot or optional field selection; bracket lookup on a named record is invalid. This rule follows checked structural type and lexical-scope identity through configured item aliases and comprehension variables; identifier spelling is not authority.
           facts: Presence facts are exact-path and lexical-scope facts. Nested branches compose, merge retains only facts true on every incoming path, and comprehension facts do not escape their lambda/body.
           sinks: Optional-to-optional assignment preserves omission. Optional-to-required assignment requires a decision. An absent optional emit result omits the target field; it never emits null.
-        implementation_constraint: Use stock `cel.OptionalTypes()` plus one checked-AST structural/control-flow analysis. Regex/string scanning, custom optional macros, exact-schema `dyn`, and permissive unresolved-source fallback are prohibited.
+        implementation_constraint: Use stock `cel.OptionalTypes()` plus one checked-AST structural/control-flow analysis. Regex/string scanning, custom optional macros, exact-schema `dyn`, alias-name allowlists, and permissive unresolved-source fallback are prohibited.
       event:
         resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
           platform-populated event context fields supplied by the runtime.'
@@ -4527,6 +4527,7 @@ handler_specification:
         query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
           when a supported scoped operand is unavailable in the handler context.
+        executable_collection_rule: Every query.filter, filter.condition, and count.condition that reads `item` is compiled at boot against the exact item type from one compiled handler collection-source resolution. The same resolution is consumed at runtime for direct payload/entity sources and supported query/filter intermediates. Missing, dynamic, cyclic, aggregate, or unsupported source ancestry is hard invalidity; runtime must not restore a dyn item fallback.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
         presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
         relevant for business meaning, but not for raw field readability.'
@@ -8041,7 +8042,7 @@ engine:
       \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
-    description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
+    description: All guard checks, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
@@ -8050,6 +8051,7 @@ engine:
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
+      item: Exact element value for query.filter, filter.condition, and count.condition. Fan-out expressions use their configured item alias. Item and alias bindings inherit the compiled collection element type and never fall back to dyn.
       fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields

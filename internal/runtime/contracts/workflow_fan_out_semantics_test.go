@@ -8,7 +8,60 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
+
+func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		RootTypes: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"WorkItem": {Fields: map[string]TypeFieldSpec{
+				"id":   {Type: "text"},
+				"tags": {Type: "[text]"},
+			}},
+		}},
+		RootEntities: EntityContractsDocument{
+			"work_state": {Fields: map[string]EntityFieldDecl{"items": {Type: "[WorkItem]"}}},
+		},
+		Events: map[string]EventCatalogEntry{
+			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}}, Required: []string{"items"}}},
+		},
+	}
+	node := identitytest.RootNode(t, "worker")
+	handler := SystemNodeEventHandler{
+		Query:  &QuerySpec{Source: "payload.items", StoreAs: "computed.queried"},
+		Filter: &FilterSpec{ItemsFrom: "computed.queried", StoreAs: "computed.filtered"},
+	}
+
+	tests := []struct {
+		name       string
+		source     string
+		wantOrigin string
+	}{
+		{name: "payload", source: "payload.items", wantOrigin: "payload.items"},
+		{name: "entity", source: "entity.items", wantOrigin: "entity.items"},
+		{name: "query intermediate", source: "computed.queried", wantOrigin: "payload.items"},
+		{name: "filter chain", source: "computed.filtered", wantOrigin: "payload.items"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, err := bundle.ResolveHandlerCollectionItemType(node, "work.received", handler, tc.source)
+			if err != nil {
+				t.Fatalf("ResolveHandlerCollectionItemType: %v", err)
+			}
+			if resolved.Origin != tc.wantOrigin || resolved.ItemType.Name != "WorkItem" {
+				t.Fatalf("resolution = %#v, want origin %q WorkItem", resolved, tc.wantOrigin)
+			}
+		})
+	}
+}
+
+func TestResolveHandlerCollectionItemTypeRejectsUnresolvedIntermediate(t *testing.T) {
+	bundle := &WorkflowContractBundle{}
+	_, err := bundle.ResolveHandlerCollectionItemType(identitytest.RootNode(t, "worker"), "work.received", SystemNodeEventHandler{}, "computed.rows")
+	if err == nil || !strings.Contains(err.Error(), "supported query/filter intermediate") {
+		t.Fatalf("ResolveHandlerCollectionItemType error = %v, want unresolved intermediate rejection", err)
+	}
+}
 
 func TestFanOutCollectionItemTypePreservesNamedFieldPresence(t *testing.T) {
 	item, err := resolveWorkflowCollectionItemType(CatalogTypeReference{

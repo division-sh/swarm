@@ -106,7 +106,7 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"ID":          noHandlerRuleExecutableReaders,
 	"Description": noHandlerRuleExecutableReaders,
 	"Condition": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendExecutableReader(out, prefix+".condition", rule.Condition, runtimepipeline.WorkflowEntityFieldLifecycleRule)
+		appendConditionExecutableReader(out, prefix+".condition", rule.Condition, runtimepipeline.WorkflowEntityFieldLifecycleRule, runtimepipeline.WorkflowConditionContextRule)
 	},
 	"PolicyRow":  noHandlerRuleExecutableReaders,
 	"AdvancesTo": noHandlerRuleExecutableReaders,
@@ -174,6 +174,16 @@ func appendExecutableReader(out *[]expressionReference, kind, expression string,
 		return
 	}
 	*out = append(*out, expressionReference{Kind: strings.TrimSpace(kind), Expression: expression, Phase: phase})
+}
+
+func appendConditionExecutableReader(out *[]expressionReference, kind, expression string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, context runtimepipeline.WorkflowConditionContext) {
+	before := len(*out)
+	appendExecutableReader(out, kind, expression, phase)
+	if len(*out) > before {
+		ref := &(*out)[len(*out)-1]
+		ref.ConditionContext = context
+		ref.HasConditionContext = true
+	}
 }
 
 func appendExpressionValueExecutableReaders(out *[]expressionReference, kind string, value runtimecontracts.ExpressionValue, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
@@ -267,7 +277,7 @@ func appendGuardExecutableReaders(out *[]expressionReference, guard *runtimecont
 		if len(guard.Checks) > 0 {
 			kind = fmt.Sprintf("guard.checks[%d]", i)
 		}
-		appendExecutableReader(out, kind, check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
+		appendConditionExecutableReader(out, kind, check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard, runtimepipeline.WorkflowConditionContextGuard)
 	}
 }
 
@@ -317,6 +327,9 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 			for index := before; index < len(*out); index++ {
 				if (*out)[index].Phase == runtimepipeline.WorkflowEntityFieldLifecycleRule {
 					(*out)[index].Phase = runtimepipeline.WorkflowEntityFieldLifecycleOnComplete
+				}
+				if (*out)[index].HasConditionContext {
+					(*out)[index].ConditionContext = runtimepipeline.WorkflowConditionContextOnComplete
 				}
 			}
 		}
@@ -391,9 +404,11 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	appendExecutableReader(out, kind+".source", query.Source, phase)
 	appendExecutableReader(out, kind+".entities", query.Entities, phase)
 	beforeFilter := len(*out)
-	appendExecutableReader(out, kind+".filter", query.Filter, phase)
+	appendConditionExecutableReader(out, kind+".filter", query.Filter, phase, runtimepipeline.WorkflowConditionContextQueryFilter)
 	if len(*out) > beforeFilter {
-		(*out)[len(*out)-1].RequireScalarEntityLeaf = true
+		ref := &(*out)[len(*out)-1]
+		ref.RequireScalarEntityLeaf = true
+		ref.ConditionCollectionSource = firstExecutableCollectionSource(query.Source, query.Entities)
 	}
 	appendExecutableReader(out, kind+".group_by", query.GroupBy, phase)
 	// Select entries are literal object field names, not executable expressions.
@@ -439,7 +454,11 @@ func appendFilterExecutableReaders(out *[]expressionReference, filter *runtimeco
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleFilter
 	appendCollectionSourceExecutableReader(out, "filter", filter.Source, filter.ItemsFrom, phase)
 	// Predicate is not evaluated by stepFilter; Condition is the executable filter expression.
-	appendExecutableReader(out, "filter.condition", filter.Condition, phase)
+	before := len(*out)
+	appendConditionExecutableReader(out, "filter.condition", filter.Condition, phase, runtimepipeline.WorkflowConditionContextFilter)
+	if len(*out) > before {
+		(*out)[len(*out)-1].ConditionCollectionSource = firstExecutableCollectionSource(filter.ItemsFrom, filter.Source)
+	}
 }
 
 func appendReduceExecutableReaders(out *[]expressionReference, reduce *runtimecontracts.ReduceSpec) {
@@ -457,7 +476,11 @@ func appendCountExecutableReaders(out *[]expressionReference, count *runtimecont
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleCount
 	appendCollectionSourceExecutableReader(out, "count", count.Source, count.ItemsFrom, phase)
-	appendExecutableReader(out, "count.condition", count.Condition, phase)
+	before := len(*out)
+	appendConditionExecutableReader(out, "count.condition", count.Condition, phase, runtimepipeline.WorkflowConditionContextCount)
+	if len(*out) > before {
+		(*out)[len(*out)-1].ConditionCollectionSource = firstExecutableCollectionSource(count.ItemsFrom, count.Source)
+	}
 }
 
 func appendCollectionSourceExecutableReader(out *[]expressionReference, kind, source, itemsFrom string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
@@ -466,4 +489,13 @@ func appendCollectionSourceExecutableReader(out *[]expressionReference, kind, so
 		return
 	}
 	appendExecutableReader(out, kind+".source", source, phase)
+}
+
+func firstExecutableCollectionSource(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

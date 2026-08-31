@@ -992,7 +992,11 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		items = executionItems(entityValue)
 	}
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
-		compiled, err := compileExecutionCondition(filter, e.collectionExpressionOptions(frame, spec.SourcePath, spec.Source))
+		options, err := e.collectionConditionExpressionOptions(frame, spec.SourcePath, firstNonEmpty(spec.Source, spec.Entities), filter)
+		if err != nil {
+			return err
+		}
+		compiled, err := compileExecutionCondition(filter, options)
 		if err != nil {
 			return err
 		}
@@ -1144,7 +1148,12 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition), e.collectionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source)))
+	condition := strings.TrimSpace(spec.Condition)
+	options, err := e.collectionConditionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source), condition)
+	if err != nil {
+		return err
+	}
+	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
 	}
@@ -1188,7 +1197,12 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition), e.collectionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source)))
+	condition := strings.TrimSpace(spec.Condition)
+	options, err := e.collectionConditionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source), condition)
+	if err != nil {
+		return err
+	}
+	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
 	}
@@ -2078,72 +2092,36 @@ func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionO
 	return workflowexpr.ValueExpressionOptions{PayloadType: &value}
 }
 
-func (e *Executor) collectionExpressionOptions(frame *executionFrame, parsed paths.Path, authored string) workflowexpr.ValueExpressionOptions {
+func (e *Executor) collectionConditionExpressionOptions(frame *executionFrame, parsed paths.Path, authored, expression string) (workflowexpr.ValueExpressionOptions, error) {
+	if !workflowexpr.ExpressionReferencesRoot(expression, "item") {
+		return frameExpressionOptions(frame), nil
+	}
+	return e.collectionExpressionOptions(frame, parsed, authored)
+}
+
+func (e *Executor) collectionExpressionOptions(frame *executionFrame, parsed paths.Path, authored string) (workflowexpr.ValueExpressionOptions, error) {
 	options := frameExpressionOptions(frame)
 	if parsed.IsZero() {
 		parsed = paths.Parse(strings.TrimSpace(authored))
 	}
-	if frame == nil || frame.payloadType == nil {
-		return options
+	if frame == nil {
+		return options, fmt.Errorf("collection expression requires an execution frame")
 	}
-	parsed = collectionPayloadOrigin(frame.req.Handler, parsed, map[string]struct{}{})
-	if parsed.Root != paths.RootPayload {
-		return options
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return options, fmt.Errorf("collection expression requires a loaded contract bundle")
 	}
-	current := frame.payloadType.Clone()
-	for _, segment := range parsed.Segments {
-		if current.Kind != runtimecontracts.CatalogTypeObject {
-			return options
-		}
-		field, ok := current.Field(segment)
-		if !ok {
-			return options
-		}
-		current = field.Type.Clone()
+	eventType := strings.TrimSpace(frame.req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	}
-	if current.Kind != runtimecontracts.CatalogTypeList || current.Element == nil {
-		return options
+	resolution, err := bundle.ResolveHandlerCollectionItemType(frame.req.Node, eventType, frame.req.Handler, parsed.String())
+	if err != nil {
+		return options, err
 	}
-	item := current.Element.Clone()
+	item := resolution.ItemType.Clone()
 	options.ItemType = &item
-	return options
-}
-
-func collectionPayloadOrigin(handler runtimecontracts.SystemNodeEventHandler, source paths.Path, seen map[string]struct{}) paths.Path {
-	key := source.String()
-	if _, exists := seen[key]; exists {
-		return source
-	}
-	seen[key] = struct{}{}
-	redirect := func(target, upstream string) (paths.Path, bool) {
-		if !sameExecutionPath(source, paths.Parse(target)) {
-			return paths.Path{}, false
-		}
-		return collectionPayloadOrigin(handler, paths.Parse(upstream), seen), true
-	}
-	if handler.Query != nil {
-		if origin, ok := redirect(handler.Query.StoreAs, firstNonEmpty(handler.Query.Source, handler.Query.Entities)); ok {
-			return origin
-		}
-	}
-	if handler.Filter != nil {
-		if origin, ok := redirect(handler.Filter.StoreAs, firstNonEmpty(handler.Filter.ItemsFrom, handler.Filter.Source)); ok {
-			return origin
-		}
-	}
-	return source
-}
-
-func sameExecutionPath(left, right paths.Path) bool {
-	if left.Root != right.Root || len(left.Segments) != len(right.Segments) {
-		return false
-	}
-	for index := range left.Segments {
-		if strings.TrimSpace(left.Segments[index]) != strings.TrimSpace(right.Segments[index]) {
-			return false
-		}
-	}
-	return true
+	return options, nil
 }
 
 func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.ResolvedCatalogType {
