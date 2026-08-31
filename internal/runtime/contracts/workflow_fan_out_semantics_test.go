@@ -63,6 +63,132 @@ func TestResolveHandlerCollectionItemTypeRejectsUnresolvedIntermediate(t *testin
 	}
 }
 
+func TestResolveHandlerCollectionItemTypeOwnsImplicitOutputsAndEntityTables(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	node := identitytest.RootNode(t, "worker")
+	handler := SystemNodeEventHandler{
+		Query:  &QuerySpec{Source: "payload.items", Select: []string{"id", "note"}},
+		Filter: &FilterSpec{ItemsFrom: "computed.query", Condition: "item.id != ''"},
+	}
+
+	queryOutput, err := bundle.ResolveHandlerCollectionItemType(node, "work.received", handler, "computed.query")
+	if err != nil {
+		t.Fatalf("resolve implicit query output: %v", err)
+	}
+	if queryOutput.Source != "computed.query" || queryOutput.Origin != "payload.items" {
+		t.Fatalf("query output = %#v", queryOutput)
+	}
+	note, ok := queryOutput.ItemType.Field("note")
+	if !ok || !note.IsOptional {
+		t.Fatalf("projected note = %#v, want optional field", note)
+	}
+
+	filtered, err := bundle.ResolveHandlerCollectionItemType(node, "work.received", handler, "computed.filter")
+	if err != nil {
+		t.Fatalf("resolve implicit filter output: %v", err)
+	}
+	if filtered.Source != "computed.filter" || filtered.Origin != "payload.items" {
+		t.Fatalf("filter output = %#v", filtered)
+	}
+
+	entityHandler := SystemNodeEventHandler{Query: &QuerySpec{Entities: "items"}}
+	entityPlan, err := bundle.ResolveHandlerQueryCollectionPlan(node, "work.received", entityHandler)
+	if err != nil {
+		t.Fatalf("resolve entity-table query: %v", err)
+	}
+	if entityPlan.Source.Kind != WorkflowCollectionSourceEntityTable || entityPlan.Source.EntityType != "items" {
+		t.Fatalf("entity source = %#v", entityPlan.Source)
+	}
+	if _, ok := entityPlan.Source.ItemType.Field("status"); !ok {
+		t.Fatalf("entity source item type = %#v, want status", entityPlan.Source.ItemType)
+	}
+}
+
+func TestResolveHandlerQueryCollectionPlanRejectsDualSource(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	_, err := bundle.ResolveHandlerQueryCollectionPlan(identitytest.RootNode(t, "worker"), "work.received", SystemNodeEventHandler{
+		Query: &QuerySpec{Source: "payload.items", Entities: "items"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exactly one collection source") {
+		t.Fatalf("dual-source error = %v", err)
+	}
+}
+
+func TestResolveCollectionPlansAdmitGroupAndSelectionFields(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	node := identitytest.RootNode(t, "worker")
+
+	query, err := bundle.ResolveHandlerQueryCollectionPlan(node, "work.received", SystemNodeEventHandler{
+		Query: &QuerySpec{Source: "payload.items", GroupBy: "item.status", Select: []string{"id", "note"}},
+	})
+	if err != nil {
+		t.Fatalf("resolve query plan: %v", err)
+	}
+	if query.GroupBy == nil || query.GroupBy.Name != "status" || len(query.Select) != 2 || !query.Select[1].IsOptional {
+		t.Fatalf("query plan = %#v", query)
+	}
+
+	group, err := bundle.ResolveHandlerGroupByCollectionPlan(node, "work.received", SystemNodeEventHandler{
+		GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "status"},
+	})
+	if err != nil {
+		t.Fatalf("resolve standalone group plan: %v", err)
+	}
+	if group.Key.Name != "status" || group.StoreAs != "computed.group_by" {
+		t.Fatalf("group plan = %#v", group)
+	}
+}
+
+func TestResolveCollectionPlansRejectInvalidSelectors(t *testing.T) {
+	bundle := collectionSemanticsTestBundle()
+	node := identitytest.RootNode(t, "worker")
+	tests := []struct {
+		name    string
+		handler SystemNodeEventHandler
+		want    string
+	}{
+		{name: "unknown query group", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "payload.items", GroupBy: "missing"}}, want: "undeclared item field missing"},
+		{name: "optional query group", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "payload.items", GroupBy: "note"}}, want: "without a presence decision"},
+		{name: "collection query group", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "payload.items", GroupBy: "tags"}}, want: "must be scalar"},
+		{name: "unknown selection", handler: SystemNodeEventHandler{Query: &QuerySpec{Source: "payload.items", Select: []string{"missing"}}}, want: "undeclared item field missing"},
+		{name: "unknown standalone group", handler: SystemNodeEventHandler{GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "missing"}}, want: "undeclared item field missing"},
+		{name: "optional standalone group", handler: SystemNodeEventHandler{GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "note"}}, want: "without a presence decision"},
+		{name: "collection standalone group", handler: SystemNodeEventHandler{GroupBy: &GroupBySpec{ItemsFrom: "payload.items", Key: "tags"}}, want: "must be scalar"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.handler.Query != nil {
+				_, err = bundle.ResolveHandlerQueryCollectionPlan(node, "work.received", tc.handler)
+			} else {
+				_, err = bundle.ResolveHandlerGroupByCollectionPlan(node, "work.received", tc.handler)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func collectionSemanticsTestBundle() *WorkflowContractBundle {
+	return &WorkflowContractBundle{
+		RootTypes: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+			"WorkItem": {Fields: map[string]TypeFieldSpec{
+				"id":     {Type: "text"},
+				"status": {Type: "text"},
+				"note":   {Type: "text", IsOptional: true},
+				"tags":   {Type: "[text]"},
+			}},
+		}},
+		RootEntities: EntityContractsDocument{
+			"items": {Fields: map[string]EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+		},
+		Events: map[string]EventCatalogEntry{
+			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}}, Required: []string{"items"}}},
+		},
+	}
+}
+
 func TestFanOutCollectionItemTypePreservesNamedFieldPresence(t *testing.T) {
 	item, err := resolveWorkflowCollectionItemType(CatalogTypeReference{
 		Type: "[WorkItem]",

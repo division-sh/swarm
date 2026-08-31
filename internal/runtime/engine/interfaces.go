@@ -55,6 +55,13 @@ type StateRepository interface {
 	SaveState(ctx context.Context, address StateAddress, mutation StateMutation) error
 }
 
+// EntityCollectionReader is the runtime value side of an admitted
+// query.entities source. The contracts bundle owns which entity type is legal;
+// this port only returns run-scoped rows for that exact type.
+type EntityCollectionReader interface {
+	QueryEntityCollection(context.Context, string, string) ([]map[string]any, error)
+}
+
 type EmitPersistenceFieldPrerequisite struct {
 	Field       string
 	Expected    any
@@ -167,6 +174,7 @@ type TransitionValidator interface {
 type RuntimeDependencies struct {
 	Source              semanticview.Source
 	StateRepo           StateRepository
+	EntityCollections   EntityCollectionReader
 	MutationOwner       EngineMutationOwner
 	Locker              EntityLocker
 	WorkflowLifecycle   WorkflowLifecycleEffectOwner
