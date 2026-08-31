@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -25,65 +24,15 @@ func checkCollectionItemSemantics(c *checkerContext) []Finding {
 		}
 		for eventType, handler := range record.Entry.EventHandlers {
 			location := node.Key()
-			add := func(kind string, err error) {
-				if err == nil {
-					return
-				}
+			if _, err := bundle.ResolveHandlerCollectionPlan(node, eventType, handler); err != nil {
 				findings = append(findings, NewHardInvalidityFinding(
 					collectionItemSemanticsCheckID,
 					location,
-					fmt.Sprintf("node %s handler %s %s: %v", node.Key(), strings.TrimSpace(eventType), kind, err),
-					"declare one exact collection source and schema-valid item fields",
+					fmt.Sprintf("node %s handler %s collection dataflow: %v", node.Key(), strings.TrimSpace(eventType), err),
+					"declare phase-ordered collection sources and non-overlapping output targets",
 				))
-			}
-			if handler.Query != nil {
-				_, err := bundle.ResolveHandlerQueryCollectionPlan(node, eventType, handler)
-				add("query", err)
-			}
-			if handler.GroupBy != nil {
-				_, err := bundle.ResolveHandlerGroupByCollectionPlan(node, eventType, handler)
-				add("group_by", err)
-			}
-			if handler.Filter != nil {
-				_, err := bundle.ResolveHandlerCollectionItemType(node, eventType, handler, collectionSource(handler.Filter))
-				add("filter", err)
-			}
-			if handler.Reduce != nil {
-				_, err := bundle.ResolveHandlerCollectionItemType(node, eventType, handler, collectionSource(handler.Reduce))
-				add("reduce", err)
-			}
-			if handler.Count != nil {
-				_, err := bundle.ResolveHandlerCollectionItemType(node, eventType, handler, collectionSource(handler.Count))
-				add("count", err)
 			}
 		}
 	}
 	return findings
-}
-
-func collectionSource(spec any) string {
-	switch value := spec.(type) {
-	case *runtimecontracts.FilterSpec:
-		if value != nil {
-			return firstCollectionSource(value.ItemsFrom, value.Source)
-		}
-	case *runtimecontracts.ReduceSpec:
-		if value != nil {
-			return firstCollectionSource(value.ItemsFrom, value.Source)
-		}
-	case *runtimecontracts.CountSpec:
-		if value != nil {
-			return firstCollectionSource(value.ItemsFrom, value.Source)
-		}
-	}
-	return ""
-}
-
-func firstCollectionSource(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
