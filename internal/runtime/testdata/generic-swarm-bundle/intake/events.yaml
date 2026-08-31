@@ -8,9 +8,11 @@ item.processed:
     - worker-a
     - worker-b
   item_id: string?
+  score: number
 item.review_requested:
   emitter:
     - intake-router
+  score: number
 item.rejected:
   emitter:
     - processing-node
