@@ -32,7 +32,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 	if err := identity.Validate(); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
@@ -61,7 +61,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "acquire_hydrate", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "acquire_hydrate", false); err != nil {
 			return err
 		}
 		rec, found, err := sqliteLoadMemorySession(txctx, tx, identity, "status IN ('active', 'suspended')")
@@ -121,7 +121,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 }
 
 func loadSQLiteExactConversationTx(ctx context.Context, tx *sql.Tx, identity agentmemory.Identity, sessionID string) (runtimellm.ConversationRecord, error) {
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, err
 	}
@@ -149,7 +149,7 @@ func (s *LLMSQLiteOwner) Release(ctx context.Context, lease *runtimesessions.Lea
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, identity agentmemory.Identi
 	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, identity agentmemory.Identi
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
-			if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "rotate", false); err != nil {
+			if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "rotate", false); err != nil {
 				return err
 			}
 			rec, found, err := sqliteLoadMemorySession(txctx, tx, identity, "status='active'")
@@ -279,7 +279,7 @@ func (s *LLMSQLiteOwner) IncrementTurn(ctx context.Context, identity agentmemory
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func (s *LLMSQLiteOwner) IncrementTurn(ctx context.Context, identity agentmemory
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "increment_turn", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "increment_turn", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `
@@ -336,7 +336,7 @@ func (s *LLMSQLiteOwner) AdoptSessionID(ctx context.Context, identity agentmemor
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
-			if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "adopt_provider_session", false); err != nil {
+			if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "adopt_provider_session", false); err != nil {
 				return err
 			}
 			rec, found, err := sqliteLoadMemorySession(txctx, tx, identity, "status='active'")
@@ -429,7 +429,7 @@ type sqliteSessionRow struct {
 }
 
 func sqliteLoadMemorySession(ctx context.Context, q rowQueryer, identity agentmemory.Identity, statusPredicate string) (sqliteSessionRow, bool, error) {
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return sqliteSessionRow{}, false, err
 	}

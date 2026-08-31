@@ -19,22 +19,22 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	bundleHash, bundleSource := source.StorageValues()
 	const activeEntityID = "22222222-2222-4222-8222-222222222222"
 	activeReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, bundleHash, bundleSource, "component-scaffold", "component-scaffold/active", activeEntityID)
-
-	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES
-			('component-scaffold/active', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP),
-			('component-scaffold/terminated', 'component-scaffold', 'template', '{}', 'terminated', CURRENT_TIMESTAMP),
-			('service-owner', 'service-owner', 'static', '{}', 'active', CURRENT_TIMESTAMP)
-	`); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: "44444444-4444-4444-8444-444444444444",
 	})
+
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES
+			(?, 'component-scaffold/active', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP),
+			(?, 'component-scaffold/terminated', 'component-scaffold', 'template', '{}', 'terminated', CURRENT_TIMESTAMP),
+			(?, 'service-owner', 'service-owner', 'static', '{}', 'active', CURRENT_TIMESTAMP)
+	`, runID, runID, runID); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
+	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
 		VALUES (?, 'component-scaffold/active', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, runID, activeReadiness); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
@@ -48,7 +48,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 		t.Fatalf("seed entity_state: %v", err)
 	}
 
-	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
+	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx, runID)
 	if err != nil {
 		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 	}
@@ -85,8 +85,8 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyC
 	ctx := testAuthorActivityContext()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
-	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
-	if err == nil || !strings.Contains(err.Error(), "run_id is required") || len(descriptors) != 0 {
+	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx, "")
+	if err == nil || !strings.Contains(err.Error(), "require exact run_id") || len(descriptors) != 0 {
 		t.Fatalf("unscoped descriptor census: descriptors=%#v err=%v, want fail-closed run scope", descriptors, err)
 	}
 }
@@ -110,13 +110,13 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)
-	`); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES (?, 'component-scaffold/uncommitted', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)
+	`, runID); err != nil {
 		t.Fatalf("seed flow_instances in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
 		VALUES (?, 'component-scaffold/uncommitted', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, runID, uncommittedReadiness); err != nil {
 		t.Fatalf("seed readiness in tx: %v", err)
@@ -128,7 +128,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 		t.Fatalf("seed entity state in tx: %v", err)
 	}
 
-	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
+	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx, runID)
 	if err != nil {
 		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 	}

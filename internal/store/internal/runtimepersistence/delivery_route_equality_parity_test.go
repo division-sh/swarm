@@ -41,7 +41,7 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 
 			t.Run("same_exact_agent_projection_conflict_rolls_back", func(t *testing.T) {
 				event := deliveryRouteEqualityEvent(runID, "exact-agent-conflict")
-				identity := testAgentIdentity(t, "worker", "review/one")
+				identity := mustTestAgentIdentityForRun(runID, "worker", "review/one")
 				first, _ := events.NewDeliveryPayloadProjection(map[string]string{"case": "one"})
 				second, _ := events.NewDeliveryPayloadProjection(map[string]string{"case": "two"})
 				routes := []events.DeliveryRoute{
@@ -106,7 +106,7 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 			} {
 				t.Run(contradiction.name, func(t *testing.T) {
 					event := deliveryRouteEqualityEvent(runID, contradiction.name)
-					identity := testAgentIdentity(t, "worker", "review/one")
+					identity := mustTestAgentIdentityForRun(runID, "worker", "review/one")
 					routes := []events.DeliveryRoute{
 						{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Target: contradiction.first},
 						{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Target: contradiction.second},
@@ -121,8 +121,8 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 
 			t.Run("distinct_exact_agents_preserve_independent_projections", func(t *testing.T) {
 				event := deliveryRouteEqualityEvent(runID, "agent-siblings")
-				firstIdentity := testAgentIdentity(t, "worker", "review/one")
-				secondIdentity := testAgentIdentity(t, "worker", "review/two")
+				firstIdentity := mustTestAgentIdentityForRun(runID, "worker", "review/one")
+				secondIdentity := mustTestAgentIdentityForRun(runID, "worker", "review/two")
 				firstProjection, _ := events.NewDeliveryPayloadProjection(map[string]string{"case": "one"})
 				secondProjection, _ := events.NewDeliveryPayloadProjection(map[string]string{"case": "two"})
 				routes := []events.DeliveryRoute{

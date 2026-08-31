@@ -49,11 +49,12 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("b")),
 			}
 			paths := []string{"worker/context-a", "worker/context-b"}
+			runIDs := []string{uuid.NewString(), uuid.NewString()}
 			for index, fact := range facts {
-				seedServeDynamicTopologyReadiness(t, db, fact, uuid.NewString(), paths[index], index == 0)
+				seedServeDynamicTopologyReadiness(t, db, fact, runIDs[index], paths[index], index == 0)
 			}
 			if foreign.malformed {
-				if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE instance_id = $1`, paths[1]); err != nil {
+				if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE run_id = $1::uuid AND instance_path = $2`, runIDs[1], paths[1]); err != nil {
 					t.Fatalf("corrupt foreign readiness: %v", err)
 				}
 			}
@@ -165,9 +166,9 @@ func seedServeDynamicTopologyReadiness(
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ($1, $2, 'template', '{}'::jsonb, 'active', NOW())
-	`, instancePath, parts[0]); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active', NOW())
+	`, runID, instancePath, parts[0]); err != nil {
 		t.Fatalf("seed flow instance %s: %v", instancePath, err)
 	}
 	if _, err := db.Exec(`
@@ -178,7 +179,7 @@ func seedServeDynamicTopologyReadiness(
 	}
 	if _, err := db.Exec(`
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_id, plan, topology_ready_at, created_at, updated_at
+			run_id, instance_path, plan, topology_ready_at, created_at, updated_at
 		) VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
 	`, runID, instancePath, raw, nullableServeReadinessTime(complete)); err != nil {
 		t.Fatalf("seed readiness %s: %v", instancePath, err)
@@ -195,12 +196,12 @@ func nullableServeReadinessTime(complete bool) any {
 func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan::text,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan::text,
 		       COALESCE(readiness.topology_ready_at::text, ''), readiness.updated_at::text,
 		       run.bundle_hash, run.bundle_source, run.status
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN runs AS run ON run.run_id = readiness.run_id
-		ORDER BY readiness.instance_id
+		ORDER BY readiness.run_id, readiness.instance_path
 	`)
 	if err != nil {
 		t.Fatalf("snapshot readiness: %v", err)

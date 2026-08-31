@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -27,7 +28,7 @@ type GatewayHooks struct {
 	RuntimeShutdownAdmissionClosed func() bool
 	WithActor                      func(context.Context, models.AgentConfig) context.Context
 	ActorFromContext               func(context.Context) (models.AgentConfig, bool)
-	ResolveActorConfig             func(string) (models.AgentConfig, bool)
+	ResolveActorConfig             func(agentidentity.Identity) (models.AgentConfig, bool)
 	WithCurrentRuntimeEpoch        func(context.Context) context.Context
 	WithInboundEvent               func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder      func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
@@ -75,7 +76,11 @@ func (g *Gateway) hydrateActor(actor models.AgentConfig) models.AgentConfig {
 	if actor.ID == "" || g.hooks.ResolveActorConfig == nil {
 		return actor
 	}
-	if resolved, ok := g.hooks.ResolveActorConfig(actor.ID); ok {
+	identity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return actor
+	}
+	if resolved, ok := g.hooks.ResolveActorConfig(identity); ok {
 		resolved.NormalizeRuntimeDescriptor()
 		resolved.NormalizeEntityID()
 		resolved.ID = actor.ID

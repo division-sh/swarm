@@ -86,8 +86,11 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			}
 
 			runCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), activation.RunID)
-			route := runtimeflowidentity.RouteForInstancePath(activation.FlowInstance)
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, route, activation.EntityID, "collecting", "active")
+			flowIdentity := runtimeflowidentity.RunScopedFlowInstance{
+				RunID: activation.RunID,
+				Route: runtimeflowidentity.RouteForInstancePath(activation.FlowInstance),
+			}
+			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "collecting", "active")
 
 			memberA := uuid.NewString()
 			memberB := uuid.NewString()
@@ -97,7 +100,7 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 				"batch_id":   batchID,
 			})
 			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation)
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, route, activation.EntityID, "review", "active")
+			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
 
 			card := loadStageLifecycleIdentityCard(t, runCtx, lifecycleStore, activation)
 			assertStageLifecycleGateIdentity(t, card, activation)
@@ -155,13 +158,13 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if err := runtime.Bus.PublishAcknowledged(runCtx, decisionEvent); err != nil {
 				t.Fatalf("publish stage gate decision: %v", err)
 			}
-			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, route, activation.EntityID, "awaiting", "active")
+			assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "awaiting", "active")
 			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, false)
 
 			publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberB, "batch_id": batchID, "value": 22,
 			})
-			instance, join := waitStageLifecycleJoin(t, runCtx, runtime.Pipeline, route, activation.EntityID, batchID, 1, "awaiting", "active")
+			instance, join := waitStageLifecycleJoin(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, batchID, 1, "awaiting", "active")
 			if join.Status != joinruntime.StatusOpen || join.Completed() != 1 || join.Expected() != 2 {
 				t.Fatalf("partial singleton join = %#v, want open 1/2", join)
 			}
@@ -171,7 +174,7 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			})
 			// Standing singletons remain active service instances at terminal stages;
 			// template-flow deactivation is proved separately at the typed terminal owner.
-			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, route, activation.EntityID, "complete", "active")
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "active")
 			join = loadStageLifecycleJoin(t, instance, batchID)
 			if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed singleton join = %#v, want closed/complete", join)
@@ -405,16 +408,16 @@ func stageLifecycleRuntimeLogs(db *sql.DB) string {
 	return string(raw)
 }
 
-func assertStageLifecycleInstanceIdentity(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, route runtimeflowidentity.Route, entityID, state, status string) runtimepipeline.WorkflowInstance {
+func assertStageLifecycleInstanceIdentity(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, identity runtimeflowidentity.RunScopedFlowInstance, entityID, state, status string) runtimepipeline.WorkflowInstance {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var last runtimepipeline.WorkflowInstance
 	for time.Now().Before(deadline) {
-		instance, ok, err := pipeline.Load(ctx, route)
+		instance, ok, err := pipeline.Load(ctx, identity)
 		if err == nil && ok {
 			last = instance
-			if instance.StorageRef != route.InstancePath || instance.InstanceID != route.InstanceID || instance.EntityID != entityID {
-				t.Fatalf("persisted lifecycle identity = route:%q instance:%q entity:%v, want %q/%q/%q", instance.StorageRef, instance.InstanceID, instance.EntityID, route.InstancePath, route.InstanceID, entityID)
+			if instance.StorageRef != identity.Route.InstancePath || instance.InstanceID != identity.Route.InstanceID || instance.EntityID != entityID {
+				t.Fatalf("persisted lifecycle identity = route:%q instance:%q entity:%v, want %q/%q/%q", instance.StorageRef, instance.InstanceID, instance.EntityID, identity.Route.InstancePath, identity.Route.InstanceID, entityID)
 			}
 			if instance.CurrentState == state && instance.Status == status {
 				return instance
@@ -426,16 +429,16 @@ func assertStageLifecycleInstanceIdentity(t *testing.T, ctx context.Context, pip
 	return runtimepipeline.WorkflowInstance{}
 }
 
-func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, route runtimeflowidentity.Route, entityID, batchID string, completed int, state, status string) (runtimepipeline.WorkflowInstance, joinruntime.Activation) {
+func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, identity runtimeflowidentity.RunScopedFlowInstance, entityID, batchID string, completed int, state, status string) (runtimepipeline.WorkflowInstance, joinruntime.Activation) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var last runtimepipeline.WorkflowInstance
 	for time.Now().Before(deadline) {
-		instance, ok, err := pipeline.Load(ctx, route)
+		instance, ok, err := pipeline.Load(ctx, identity)
 		if err == nil && ok {
 			last = instance
-			if instance.StorageRef != route.InstancePath || instance.EntityID != entityID {
-				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.EntityID, route.InstancePath, entityID)
+			if instance.StorageRef != identity.Route.InstancePath || instance.EntityID != entityID {
+				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.EntityID, identity.Route.InstancePath, entityID)
 			}
 			activation, found := findStageLifecycleJoin(t, instance, batchID)
 			if found && activation.Completed() == completed && instance.CurrentState == state && instance.Status == status {

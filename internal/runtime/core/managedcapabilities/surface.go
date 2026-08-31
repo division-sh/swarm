@@ -44,6 +44,14 @@ type Authority struct {
 	StartupGeneration    uint64        `json:"startup_generation,omitempty"`
 }
 
+func validateAuthorityActorRun(authority Authority, actor agentidentity.Identity) error {
+	runID := strings.TrimSpace(authority.RunID)
+	if runID != "" && runID != actor.RunID {
+		return fmt.Errorf("managed capability authority run does not match actor identity run")
+	}
+	return nil
+}
+
 func (a Authority) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(a.ID)); err != nil {
 		return fmt.Errorf("managed capability authority id is invalid: %w", err)
@@ -268,6 +276,9 @@ func New(plan Plan) (Surface, error) {
 	if err := actorIdentity.Validate(); err != nil {
 		return Surface{}, fmt.Errorf("managed capability actor identity: %w", err)
 	}
+	if err := validateAuthorityActorRun(plan.Authority, actorIdentity); err != nil {
+		return Surface{}, err
+	}
 	if strings.TrimSpace(plan.Provider) == "" || strings.TrimSpace(plan.Transport) == "" || strings.TrimSpace(plan.ProviderContract) == "" {
 		return Surface{}, fmt.Errorf("managed capability surface requires actor, provider, transport, and provider contract")
 	}
@@ -347,6 +358,9 @@ func (s Surface) Validate() error {
 	actorIdentity := s.ActorIdentity.Normalize()
 	if err := actorIdentity.Validate(); err != nil {
 		return fmt.Errorf("managed capability actor identity: %w", err)
+	}
+	if err := validateAuthorityActorRun(s.Authority, actorIdentity); err != nil {
+		return err
 	}
 	if actorIdentity.AgentID() != strings.TrimSpace(s.ActorID) {
 		return fmt.Errorf("managed capability actor id is not the typed identity projection")

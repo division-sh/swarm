@@ -48,10 +48,14 @@ func TestDrainedCompletionInputHasNoMutableProjectionSurface(t *testing.T) {
 	}
 }
 
-func effectLifecycleToken(t testing.TB, runtimeEpoch int64, agentID string, generation uint64) LifecycleToken {
+func effectLifecycleToken(t testing.TB, runtimeEpoch int64, agentID string, generation uint64, runIDs ...string) LifecycleToken {
 	t.Helper()
+	runID := agentidentitytest.DefaultRunID
+	if len(runIDs) > 0 {
+		runID = runIDs[0]
+	}
 	return LifecycleToken{
-		Identity:     agentidentitytest.Runtime(t, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
+		Identity:     agentidentitytest.RuntimeForRun(t, runID, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
 		RuntimeEpoch: runtimeEpoch,
 		AgentID:      agentID,
 		Generation:   generation,
@@ -76,6 +80,54 @@ func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
 	authority, ok = CompletionAuthorityFromContext(ctx)
 	if !ok || authority.ExecutionMode != ExecutionModeMock {
 		t.Fatalf("targeted authority = %#v, want mock mode preserved", authority)
+	}
+}
+
+func TestConversationForkCompletionTargetRequiresExactSourceRun(t *testing.T) {
+	forkTurnID := uuid.NewString()
+	sourceRunID := uuid.NewString()
+	authority := Authority{
+		Kind:            AuthorityConversationForkChat,
+		ID:              forkTurnID,
+		ExecutionOwner:  "forkchat-owner",
+		LeaseExpiresAt:  time.Now().UTC().Add(time.Minute),
+		FenceGeneration: 1,
+		ExecutionMode:   ExecutionModeLive,
+		ForkChat: ConversationForkChatAuthority{
+			ForkTurnID:          forkTurnID,
+			ForkID:              uuid.NewString(),
+			SourceRunID:         sourceRunID,
+			BundleHash:          "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			ActorTokenID:        "actor-token",
+			RequestOccurrenceID: uuid.NewString(),
+			RequestHash:         "request-hash",
+		},
+		Target: UsageTarget{
+			Kind:    UsageTargetConversationForkCompletion,
+			ID:      forkTurnID,
+			Ordinal: 1,
+			RunID:   sourceRunID,
+		},
+	}
+	if err := authority.ValidateCompletionAdapter("anthropic_api"); err != nil {
+		t.Fatalf("exact source run authority: %v", err)
+	}
+
+	authority.Target.RunID = uuid.NewString()
+	if err := authority.ValidateCompletionAdapter("anthropic_api"); err == nil {
+		t.Fatal("mismatched fork completion target run_id accepted")
+	}
+}
+
+func TestAgentTurnUsageTargetRejectsIdentityFromDifferentRun(t *testing.T) {
+	token := effectLifecycleToken(t, 1, "agent-1", 2)
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: token.Identity.FlowInstance(),
+	}
+	if target.Valid() {
+		t.Fatal("agent-turn usage target accepted an identity from a different run")
 	}
 }
 
@@ -254,15 +306,24 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 		t.Fatalf("build managed execution admission: %v", err)
 	}
 	target := UsageTarget{
-		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
 		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: token.Identity.FlowInstance(),
 	}
+	surfaceRunID := uuid.NewString()
+	surfaceIdentity, err := target.AgentIdentity.Plan()
+	if err != nil {
+		t.Fatalf("plan managed capability actor identity: %v", err)
+	}
+	concreteSurfaceIdentity, err := surfaceIdentity.Live(surfaceRunID)
+	if err != nil {
+		t.Fatalf("admit managed capability actor identity: %v", err)
+	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: target.AgentIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: concreteSurfaceIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
-			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: uuid.NewString(), SessionID: target.SessionID, TurnOrdinal: 1,
+			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: surfaceRunID, SessionID: target.SessionID, TurnOrdinal: 1,
 		},
 		CreatedAt: time.Unix(1, 0).UTC(),
 	})
@@ -282,8 +343,8 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 		t.Fatal("provider completion accepted a capability surface from a different run")
 	}
 	failure, ok := runtimefailures.EnvelopeFromError(err)
-	if !ok || failure.Detail.Code != "managed_effect_turn_identity_mismatch" {
-		t.Fatalf("failure = %#v ok=%v, want managed_effect_turn_identity_mismatch", failure, ok)
+	if !ok || failure.Detail.Code != "managed_effect_execution_authority_mismatch" {
+		t.Fatalf("failure = %#v ok=%v, want managed_effect_execution_authority_mismatch", failure, ok)
 	}
 }
 
@@ -331,7 +392,7 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 				surfaceTarget.RunID = uuid.NewString()
 				return token.AgentID
 			},
-			wantCode: "managed_effect_turn_identity_mismatch",
+			wantCode: "managed_effect_execution_authority_mismatch",
 		},
 	}
 
@@ -343,7 +404,7 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 				t.Fatalf("build managed execution admission: %v", err)
 			}
 			authorityTarget := UsageTarget{
-				Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+				Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
 				AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 				FlowInstance: token.Identity.FlowInstance(),
 			}
@@ -385,8 +446,8 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorization(t *testing.T) {
 	probe := &effectStoreProbe{}
 	token := effectLifecycleToken(t, 7, "agent-a", 3)
-	siblingIdentity := agentidentitytest.Runtime(
-		t, token.AgentID, "effects-test", "effects-test", "sibling", "effects-test/sibling",
+	siblingIdentity := agentidentitytest.RuntimeForRun(
+		t, token.Identity.RunID, token.AgentID, "effects-test", "effects-test", "sibling", "effects-test/sibling",
 	)
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
@@ -401,7 +462,7 @@ func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorizati
 		t.Fatalf("build managed execution admission: %v", err)
 	}
 	target := UsageTarget{
-		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
 		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: token.Identity.FlowInstance(),
 	}
@@ -446,7 +507,7 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
-		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1).Identity,
+		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1, forkRunID).Identity,
 		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
 	}
 
@@ -513,7 +574,7 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
-		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1).Identity,
+		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1, forkRunID).Identity,
 		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
 	}
 	selectedAuthority.Target = target
@@ -557,15 +618,16 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 		probe := &effectStoreProbe{}
 		controller := NewController(probe).WithExecutionPosture(executionposture.Live)
 		forkTurnID := uuid.NewString()
+		sourceRunID := uuid.NewString()
 		authority := Authority{
 			Kind: AuthorityConversationForkChat, ID: forkTurnID,
 			ExecutionOwner: "forkchat-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 			ExecutionMode: ExecutionModeLive,
 			ForkChat: ConversationForkChatAuthority{
-				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), SourceRunID: sourceRunID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				ActorTokenID: "actor-token", RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash",
 			},
-			Target: UsageTarget{Kind: UsageTargetConversationForkCompletion, ID: forkTurnID, Ordinal: 1},
+			Target: UsageTarget{Kind: UsageTargetConversationForkCompletion, ID: forkTurnID, Ordinal: 1, RunID: sourceRunID},
 		}
 		frame := agentframe.Frame{}
 		_, err := controller.Authorize(WithAuthority(context.Background(), authority), AuthorizeRequest{
@@ -709,7 +771,7 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, bundleSourc
 	t.Helper()
 	selected := origin == "selected"
 	runID := uuid.NewString()
-	token := effectLifecycleToken(t, 7, "binding-agent", 3)
+	token := effectLifecycleToken(t, 7, "binding-agent", 3, runID)
 	authority := NormalAgentAuthority(token, "binding-owner", time.Now().UTC().Add(time.Minute))
 	admissionKind := managedexecution.KindNormalRuntime
 	executionID := "binding-execution"
@@ -819,7 +881,7 @@ func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
 	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	authority := testAuthority(token)
 	authority.Target = UsageTarget{
-		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: token.AgentID,
 		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: token.Identity.FlowInstance(), EntityID: uuid.NewString(),
 	}
@@ -932,9 +994,13 @@ func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string)
 	if err != nil {
 		t.Fatalf("build managed execution test admission: %v", err)
 	}
+	token, ok := LifecycleTokenFromContext(ctx)
+	if !ok {
+		t.Fatal("managed effect test context requires lifecycle token")
+	}
 	target := UsageTarget{
-		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: agentID,
-		AgentIdentity: agentidentitytest.Runtime(t, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: token.Identity.RunID, AgentID: agentID,
+		AgentIdentity: agentidentitytest.RuntimeForRun(t, token.Identity.RunID, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
 		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
 	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
@@ -946,7 +1012,16 @@ func normalManagedEffectSurface(t testing.TB, admission managedexecution.Admissi
 	t.Helper()
 	actorIdentity := target.AgentIdentity
 	if actorID != target.AgentIdentity.AgentID() {
-		actorIdentity = agentidentitytest.Runtime(t, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+		actorIdentity = agentidentitytest.RuntimeForRun(t, target.RunID, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+	} else if actorIdentity.RunID != target.RunID {
+		plan, err := actorIdentity.Plan()
+		if err != nil {
+			t.Fatalf("plan managed capability actor identity: %v", err)
+		}
+		actorIdentity, err = plan.Live(target.RunID)
+		if err != nil {
+			t.Fatalf("admit managed capability actor identity: %v", err)
+		}
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
@@ -966,7 +1041,16 @@ func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admis
 	t.Helper()
 	actorIdentity := target.AgentIdentity
 	if actorID != target.AgentIdentity.AgentID() {
-		actorIdentity = agentidentitytest.Runtime(t, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+		actorIdentity = agentidentitytest.RuntimeForRun(t, target.RunID, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+	} else if actorIdentity.RunID != target.RunID {
+		plan, err := actorIdentity.Plan()
+		if err != nil {
+			t.Fatalf("plan selected capability actor identity: %v", err)
+		}
+		actorIdentity, err = plan.Live(target.RunID)
+		if err != nil {
+			t.Fatalf("admit selected capability actor identity: %v", err)
+		}
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",

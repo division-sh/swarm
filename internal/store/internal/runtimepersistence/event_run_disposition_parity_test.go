@@ -215,7 +215,7 @@ func TestRunCreatingRootRejectsTerminalRunParity(t *testing.T) {
 	}
 }
 
-func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
+func TestDirectiveOperationRequiresExistingExactRunAuthorityParity(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) authorActivityReceiptFixture
@@ -228,7 +228,8 @@ func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			store := fixture.store.(runtimeagentcontrol.DirectiveOperationStore)
-			req := newRunDispositionDirectiveRequest(t, runtimeagentcontrol.RunResolutionNewRunAllocated)
+			req := newRunDispositionDirectiveRequest(t)
+			seedAuthorActivityReceiptRun(t, fixture, ctx, req.Operation.ResolvedRunID)
 			seedTestAgentRow(
 				t,
 				ctx,
@@ -247,8 +248,8 @@ func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
 				t.Fatalf("reservation = %#v", reserved)
 			}
 			after := eventMutationSurfaceCounts(t, fixture.db, ctx)
-			if after["runs"]-before["runs"] != 1 || after["events"]-before["events"] != 1 {
-				t.Fatalf("row deltas = runs:%d events:%d, want 1/1", after["runs"]-before["runs"], after["events"]-before["events"])
+			if after["runs"]-before["runs"] != 0 || after["events"]-before["events"] != 1 {
+				t.Fatalf("row deltas = runs:%d events:%d, want 0/1", after["runs"]-before["runs"], after["events"]-before["events"])
 			}
 			var operationCount int
 			if err := fixture.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_directive_operations WHERE directive_event_id = "+directiveEventIDPlaceholder(fixture.dialect), req.Operation.DirectiveEventID).Scan(&operationCount); err != nil {
@@ -282,19 +283,25 @@ func TestDirectiveOperationResolutionMustMatchAdmittedRunAuthorityParity(t *test
 		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
 	} {
 		for _, test := range []struct {
-			name              string
-			eventResolution   string
-			claimedResolution string
+			name   string
+			mutate func(*runtimeagentcontrol.ReserveDirectiveOperationRequest)
 		}{
-			{name: "create_event_claimed_existing", eventResolution: runtimeagentcontrol.RunResolutionNewRunAllocated, claimedResolution: runtimeagentcontrol.RunResolutionSpecified},
-			{name: "existing_event_claimed_create", eventResolution: runtimeagentcontrol.RunResolutionSpecified, claimedResolution: runtimeagentcontrol.RunResolutionNewRunAllocated},
+			{name: "unsupported_resolution", mutate: func(req *runtimeagentcontrol.ReserveDirectiveOperationRequest) {
+				req.Operation.RunIDResolution = "unsupported"
+			}},
+			{name: "requested_run_disagrees", mutate: func(req *runtimeagentcontrol.ReserveDirectiveOperationRequest) {
+				req.Operation.RequestedRunID = uuid.NewString()
+			}},
+			{name: "resolved_run_disagrees", mutate: func(req *runtimeagentcontrol.ReserveDirectiveOperationRequest) {
+				req.Operation.ResolvedRunID = uuid.NewString()
+			}},
 		} {
 			backend, test := backend, test
 			t.Run(backend.name+"/"+test.name, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
-				req := newRunDispositionDirectiveRequest(t, test.eventResolution)
-				req.Operation.RunIDResolution = test.claimedResolution
+				req := newRunDispositionDirectiveRequest(t)
+				test.mutate(&req)
 				before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 				if _, err := fixture.store.(runtimeagentcontrol.DirectiveOperationStore).ReserveDirectiveOperation(ctx, req); err == nil {
 					t.Fatal("ReserveDirectiveOperation error = nil")
@@ -305,7 +312,7 @@ func TestDirectiveOperationResolutionMustMatchAdmittedRunAuthorityParity(t *test
 	}
 }
 
-func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimeagentcontrol.ReserveDirectiveOperationRequest {
+func newRunDispositionDirectiveRequest(t *testing.T) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
 	now := time.Date(2026, 7, 19, 19, 30, 0, 0, time.UTC)
 	runID := uuid.NewString()
@@ -313,12 +320,9 @@ func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimea
 	eventID := uuid.NewString()
 	req := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID: "agent-1", Directive: "continue", Source: runtimeagentcontrol.DirectiveSourceV1RPC,
-		OperatorID: "actor-1",
+		OperatorID: "actor-1", RunID: runID,
 	}
-	if resolution != runtimeagentcontrol.RunResolutionNewRunAllocated {
-		req.RunID = runID
-	}
-	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: resolution}, operationID, eventID, now, executionposture.Live)
+	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}, operationID, eventID, now, executionposture.Live)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}
@@ -329,9 +333,9 @@ func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimea
 	return runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{
 			OperationID: operationID, Method: runtimeagentcontrol.DirectiveOperationMethod,
-			ActorTokenID: "actor-1", RequestHash: "hash-1", AgentIdentity: testAgentIdentity(t, req.AgentID, req.FlowInstance),
+			ActorTokenID: "actor-1", RequestHash: "hash-1", AgentIdentity: mustTestAgentIdentityForRun(runID, req.AgentID, req.FlowInstance),
 			Directive: req.Directive, RequestedRunID: req.RunID, ResolvedRunID: runID,
-			RunIDResolution: resolution, Source: req.Source, OperatorID: req.OperatorID,
+			RunIDResolution: runtimeagentcontrol.RunResolutionSpecified, Source: req.Source, OperatorID: req.OperatorID,
 			DirectiveEventID: eventID, State: runtimeagentcontrol.DirectiveOperationPrepared,
 		},
 		Event: admitted,

@@ -261,6 +261,9 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	if c.Session != nil {
 		return nil
 	}
+	if c.kind == conversationManaged {
+		ctx = agentmemory.WithExecution(ctx, c.Memory, c.seed.AgentIdentity)
+	}
 	s, err := c.runtime.StartSession(ctx, c.AgentID, c.SystemPrompt, c.Tools)
 	if err != nil {
 		return err
@@ -384,7 +387,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 				actor, hasActor := models.ActorFromContext(ctx)
 				actorIdentity, actorIdentityErr := actor.ConcreteIdentity()
 				if !hasActor || actorIdentityErr != nil || !surface.MatchesActor(actorIdentity) ||
-					!surface.MatchesActor(c.Session.MemoryIdentity.Agent) {
+					!surface.MatchesActor(c.Session.MemoryIdentity) {
 					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
 				}
 				if token, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx); hasToken && !surface.MatchesActor(token.Identity) {

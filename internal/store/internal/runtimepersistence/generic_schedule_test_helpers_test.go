@@ -55,7 +55,7 @@ func selectedScheduleTestContext(t *testing.T, runID string) context.Context {
 
 func testAgentGenericScheduleCommand(t testing.TB, runID, agentID, flowInstance, entityID, key string, due runtimegenericschedule.DueBasis) runtimegenericschedule.AdmissionCommand {
 	t.Helper()
-	identity := testAgentIdentity(t, agentID, flowInstance)
+	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 	flowID, _, path, present := identity.Route.Fields()
 	if !present {
 		t.Fatal("generic schedule fixture requires a flow-owned agent identity")

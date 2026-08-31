@@ -19,6 +19,7 @@ func IdentityFields(identity runtimeagentidentity.Identity) (runtimeagentidentit
 }
 
 func IdentityFromColumns(
+	runID,
 	agentID,
 	nameOwner,
 	nameSource,
@@ -28,6 +29,7 @@ func IdentityFromColumns(
 	flowInstance string,
 ) (runtimeagentidentity.Identity, error) {
 	return runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{
+		RunID:            runID,
 		AgentID:          agentID,
 		NameOwner:        nameOwner,
 		NameSource:       nameSource,
@@ -38,18 +40,19 @@ func IdentityFromColumns(
 	})
 }
 
-func (s *AgentPostgresOwner) ResolveOperatorAgentIdentity(ctx context.Context, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
-	return resolveOperatorAgentIdentity(ctx, s.agents, agentID, flowInstance)
+func (s *AgentPostgresOwner) ResolveOperatorAgentIdentity(ctx context.Context, runID, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
+	return resolveOperatorAgentIdentity(ctx, s.agents, runID, agentID, flowInstance)
 }
 
-func (s *AgentSQLiteOwner) ResolveOperatorAgentIdentity(ctx context.Context, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
-	return resolveOperatorAgentIdentity(ctx, s.agents, agentID, flowInstance)
+func (s *AgentSQLiteOwner) ResolveOperatorAgentIdentity(ctx context.Context, runID, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
+	return resolveOperatorAgentIdentity(ctx, s.agents, runID, agentID, flowInstance)
 }
 
-func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
+func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, runID, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
+	runID = strings.TrimSpace(runID)
 	agentID = strings.TrimSpace(agentID)
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if agentID == "" {
+	if runID == "" || agentID == "" {
 		return runtimeagentidentity.Identity{}, operatorread.ErrAgentNotFound
 	}
 	rows, err := source.LoadAgents(ctx)
@@ -62,7 +65,7 @@ func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agent
 		if err != nil {
 			return runtimeagentidentity.Identity{}, err
 		}
-		if identity.AgentID() != agentID {
+		if identity.RunID != runID || identity.AgentID() != agentID {
 			continue
 		}
 		if flowInstance != "" && identity.FlowInstance() != flowInstance {
@@ -84,9 +87,10 @@ func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agent
 		descriptions = append(descriptions, candidate.Description())
 	}
 	return runtimeagentidentity.Identity{}, fmt.Errorf(
-		"%w: agent_id %q matches %s",
+		"%w: agent_id %q in run %q matches %s",
 		operatorread.ErrAgentTargetAmbiguous,
 		agentID,
+		runID,
 		strings.Join(descriptions, ", "),
 	)
 }

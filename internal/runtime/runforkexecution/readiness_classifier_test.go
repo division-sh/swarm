@@ -25,7 +25,7 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("worker", "flow-a/worker", "selected_contracts", agentidentity.Identity{}),
+				testAgentFrontierRecipient("worker", "flow-a/worker", "selected_contracts", agentidentity.Plan{}),
 			},
 		}},
 	}

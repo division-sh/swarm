@@ -25,11 +25,11 @@ func TestCatalogRequiredInventory(t *testing.T) {
 			verifyCounts[fixture.Metadata.Verify]++
 		}
 	}
-	if got := len(inventory.Fixtures); got != 156 {
-		t.Fatalf("fixture count = %d, want 156", got)
+	if got := len(inventory.Fixtures); got != 157 {
+		t.Fatalf("fixture count = %d, want 157", got)
 	}
-	if counts[DispositionRuntime] != 98 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 22 {
-		t.Fatalf("disposition counts = %#v, want runtime=98 verify-only=36 retired=22", counts)
+	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 22 {
+		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=36 retired=22", counts)
 	}
 	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 8 || verifyCounts[VerifyReject] != 26 {
 		t.Fatalf("verify-only counts = %#v, want pass=2 warning=8 reject=26", verifyCounts)

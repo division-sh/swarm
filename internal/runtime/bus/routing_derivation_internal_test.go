@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -211,6 +212,7 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 			name = "reverse"
 		}
 		t.Run(name, func(t *testing.T) {
+			owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(templatePath, "worker-a"))
 			rt := newRouteTable(nil)
 			rt.eventPath[instancePath+"/"+localEvent] = struct{}{}
 			firstNode := testFlowNode(t, "observer", "first-handler")
@@ -238,7 +240,7 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 					Subscriber: role, SubscriberInstancePath: "observer",
 				}
 				rt.addTemplateSourceObserverLocked(observer)
-				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+				rt.materializeTemplateSourceObserverLocked(observer, owner)
 			}
 			if got := len(rt.templateObservers[templatePath]); got != 2 {
 				t.Fatalf("template observer roles = %d, want 2", got)
@@ -250,7 +252,7 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 			// Reinstalling exact equal roles must be idempotent across a rebuild.
 			for _, observer := range append([]routeTemplateSourceObserver(nil), rt.templateObservers[templatePath]...) {
 				rt.addTemplateSourceObserverLocked(observer)
-				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+				rt.materializeTemplateSourceObserverLocked(observer, owner)
 			}
 			if got := len(rt.templateObservers[templatePath]); got != 2 {
 				t.Fatalf("reinstalled observer roles = %d, want 2", got)
@@ -261,7 +263,7 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 
 			rt.patterns = rt.patterns[:1]
 			for _, observer := range rt.templateObservers[templatePath] {
-				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+				rt.materializeTemplateSourceObserverLocked(observer, owner)
 			}
 			rt.rebuildLocked()
 			resolved := rt.Resolve(instancePath + "/" + localEvent)
@@ -285,27 +287,28 @@ func TestRouteTableTemplateObserverPreservesDistinctAgentIdentities(t *testing.T
 	if err != nil {
 		t.Fatalf("second route: %v", err)
 	}
-	firstIdentity, err := agentidentity.New(name, firstRoute)
+	firstIdentity, err := agentidentity.NewPlan(name, firstRoute)
 	if err != nil {
 		t.Fatalf("first identity: %v", err)
 	}
-	secondIdentity, err := agentidentity.New(name, secondRoute)
+	secondIdentity, err := agentidentity.NewPlan(name, secondRoute)
 	if err != nil {
 		t.Fatalf("second identity: %v", err)
 	}
 	rt := newRouteTable(nil)
 	rt.eventPath["sources/source-a/work.ready"] = struct{}{}
-	for _, identity := range []agentidentity.Identity{firstIdentity, secondIdentity} {
+	owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("sources", "source-a"))
+	for _, identity := range []agentidentity.Plan{firstIdentity, secondIdentity} {
 		observer := routeTemplateSourceObserver{
 			SourceTemplatePath: "sources", SourceLocalEvent: "work.ready",
 			Subscriber: Subscriber{
 				Recipient: events.MustAgentDeliveryRecipient("shared-agent"), Path: "workers",
-				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "work.ready", AgentIdentity: identity,
+				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "work.ready", AgentPlan: identity,
 			},
 			SubscriberInstancePath: "workers",
 		}
 		rt.addTemplateSourceObserverLocked(observer)
-		rt.materializeTemplateSourceObserverLocked(observer, "sources/source-a")
+		rt.materializeTemplateSourceObserverLocked(observer, owner)
 	}
 	if got := len(rt.templateObservers["sources"]); got != 2 {
 		t.Fatalf("template agent observer roles = %d, want 2", got)
@@ -320,9 +323,14 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	const eventType = "component-scaffold/component-a/component.scaffolded"
 	rt := newRouteTable(nil)
 	rt.eventPath[eventType] = struct{}{}
+	plan, err := testAgentRouteIdentity(t, "operating-observer", "").Plan()
+	if err != nil {
+		t.Fatalf("construct wildcard subscriber plan: %v", err)
+	}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber:   Subscriber{Recipient: events.MustAgentDeliveryRecipient("operating-observer"), routeSource: subscriberRouteSourceSubscription},
+		RunID:        busInternalTestRunID,
+		Subscriber:   Subscriber{Recipient: events.MustAgentDeliveryRecipient("operating-observer"), AgentPlan: plan, routeSource: subscriberRouteSourceSubscription},
 	}}
 	rt.rebuildLocked()
 	delete(rt.routes, eventType)
@@ -335,7 +343,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	recorder := NewEmittedEventsRecorder()
 	ctx := WithEmittedEventsRecorder(context.Background(), recorder)
 
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", eventType, "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	evt := requireBusEvent(t, ch, "routed wildcard delivery")

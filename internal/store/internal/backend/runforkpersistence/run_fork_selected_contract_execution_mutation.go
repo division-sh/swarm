@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -124,8 +127,11 @@ type selectedContractWorkflowState struct {
 	EntityID        string
 	WorkflowName    string
 	WorkflowVersion string
+	ExecutionMode   executionmode.Mode
 	Mode            string
 	Route           string
+	Config          map[string]any
+	Agents          []runfork.RunForkSelectedContractAgentExpectation
 }
 
 func selectedContractWorkflowStates(
@@ -157,7 +163,7 @@ func selectedContractWorkflowStates(
 		workflowName := strings.TrimSpace(state.FlowID)
 		workflowVersion := strings.TrimSpace(state.WorkflowVersion)
 		mode := strings.TrimSpace(state.Mode)
-		if workflowName == "" || workflowVersion == "" || (mode != "static" && mode != "template") {
+		if workflowName == "" || workflowVersion == "" || !state.ExecutionMode.Valid() || (mode != "static" && mode != "template") {
 			return nil, fmt.Errorf("selected-contract workflow state requires exact workflow descriptor")
 		}
 		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateRunScope &&
@@ -179,7 +185,9 @@ func selectedContractWorkflowStates(
 		seenEntities[entityID] = struct{}{}
 		out = append(out, selectedContractWorkflowState{
 			RunID: strings.TrimSpace(forkRunID), EntityID: entityID, WorkflowName: workflowName,
-			WorkflowVersion: workflowVersion, Mode: mode, Route: route.InstancePath,
+			WorkflowVersion: workflowVersion, ExecutionMode: state.ExecutionMode, Mode: mode, Route: route.InstancePath,
+			Config: state.Config,
+			Agents: append([]runfork.RunForkSelectedContractAgentExpectation(nil), state.Agents...),
 		})
 	}
 	return out, nil
@@ -207,59 +215,201 @@ func selectedContractProjectedWorkflowStateRoute(forkRunID string, state runfork
 	}
 }
 
-func materializeSelectedContractWorkflowState(ctx context.Context, tx *sql.Tx, state selectedContractWorkflowState, now time.Time) error {
+func materializeSelectedContractWorkflowState(ctx context.Context, tx *sql.Tx, postgres bool, source runtimecorrelation.BundleSourceFact, state selectedContractWorkflowState, now time.Time) ([]runfork.RunForkSelectedContractAgentTopology, error) {
 	transition, err := runtimepipeline.WorkflowEngineStateTransitionForPresence(runtimepipeline.WorkflowTargetPersistenceStateOnly)
 	if err != nil {
-		return fmt.Errorf("selected-contract workflow state requires the canonical state-only companion transition: %w", err)
+		return nil, fmt.Errorf("selected-contract workflow state requires the canonical state-only companion transition: %w", err)
 	}
 	if transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
-		return fmt.Errorf("selected-contract workflow state received incompatible persistence transition")
+		return nil, fmt.Errorf("selected-contract workflow state received incompatible persistence transition")
 	}
-	config, err := json.Marshal(map[string]any{
-		"flow_path":        state.Route,
-		"instance_id":      runtimeflowidentity.LogicalInstanceID(state.Route),
-		"storage_ref":      state.Route,
-		"workflow_version": state.WorkflowVersion,
-	})
+	descriptor := state.Config
+	if state.Mode != "template" {
+		descriptor = map[string]any{
+			"flow_path":        state.Route,
+			"instance_id":      runtimeflowidentity.LogicalInstanceID(state.Route),
+			"storage_ref":      state.Route,
+			"workflow_version": state.WorkflowVersion,
+		}
+	} else if descriptor == nil {
+		return nil, fmt.Errorf("selected-contract template workflow state requires exact activation config")
+	}
+	route := runtimeflowidentity.RouteForInstancePath(state.Route)
+	descriptor, err = runtimepipeline.WorkflowInstanceConfigPayloadForRoute(route, state.WorkflowVersion, descriptor)
 	if err != nil {
-		return fmt.Errorf("encode selected-contract root descriptor: %w", err)
+		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES ($1, $2, $3, $4, 'active', $5)
-		ON CONFLICT (instance_id) DO NOTHING
-	`, state.Route, state.WorkflowName, state.Mode, string(config), now); err != nil {
-		return fmt.Errorf("insert selected-contract workflow instance: %w", err)
+	config, err := json.Marshal(descriptor)
+	if err != nil {
+		return nil, fmt.Errorf("encode selected-contract root descriptor: %w", err)
+	}
+	insertFlow := `
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES (?, ?, ?, ?, ?, 'active', ?)
+		ON CONFLICT (run_id, instance_path) DO NOTHING`
+	if postgres {
+		insertFlow = `
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+				VALUES ($1::uuid, $2, $3, $4, $5, 'active', $6)
+			ON CONFLICT (run_id, instance_path) DO NOTHING`
+	}
+	if _, err := tx.ExecContext(ctx, insertFlow, state.RunID, state.Route, state.WorkflowName, state.Mode, string(config), now); err != nil {
+		return nil, fmt.Errorf("insert selected-contract workflow instance: %w", err)
 	}
 	var persistedWorkflow, persistedMode, persistedStatus string
 	var persistedConfig []byte
-	if err := tx.QueryRowContext(ctx, `
-		SELECT flow_template, mode, config, status
-		FROM flow_instances
-		WHERE instance_id = $1
-	`, state.Route).Scan(&persistedWorkflow, &persistedMode, &persistedConfig, &persistedStatus); err != nil {
-		return fmt.Errorf("verify selected-contract workflow instance: %w", err)
+	selectFlow := `SELECT flow_template, mode, config, status FROM flow_instances WHERE run_id = ? AND instance_path = ?`
+	if postgres {
+		selectFlow = `SELECT flow_template, mode, config, status FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
+	}
+	if err := tx.QueryRowContext(ctx, selectFlow, state.RunID, state.Route).Scan(&persistedWorkflow, &persistedMode, &persistedConfig, &persistedStatus); err != nil {
+		return nil, fmt.Errorf("verify selected-contract workflow instance: %w", err)
 	}
 	if persistedWorkflow != state.WorkflowName || persistedMode != state.Mode || persistedStatus != "active" ||
 		!workflowCommitJSONEqual(persistedConfig, config) {
-		return fmt.Errorf("selected-contract workflow instance %s disagrees with exact descriptor", state.Route)
+		return nil, fmt.Errorf("selected-contract workflow instance %s disagrees with exact descriptor", state.Route)
 	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE entity_state
-		SET flow_instance = $1, updated_at = $4
-			WHERE run_id = $2 AND entity_id = $3
-	`, state.Route, state.RunID, state.EntityID, now)
+	topologies, err := materializeSelectedContractWorkflowReadiness(ctx, tx, postgres, source, state, now)
 	if err != nil {
-		return fmt.Errorf("address selected-contract workflow entity state: %w", err)
+		return nil, err
+	}
+	updateEntity := `UPDATE entity_state SET flow_instance = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
+	args := []any{state.Route, now, state.RunID, state.EntityID}
+	if postgres {
+		updateEntity = `UPDATE entity_state SET flow_instance = $1, updated_at = $4 WHERE run_id = $2 AND entity_id = $3`
+		args = []any{state.Route, state.RunID, state.EntityID, now}
+	}
+	result, err := tx.ExecContext(ctx, updateEntity, args...)
+	if err != nil {
+		return nil, fmt.Errorf("address selected-contract workflow entity state: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read selected-contract root state update: %w", err)
+		return nil, fmt.Errorf("read selected-contract root state update: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("selected-contract workflow entity state %s was not materialized exactly once", state.EntityID)
+		return nil, fmt.Errorf("selected-contract workflow entity state %s was not materialized exactly once", state.EntityID)
+	}
+	return topologies, nil
+}
+
+func materializeSelectedContractWorkflowReadiness(ctx context.Context, tx *sql.Tx, postgres bool, source runtimecorrelation.BundleSourceFact, state selectedContractWorkflowState, now time.Time) ([]runfork.RunForkSelectedContractAgentTopology, error) {
+	plan, topologies, encoded, err := selectedContractWorkflowReadiness(source, state)
+	if err != nil || plan == nil {
+		return topologies, err
+	}
+	query := `
+		INSERT INTO flow_instance_runtime_readiness (
+			run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+		) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+		ON CONFLICT (run_id, instance_path) DO NOTHING`
+	args := []any{state.RunID, state.Route, encoded, now, now}
+	if postgres {
+		query = `
+			INSERT INTO flow_instance_runtime_readiness (
+				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
+			ON CONFLICT (run_id, instance_path) DO NOTHING`
+		args = []any{state.RunID, state.Route, encoded, now}
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return nil, fmt.Errorf("insert selected-contract workflow readiness: %w", err)
+	}
+	if err := requireSelectedContractWorkflowReadiness(ctx, tx, postgres, state, encoded); err != nil {
+		return nil, err
+	}
+	return topologies, nil
+}
+
+func requireSelectedContractWorkflowReadiness(ctx context.Context, tx *sql.Tx, postgres bool, state selectedContractWorkflowState, expected []byte) error {
+	if state.Mode != "template" {
+		if len(state.Agents) != 0 {
+			return fmt.Errorf("selected-contract static workflow state cannot carry dynamic agent expectations")
+		}
+		return nil
+	}
+	query := `SELECT plan FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`
+	if postgres {
+		query = `SELECT plan FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`
+	}
+	var persisted []byte
+	if err := tx.QueryRowContext(ctx, query, state.RunID, state.Route).Scan(&persisted); err != nil {
+		return fmt.Errorf("verify selected-contract workflow readiness: %w", err)
+	}
+	if !workflowCommitJSONEqual(persisted, expected) {
+		return fmt.Errorf("selected-contract workflow readiness %s disagrees with exact plan", state.Route)
 	}
 	return nil
+}
+
+func selectedContractWorkflowReadiness(source runtimecorrelation.BundleSourceFact, state selectedContractWorkflowState) (*runtimepipeline.DynamicFlowRuntimeReadinessPlan, []runfork.RunForkSelectedContractAgentTopology, []byte, error) {
+	if state.Mode != "template" {
+		if len(state.Agents) != 0 {
+			return nil, nil, nil, fmt.Errorf("selected-contract static workflow state cannot carry dynamic agent expectations")
+		}
+		return nil, nil, nil, nil
+	}
+	if err := source.Validate(); err != nil {
+		return nil, nil, nil, fmt.Errorf("selected-contract workflow readiness source: %w", err)
+	}
+	route := runtimeflowidentity.StoredRoute(
+		runtimeflowidentity.SemanticScopeFromInstancePath(state.Route),
+		runtimeflowidentity.LogicalInstanceID(state.Route),
+		state.Route,
+	)
+	if !route.Valid() {
+		return nil, nil, nil, fmt.Errorf("selected-contract workflow readiness requires exact route")
+	}
+	identity := runtimeflowidentity.Instance{
+		TemplateID: state.WorkflowName, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
+		InstancePath: route.InstancePath, EntityID: state.EntityID, HasStoredPath: true,
+	}
+	bundleHash, bundleSource := source.StorageValues()
+	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: identity, RunID: state.RunID, BundleHash: bundleHash, BundleSource: bundleSource,
+		WorkflowVersion: state.WorkflowVersion, ExecutionMode: state.ExecutionMode,
+		Agents: make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(state.Agents)),
+	}
+	agentRoute, err := route.AgentIdentityRoute()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, expected := range state.Agents {
+		declaration := expected.Plan.Normalize()
+		if err := declaration.Validate(); err != nil || declaration.Route != agentRoute {
+			return nil, nil, nil, fmt.Errorf("selected-contract workflow readiness has invalid agent declaration for %s", state.Route)
+		}
+		live, err := declaration.Live(state.RunID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		plan.Agents = append(plan.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
+			Identity: live, ConfigRevision: strings.TrimSpace(expected.ConfigRevision),
+		})
+	}
+	normalized, err := plan.Normalized()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("normalize selected-contract workflow readiness: %w", err)
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("encode selected-contract workflow readiness: %w", err)
+	}
+	fingerprint, err := runtimecanonicaljson.Hash(normalized)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	admission, err := runtimeagenttopology.FlowReadinessAdmission(state.RunID, state.Route, fingerprint)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	topologies := make([]runfork.RunForkSelectedContractAgentTopology, 0, len(normalized.Agents))
+	for _, expected := range normalized.Agents {
+		topologies = append(topologies, runfork.RunForkSelectedContractAgentTopology{
+			Identity: expected.Identity, Admission: admission,
+		})
+	}
+	return &normalized, topologies, encoded, nil
 }
 
 func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
@@ -902,6 +1052,7 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			fmt.Sprintf("fork activation blocked: fork_selected_contract_agent_delivery_incomplete: delivery %s for %s/%s is %s", snapshot.DeliveryID, snapshot.SubscriberClass, snapshot.SubscriberID, snapshot.Status),
 		)
 	}
+	selectedAgentRunIDs := []string{}
 	selectedAgentIDs := []string{}
 	selectedAgentFlowInstances := []string{}
 	for _, snapshot := range deliverySnapshots {
@@ -921,19 +1072,24 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			if err := identity.Validate(); err != nil {
 				return fmt.Errorf("check selected-contract delivery agent identity: %w", err)
 			}
+			if identity.RunID != strings.TrimSpace(forkRunID) {
+				return fmt.Errorf("check selected-contract delivery agent identity: run %q conflicts with fork run %q", identity.RunID, forkRunID)
+			}
 			if identity.AgentID() != strings.TrimSpace(snapshot.SubscriberID) {
 				return fmt.Errorf("check selected-contract delivery agent identity: subscriber %q conflicts with %s", snapshot.SubscriberID, identity.Description())
 			}
+			selectedAgentRunIDs = append(selectedAgentRunIDs, identity.RunID)
 			selectedAgentIDs = append(selectedAgentIDs, identity.AgentID())
 			selectedAgentFlowInstances = append(selectedAgentFlowInstances, identity.FlowInstance())
 		}
 	}
 
 	var strayEvents int
+	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
 		WITH RECURSIVE selected_agents AS (
-			SELECT agent_id, flow_instance
-			FROM unnest($4::text[], $5::text[]) AS selected(agent_id, flow_instance)
+			SELECT run_id, agent_id, flow_instance
+			FROM unnest($4::uuid[], $5::text[], $6::text[]) AS selected(run_id, agent_id, flow_instance)
 		),
 		selected_tree AS (
 			SELECT e.event_id
@@ -947,10 +1103,23 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			SELECT e.event_id
 			FROM events e
 			INNER JOIN selected_agents a
-				ON a.agent_id = e.produced_by
+				ON a.run_id = e.run_id
+			   AND a.agent_id = e.produced_by
 			   AND a.flow_instance = COALESCE(e.source_route->>'flow_instance', '')
 			WHERE e.run_id = $1::uuid
 			  AND e.produced_by_type = 'agent'
+			UNION
+			SELECT e.event_id
+			FROM events e
+			WHERE e.run_id = $1::uuid
+			  AND e.event_name = 'platform.runtime_log'
+			  AND e.source_event_id IS NULL
+			  AND e.payload->'details'->>'runtime_lineage_owner' = $7
+			  AND e.payload->'details'->>'runtime_lineage_run_id' = $1::text
+			  AND e.payload->'details'->>'runtime_lineage_row_category' = 'diagnostic'
+			  AND e.payload->'details'->>'runtime_lineage_selected_fork_owner' = $8
+			  AND e.payload->'details'->>'runtime_lineage_classification' = 'fork_local'
+			  AND e.payload->'details'->>'runtime_lineage_selected_fork_context' = 'true'
 			UNION
 			SELECT child.event_id
 			FROM events child
@@ -961,17 +1130,17 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 				OR child.event_name = ANY($3::text[])
 			  )
 		)
-		SELECT COUNT(*)
+		SELECT COUNT(*), COALESCE(string_agg(e.event_name || ':' || e.event_id::text, ',' ORDER BY e.event_name, e.event_id), '')
 		FROM events e
 		WHERE e.run_id = $1::uuid
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances)).Scan(&strayEvents); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
-		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", runfork.RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_events_not_selected_contract_lineage")
+		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", runfork.RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: fork_events_not_selected_contract_lineage: %s", strayEventEvidence))
 	}
 
 	checkedEvents := map[string]struct{}{}

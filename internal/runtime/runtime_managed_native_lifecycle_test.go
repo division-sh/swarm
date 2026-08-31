@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -39,6 +40,8 @@ type managedNativeStartupProbeRuntime struct {
 	llm.NoopRuntime
 	probe startupVisibleSurfaceProbeStub
 }
+
+const runtimeTestManagedLifecycleRunID = "11111111-1111-4111-8111-111111111112"
 
 func (*managedNativeStartupProbeRuntime) ProviderContract() llm.ProviderContract {
 	return llm.ClaudeCLIProviderContract()
@@ -125,46 +128,46 @@ func (managedNativeDurableRoles) MarkTerminalRun(context.Context, runtimerunlife
 func (managedNativeDurableRoles) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
-func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
-func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route, []runtimebus.FlowInstanceRouteRecord) error {
+func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
 func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
 	return nil
 }
-func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (managedNativeDurableRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
-func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, nil
 }
-func (managedNativeDurableRoles) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+func (managedNativeDurableRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) SelectActiveWorkflowInstances(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
+func (managedNativeDurableRoles) SelectActiveWorkflowInstances(context.Context, string, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
 }
-func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, string, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return nil, nil
 }
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
@@ -234,7 +237,7 @@ func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	module := managedNativeLifecycleModule(t, "recovered-native-agent")
 	managerStore := newManagedNativeLifecycleStore(t, managedNativeLifecycleAgent(t, module.SemanticSource()))
 	delivery := &managedNativeRecoveryDeliveryStore{}
@@ -252,6 +255,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	bindManagedNativeLifecycleAgentsToGrant(t, managerStore, rt.startupGrant)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
 	}
@@ -303,7 +307,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 
 func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	predecessorStore := newManagedNativeLifecycleStore(t)
 	delivery := &managedNativeRecoveryDeliveryStore{}
 	predecessorDeps := managedNativeLifecycleDeps(
@@ -331,9 +335,9 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		t.Fatalf("ShutdownWithOptions(predecessor): %v", err)
 	}
 
-	managerStore := newManagedNativeLifecycleStore(t)
 	probeRuntime := &managedNativeStartupProbeRuntime{}
 	module := managedNativeLifecycleModule(t, "replacement-native-agent")
+	managerStore := newManagedNativeLifecycleStore(t, managedNativeLifecycleAgent(t, module.SemanticSource()))
 	candidateDeps := managedNativeLifecycleDeps(
 		managerStore,
 		delivery,
@@ -346,6 +350,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
+	bindManagedNativeLifecycleAgentsToGrant(t, managerStore, candidate.startupGrant)
 	if err := candidate.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}
@@ -453,7 +458,7 @@ func managedNativeLifecycleDeps(
 
 func managedNativeLifecycleAgent(t testing.TB, source semanticview.Source) runtimemanager.PersistedAgent {
 	t.Helper()
-	records, err := runtimemanager.StaticAgentMaterializationRecords(source)
+	records, err := runtimemanager.StaticAgentMaterializationRecords(runtimeTestManagedLifecycleRunID, source)
 	if err != nil {
 		t.Fatalf("materialize managed-native declaration: %v", err)
 	}
@@ -469,6 +474,41 @@ func managedNativeLifecycleAgent(t testing.TB, source semanticview.Source) runti
 	rec.LifecyclePhase = runtimemanager.AgentLifecycleRunning
 	rec.LifecycleRunMode = runtimemanager.AgentRunModeStandard
 	return rec
+}
+
+func bindManagedNativeLifecycleAgentsToGrant(
+	t testing.TB,
+	store *managedNativeLifecycleStore,
+	grant runtimestartupownership.GenerationGrant,
+) {
+	t.Helper()
+	if store == nil || grant == nil {
+		t.Fatal("managed-native lifecycle fixture requires store and generation grant")
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatalf("load managed-native generation evidence: %v", err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(
+		evidence.SourceSetRevision,
+		evidence.BundleHash,
+		evidence.BundleSource,
+		runtimeagenttopology.LifetimeDurableManaged,
+	)
+	if err != nil {
+		t.Fatalf("construct managed-native topology admission: %v", err)
+	}
+	binding, err := grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatalf("load managed-native process binding: %v", err)
+	}
+	store.runtimeTestRetainedSession.mu.Lock()
+	defer store.runtimeTestRetainedSession.mu.Unlock()
+	for key, rec := range store.runtimeTestRetainedSession.agents {
+		rec.Topology = admission
+		rec.ProcessBinding = binding
+		store.runtimeTestRetainedSession.agents[key] = rec
+	}
 }
 
 func managedNativeLifecycleModule(t *testing.T, agentID string) semanticOnlyWorkflowRuntime {

@@ -42,7 +42,7 @@ func (s *bootSelfCheckDescriptorStore) ListEventDeliveryRecipients(context.Conte
 	return append([]string(nil), s.deliveries...), nil
 }
 
-func (s *bootSelfCheckDescriptorStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (s *bootSelfCheckDescriptorStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
 }
 

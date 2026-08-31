@@ -25,7 +25,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 	if !ok {
 		return fmt.Errorf("test transition requires an inbound event")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, route runtimeflowidentity.Route, _ string, setGate string, clearAll bool) error {
-	return pc.workflowStore.mutate(ctx, route, func(instance *WorkflowInstance) {
+	return pc.workflowStore.mutate(ctx, testRunScopedWorkflowRoute(ctx, route), func(instance *WorkflowInstance) {
 		gates := cloneWorkflowGates(instance.Gates)
 		if clearAll {
 			clear(gates)
@@ -72,7 +72,7 @@ func fireTypedWorkflowTimerTestWakeup(ctx context.Context, pc *PipelineCoordinat
 }
 
 func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID string) error {
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, rou
 }
 
 func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context, route runtimeflowidentity.Route, entityID string, _ runtimeengine.StateCarrier) error {
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 }
 
 func applyTestAcceptedLifecycleEffect(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID, currentStage, nextStage, eventType string, occurredAt time.Time) error {
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func applyTestAcceptedLifecycleEffect(ctx context.Context, pc *PipelineCoordinat
 }
 
 func reconcileWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID, currentStage, nextStage string, cause workflowTimerCause) error {
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
 	}
@@ -201,16 +201,17 @@ func commitTestWorkflowLifecycleMutation(
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
 		return fmt.Errorf("test workflow lifecycle requires the selected workflow engine mutation owner")
 	}
-	prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, &instance, effects, len(effects) > 0)
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: route}.Normalize()
+	prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, owner, &instance, effects, len(effects) > 0)
 	if err != nil {
 		return err
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	updatedAt := time.Now().UTC()
 	if updatedAt.Before(instance.CreatedAt) {
 		updatedAt = instance.CreatedAt
 	}
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
+	state, err := workflowEngineStateRecord(runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: route}, instance, expectedState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
 	if err != nil {
 		return err
 	}

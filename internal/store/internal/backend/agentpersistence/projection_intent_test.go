@@ -167,7 +167,7 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+	identity, err := runtimeagentidentity.New("11111111-1111-4111-8111-111111111113", name, runtimeagentidentity.RootRoute())
 	if err != nil {
 		t.Fatal(err)
 	}

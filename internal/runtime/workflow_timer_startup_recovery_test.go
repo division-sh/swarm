@@ -183,7 +183,7 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				RunID:         runID,
 				OwnerID:       "runtime",
 				OwnerKind:     runtimegenericschedule.OwnerAgent,
-				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "generic-occurrence-proof"),
+				AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, "runtime", "generic-occurrence-proof"),
 				EventType:     "generic.tick",
 				EntityID:      entityID,
 				Payload:       semanticvalue.EmptyObject(),
@@ -379,7 +379,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(workflowCtx, seedRuntime.WorkOccurrence()))
 			occurredAt := time.Now().UTC()
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: "workflow-timer-startup", WorkflowVersion: "1", CurrentState: "waiting",
 				Fields: map[string]any{
@@ -401,7 +401,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			genericCommand := runtimegenericschedule.AdmissionCommand{
 				RunID: genericRunID, ScheduleKey: "topology-latch-generic", TaskID: "topology-latch-generic",
 				OwnerID: "runtime", OwnerKind: runtimegenericschedule.OwnerAgent,
-				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "topology-latch-generic"),
+				AgentIdentity: agentidentitytest.RootRuntimeForRun(t, genericRunID, "runtime", "topology-latch-generic"),
 				EventType:     "generic.tick", EntityID: genericEntityID, Payload: semanticvalue.EmptyObject(),
 				RoutingSource: routingSource, Due: runtimegenericschedule.AbsoluteDue(dueAt), ExecutionMode: executionmode.Mock,
 			}
@@ -448,7 +448,10 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			}
 			closeRuntime("failed topology", failedRuntime, failedProcess, failedCapability)
 			time.Sleep(100 * time.Millisecond)
-			instance, found, err := failedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RouteForInstancePath(workflowRunID))
+			instance, found, err := failedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
+				RunID: workflowRunID,
+				Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+			})
 			if err != nil || !found || instance.CurrentState != "waiting" {
 				t.Fatalf("workflow timer crossed failed topology latch: found=%v state=%q err=%v", found, instance.CurrentState, err)
 			}
@@ -466,7 +469,10 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			defer closeRuntime("recovered", recoveredRuntime, recoveredProcess, recoveredCapability)
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, instanceFound, loadErr := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RouteForInstancePath(workflowRunID))
+				instance, instanceFound, loadErr := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
+					RunID: workflowRunID,
+					Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+				})
 				activation, activationFound, activationErr := selected.LoadGenericScheduleActivation(genericCtx, genericAdmission.Activation.ID)
 				if loadErr == nil && instanceFound && instance.CurrentState == "done" && activationErr == nil && activationFound &&
 					activation.Status == runtimegenericschedule.StatusFired && countGenericEvents() == 1 {
@@ -563,7 +569,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				WorkflowName:    "workflow-timer-startup",
@@ -602,7 +608,10 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				t.Fatalf("close failed-restart generation: %v", err)
 			}
 
-			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(runID))
+			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+				RunID: runID,
+				Route: runtimeflowidentity.RouteForInstancePath(runID),
+			})
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
 			}
@@ -702,7 +711,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			seedRuntime, seedProcess := newRuntime()
 			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
-			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
 				InstanceID:      runID,
 				StorageRef:      runID,
 				WorkflowName:    "workflow-timer-startup",
@@ -766,7 +775,10 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(runID))
+				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+					RunID: runID,
+					Route: runtimeflowidentity.RouteForInstancePath(runID),
+				})
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

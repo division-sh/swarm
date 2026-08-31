@@ -36,7 +36,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 	if err := identity.Validate(); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
@@ -60,7 +60,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "acquire_hydrate", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "acquire_hydrate", false); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
 
@@ -172,7 +172,7 @@ func (s *LLMPostgresOwner) Release(ctx context.Context, lease *runtimesessions.L
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -228,7 +228,7 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return nil, err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "rotate", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "rotate", false); err != nil {
 		return nil, err
 	}
 	var currentID string
@@ -352,7 +352,7 @@ func (s *LLMPostgresOwner) IncrementTurn(ctx context.Context, identity agentmemo
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func (s *LLMPostgresOwner) IncrementTurn(ctx context.Context, identity agentmemo
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "increment_turn", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "increment_turn", false); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -395,7 +395,7 @@ func (s *LLMPostgresOwner) AdoptSessionID(ctx context.Context, identity agentmem
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -417,7 +417,7 @@ func (s *LLMPostgresOwner) AdoptSessionID(ctx context.Context, identity agentmem
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "adopt_provider_session", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "adopt_provider_session", false); err != nil {
 		return err
 	}
 	var sessionID string

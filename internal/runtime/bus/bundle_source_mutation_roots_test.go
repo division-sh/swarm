@@ -231,11 +231,11 @@ func (s *sourceBoundaryProbeStore) UpsertFlowInstanceRoute(ctx context.Context, 
 	if s.routes == nil {
 		s.routes = map[string]FlowInstanceRouteRecord{}
 	}
-	s.routes[route.Identity.InstancePath+"\x00"+route.EventPattern] = route
+	s.routes[route.Identity.Key()+"\x00"+route.EventPattern] = route
 	return nil
 }
 
-func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	s.deleteCalls++
 	s.deleteFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
 	for key, route := range s.routes {
@@ -248,7 +248,7 @@ func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, 
 
 func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
 	ctx context.Context,
-	identity runtimeflowidentity.Route,
+	identity runtimeflowidentity.RunScopedFlowInstance,
 	routes []FlowInstanceRouteRecord,
 ) error {
 	if len(routes) == 0 {
@@ -274,7 +274,7 @@ func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteTopology(
 	return nil
 }
 
-func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
 
@@ -282,12 +282,12 @@ func (*sourceBoundaryProbeStore) RunRuntimeMutationContext(ctx context.Context, 
 	return fn(ctx)
 }
 
-func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
-	seen := map[runtimeflowidentity.Route]struct{}{}
+func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	seen := map[runtimeflowidentity.RunScopedFlowInstance]struct{}{}
 	for _, route := range s.routes {
 		seen[route.Identity] = struct{}{}
 	}
-	out := make([]runtimeflowidentity.Route, 0, len(seen))
+	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(seen))
 	for route := range seen {
 		out = append(out, route)
 	}
@@ -507,7 +507,7 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource())
 	foreignCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
 	req := FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute("work", "instance-a"),
+		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("work", "instance-a")),
 	}
 
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
@@ -564,7 +564,7 @@ func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMuta
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	sessionID := uuid.NewString()
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentity(t, "agent-a", "")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentityForRun(t, runID, "agent-a", "")}
 	store.seed(t, eventID, runID, route)
 	claim := store.claim(t, eventID, runID, route)
 	store.seedSession(t, sessionID, runID, route.AgentIdentity)

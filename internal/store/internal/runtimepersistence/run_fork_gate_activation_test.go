@@ -300,16 +300,16 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 			flowInstanceConfig := fmt.Sprintf(`{"workflow_version":"1","instance_id":%q,"storage_ref":%q,"flow_path":%q}`, forkRunID, forkRunID, forkRunID)
 			flowInstanceQuery := `
-				INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-				VALUES (?, 'root', 'static', ?, 'active', ?)
+				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+				VALUES (?, ?, 'root', 'static', ?, 'active', ?)
 			`
 			if backend == "postgres" {
 				flowInstanceQuery = `
-					INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-					VALUES ($1, 'root', 'static', $2::jsonb, 'active', $3)
+					INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+					VALUES ($1::uuid, $2, 'root', 'static', $3::jsonb, 'active', $4)
 				`
 			}
-			if _, err := db.ExecContext(ctx, flowInstanceQuery, forkRunID, flowInstanceConfig, now); err != nil {
+			if _, err := db.ExecContext(ctx, flowInstanceQuery, forkRunID, forkRunID, flowInstanceConfig, now); err != nil {
 				t.Fatalf("create fork root workflow instance: %v", err)
 			}
 			if _, err := db.ExecContext(ctx, `

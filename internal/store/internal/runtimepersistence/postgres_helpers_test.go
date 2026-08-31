@@ -107,9 +107,9 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
-	`); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, 'testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+	`, runID); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
@@ -126,14 +126,14 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 
 	// Active agent descriptors.
 	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: testAgentIdentity(t, "a", "review/inst-1"), ID: "a", Role: "a", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)}),
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: mustTestAgentIdentityForRun(runID, "a", "review/inst-1"), ID: "a", Role: "a", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
 	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: testAgentIdentity(t, "t", "global"), ID: "t", Role: "t", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "global", Config: []byte(`{}`)}),
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: mustTestAgentIdentityForRun(runID, "t", "global"), ID: "t", Role: "t", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "global", Config: []byte(`{}`)}),
 		Status: "terminated", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
-	descriptors, err := pg.ListActiveAgentDescriptors(ctx)
+	descriptors, err := pg.ListActiveAgentDescriptors(ctx, runID)
 	if err != nil || len(descriptors) == 0 {
 		t.Fatalf("ListActiveAgentDescriptors err=%v descriptors=%v", err, descriptors)
 	}

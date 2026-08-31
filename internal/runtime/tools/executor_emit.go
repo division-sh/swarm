@@ -298,7 +298,11 @@ func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.
 			instancePath = strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
 		}
 		if instancePath != "" {
-			instance, ok, err := e.workflowInstances.Load(ctx, runtimeflowidentity.RouteForInstancePath(instancePath))
+			flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(actor.Identity.RunID, runtimeflowidentity.RouteForInstancePath(instancePath))
+			if err != nil {
+				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
+			}
+			instance, ok, err := e.workflowInstances.Load(ctx, flowIdentity)
 			if err != nil {
 				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
 			}

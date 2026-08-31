@@ -284,9 +284,9 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	identity := testAgentIdentity(t, agentID, "standing/ingress")
+	identity := mustTestAgentIdentityForRun(created.RunID, agentID, "standing/ingress")
 	fields := testAgentIdentityStorageFields(t, identity)
-	workRoute := testAgentDeliveryRoute(t, agentID, "standing/ingress")
+	workRoute := testAgentDeliveryRoute(t, created.RunID, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, store, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
@@ -483,9 +483,9 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 			t.Fatal(err)
 		}
 	}
-	identity := testAgentIdentity(t, agentID, "standing/ingress")
+	identity := mustTestAgentIdentityForRun(created[0].RunID, agentID, "standing/ingress")
 	fields := testAgentIdentityStorageFields(t, identity)
-	workRoute := testAgentDeliveryRoute(t, agentID, "standing/ingress")
+	workRoute := testAgentDeliveryRoute(t, created[0].RunID, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, selected, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
@@ -898,18 +898,18 @@ func seedStandingCensusReadiness(t *testing.T, fixture authorActivityReceiptFixt
 	instanceID := "standing-census/" + uuid.NewString()
 	plan := `{"execution_mode":"` + string(mode) + `"}`
 	if fixture.dialect == authoractivityfixture.DialectPostgres {
-		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ($1, 'standing-census', 'static', '{}'::jsonb, 'active')`, instanceID); err != nil {
+		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, 'standing-census', 'static', '{}'::jsonb, 'active')`, runID, instanceID); err != nil {
 			t.Fatalf("seed postgres standing flow instance: %v", err)
 		}
-		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())`, runID, instanceID, plan); err != nil {
+		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())`, runID, instanceID, plan); err != nil {
 			t.Fatalf("seed postgres standing readiness: %v", err)
 		}
 		return
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES (?, 'standing-census', 'static', '{}', 'active')`, instanceID); err != nil {
+	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, 'standing-census', 'static', '{}', 'active')`, runID, instanceID); err != nil {
 		t.Fatalf("seed sqlite standing flow instance: %v", err)
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, runID, instanceID, plan, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, runID, instanceID, plan, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite standing readiness: %v", err)
 	}
 }

@@ -15,6 +15,7 @@ type agentFrameCommandOptions struct {
 	apiOptions   rootCommandOptions
 	output       cliOutputOptions
 	scope        string
+	runID        string
 	bundleHash   string
 	flow         string
 	root         bool
@@ -36,6 +37,7 @@ func newAgentFrameCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&frameOpts.scope, "scope", "", "Inspection scope: static or effective")
+	cmd.Flags().StringVar(&frameOpts.runID, "run-id", "", "Effective run identity")
 	cmd.Flags().StringVar(&frameOpts.bundleHash, "bundle-hash", "", "Static bundle identity")
 	cmd.Flags().StringVar(&frameOpts.flow, "flow", "", "Static authored flow path, or root")
 	cmd.Flags().BoolVar(&frameOpts.root, "root", false, "Select the effective root agent")
@@ -79,14 +81,18 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		return nil, err
 	}
 	params := map[string]any{"scope": scope, "agent_id": agentID}
+	runID, err := exactAgentFrameCLIScalar(opts.runID, "--run-id")
+	if err != nil {
+		return nil, err
+	}
 	switch scope {
 	case string(agentframe.InspectionStatic):
 		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
 		if err != nil {
 			return nil, err
 		}
-		if opts.root || flowInstance != "" {
-			return nil, fmt.Errorf("--scope static forbids --root and --flow-instance")
+		if runID != "" || opts.root || flowInstance != "" {
+			return nil, fmt.Errorf("--scope static forbids --run-id, --root, and --flow-instance")
 		}
 		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
 		if err != nil {
@@ -102,6 +108,10 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		params["bundle_hash"] = bundleHash
 		params["flow"] = flow
 	case string(agentframe.InspectionEffective):
+		if runID == "" {
+			return nil, fmt.Errorf("--scope effective requires --run-id")
+		}
+		params["run_id"] = runID
 		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
 		if err != nil {
 			return nil, err

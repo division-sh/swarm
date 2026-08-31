@@ -52,7 +52,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Plan.SourceRunID, req.Source, req.Plan.PendingWork); err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, err
 	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
@@ -65,6 +65,9 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
 	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
+	if err := completeContractFrontierFlowInstances(req.Plan.SourceRunID, req.Source, req.Plan.PendingWork, frontier); err != nil {
+		return runfork.RunForkContractFrontierAdmission{}, err
+	}
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
@@ -132,6 +135,37 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		LineageOnlyEvents:            lineageOnly,
 		UnsupportedBlockers:          blockers,
 	}, nil
+}
+
+func completeContractFrontierFlowInstances(runID string, source semanticview.Source, pending []runfork.RunForkPendingWork, frontier []runfork.RunForkContractFrontierEvent) error {
+	byEvent := make(map[string]map[string]struct{}, len(frontier))
+	for i := range frontier {
+		eventID := strings.TrimSpace(frontier[i].SourceEventID)
+		instances := make(map[string]struct{}, len(frontier[i].SourceFlowInstances))
+		for _, instance := range frontier[i].SourceFlowInstances {
+			if instance = strings.Trim(strings.TrimSpace(instance), "/"); instance != "" {
+				instances[instance] = struct{}{}
+			}
+		}
+		byEvent[eventID] = instances
+	}
+	for _, item := range pending {
+		instances, ok := byEvent[strings.TrimSpace(item.EventID)]
+		if !ok {
+			continue
+		}
+		exact, err := contractFrontierFlowInstances(runID, source, item)
+		if err != nil {
+			return err
+		}
+		for _, instance := range exact {
+			instances[instance] = struct{}{}
+		}
+	}
+	for i := range frontier {
+		frontier[i].SourceFlowInstances = sortedSet(byEvent[strings.TrimSpace(frontier[i].SourceEventID)])
+	}
+	return nil
 }
 
 func mergeContractFrontierRecipients(authoritative, additional []runfork.RunForkContractFrontierRecipient) []runfork.RunForkContractFrontierRecipient {
@@ -274,25 +308,43 @@ func contractFrontierRecipientFromStampedRoute(route events.DeliveryRoute) (runf
 	if route.ConnectClaim.Empty() || route.Recipient.Empty() {
 		return runfork.RunForkContractFrontierRecipient{}, false
 	}
-	return runfork.NewRunForkContractFrontierRecipient(
-		route.Recipient, route.Target.Route().FlowInstance, "stamped_connect_claim", route.AgentIdentity,
-	), true
+	plan := runtimeagentidentity.Plan{}
+	if route.Recipient.IsAgent() {
+		var err error
+		plan, err = route.AgentIdentity.Plan()
+		if err != nil {
+			return runfork.RunForkContractFrontierRecipient{}, false
+		}
+	}
+	return runfork.NewRunForkContractFrontierRecipient(route.Recipient, route.Target.Route().FlowInstance, "stamped_connect_claim", plan), true
 }
 
-func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []runfork.RunForkPendingWork) error {
-	for _, route := range contractFrontierFlowInstanceRoutes(source, pending) {
-		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, runID string, source semanticview.Source, pending []runfork.RunForkPendingWork) error {
+	routes, err := contractFrontierFlowInstanceRoutes(runID, source, pending)
+	if err != nil {
+		return err
+	}
+	for _, route := range routes {
+		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+		if err != nil {
+			return fmt.Errorf("derive selected-contract flow-instance identity %s: %w", route.InstancePath, err)
+		}
+		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", route.InstancePath, err)
 		}
 	}
 	return nil
 }
 
-func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []runfork.RunForkPendingWork) []runtimeflowidentity.Route {
+func contractFrontierFlowInstanceRoutes(runID string, source semanticview.Source, pending []runfork.RunForkPendingWork) ([]runtimeflowidentity.Route, error) {
 	seen := map[runtimeflowidentity.Route]struct{}{}
 	out := make([]runtimeflowidentity.Route, 0)
 	for _, item := range pending {
-		for _, instancePath := range contractFrontierFlowInstances(source, item) {
+		instances, err := contractFrontierFlowInstances(runID, source, item)
+		if err != nil {
+			return nil, err
+		}
+		for _, instancePath := range instances {
 			route := runtimeflowidentity.StoredRoute("", "", instancePath)
 			if !route.Valid() {
 				continue
@@ -313,15 +365,65 @@ func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []ru
 		}
 		return out[i].InstancePath < out[j].InstancePath
 	})
-	return out
+	return out, nil
 }
 
-func contractFrontierFlowInstances(source semanticview.Source, item runfork.RunForkPendingWork) []string {
-	instancePath := item.RoutingSource.Route().FlowInstance
-	if isContractFrontierTemplateInstancePath(source, instancePath) {
-		return []string{instancePath}
+func contractFrontierFlowInstances(runID string, source semanticview.Source, item runfork.RunForkPendingWork) ([]string, error) {
+	candidates, err := contractFrontierExactFlowInstances(runID, item)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !isContractFrontierTemplateInstancePath(source, candidate) {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func contractFrontierExactFlowInstances(runID string, item runfork.RunForkPendingWork) ([]string, error) {
+	candidates := []string{
+		item.RoutingSource.Route().FlowInstance,
+		item.FlowInstance,
+		item.DeliveryRoute.Target.Route().FlowInstance,
+	}
+	agentIdentity := item.DeliveryRoute.AgentIdentity.Normalize()
+	if !agentIdentity.IsZero() {
+		if err := agentIdentity.Validate(); err != nil {
+			return nil, fmt.Errorf("selected-contract pending agent delivery has invalid identity: %w", err)
+		}
+		if agentIdentity.RunID != strings.TrimSpace(runID) {
+			return nil, fmt.Errorf(
+				"selected-contract pending agent delivery run_id %s disagrees with source run_id %s",
+				agentIdentity.RunID,
+				strings.TrimSpace(runID),
+			)
+		}
+		candidates = append(candidates, agentIdentity.FlowInstance())
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.Trim(strings.TrimSpace(candidate), "/")
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func isContractFrontierTemplateInstancePath(source semanticview.Source, instancePath string) bool {
@@ -388,13 +490,13 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectG
 			seenNodes[typedRecipient.ID()] = struct{}{}
 		}
 		projected := runfork.NewRunForkContractFrontierRecipient(
-			typedRecipient, recipient.Path(), "connect_route_plan", recipient.AgentIdentity(),
+			typedRecipient, recipient.Path(), "connect_route_plan", recipient.AgentPlan(),
 		)
 		key := contractFrontierRecipientIdentity{
-			recipient:     projected.Recipient,
-			path:          projected.Path,
-			routeSource:   projected.RouteSourceCode(),
-			agentIdentity: projected.AgentIdentity,
+			recipient:   projected.Recipient,
+			path:        projected.Path,
+			routeSource: projected.RouteSourceCode(),
+			agentPlan:   projected.AgentPlan,
 		}
 		if _, exists := seenRecipients[key]; exists {
 			continue
@@ -449,7 +551,7 @@ func contractFrontierConnectRecipients(in []runtimebus.Subscriber) []runfork.Run
 	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
 	for _, subscriber := range in {
 		recipient := runfork.NewRunForkContractFrontierRecipient(
-			subscriber.Recipient, subscriber.Path, "connect_route_plan", subscriber.AgentIdentity,
+			subscriber.Recipient, subscriber.Path, "connect_route_plan", subscriber.AgentPlan,
 		)
 		if !recipient.Recipient.Empty() {
 			out = append(out, recipient)
@@ -463,7 +565,7 @@ func contractFrontierRecipients(in []runtimebus.Subscriber) []runfork.RunForkCon
 	seen := map[contractFrontierRecipientIdentity]struct{}{}
 	for _, subscriber := range in {
 		recipient := runfork.NewRunForkContractFrontierRecipient(
-			subscriber.Recipient, subscriber.Path, subscriber.RouteSourceCode(), subscriber.AgentIdentity,
+			subscriber.Recipient, subscriber.Path, subscriber.RouteSourceCode(), subscriber.AgentPlan,
 		)
 		if recipient.Recipient.Empty() {
 			continue
@@ -482,18 +584,18 @@ func contractFrontierRecipients(in []runtimebus.Subscriber) []runfork.RunForkCon
 }
 
 type contractFrontierRecipientIdentity struct {
-	recipient     events.DeliveryRecipient
-	path          string
-	routeSource   string
-	agentIdentity runtimeagentidentity.Identity
+	recipient   events.DeliveryRecipient
+	path        string
+	routeSource string
+	agentPlan   runtimeagentidentity.Plan
 }
 
 func contractFrontierRecipientKey(recipient runfork.RunForkContractFrontierRecipient) contractFrontierRecipientIdentity {
 	return contractFrontierRecipientIdentity{
-		recipient:     recipient.Recipient,
-		path:          recipient.Path,
-		routeSource:   recipient.RouteSourceCode(),
-		agentIdentity: recipient.AgentIdentity,
+		recipient:   recipient.Recipient,
+		path:        recipient.Path,
+		routeSource: recipient.RouteSourceCode(),
+		agentPlan:   recipient.AgentPlan,
 	}
 }
 

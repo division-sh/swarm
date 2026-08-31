@@ -114,7 +114,7 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 				SET plan = ?,
 				    topology_ready_at = NULL,
 				    updated_at = ?
-				WHERE run_id = ? AND instance_id = ?
+				WHERE run_id = ? AND instance_path = ?
 			`, expectedJSON, observedAt, normalized.RunID, instancePath)
 			if err != nil {
 				return err
@@ -132,7 +132,7 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 				SET plan = $1::jsonb,
 				    topology_ready_at = NULL,
 				    updated_at = $2
-				WHERE run_id = $3::uuid AND instance_id = $4
+				WHERE run_id = $3::uuid AND instance_path = $4
 			`, expectedJSON, observedAt, normalized.RunID, instancePath)
 			if err != nil {
 				return err
@@ -185,9 +185,9 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 		       run.bundle_hash, run.bundle_source, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
-		WHERE readiness.run_id = $1::uuid AND readiness.instance_id = $2
+		WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
 	`
 	if s.isSQLite() {
 		query = `
@@ -195,9 +195,9 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 			       run.bundle_hash, run.bundle_source, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
-			WHERE readiness.run_id = ? AND readiness.instance_id = ?
+			WHERE readiness.run_id = ? AND readiness.instance_path = ?
 		`
 	}
 	var raw []byte
@@ -236,29 +236,29 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.bundle_source, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		WHERE LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
-		ORDER BY readiness.run_id, readiness.instance_id
+		ORDER BY readiness.run_id, readiness.instance_path
 	`
 	if s.isSQLite() {
 		query = `
-			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.bundle_source, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
 			WHERE LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 			  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-			ORDER BY readiness.run_id, readiness.instance_id
+			ORDER BY readiness.run_id, readiness.instance_path
 		`
 	}
 	rows, err := dbQueryContext(ctx, s.testDB(), query)
@@ -338,8 +338,8 @@ func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 		result, err := tx.ExecContext(ctx, `
 			UPDATE flow_instances
 			SET status = status
-			WHERE instance_id = ?
-		`, instancePath)
+			WHERE run_id = ? AND instance_path = ?
+		`, runID, instancePath)
 		if err != nil {
 			return err
 		}
@@ -354,11 +354,11 @@ func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 	}
 	var lockedInstancePath string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT instance_id
+		SELECT instance_path
 		FROM flow_instances
-		WHERE instance_id = $1
+		WHERE run_id = $1::uuid AND instance_path = $2
 		FOR UPDATE
-	`, instancePath).Scan(&lockedInstancePath); err != nil {
+	`, runID, instancePath).Scan(&lockedInstancePath); err != nil {
 		return fmt.Errorf("lock dynamic flow runtime creation instance: %w", err)
 	}
 	if strings.TrimSpace(lockedInstancePath) != instancePath {
@@ -394,7 +394,7 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 		var result sql.Result
 		var err error
 		if s.isSQLite() {
-			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, ?), updated_at = ? WHERE run_id = ? AND instance_id = ?`
+			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, ?), updated_at = ? WHERE run_id = ? AND instance_path = ?`
 			args := []any{observedAt, observedAt, runID, instancePath}
 			if len(expectedPlan) != 0 {
 				query += ` AND plan = ?`
@@ -408,14 +408,15 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 					SELECT 1
 					FROM flow_instances AS instance
 					JOIN runs AS run ON run.run_id = flow_instance_runtime_readiness.run_id
-					WHERE instance.instance_id = flow_instance_runtime_readiness.instance_id
+					WHERE instance.run_id = flow_instance_runtime_readiness.run_id
+					  AND instance.instance_path = flow_instance_runtime_readiness.instance_path
 					  AND LOWER(TRIM(instance.status)) = 'active'
 					  AND instance.terminated_at IS NULL
 					  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
 				)`
 			result, err = tx.ExecContext(txctx, query, args...)
 		} else {
-			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, $1), updated_at = $1 WHERE run_id = $2::uuid AND instance_id = $3`
+			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, $1), updated_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
 			args := []any{observedAt, runID, instancePath}
 			if len(expectedPlan) != 0 {
 				query += ` AND plan = $4::jsonb`
@@ -429,7 +430,8 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 					SELECT 1
 					FROM flow_instances AS instance
 					JOIN runs AS run ON run.run_id = flow_instance_runtime_readiness.run_id
-					WHERE instance.instance_id = flow_instance_runtime_readiness.instance_id
+					WHERE instance.run_id = flow_instance_runtime_readiness.run_id
+					  AND instance.instance_path = flow_instance_runtime_readiness.instance_path
 					  AND LOWER(BTRIM(instance.status)) = 'active'
 					  AND instance.terminated_at IS NULL
 					  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')

@@ -160,11 +160,11 @@ type emitWorkflowInstanceLoader struct {
 
 func (l emitWorkflowInstanceLoader) Enabled() bool { return true }
 
-func (l emitWorkflowInstanceLoader) Load(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (l emitWorkflowInstanceLoader) Load(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	if l.err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, l.err
 	}
-	instance, ok := l.rows[strings.TrimSpace(route.InstancePath)]
+	instance, ok := l.rows[strings.TrimSpace(identity.Route.InstancePath)]
 	return instance, ok, nil
 }
 
@@ -260,7 +260,7 @@ func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, even
 	return out, nil
 }
 
-func (s *emitRoutePlanStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (s *emitRoutePlanStore) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
@@ -1219,7 +1219,10 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	route := runtimeflowidentity.DeriveRoute("review", "instance-1")
-	if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+	if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+		RunID: toolTestRunID,
+		Route: route,
+	}}); err != nil {
 		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
 	entityID := runtimeflowidentity.EntityID(route.InstancePath)

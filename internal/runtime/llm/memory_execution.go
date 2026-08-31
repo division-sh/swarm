@@ -50,7 +50,7 @@ func resolveMemoryExecution(ctx context.Context, agentID string) (resolvedMemory
 		return resolvedMemoryExecution{}, err
 	}
 	identity := execution.Identity.Normalize()
-	if err := identity.ValidateOwner(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, false); err != nil {
 		return resolvedMemoryExecution{}, err
 	}
 	if strings.TrimSpace(agentID) != identity.AgentID() {
@@ -59,7 +59,7 @@ func resolveMemoryExecution(ctx context.Context, agentID string) (resolvedMemory
 	if !plan.Enabled {
 		return resolvedMemoryExecution{Plan: plan, Identity: identity}, nil
 	}
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return resolvedMemoryExecution{}, err
 	}
 	return resolvedMemoryExecution{Plan: plan, Identity: identity}, nil

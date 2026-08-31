@@ -45,9 +45,9 @@ type SemanticSourceProvider interface {
 }
 
 type StateAddress struct {
-	FlowID   identity.FlowID
-	Route    runtimeflowidentity.Route
-	EntityID identity.EntityID
+	FlowID       identity.FlowID
+	FlowInstance runtimeflowidentity.RunScopedFlowInstance
+	EntityID     identity.EntityID
 }
 
 type StateRepository interface {

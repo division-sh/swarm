@@ -169,7 +169,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("nested child template selection error = %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
 			})
 
 			t.Run("select or create ignores nested child and materializes parent", func(t *testing.T) {
@@ -192,7 +192,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("publish parent select-or-create: %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
 			})
 
 			t.Run("select excludes nested child singleton from parent template", func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("nested child singleton selection error = %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
 			})
 
 			t.Run("select preserves direct parent template owner beside nested child", func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("publish parent template owner: %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
 			})
 
 			t.Run("actual nested child template selects its own state", func(t *testing.T) {
@@ -309,7 +309,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("stamped contradiction target = %#v, want immutable %#v", persisted.DeliveryRoutes, want)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
 			})
 
 			t.Run("sibling prefix flow never enters parent cardinality", func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 						instancePath := flowID
 						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instancePath, excluded.state, accountID)
 						if excluded.lifecycleState != "" {
-							seedStateOnlyAcquisitionLifecycle(t, backend, db, instancePath, excluded.lifecycleState)
+							seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instancePath, excluded.lifecycleState)
 						}
 						evt := newEvent(accountID)
 						if err := newBus(t, flowID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
@@ -886,18 +886,18 @@ func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, ru
 	}
 }
 
-func seedStateOnlyAcquisitionLifecycle(t *testing.T, backend string, db *sql.DB, instancePath, status string) {
+func seedStateOnlyAcquisitionLifecycle(t *testing.T, backend string, db *sql.DB, runID, instancePath, status string) {
 	t.Helper()
-	query := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, 'review', 'static', '{}', ?, ?, ?)`
+	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, 'review', 'static', '{}', ?, ?, ?)`
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	var terminatedAt any
 	if status == "terminated" {
 		terminatedAt = now
 	}
-	args := []any{instancePath, status, terminatedAt, now}
+	args := []any{runID, instancePath, status, terminatedAt, now}
 	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, 'review', 'static', '{}'::jsonb, $2, $3, $4)`
-		args = []any{instancePath, status, terminatedAt, now}
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1::uuid, $2, 'review', 'static', '{}'::jsonb, $3, $4, $5)`
+		args = []any{runID, instancePath, status, terminatedAt, now}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed state-only acquisition lifecycle: %v", err)
@@ -929,14 +929,14 @@ func assertStateOnlyAcquisitionMutationCounts(t *testing.T, backend string, db *
 	}
 }
 
-func assertStateOnlyAcquisitionLifecycleCount(t *testing.T, backend string, db *sql.DB, instancePath string, want int) {
+func assertStateOnlyAcquisitionLifecycleCount(t *testing.T, backend string, db *sql.DB, runID, instancePath string, want int) {
 	t.Helper()
-	query := "SELECT COUNT(*) FROM flow_instances WHERE instance_id = ?"
+	query := "SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND instance_path = ?"
 	if backend == "postgres" {
-		query = "SELECT COUNT(*) FROM flow_instances WHERE instance_id = $1"
+		query = "SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2"
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, instancePath).Scan(&count); err != nil {
+	if err := db.QueryRowContext(context.Background(), query, runID, instancePath).Scan(&count); err != nil {
 		t.Fatalf("count lifecycle rows for %s: %v", instancePath, err)
 	}
 	if count != want {

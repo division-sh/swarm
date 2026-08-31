@@ -651,8 +651,8 @@ func TestCatalogReplayClean_SelectedStores(t *testing.T) {
 
 func TestCatalogReplayCleanCensus(t *testing.T) {
 	fixtures := catalogReplayCleanFixtures(t)
-	if len(fixtures) != 94 {
-		t.Fatalf("replay-clean fixtures = %d, want 94", len(fixtures))
+	if len(fixtures) != 95 {
+		t.Fatalf("replay-clean fixtures = %d, want 95", len(fixtures))
 	}
 
 	repo := repoRootFromCatalogE2E(t)
@@ -669,8 +669,8 @@ func TestCatalogReplayCleanCensus(t *testing.T) {
 func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 	t.Helper()
 	inventory := catalogInventory(t)
-	if len(inventory.Fixtures) != 156 {
-		t.Fatalf("catalog fixtures = %d, want 156", len(inventory.Fixtures))
+	if len(inventory.Fixtures) != 157 {
+		t.Fatalf("catalog fixtures = %d, want 157", len(inventory.Fixtures))
 	}
 
 	runtimeCount := 0
@@ -694,11 +694,11 @@ func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 			fixtures = append(fixtures, fixture)
 		}
 	}
-	if runtimeCount != 98 {
-		t.Fatalf("runtime fixtures = %d, want 98", runtimeCount)
+	if runtimeCount != 99 {
+		t.Fatalf("runtime fixtures = %d, want 99", runtimeCount)
 	}
-	if len(fixtures) != 94 || len(excluded) != 4 {
-		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 94 + 4", len(fixtures), len(excluded))
+	if len(fixtures) != 95 || len(excluded) != 4 {
+		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 95 + 4", len(fixtures), len(excluded))
 	}
 	for path, disposition := range catalogReplayCleanExclusions {
 		if !excluded[path] {

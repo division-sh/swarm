@@ -77,10 +77,6 @@ func resolveEventPublicationBundleScope(
 			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(runAvailability))
 		}
 		params.BundleSourceFact = currentFact
-		ctx, err = eventPublicationSourceContext(ctx, currentFact)
-		if err != nil {
-			return ctx, opts, params, err
-		}
 		var publisherFact runtimecorrelation.BundleSourceFact
 		var hasPublisherFact bool
 		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, opts.BundleSource)
@@ -89,6 +85,7 @@ func resolveEventPublicationBundleScope(
 				"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
 			})
 		}
+		ctx, err = eventPublicationSourceContext(ctx, currentFact)
 		return ctx, opts, params, err
 	}
 	var currentFact runtimecorrelation.BundleSourceFact

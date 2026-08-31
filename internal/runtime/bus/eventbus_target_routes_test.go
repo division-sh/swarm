@@ -57,7 +57,7 @@ type targetRouteMemoryStore struct {
 	workflowStates    []runtimepipeline.WorkflowEntityStatePersistenceRecord
 }
 
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
+func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]ActiveTargetDescriptor(nil), s.targetOwners...), nil
@@ -80,9 +80,10 @@ func (s *targetRouteMemoryStore) setTargetOwnerRoutes(routes ...events.RouteIden
 	s.setTargetOwners(owners...)
 }
 
-func (s *targetRouteMemoryStore) LoadWorkflowInstance(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (s *targetRouteMemoryStore) LoadWorkflowInstance(_ context.Context, owner runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	route := owner.Route
 	for _, instance := range s.workflowInstances {
 		if strings.Trim(strings.TrimSpace(instance.StorageRef), "/") == route.InstancePath {
 			return instance, true, nil
@@ -91,15 +92,16 @@ func (s *targetRouteMemoryStore) LoadWorkflowInstance(_ context.Context, route r
 	return runtimepipeline.WorkflowInstance{}, false, nil
 }
 
-func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]runtimepipeline.WorkflowInstance(nil), s.workflowInstances...), nil
 }
 
-func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	route := owner.Route
 	for _, record := range s.workflowStates {
 		if strings.Trim(strings.TrimSpace(record.FlowInstance), "/") == route.InstancePath && runtimeidentity.NormalizeEntityID(record.EntityID) == entityID {
 			return record, true, nil
@@ -113,7 +115,7 @@ func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, rout
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
 }
 
-func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Context, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Context, _ string, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := append([]runtimepipeline.WorkflowEntityStatePersistenceRecord(nil), s.workflowStates...)
@@ -126,7 +128,7 @@ func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Cont
 	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
-func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
+func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context, _ string, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	excluded := map[string]struct{}{}
@@ -180,11 +182,12 @@ func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTarge
 	}.Normalized()
 }
 
-func targetRouteIdentity(route runtimeflowidentity.Route) runtimeflowidentity.Route {
-	return runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+func targetRouteIdentity(identity runtimeflowidentity.RunScopedFlowInstance) runtimeflowidentity.RunScopedFlowInstance {
+	identity.Route = runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
+	return identity.Normalize()
 }
 
-func sameTargetRoute(left, right runtimeflowidentity.Route) bool {
+func sameTargetRoute(left, right runtimeflowidentity.RunScopedFlowInstance) bool {
 	return targetRouteIdentity(left) == targetRouteIdentity(right)
 }
 
@@ -202,15 +205,15 @@ func (s *targetRouteMemoryStore) UpsertFlowInstanceRoute(_ context.Context, rout
 	return nil
 }
 
-func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return s.RollbackFlowInstanceRoute(context.Background(), identity)
 }
 
-func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	seen := make(map[runtimeflowidentity.Route]struct{}, len(s.flowRoutes))
-	routes := make([]runtimeflowidentity.Route, 0, len(s.flowRoutes))
+	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(s.flowRoutes))
+	routes := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(s.flowRoutes))
 	for _, record := range s.flowRoutes {
 		identity := targetRouteIdentity(record.Identity)
 		if _, ok := seen[identity]; ok {
@@ -222,7 +225,7 @@ func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runt
 	return routes, nil
 }
 
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.Route, routes []FlowInstanceRouteRecord) error {
+func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	identity = targetRouteIdentity(identity)
@@ -240,7 +243,7 @@ func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Conte
 	return nil
 }
 
-func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error) {
+func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	identity = targetRouteIdentity(identity)
@@ -253,7 +256,7 @@ func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context,
 	return routes, nil
 }
 
-func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	identity = targetRouteIdentity(identity)
@@ -1210,7 +1213,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 		time.Now().UTC(),
@@ -1324,7 +1327,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Time{})
 	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routeIntentProducerAgentPolicy)
 	if emptyAgentPolicyPlan.AuthorityState != RoutePlanAuthorityNoCanonicalMatch || emptyAgentPolicyPlan.AuthorityOwner != 0 {
 		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
@@ -1900,7 +1903,7 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(
@@ -1955,10 +1958,10 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("worker", "w-001")}); err != nil {
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
-	materialized := eb.RouteTable().MaterializedRoutes(runtimeflowidentity.DeriveRoute("worker", "w-001"))
+	materialized := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001")))
 	taskHandler := testPackageNode(t, "flows/worker", "worker", "task-handler")
 	hasRoute := func(eventPattern string) bool {
 		for _, route := range materialized {
@@ -2030,7 +2033,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
@@ -2099,7 +2102,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
@@ -2172,7 +2175,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
+			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"))}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
@@ -3616,7 +3619,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 	reviewerOwner := events.RouteIdentity{FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("reviewer-root-owner")}
 	store.setTargetOwnerRoutes(reviewerOwner)
 	reviewerRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "reviewer")), Target: events.MustExistingEntityTarget(reviewerOwner)}
-	workflowRuntimeIdentity := testAgentRouteIdentity(t, "workflow-runtime", "")
+	workflowRuntimeIdentity := testAgentRouteIdentityForRun(t, runID, "workflow-runtime", "")
 	workflowRuntimeRoute := events.DeliveryRoute{
 		Recipient: events.MustAgentDeliveryRecipient("workflow-runtime"), AgentIdentity: workflowRuntimeIdentity,
 	}
@@ -3700,7 +3703,7 @@ type rejectingDeliveryRouteStore struct {
 	owners []ActiveTargetDescriptor
 }
 
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
+func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
 	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
 }
 

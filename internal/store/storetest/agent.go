@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
@@ -20,6 +21,11 @@ func AgentLifecycleFixture(t testing.TB, selected AgentFixtureStore) runtimemana
 func UpsertStaticAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) error {
 	t.Helper()
 	return agentfixture.UpsertStatic(t, ctx, selected, rec)
+}
+
+func UpsertStaticAgentFixtureForSource(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent, source runtimecorrelation.BundleSourceFact) error {
+	t.Helper()
+	return agentfixture.UpsertStaticForSource(t, ctx, selected, rec, source)
 }
 
 func RequireStaticAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) {

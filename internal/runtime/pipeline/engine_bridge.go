@@ -218,7 +218,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
-		currentState, err := pc.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
+		flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(triggerCtx.Event.RunID(), stateRoute)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		currentState, err := pc.currentWorkflowState(ctx, flowOwner, identity.NormalizeEntityID(entityID))
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}

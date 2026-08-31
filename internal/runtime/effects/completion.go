@@ -125,7 +125,7 @@ func (t CompletionAgentTurn) Validate() error {
 		return fmt.Errorf("completion agent turn requires run, agent, and session identity")
 	}
 	identity := t.Identity.Normalize()
-	if err := identity.ValidateOwner(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, false); err != nil {
 		return fmt.Errorf("completion agent turn concrete identity: %w", err)
 	}
 	if identity.RunID != strings.TrimSpace(t.RunID) ||

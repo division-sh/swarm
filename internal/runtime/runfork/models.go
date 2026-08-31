@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -147,30 +148,30 @@ type RunForkContractFrontierEvent struct {
 }
 
 type RunForkContractFrontierRecipient struct {
-	Recipient     events.DeliveryRecipient `json:"-"`
-	Path          string                   `json:"path,omitempty"`
-	routeSource   string
-	AgentIdentity agentidentity.Identity `json:"agent_identity,omitempty"`
+	Recipient   events.DeliveryRecipient `json:"-"`
+	Path        string                   `json:"path,omitempty"`
+	routeSource string
+	AgentPlan   agentidentity.Plan `json:"agent_plan,omitempty"`
 }
 
-func NewRunForkContractFrontierRecipient(recipient events.DeliveryRecipient, path, routeSource string, identity agentidentity.Identity) RunForkContractFrontierRecipient {
+func NewRunForkContractFrontierRecipient(recipient events.DeliveryRecipient, path, routeSource string, plan agentidentity.Plan) RunForkContractFrontierRecipient {
 	if recipient.Empty() {
 		return RunForkContractFrontierRecipient{}
 	}
 	return RunForkContractFrontierRecipient{
 		Recipient: recipient, Path: strings.TrimSpace(path), routeSource: strings.TrimSpace(routeSource),
-		AgentIdentity: identity.Normalize(),
+		AgentPlan: plan.Normalize(),
 	}
 }
 
 func (r RunForkContractFrontierRecipient) RouteSourceCode() string { return r.routeSource }
 
 type runForkContractFrontierRecipientWire struct {
-	SubscriberType string                 `json:"subscriber_type"`
-	SubscriberID   string                 `json:"subscriber_id"`
-	Path           string                 `json:"path,omitempty"`
-	RouteSource    string                 `json:"route_source,omitempty"`
-	AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
+	SubscriberType string             `json:"subscriber_type"`
+	SubscriberID   string             `json:"subscriber_id"`
+	Path           string             `json:"path,omitempty"`
+	RouteSource    string             `json:"route_source,omitempty"`
+	AgentPlan      agentidentity.Plan `json:"agent_plan,omitempty"`
 }
 
 func (r RunForkContractFrontierRecipient) MarshalJSON() ([]byte, error) {
@@ -179,7 +180,7 @@ func (r RunForkContractFrontierRecipient) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(runForkContractFrontierRecipientWire{
 		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), Path: strings.TrimSpace(r.Path),
-		RouteSource: r.RouteSourceCode(), AgentIdentity: r.AgentIdentity.Normalize(),
+		RouteSource: r.RouteSourceCode(), AgentPlan: r.AgentPlan.Normalize(),
 	})
 }
 
@@ -212,7 +213,7 @@ func (r *RunForkContractFrontierRecipient) UnmarshalJSON(raw []byte) error {
 	if err != nil {
 		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
 	}
-	*r = NewRunForkContractFrontierRecipient(recipient, wire.Path, wire.RouteSource, wire.AgentIdentity)
+	*r = NewRunForkContractFrontierRecipient(recipient, wire.Path, wire.RouteSource, wire.AgentPlan)
 	return nil
 }
 
@@ -278,19 +279,20 @@ type RunForkMaterializeRequest struct {
 }
 
 type RunForkMaterialization struct {
-	SourceRunID              string                          `json:"source_run_id"`
-	ForkRunID                string                          `json:"fork_run_id"`
-	ForkRunStatus            string                          `json:"fork_run_status"`
-	ForkPoint                RunForkPoint                    `json:"fork_point"`
-	MaterializedEntityCount  int                             `json:"materialized_entity_count"`
-	MaterializedFanOutCount  int                             `json:"materialized_fan_out_count"`
-	ExecutionReady           bool                            `json:"execution_ready"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission    `json:"replay_resume_admission"`
-	SelectedContractBinding  *RunForkSelectedContractBinding `json:"selected_contract_binding,omitempty"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker     `json:"unsupported_blockers,omitempty"`
-	DeliveryResumeBlocked    bool                            `json:"delivery_resume_blocked"`
-	SourceRunStatusUnchanged bool                            `json:"source_run_status_unchanged"`
-	DataPins                 []durabledata.Pin               `json:"data_pins"`
+	SourceRunID              string                                 `json:"source_run_id"`
+	ForkRunID                string                                 `json:"fork_run_id"`
+	ForkRunStatus            string                                 `json:"fork_run_status"`
+	ForkPoint                RunForkPoint                           `json:"fork_point"`
+	MaterializedEntityCount  int                                    `json:"materialized_entity_count"`
+	MaterializedFanOutCount  int                                    `json:"materialized_fan_out_count"`
+	ExecutionReady           bool                                   `json:"execution_ready"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission           `json:"replay_resume_admission"`
+	SelectedContractBinding  *RunForkSelectedContractBinding        `json:"selected_contract_binding,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker            `json:"unsupported_blockers,omitempty"`
+	DeliveryResumeBlocked    bool                                   `json:"delivery_resume_blocked"`
+	SourceRunStatusUnchanged bool                                   `json:"source_run_status_unchanged"`
+	DataPins                 []durabledata.Pin                      `json:"data_pins"`
+	AgentTopologies          []RunForkSelectedContractAgentTopology `json:"agent_topologies,omitempty"`
 }
 
 const (
@@ -1099,9 +1101,26 @@ type RunForkSelectedContractWorkflowState struct {
 	EntityID        string
 	FlowID          string
 	WorkflowVersion string
+	ExecutionMode   executionmode.Mode
 	Mode            string
 	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
 	Route           runtimeflowidentity.Route
+	Config          map[string]any
+	Agents          []RunForkSelectedContractAgentExpectation
+}
+
+// RunForkSelectedContractAgentExpectation is a runless declaration fact. The
+// selected-store materializer composes it with the admitted fork run.
+type RunForkSelectedContractAgentExpectation struct {
+	Plan           agentidentity.Plan
+	ConfigRevision string
+}
+
+// RunForkSelectedContractAgentTopology is exact committed readiness evidence
+// returned to the fork-local runtime. Runtime code must not recompute it.
+type RunForkSelectedContractAgentTopology struct {
+	Identity  agentidentity.Identity
+	Admission agenttopology.Admission
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {

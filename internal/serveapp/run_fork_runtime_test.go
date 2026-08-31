@@ -90,7 +90,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
 		[]events.DeliveryRoute{{
 			Recipient:     events.MustAgentDeliveryRecipient("cli-agent"),
-			AgentIdentity: servedRuntimeRootIdentity(t, "cli-agent"),
+			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "cli-agent"),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
@@ -758,7 +758,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
 		[]events.DeliveryRoute{{
 			Recipient:     events.MustAgentDeliveryRecipient("safe-agent"),
-			AgentIdentity: servedRuntimeRootIdentity(t, "safe-agent"),
+			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "safe-agent"),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := repoRootForTest()

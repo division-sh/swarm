@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -50,9 +51,13 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if !route.Valid() {
 		return true, false, fmt.Errorf("workflow timer activation is missing its canonical route")
 	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(activation.RunID, route)
+	if err != nil {
+		return true, false, err
+	}
 	nextStage := strings.TrimSpace(timer.AdvancesTo)
 	if nextStage == "" {
-		instance, found, err := pc.workflowStore.Load(ctx, route)
+		instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 		if err != nil {
 			return true, false, err
 		}
@@ -72,7 +77,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if pc.workflowStore.engineMutations == nil {
 		return true, false, fmt.Errorf("workflow timer transition requires the selected workflow engine mutation owner")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil || !found {
 		return true, false, err
 	}
@@ -105,8 +110,9 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		}
 	}
 	address := runtimeengine.StateAddress{
-		FlowID: identity.NormalizeFlowID(instance.WorkflowName), Route: route,
-		EntityID: identity.NormalizeEntityID(entityID),
+		FlowID:       identity.NormalizeFlowID(instance.WorkflowName),
+		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: route}.Normalize(),
+		EntityID:     identity.NormalizeEntityID(entityID),
 	}
 	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
 		NextState: nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
@@ -119,7 +125,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, &prepared.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
+	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &prepared.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
 		return true, false, err
 	}
@@ -135,7 +141,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, true, err
 	}
 	pc.notifyTestEntityStateUpdated(entityID, nextStage)
-	if err := pc.maybeDeactivateTerminalFlowInstance(ctx, route, identity.NormalizeEntityID(entityID), nextStage); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(ctx, flowIdentity, identity.NormalizeEntityID(entityID), nextStage); err != nil {
 		return true, true, err
 	}
 	if lateBy := evt.CreatedAt().Sub(occurrence.DueAt); lateBy > time.Minute {

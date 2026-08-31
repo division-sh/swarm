@@ -23,6 +23,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -71,7 +72,8 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 }
 
 func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{DefaultEventIDCorrelation: true})
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
@@ -91,12 +93,15 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
-		Identity:            runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
+		Identity: runtimeflowidentity.RunScopedFlowInstance{
+			RunID: runID,
+			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
+		},
 		ActivationVariables: map[string]string{"account_id": "account-a"},
 	}); err != nil {
 		t.Fatalf("materialize requester route: %v", err)
 	}
-	request := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), uuid.NewString(), templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/account-a", map[string]any{
+	request := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), uuid.NewString(), runID, templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/account-a", map[string]any{
 		"provider_request_id": "ignored-for-default",
 		"account_id":          "account-a",
 	})
@@ -142,7 +147,8 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 }
 
 func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPersistedContext(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
@@ -159,7 +165,10 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	}
 	for _, accountID := range []string{"account-a", "account-b"} {
 		if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
-			Identity:            runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{
+				RunID: runID,
+				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
+			},
 			ActivationVariables: map[string]string{"account_id": accountID},
 		}); err != nil {
 			t.Fatalf("materialize requester route %s: %v", accountID, err)
@@ -179,7 +188,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	}
 	contexts := map[string]events.DeliveryContext{}
 	for _, tc := range cases {
-		request := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), tc.requestID, templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/"+tc.accountID, map[string]any{
+		request := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), tc.requestID, runID, templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/"+tc.accountID, map[string]any{
 			"provider_request_id": tc.requestKey,
 			"account_id":          tc.accountID,
 		})
@@ -209,7 +218,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 
 	for _, tc := range []requestCase{cases[2], cases[1], cases[0]} {
 		replyID := uuid.NewString()
-		reply := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), replyID, templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
+		reply := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), replyID, runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
 			"provider_request_id": tc.requestKey,
 			"account_id":          tc.accountID,
 			"result":              tc.name,
@@ -238,7 +247,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 		}
 	}
 	firstContext := contexts["same-origin-first"]
-	lateReply := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), uuid.NewString(), templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
+	lateReply := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), uuid.NewString(), runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
 		"provider_request_id": cases[0].requestKey,
 		"account_id":          "account-a",
 		"result":              "too-late",
@@ -259,7 +268,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 		t.Fatalf("late reply persisted routes = %#v, want none", routes)
 	}
 
-	staleReply := replyConformanceEvent(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), uuid.NewString(), templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
+	staleReply := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent), uuid.NewString(), runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID, map[string]any{
 		"provider_request_id": "missing",
 		"account_id":          "account-a",
 		"result":              "stale",
@@ -650,9 +659,12 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	if got := approvedOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
 		t.Fatalf("stale-origin approved reply context = %q, want %q", got, deliveryContext.ReplyContextID())
 	}
-	if err := resumedBus.RouteTable().RemoveFlowInstanceRoute(runtimeflowidentity.StoredRoute(
-		templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a",
-	)); err != nil {
+	if err := resumedBus.RouteTable().RemoveFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.StoredRoute(
+			templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a",
+		),
+	}); err != nil {
 		t.Fatalf("remove stale requester route: %v", err)
 	}
 
@@ -762,11 +774,28 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	})
 
 	eb.SetInterceptors(coordinator)
-	requesterIdentity := runtimebustest.Identity(t, "provider-agent", templatereply.ProviderFlowID)
+	requesterIdentity := runtimebustest.IdentityForRun(
+		t,
+		runtimecorrelation.RunIDFromContext(ctx),
+		"provider-agent",
+		templatereply.ProviderFlowID,
+	)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{
 		Identity: requesterIdentity,
 		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
 	})
+	eb.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			identity := route.AgentIdentity.Normalize()
+			if identity != requesterIdentity || identity.RunID != event.RunID() {
+				return fmt.Errorf("human-task outcome route %s is not owned by registered provider %s", identity.Description(), requesterIdentity.Description())
+			}
+		}
+		return nil
+	}))
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID: "provider-agent", FlowID: templatereply.ProviderFlowID, FlowPath: templatereply.ProviderFlowID,
 		Subscriptions: []string{"human_task.deferred", "human_task.approved"},
@@ -838,15 +867,19 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	}
 	persistedByPath := make(map[string]struct{}, len(persisted))
 	for _, route := range persisted {
-		persistedByPath[route.InstancePath] = struct{}{}
+		persistedByPath[route.Key()] = struct{}{}
 	}
+	runID := runtimecorrelation.RunIDFromContext(ctx)
 	for _, accountID := range []string{"account-a", "account-b"} {
 		req := bus.FlowInstanceRouteMaterializationRequest{
-			Identity:            runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{
+				RunID: runID,
+				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
+			},
 			ActivationVariables: map[string]string{"account_id": accountID},
 		}
 		var err error
-		if _, exists := persistedByPath[req.Identity.InstancePath]; exists {
+		if _, exists := persistedByPath[req.Identity.Key()]; exists {
 			err = eb.PublishPersistedFlowInstanceRoute(req)
 		} else {
 			err = eb.AddFlowInstanceRouteContext(ctx, req)
@@ -865,17 +898,72 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		t.Fatal("reply conformance run identity is required before seeding target owners")
 	}
 	db := replyConformanceDB(t, backend)
+	sourceFact := authorActivityTestBundleSourceFact
+	bundleHash, bundleSource := sourceFact.StorageValues()
+	flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
+		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active')
+		ON CONFLICT (run_id, instance_path) DO NOTHING`
+	readinessQuery := `INSERT INTO flow_instance_runtime_readiness
+		(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::jsonb, $4, $4, $4)
+		ON CONFLICT (run_id, instance_path) DO NOTHING`
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
 		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', 'active')
 		ON CONFLICT (run_id, entity_id) DO NOTHING`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		flowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
+			VALUES (?, ?, ?, 'template', '{}', 'active')`
+		readinessQuery = `INSERT OR IGNORE INTO flow_instance_runtime_readiness
+			(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`
 		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
 			VALUES (?, ?, ?, 'requester_state', 'active')`
 	}
 	for _, owner := range replyConformanceTargetOwners() {
+		if _, err := db.ExecContext(ctx, flowQuery, runID, owner.FlowInstance, templatereply.RequesterFlowID); err != nil {
+			t.Fatalf("seed reply conformance flow owner %s: %v", owner.FlowInstance, err)
+		}
+		plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: runtimeflowidentity.Instance{
+				TemplateID: templatereply.RequesterFlowID, ScopeKey: templatereply.RequesterFlowID,
+				InstanceID: runtimeflowidentity.LogicalInstanceID(owner.FlowInstance), InstancePath: owner.FlowInstance,
+				EntityID: owner.EntityID, HasStoredPath: true,
+			},
+			RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+			WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+		}).Normalized()
+		if err != nil {
+			t.Fatalf("construct reply conformance readiness %s: %v", owner.FlowInstance, err)
+		}
+		planRaw, err := canonicaljson.Bytes(plan)
+		if err != nil {
+			t.Fatalf("encode reply conformance readiness %s: %v", owner.FlowInstance, err)
+		}
+		now := time.Now().UTC()
+		readinessArgs := []any{runID, owner.FlowInstance, planRaw, now}
+		if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+			readinessArgs = []any{runID, owner.FlowInstance, planRaw, now, now, now}
+		}
+		if _, err := db.ExecContext(ctx, readinessQuery, readinessArgs...); err != nil {
+			t.Fatalf("seed reply conformance readiness %s: %v", owner.FlowInstance, err)
+		}
 		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance); err != nil {
 			t.Fatalf("seed reply conformance target owner %s: %v", owner.FlowInstance, err)
 		}
+	}
+	providerFlowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
+		VALUES ($1::uuid, $2, $3, 'static', '{}'::jsonb, 'active')
+		ON CONFLICT (run_id, instance_path) DO NOTHING`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		providerFlowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
+			VALUES (?, ?, ?, 'static', '{}', 'active')`
+	}
+	providerEntityID := runtimeflowidentity.EntityID(templatereply.ProviderFlowID)
+	if _, err := db.ExecContext(ctx, providerFlowQuery, runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID); err != nil {
+		t.Fatalf("seed reply conformance provider flow owner: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, query, runID, providerEntityID, templatereply.ProviderFlowID); err != nil {
+		t.Fatalf("seed reply conformance provider target owner: %v", err)
 	}
 }
 
@@ -1038,11 +1126,11 @@ func (s *replyConformanceStore) CommitPublication(ctx context.Context, command b
 	})
 }
 
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
+func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
 
-func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context) ([]bus.ActiveTargetDescriptor, error) {
+func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
 	return replyConformanceTargetOwners(), nil
 }
 
@@ -1061,7 +1149,7 @@ func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 
 func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
 	for _, set := range sets {
-		if !set.Identity.Valid() {
+		if err := set.Identity.Validate(); err != nil {
 			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
 		}
 	}

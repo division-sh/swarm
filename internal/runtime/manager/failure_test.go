@@ -125,7 +125,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 				t.Fatal("startup replay record failure = nil")
 			}
 			wantStatus := receiptStatusForAgentFailure(err)
-			deliveryID, obligationErr := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, obligationErr := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 			if obligationErr != nil {
 				t.Fatalf("derive failure delivery obligation: %v", obligationErr)
 			}
@@ -212,7 +212,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				eventtest.UUID("intervention-"+tt.name),
 				events.EventType("test.intervention"),
 				"test", "", nil, 0,
-				eventtest.UUID("intervention-run-"+tt.name),
+				managerIdentityTestRunID,
 				"", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
@@ -232,7 +232,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				t.Fatalf("agent calls = %d, want 1", got)
 			}
 
-			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRouteForRun(inbound.RunID(), agent.ID()))
 			if err != nil {
 				t.Fatalf("derive intervention obligation: %v", err)
 			}
@@ -331,7 +331,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				eventtest.UUID("intervention-settlement-"+tt.name),
 				events.EventType("test.intervention.settlement"),
 				"test", "", nil, 0,
-				eventtest.UUID("intervention-settlement-run-"+tt.name),
+				managerIdentityTestRunID,
 				"", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
@@ -350,7 +350,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				t.Fatalf("settlement attempts = %d canceled_at_attempt=%t, want one attempt before shutdown cancellation", deliveryStore.attempts.Load(), deliveryStore.canceledAtAttempt.Load())
 			}
 
-			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRouteForRun(inbound.RunID(), agent.ID()))
 			if err != nil {
 				t.Fatalf("derive intervention settlement obligation: %v", err)
 			}
@@ -381,7 +381,7 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
 	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-	route := managerAgentDeliveryRoute(agent.ID())
+	route := managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID())
 	ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
 	first := am.processEventDetailed(ctx, agent, evt)
 	if first.err == nil || agent.calls != 1 {
@@ -440,7 +440,7 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 		t.Fatal("selected-fork retryable handler failure returned nil")
 	}
 
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatalf("derive selected-fork delivery obligation: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 		testAuthorActivityContext(context.Background()),
 		deliveryStore.authority,
 		evt,
-		managerAgentDeliveryRoute(agent.ID()),
+		managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()),
 	)
 	if err != nil {
 		t.Fatalf("claim selected delivery with normal authority: %v", err)

@@ -43,6 +43,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const flowActivationTestRunID = "77777777-7777-4777-8777-777777777778"
+
 func deactivateFlowInstanceForTest(am *AgentManager, ctx context.Context, templateID, instanceID, flowPath, entityID string) error {
 	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, ""),
@@ -136,8 +138,8 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 
 type flowActivationRouteStore interface {
 	UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
+	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
+	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 }
 
 type flowActivationTestBus struct {
@@ -185,7 +187,7 @@ type flowActivationTestInstanceStore struct {
 	terminatedPaths         []string
 	terminatedAtSeen        []time.Time
 	byStorageRef            map[string]runtimepipeline.WorkflowInstance
-	routeLoads              []runtimeflowidentity.Route
+	routeLoads              []runtimeflowidentity.RunScopedFlowInstance
 	materialization         runtimepipeline.WorkflowInitialMaterializationResult
 	armedEntries            []string
 	armInitialEntry         func(string) error
@@ -256,7 +258,11 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	if !route.Valid() || strings.TrimSpace(req.RunID) == "" {
 		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination requires an exact route and run_id")
 	}
-	priorInstance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(req.RunID, route)
+	if err != nil {
+		return runtimepipeline.FlowInstanceTermination{}, err
+	}
+	priorInstance, found, err := o.instances.Load(ctx, flowIdentity)
 	if err != nil || !found {
 		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("flow activation test instance %s not found", storageRef))
 	}
@@ -276,10 +282,10 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 		o.instances.readiness = priorReadiness
 		o.instances.readinessMu.Unlock()
 	}
-	if err := o.instances.MarkTerminated(ctx, route, req.EntityID, req.TerminatedAt); err != nil {
+	if err := o.instances.MarkTerminated(ctx, flowIdentity, req.EntityID, req.TerminatedAt); err != nil {
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
-	instance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
+	instance, found, err := o.instances.Load(ctx, flowIdentity)
 	if err != nil || !found || strings.TrimSpace(instance.Status) != "terminated" || instance.TerminatedAt.IsZero() {
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef))
@@ -289,11 +295,16 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", instance.StorageRef)
 	}
-	if err := o.routes.RemoveFlowInstanceRouteContext(ctx, canonicalRoute); err != nil {
+	canonicalIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(req.RunID, canonicalRoute)
+	if err != nil {
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
-	return runtimepipeline.FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
+	if err := o.routes.RemoveFlowInstanceRouteContext(ctx, canonicalIdentity); err != nil {
+		rollback()
+		return runtimepipeline.FlowInstanceTermination{}, err
+	}
+	return runtimepipeline.FlowInstanceTermination{Instance: instance, Identity: canonicalIdentity}, nil
 }
 
 type flowActivationTestCommitter struct {
@@ -308,7 +319,11 @@ func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
 	if o.instances == nil || o.routes == nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("test flow activation commit owners are required")
 	}
-	result, err := o.instances.MaterializeInitialEntry(ctx, plan.Instance, plan.OccurredAt)
+	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	result, err := o.instances.MaterializeInitialEntry(ctx, flowOwner, plan.Instance, plan.OccurredAt)
 	if err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -316,7 +331,7 @@ func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
 		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("unknown test flow activation result %d", result)
 	}
 	if err := o.routes.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: plan.Identity.Route(), ActivationVariables: plan.ActivationVariables,
+		Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}, ActivationVariables: plan.ActivationVariables,
 	}); err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -412,39 +427,44 @@ func (s *flowActivationTestRouteStore) UpsertFlowInstanceRoute(_ context.Context
 	if s.statusByPath == nil {
 		s.statusByPath = map[string]string{}
 	}
-	s.statusByPath[strings.TrimSpace(route.Identity.InstancePath)] = "active"
+	s.statusByPath[route.Identity.Key()] = "active"
 	return nil
 }
 
-func (s *flowActivationTestRouteStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+func (s *flowActivationTestRouteStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if s.statusByPath == nil {
 		s.statusByPath = map[string]string{}
 	}
-	s.statusByPath[strings.TrimSpace(identity.InstancePath)] = "inactive"
+	s.statusByPath[identity.Key()] = "inactive"
 	return nil
 }
 
-func (s *flowActivationTestRouteStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
-	var routes []runtimeflowidentity.Route
-	for path, status := range s.statusByPath {
+func (s *flowActivationTestRouteStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	var routes []runtimeflowidentity.RunScopedFlowInstance
+	for key, status := range s.statusByPath {
 		if status != "active" {
 			continue
 		}
+		partsByRun := strings.SplitN(key, "\x00", 2)
+		if len(partsByRun) != 2 {
+			continue
+		}
+		path := partsByRun[1]
 		parts := strings.SplitN(path, "/", 2)
 		if len(parts) == 2 {
-			routes = append(routes, runtimeflowidentity.StoredRoute(parts[0], parts[1], path))
+			routes = append(routes, runtimeflowidentity.RunScopedFlowInstance{RunID: partsByRun[0], Route: runtimeflowidentity.StoredRoute(parts[0], parts[1], path)})
 		}
 	}
 	return routes, nil
 }
 
-func (s *flowActivationTestRouteStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s.statusByPath[strings.TrimSpace(identity.InstancePath)] != "active" {
+func (s *flowActivationTestRouteStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	if s.statusByPath[identity.Key()] != "active" {
 		return nil, nil
 	}
 	return []runtimebus.FlowInstanceRouteRecord{{
-		Identity: identity, EventPattern: identity.InstancePath + "/task.started",
-		SubscriberType: "agent", SubscriberID: "reviewer-" + identity.InstanceID, SourceFlow: identity.ScopeKey,
+		Identity: identity, EventPattern: identity.Route.InstancePath + "/task.started",
+		SubscriberType: "agent", SubscriberID: "reviewer-" + identity.Route.InstanceID, SourceFlow: identity.Route.ScopeKey,
 	}}, nil
 }
 
@@ -469,7 +489,10 @@ func (s *flowActivationTestInstanceStore) Create(_ context.Context, instance run
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
+func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
+	if err := owner.Validate(); err != nil || owner.Route.InstancePath != strings.Trim(strings.TrimSpace(instance.StorageRef), "/") {
+		return runtimepipeline.WorkflowInitialMaterializationUnknown, fmt.Errorf("test initial materialization requires exact flow owner")
+	}
 	if s.materialization != runtimepipeline.WorkflowInitialMaterializationUnknown {
 		return s.materialization, nil
 	}
@@ -504,7 +527,10 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
 }
 
-func (s *flowActivationTestInstanceStore) PrepareInitialEntryLifecycle(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+func (s *flowActivationTestInstanceStore) PrepareInitialEntryLifecycle(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+	if err := owner.Validate(); err != nil || owner.Route.InstancePath != strings.Trim(strings.TrimSpace(instance.StorageRef), "/") {
+		return runtimepipeline.WorkflowInstance{}, runtimepipeline.WorkflowLifecycleMutationPlan{}, fmt.Errorf("test initial lifecycle requires exact flow owner")
+	}
 	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
 	if !ok {
 		return runtimepipeline.WorkflowInstance{}, runtimepipeline.WorkflowLifecycleMutationPlan{}, errors.New("test flow activation lifecycle requires execution mode")
@@ -519,8 +545,8 @@ func (s *flowActivationTestInstanceStore) FinalizeInitialEntryLifecycle(context.
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, route runtimeflowidentity.Route) error {
-	instanceID := strings.TrimSpace(route.InstancePath)
+func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
+	instanceID := strings.TrimSpace(identity.Route.InstancePath)
 	s.armedEntries = append(s.armedEntries, instanceID)
 	if s.armInitialEntry != nil {
 		return s.armInitialEntry(instanceID)
@@ -528,12 +554,12 @@ func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Contex
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
-	return s.ArmInitialEntryTimers(ctx, route)
+func (s *flowActivationTestInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
+	return s.ArmInitialEntryTimers(ctx, identity)
 }
 
-func (s *flowActivationTestInstanceStore) RetireInitialEntryTimerWakeups(_ context.Context, route runtimeflowidentity.Route) error {
-	instanceID := strings.TrimSpace(route.InstancePath)
+func (s *flowActivationTestInstanceStore) RetireInitialEntryTimerWakeups(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
+	instanceID := strings.TrimSpace(identity.Route.InstancePath)
 	s.retiredTimerEntries = append(s.retiredTimerEntries, instanceID)
 	if s.retireInitialEntry != nil {
 		return s.retireInitialEntry(instanceID)
@@ -833,8 +859,8 @@ func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline
 	}
 }
 
-func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, route runtimeflowidentity.Route, _ identity.EntityID, terminatedAt time.Time) error {
-	storageRef := route.InstancePath
+func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, _ identity.EntityID, terminatedAt time.Time) error {
+	storageRef := flowIdentity.Route.InstancePath
 	s.terminatedPaths = append(s.terminatedPaths, strings.TrimSpace(storageRef))
 	s.terminatedAtSeen = append(s.terminatedAtSeen, terminatedAt)
 	if s.byStorageRef != nil {
@@ -856,17 +882,18 @@ func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, rout
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) Load(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (s *flowActivationTestInstanceStore) Load(_ context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	if s.byStorageRef == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
-	instance, ok := s.byStorageRef[strings.TrimSpace(route.InstancePath)]
+	instance, ok := s.byStorageRef[strings.TrimSpace(flowIdentity.Route.InstancePath)]
 	return instance, ok, nil
 }
 
-func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	s.routeLoads = append(s.routeLoads, route)
+func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
+	flowIdentity = flowIdentity.Normalize()
+	route := flowIdentity.Route
+	s.routeLoads = append(s.routeLoads, flowIdentity)
 	instance, ok := s.byStorageRef[route.InstancePath]
 	if !ok {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("active flow instance not found for route recovery: %s", route.InstancePath)
@@ -1078,7 +1105,7 @@ func (b *flowActivationSemanticRouteBus) StageFlowInstanceRouteContext(
 	if b.durableRoutes == nil {
 		b.durableRoutes = map[string][]runtimebus.FlowInstanceRouteRecord{}
 	}
-	b.durableRoutes[req.Identity.InstancePath] = b.durable.MaterializedRoutes(req.Identity)
+	b.durableRoutes[req.Identity.Key()] = b.durable.MaterializedRoutes(req.Identity)
 	return nil
 }
 
@@ -1096,7 +1123,7 @@ func (b *flowActivationSemanticRouteBus) PublishPersistedFlowInstanceRoute(
 }
 
 func (b *flowActivationSemanticRouteBus) RetirePublishedFlowInstanceRoute(
-	identity runtimeflowidentity.Route,
+	identity runtimeflowidentity.RunScopedFlowInstance,
 ) error {
 	if b == nil || b.process == nil {
 		return errors.New("semantic process route table is required")
@@ -1104,18 +1131,18 @@ func (b *flowActivationSemanticRouteBus) RetirePublishedFlowInstanceRoute(
 	return b.process.RemoveFlowInstanceRoute(identity)
 }
 
-func (b *flowActivationSemanticRouteBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+func (b *flowActivationSemanticRouteBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	return b != nil && b.process != nil && b.process.HasFlowInstanceRoute(identity)
 }
 
 func (b *flowActivationSemanticRouteBus) VerifyFlowInstanceRoute(
 	_ context.Context,
-	identity runtimeflowidentity.Route,
+	identity runtimeflowidentity.RunScopedFlowInstance,
 ) error {
 	if !b.HasFlowInstanceRoute(identity) {
 		return errors.New("semantic route is not process-ready")
 	}
-	durable := b.durableRoutes[identity.InstancePath]
+	durable := b.durableRoutes[identity.Key()]
 	process := b.process.MaterializedRoutes(identity)
 	if !reflect.DeepEqual(durable, process) {
 		return fmt.Errorf("semantic durable/process route mismatch: durable=%#v process=%#v", durable, process)
@@ -1139,10 +1166,10 @@ func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Contex
 	identity := req.Identity
 	return b.routeStore.UpsertFlowInstanceRoute(ctx, runtimebus.FlowInstanceRouteRecord{
 		Identity:       identity,
-		EventPattern:   identity.InstancePath + "/task.started",
+		EventPattern:   identity.Route.InstancePath + "/task.started",
 		SubscriberType: "agent",
-		SubscriberID:   "reviewer-" + identity.InstanceID,
-		SourceFlow:     identity.ScopeKey,
+		SubscriberID:   "reviewer-" + identity.Route.InstanceID,
+		SourceFlow:     identity.Route.ScopeKey,
 	})
 }
 
@@ -1154,12 +1181,12 @@ func (b *flowActivationTestBus) PublishPersistedFlowInstanceRoute(req runtimebus
 	if b.addErr != nil {
 		return b.addErr
 	}
-	b.addedPaths = append(b.addedPaths, req.Identity.InstancePath)
+	b.addedPaths = append(b.addedPaths, req.Identity.Route.InstancePath)
 	b.addedRouteRequests = append(b.addedRouteRequests, req)
 	return nil
 }
 
-func (b *flowActivationTestBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (b *flowActivationTestBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	keptPaths := b.addedPaths[:0]
 	keptRequests := b.addedRouteRequests[:0]
 	for idx, req := range b.addedRouteRequests {
@@ -1202,7 +1229,7 @@ func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context,
 	return b.PublishPersistedFlowInstanceRoute(req)
 }
 
-func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	for _, req := range b.addedRouteRequests {
 		if req.Identity == identity {
 			return true
@@ -1211,7 +1238,7 @@ func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentit
 	return false
 }
 
-func (b *flowActivationTestBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (b *flowActivationTestBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if !b.HasFlowInstanceRoute(identity) {
 		return errors.New("route not process-ready")
 	}
@@ -1230,16 +1257,16 @@ func (b *flowActivationTestBus) VerifyFlowInstanceRoute(ctx context.Context, ide
 	return nil
 }
 
-func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return b.RemoveFlowInstanceRouteContext(context.Background(), identity)
 }
 
-func (b *flowActivationTestBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
-	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+func (b *flowActivationTestBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
+	b.removedPairs = append(b.removedPairs, identity.Route.ScopeKey+"/"+identity.Route.InstanceID)
 	return b.RetirePublishedFlowInstanceRoute(identity)
 }
 
-func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if b.removeErr != nil {
 		return b.removeErr
 	}
@@ -1249,7 +1276,7 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Conte
 		}
 	}
 	recordRemoval := func() {
-		b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+		b.removedPairs = append(b.removedPairs, identity.Route.ScopeKey+"/"+identity.Route.InstanceID)
 	}
 	if runtimepipelinefixture.QueuePostCommitAction(ctx, func(context.Context) {
 		recordRemoval()
@@ -1261,7 +1288,11 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Conte
 }
 
 func flowActivationRunContext() context.Context {
-	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), flowActivationTestRunID)
+}
+
+func testFlowActivationAgentConfig(t testing.TB, am *AgentManager, agentID, flowInstance string) (models.AgentConfig, bool) {
+	return testAgentConfigForRun(t, am, flowActivationTestRunID, agentID, flowInstance)
 }
 
 func testFlowAgentURIRef(flowID, logicalID string) runtimecontracts.ContractURIRef {
@@ -1538,9 +1569,17 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 		TriggerEvent: eventtest.RunCreatingRootIngress(
 			"77777777-7777-4777-8777-777777777777", events.EventType("spawn.requested"),
 			"spawner", "", json.RawMessage(`{}`), 0,
-			"77777777-7777-4777-8777-777777777778", "", events.EventEnvelope{}, time.Now().UTC(),
+			flowActivationTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 		),
 	}
+}
+
+func testActivationFlowIdentity(req runtimepipeline.FlowInstanceActivationRequest) runtimeflowidentity.RunScopedFlowInstance {
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil {
+		panic(err)
+	}
+	return identity
 }
 
 func testFlowActivationTriggerEvent(eventID string, runIDs ...string) events.Event {
@@ -1548,7 +1587,7 @@ func testFlowActivationTriggerEvent(eventID string, runIDs ...string) events.Eve
 }
 
 func testFlowActivationTriggerEventWithMode(eventID string, mode executionmode.Mode, runIDs ...string) events.Event {
-	runID := "77777777-7777-4777-8777-777777777778"
+	runID := flowActivationTestRunID
 	if len(runIDs) > 0 {
 		runID = strings.TrimSpace(runIDs[0])
 	}
@@ -1615,10 +1654,10 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
 		t.Fatalf("activation entity contract = %#v, want canonical review_entity and no schema.Entity interpretation", instances.creates)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("expected activated flow agent config")
 	}
-	cfg, _ := testAgentConfig(t, am, "reviewer", "review/inst-1")
+	cfg, _ := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
 	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
@@ -1653,7 +1692,7 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start from the closed activation result")
 	}
 	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
@@ -1675,7 +1714,7 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 		if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
 			return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
 		}
-		if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
+		if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 			return errors.New("timer armed before agent installation")
 		}
 		return nil
@@ -1747,7 +1786,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					0,
 				)
 			}
-			if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 				t.Fatal("failed readiness attempt left the route process-visible")
 			}
 			wantTimerRetirements := 0
@@ -1906,7 +1945,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		!readiness.Pending() {
 		t.Fatalf("concurrently revised readiness was falsely completed: %#v", readiness)
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("stale topology attempt left its process route published")
 	}
 }
@@ -1961,7 +2000,7 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	if err := <-reconciled; !errors.Is(err, errDynamicFlowRuntimeReadinessPlanStale) {
 		t.Fatalf("post-admission revision error = %v, want stale-plan rejection", err)
 	}
-	if !bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("stale admitted callback retired the already-published route")
 	}
 }
@@ -2247,10 +2286,10 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		readiness.Pending() {
 		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
 	}
-	if !bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("post-CAS revised topology route was not published")
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("post-CAS revised topology agent was not published")
 	}
 }
@@ -2334,12 +2373,12 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("activate initial source: %v", err)
 	}
-	reviewerIdentity := testAgentIdentity(t, am, "reviewer", "review/inst-1")
+	reviewerIdentity := testAgentIdentityForRun(t, am, req.TriggerEvent.RunID(), "reviewer", "review/inst-1")
 	initialState, ok := am.lifecycle.stateByIdentity(reviewerIdentity)
 	if !ok {
 		t.Fatal("initial reviewer lifecycle state is missing")
 	}
-	initialConfig, ok := testAgentConfig(t, am, "reviewer", "review/inst-1")
+	initialConfig, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
 	if !ok {
 		t.Fatal("initial reviewer config is missing")
 	}
@@ -2391,7 +2430,7 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	if revisedState.Generation <= initialState.Generation {
 		t.Fatalf("reviewer lifecycle generation = %d, want later than %d", revisedState.Generation, initialState.Generation)
 	}
-	revisedConfig, ok := testAgentConfig(t, am, "reviewer", "review/inst-1")
+	revisedConfig, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
 	if !ok {
 		t.Fatal("revised reviewer config is missing")
 	}
@@ -2402,7 +2441,7 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	if revisedConfigRevision != initialConfigRevision {
 		t.Fatalf("reviewer config revision changed: before=%s after=%s", initialConfigRevision, revisedConfigRevision)
 	}
-	if _, ok := testAgentConfig(t, am, "writer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "writer", "review/inst-1"); !ok {
 		t.Fatal("added sibling writer is not process-ready")
 	}
 	persisted, err := agents.LoadAgents(revisedCtx)
@@ -2484,11 +2523,12 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	oldEvent := "review/inst-1/task.started"
 	newEvent := "review/inst-1/task.revised"
 	routeObserver := identitytest.FlowNode(t, "review", "route-observer").Key()
-	if !hasRecord(durableRoutes[reqA.Instance.InstancePath], oldEvent, routeObserver) ||
+	ownerA := testActivationFlowIdentity(reqA)
+	if !hasRecord(durableRoutes[ownerA.Key()], oldEvent, routeObserver) ||
 		!hasSubscriber(processA.Resolve(oldEvent), routeObserver) {
 		t.Fatalf(
 			"source A route-only facts missing: durable=%#v process=%#v",
-			durableRoutes[reqA.Instance.InstancePath],
+			durableRoutes[ownerA.Key()],
 			processA.Resolve(oldEvent),
 		)
 	}
@@ -2537,7 +2577,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		!reflect.DeepEqual(revised.Plan.Agents, initial.Plan.Agents) {
 		t.Fatalf("route-only revision changed wrong plan facts: before=%#v after=%#v", initial.Plan, revised.Plan)
 	}
-	revisedRecords := durableRoutes[reqB.Instance.InstancePath]
+	revisedRecords := durableRoutes[testActivationFlowIdentity(reqB).Key()]
 	if hasRecord(revisedRecords, oldEvent, routeObserver) ||
 		hasSubscriber(processB.Resolve(oldEvent), routeObserver) {
 		t.Fatalf(
@@ -2592,7 +2632,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 	if err != nil || !found || !readiness.Pending() || !readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("failed no-auto readiness left process route published")
 	}
 	for {
@@ -2712,7 +2752,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 	}
 	bus.addErr = nil
 	if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: req.Instance.Route(),
+		Identity: testActivationFlowIdentity(req),
 	}); err != nil {
 		t.Fatalf("seed stale process route: %v", err)
 	}
@@ -2732,14 +2772,14 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 		)
 	}()
 	<-stageEntered
-	if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+	if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
 	if err := <-reconciled; err != nil {
 		t.Fatalf("terminal reconciliation: %v", err)
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("terminal readiness left a process-visible route")
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
@@ -2763,7 +2803,7 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances.creationMarkErr = nil
 	instances.beforeCreation = func() {
 		instances.beforeCreation = nil
-		if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+		if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 			t.Fatalf("terminalize at creation boundary: %v", err)
 		}
 	}
@@ -2775,14 +2815,14 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	if err != nil {
 		t.Fatalf("terminal creation reconciliation: %v", err)
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("terminal creation boundary left a process-visible route")
 	}
 	if len(bus.published) != 0 {
 		t.Fatalf("terminal creation boundary published events: %#v", bus.published)
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
-		if _, ok := testAgentConfig(t, am, agentID, "review/inst-1"); ok {
+		if _, ok := testFlowActivationAgentConfig(t, am, agentID, "review/inst-1"); ok {
 			t.Fatalf("terminal creation boundary left process agent %s", agentID)
 		}
 	}
@@ -2894,10 +2934,10 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, true); err != nil {
 		t.Fatalf("ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
-	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not restore first declared agent")
 	}
-	if _, ok := testAgentConfig(t, restarted, "writer", "review/inst-1"); !ok {
+	if _, ok := testFlowActivationAgentConfig(t, restarted, "writer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not reconcile missing declared agent")
 	}
 	if len(instances.armedEntries) != 1 {
@@ -3150,6 +3190,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
 			Identity: runtimeagentidentity.Identity{
+				RunID: req.TriggerEvent.RunID(),
 				Name: runtimeagentidentity.Name{
 					AgentID: "reviewer",
 					Owner:   testFlowAgentURIRef("review", "reviewer").Full,
@@ -3193,7 +3234,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		Status: "active",
 	}}}
 	routeStore := &flowActivationTestRouteStore{statusByPath: map[string]string{
-		req.Instance.InstancePath: "active",
+		testActivationFlowIdentity(req).Key(): "active",
 	}}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	am := newFlowActivationManager(t, bus, instances, agents)
@@ -3201,10 +3242,10 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	if err := reconcileDynamicFlowRuntimeStartupForTest(am, testAuthorActivityContext(context.Background()), authorActivityTestBundleSourceFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("terminal readiness retained or restored a process route")
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
@@ -3241,7 +3282,7 @@ func TestEnsureFlowInstanceRestoresPersistedDeclaredAgentsWithoutNewLifecycleTra
 		t.Fatalf("persisted agent transitions = %d, want unchanged %d", len(agents.upserts), persistedCount)
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
-		if _, ok := testAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
+		if _, ok := testFlowActivationAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
 			t.Fatalf("persisted declared agent %s was not restored into process state", agentID)
 		}
 	}
@@ -3287,13 +3328,13 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	if readiness.Plan.WorkflowVersion != "v-revised" || readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("revised readiness = %#v", readiness)
 	}
-	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/inst-1"); ok {
 		t.Fatal("removed reviewer remains process-visible")
 	}
-	if cfg, ok := testAgentConfig(t, restarted, "writer", "review/inst-1"); !ok || cfg.Role != "writer-v2" {
+	if cfg, ok := testFlowActivationAgentConfig(t, restarted, "writer", "review/inst-1"); !ok || cfg.Role != "writer-v2" {
 		t.Fatalf("changed writer config = %#v found=%t", cfg, ok)
 	}
-	if cfg, ok := testAgentConfig(t, restarted, "editor", "review/inst-1"); !ok || cfg.Role != "editor" {
+	if cfg, ok := testFlowActivationAgentConfig(t, restarted, "editor", "review/inst-1"); !ok || cfg.Role != "editor" {
 		t.Fatalf("added editor config = %#v found=%t", cfg, ok)
 	}
 	if len(agents.terminated) != 1 || agents.terminated[0] != "reviewer" {
@@ -3328,11 +3369,11 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance")
 	}
-	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("flow route was not process-ready after named mutation commit")
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
-		if _, ok := testAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
+		if _, ok := testFlowActivationAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
 			t.Fatalf("persisted declared agent %s was not restored after commit", agentID)
 		}
 	}
@@ -3719,7 +3760,7 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after auto-emit schema failure")
 	}
 }
@@ -3755,7 +3796,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after queued auto-emit schema failure")
 	}
 }
@@ -3985,7 +4026,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	cfg, ok := testAgentConfig(t, am, "reviewer", "review/inst-1")
+	cfg, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
 	if !ok {
 		t.Fatal("expected activated flow agent config")
 	}
@@ -4007,7 +4048,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow agent teardown")
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
@@ -4044,7 +4085,7 @@ func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testi
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
 		t.Fatalf("flow instance terminal state = %#v, want committed owner entry", instances.terminatedPaths)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
+	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow agent teardown after named commit")
 	}
 	if len(bus.unsubscribed) != 0 {
@@ -4056,7 +4097,8 @@ func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testi
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed routes after post-commit flush = %#v, want [review/inst-1]", bus.removedPairs)
 	}
-	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
+	flowIdentity := runtimeflowidentity.RunScopedFlowInstance{RunID: runtimecorrelation.RunIDFromContext(flowActivationRunContext()), Route: runtimeflowidentity.RouteForInstancePath("review/inst-1")}
+	if got := routeStore.statusByPath[flowIdentity.Key()]; got != "inactive" {
 		t.Fatalf("route status after post-commit flush = %q, want inactive", got)
 	}
 	if len(bus.runtimeLogs) != 0 {
@@ -4128,7 +4170,7 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	if len(instances.terminatedPaths) != 0 {
 		t.Fatalf("terminal state survived route replacement rollback: %#v", instances.terminatedPaths)
 	}
-	instance, ok, loadErr := instances.Load(context.Background(), runtimeflowidentity.RouteForInstancePath("review/inst-1"))
+	instance, ok, loadErr := instances.Load(context.Background(), runtimeflowidentity.RunScopedFlowInstance{RunID: runtimecorrelation.RunIDFromContext(flowActivationRunContext()), Route: runtimeflowidentity.RouteForInstancePath("review/inst-1")})
 	if loadErr != nil || !ok || instance.Status != "active" {
 		t.Fatalf("flow instance after route replacement rollback: found=%t instance=%#v err=%v", ok, instance, loadErr)
 	}
@@ -4157,7 +4199,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 
 func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsAndEmitEventsFromExactFlowPath(t *testing.T) {
 	source := semanticview.Wrap(testNestedFlowBundle(t))
-	cfg, err := buildFlowAgentConfig(
+	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "grandchild", "worker"),
 		"grandchild",
@@ -4198,11 +4240,11 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 	source := semanticview.Wrap(bundle)
 	namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
 
-	staticCfg, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, staticFlowLocalEventSetForTest(review.Agents))
+	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "review", "reviewer", entry, staticFlowLocalEventSetForTest(review.Agents))
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	templateCfg, err := buildFlowAgentConfig(
+	templateCfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		namePlan,
 		"review",
@@ -4228,9 +4270,55 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 	}
 }
 
+func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(t, ""))
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1")
+	if err != nil {
+		t.Fatalf("TemplateFlowAgentMaterializationBlueprints: %v", err)
+	}
+	if len(blueprints) != 1 {
+		t.Fatalf("blueprints = %#v, want one declaration", blueprints)
+	}
+	if !blueprints[0].Config.Identity.IsZero() {
+		t.Fatalf("pre-run blueprint acquired live identity %#v", blueprints[0].Config.Identity)
+	}
+	if err := blueprints[0].Identity.Validate(); err != nil {
+		t.Fatalf("declaration plan: %v", err)
+	}
+	blueprint, err := ResolveAgentMaterializationBlueprint(AgentManagerOptions{}, blueprints[0])
+	if err != nil {
+		t.Fatalf("ResolveAgentMaterializationBlueprint: %v", err)
+	}
+	if !blueprint.Config.Identity.IsZero() {
+		t.Fatalf("resolved pre-run blueprint acquired live identity %#v", blueprint.Config.Identity)
+	}
+	plannedRevision, err := AgentConfigPlanRevision(blueprint.Config, blueprint.Identity)
+	if err != nil {
+		t.Fatalf("planned revision: %v", err)
+	}
+	record, err := blueprint.Materialize(managerIdentityTestRunID)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	identity, err := record.Config.ConcreteIdentity()
+	if err != nil {
+		t.Fatalf("concrete identity: %v", err)
+	}
+	if identity.RunID != managerIdentityTestRunID || identity.FlowInstance() != "review/inst-1" {
+		t.Fatalf("materialized identity = %#v", identity)
+	}
+	liveRevision, err := lifecycleConfigRevision(record)
+	if err != nil {
+		t.Fatalf("live revision: %v", err)
+	}
+	if liveRevision != plannedRevision {
+		t.Fatalf("revision changed at run admission: planned %q live %q", plannedRevision, liveRevision)
+	}
+}
+
 func TestStaticFlowRequiredAgentMaterializationRegistersSubscriptions(t *testing.T) {
 	bundle := testStaticFlowBundle()
-	records, err := StaticFlowRequiredAgentMaterializationRecords(semanticview.Wrap(bundle))
+	records, err := StaticFlowRequiredAgentMaterializationRecords(managerIdentityTestRunID, semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -4260,14 +4348,14 @@ func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *test
 	}}
 	source := semanticview.Wrap(bundle)
 
-	staticRecords, err := StaticAgentMaterializationRecords(source)
+	staticRecords, err := StaticAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
 	}
 	if len(staticRecords) != 0 {
 		t.Fatalf("standing static agent records = %#v, want none before materialized activation", staticRecords)
 	}
-	requiredRecords, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	requiredRecords, err := StaticFlowRequiredAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -4304,7 +4392,7 @@ func TestStaticAgentMaterializationKeepsDistinctSameIDPhysicalDeclarations(t *te
 	}
 	source := semanticview.Wrap(bundle)
 
-	records, err := StaticAgentMaterializationRecords(source)
+	records, err := StaticAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4326,7 +4414,7 @@ func TestStaticFlowRequiredAgentMaterializationInfersFromOmittedRequiredAgents(t
 	bundle.Semantics.FlowAgents = map[string][]runtimecontracts.FlowRequiredAgent{}
 	bundle.Semantics.FlowAgentFacts = map[string][]runtimecontracts.RequiredAgentFact{}
 
-	records, err := StaticFlowRequiredAgentMaterializationRecords(semanticview.Wrap(bundle))
+	records, err := StaticFlowRequiredAgentMaterializationRecords(managerIdentityTestRunID, semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -4345,7 +4433,7 @@ func TestStaticFlowRequiredAgentMaterializationUsesFlowOwnedProjectDeclaration(t
 	if len(declarations) != 1 || declarations[0].Source.Layer != "project" {
 		t.Fatalf("support declarations = %#v, want one project declaration", declarations)
 	}
-	records, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	records, err := StaticFlowRequiredAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
 	}
@@ -4377,7 +4465,7 @@ func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing
 	}}
 	bundle.FlowSchemas["analyzer-flow"] = schema
 
-	records, err := StaticFlowRequiredAgentMaterializationRecords(semanticview.Wrap(bundle))
+	records, err := StaticFlowRequiredAgentMaterializationRecords(managerIdentityTestRunID, semanticview.Wrap(bundle))
 
 	if err == nil || !strings.Contains(err.Error(), `required agent "worker"`) {
 		t.Fatalf("expected required-agent map-key error, records=%#v err=%v", records, err)
@@ -4386,7 +4474,7 @@ func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing
 
 func TestStaticAgentMaterializationRecordsRegistersRootAndFlowSubscriptions(t *testing.T) {
 	source := loadRootAndFlowStaticAgentSource(t)
-	records, err := StaticAgentMaterializationRecords(source)
+	records, err := StaticAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
 	}
@@ -4409,7 +4497,7 @@ func TestStaticAgentMaterializationRecordsRegistersRootAndFlowSubscriptions(t *t
 
 func TestStaticAgentMaterialization_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t *testing.T) {
 	source := loadPackageBackedStaticAgentSource(t)
-	records, err := StaticAgentMaterializationRecords(source)
+	records, err := StaticAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
 	}
@@ -4430,7 +4518,7 @@ func TestStaticAgentMaterialization_PackageBackedFlowOwnedAgentsCarryCanonicalFl
 
 func TestStaticAgentMaterialization_StructurallyNestedProjectAgentsStartWithOwningFlowPath(t *testing.T) {
 	source := loadNestedProjectStaticAgentSource(t)
-	records, err := StaticAgentMaterializationRecords(source)
+	records, err := StaticAgentMaterializationRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
 	}
@@ -4479,7 +4567,7 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 			}
 			req := testActivationRequest(bundle, "support", tc.instanceID, "ent-1", tc.instancePath)
 			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
-			records, err := am.flowInstanceAgentRecords(req, schema, scope)
+			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
 			if err != nil {
 				t.Fatalf("flowInstanceAgentRecords: %v", err)
 			}
@@ -4723,7 +4811,7 @@ func managerTestFlowAgentNamePlan(t *testing.T, source semanticview.Source, flow
 
 func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	cfg, err := buildFlowAgentConfig(
+	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
@@ -4763,7 +4851,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 
 func TestBuildFlowAgentConfigRejectsPayloadDerivedNestedSystemPromptBeforeMaterialization(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	_, err := buildFlowAgentConfig(
+	_, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
@@ -4791,10 +4879,10 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
 			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}})
 			namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
-			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
-			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
 			}
 		})
@@ -4803,7 +4891,7 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 
 func TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	cfg, err := buildFlowAgentConfig(
+	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
@@ -4836,7 +4924,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		t.Fatal("static_support flow scope missing")
 	}
 	staticEntry := staticScope.Agents["worker"]
-	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static_support", "worker"), "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSetForTest(staticScope.Agents))
+	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "static_support", "worker"), "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSetForTest(staticScope.Agents))
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
@@ -4847,7 +4935,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		t.Fatal("template_support flow scope missing")
 	}
 	templateEntry := templateScope.Agents["worker"]
-	templateCfg, err := buildFlowAgentConfig(
+	templateCfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "template_support", "worker"),
 		"template_support",

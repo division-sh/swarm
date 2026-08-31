@@ -231,7 +231,7 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				uuid.NewString(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 				time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
 			)
-			route := testAgentDeliveryRoute(t, "dead-letter-agent", "dead-letter/primary")
+			route := testAgentDeliveryRoute(t, event.RunID(), "dead-letter-agent", "dead-letter/primary")
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit event and delivery: %v", err)
 			}
@@ -319,7 +319,7 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				})
 			}
 
-			secondRoute := testAgentDeliveryRoute(t, "dead-letter-agent-two", "dead-letter/secondary")
+			secondRoute := testAgentDeliveryRoute(t, event.RunID(), "dead-letter-agent-two", "dead-letter/secondary")
 			if err := commitDeliveryObligationFixture(ctx, selected, event, secondRoute); err != nil {
 				t.Fatalf("commit second delivery: %v", err)
 			}

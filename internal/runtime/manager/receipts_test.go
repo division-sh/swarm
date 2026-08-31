@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -169,7 +168,7 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, event ev
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance,
 			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: surfaceJSON,
@@ -240,7 +239,7 @@ func TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrO
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 			evt := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "work.requested", "source", "", nil, 0,
-				"33333333-3333-4333-8333-333333333333", "", events.EventEnvelope{}, time.Now().UTC(),
+				harness.Token.Identity.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput, bypassDisposition: test.withOutput}
 			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
@@ -950,7 +949,7 @@ func TestProcessEventRenewsExactClaimAroundAgentHandler(t *testing.T) {
 	if got := deliveryStore.renewals.Load(); got < 2 {
 		t.Fatalf("claim renewals = %d, want immediate and final handler renewal", got)
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatalf("derive agent delivery obligation: %v", err)
 	}
@@ -988,7 +987,7 @@ func TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim(t *testing.T
 		testAuthorActivityContext(context.Background()),
 		baseStore.authority,
 		evt,
-		managerAgentDeliveryRoute(agent.ID()),
+		managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()),
 	)
 	if err != nil || secondClaim.Disposition != runtimedelivery.ClaimBusy {
 		t.Fatalf("second reclaimer = %#v, err=%v; want current renewed claim", secondClaim, err)
@@ -1002,7 +1001,7 @@ func TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("blocked output did not settle after release")
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1023,7 +1022,7 @@ func TestProcessEventSettlementFailureIsNotReportedAsReplayed(t *testing.T) {
 	if result.err == nil || result.record.Outcome == startupManagerReplayOutcomeReplayed {
 		t.Fatalf("settlement result = outcome:%q err:%v, want failed non-replayed result", result.record.Outcome, result.err)
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1037,8 +1036,9 @@ func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T
 	store := newManagerDeliveryTestStore(t)
 	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store})
 	agent := &serializingAgent{id: "agent-a", started: make(chan struct{}), release: make(chan struct{})}
-	first := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.first", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-	second := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.second", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	runID := uuid.NewString()
+	first := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.first", "gateway", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	second := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.second", "gateway", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	firstCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), first, agent.ID())
 	secondCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), second, agent.ID())
 	results := make(chan eventProcessResult, 2)
@@ -1105,7 +1105,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 		t.Fatalf("run lane test manager: %v", err)
 	}
 
-	root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.root", "test", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.root", "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), root); err != nil {
 		t.Fatalf("publish lane root: %v", err)
 	}
@@ -1115,7 +1115,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 		t.Fatal("root delivery did not enter the agent lane")
 	}
 
-	later := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	later := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	laterCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), later, agent.ID())
 	laterResult := make(chan eventProcessResult, 1)
 	go func() {
@@ -1190,7 +1190,7 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	if len(bus.published) != 0 {
 		t.Fatalf("published events = %#v, want none after quiescence", bus.published)
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatalf("derive quiesced delivery obligation: %v", err)
 	}
@@ -1262,14 +1262,14 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			deliveryStore := newManagerDeliveryTestStore(t)
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("write-receipt-"+tc.name), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("write-receipt-run-"+tc.name), "", events.EventEnvelope{}, time.Time{})
-			claim, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+			claim, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 			if err != nil {
 				t.Fatalf("claim delivery: %v", err)
 			}
 			if tc.exhaust {
 				am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 				deliveryStore.makeDeliveryDueNow(t, evt, "agent-a")
-				claim, err = deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+				claim, err = deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 				if err != nil {
 					t.Fatalf("claim retry delivery: %v", err)
 				}
@@ -1320,7 +1320,7 @@ func TestWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T) {
 			deliveryStore := newManagerDeliveryTestStore(t)
 			am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: test.source})
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("work.requested"), "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
-			claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+			claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1340,7 +1340,7 @@ func TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRec
 	deliveryStore := newManagerDeliveryTestStore(t)
 	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("cancelled-settlement"), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("cancelled-settlement-run"), "", events.EventEnvelope{}, time.Time{})
-	claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+	claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
@@ -1363,7 +1363,7 @@ func TestWriteReceiptLongRunningClaimUsesExactRenewalTime(t *testing.T) {
 	deliveryStore := newManagerDeliveryTestStore(t)
 	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("long-running-settlement"), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("long-running-settlement-run"), "", events.EventEnvelope{}, time.Time{})
-	claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+	claimed, err := deliveryStore.claimExact(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRouteForRun(evt.RunID(), "agent-a"))
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}

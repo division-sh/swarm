@@ -463,6 +463,7 @@ type selectedForkDiscardStore interface {
 type selectedForkDiscardProof struct {
 	RunStatus     string
 	RunRows       int
+	AgentRows     int
 	EventRows     int
 	DeliveryRows  int
 	AttemptRows   int
@@ -499,7 +500,7 @@ func TestSelectedForkDiscardSelectedStoreParity(t *testing.T) {
 				t.Fatalf("discard selected fork: %v", err)
 			}
 			proofs[backend] = loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
-			if proofs[backend] != (selectedForkDiscardProof{RunStatus: "cancelled", RunRows: 1, ExecutionRows: 1, BindingRows: 1}) {
+			if proofs[backend] != (selectedForkDiscardProof{RunStatus: "cancelled", RunRows: 1, AgentRows: 1, ExecutionRows: 1, BindingRows: 1}) {
 				t.Fatalf("selected fork discard proof = %#v", proofs[backend])
 			}
 			for _, claimed := range deliveries {
@@ -571,7 +572,7 @@ func selectedForkDiscardTestStore(t *testing.T, backend string) (selectedForkDis
 
 func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store selectedForkDiscardStore, fixture selectedCompletionFixture) ([]events.Event, []runtimedelivery.ClaimedObligation) {
 	t.Helper()
-	route := testAgentDeliveryRoute(t, "selected-agent", "fixture/selected-agent")
+	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
 		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -609,6 +610,7 @@ func loadSelectedForkDiscardProof(t *testing.T, ctx context.Context, db *sql.DB,
 		args  []any
 	}{
 		{&proof.RunRows, "SELECT COUNT(*) FROM runs WHERE run_id = " + placeholder, []any{runID}},
+		{&proof.AgentRows, "SELECT COUNT(*) FROM agents WHERE run_id = " + placeholder, []any{runID}},
 		{&proof.EventRows, "SELECT COUNT(*) FROM events WHERE run_id = " + placeholder, []any{runID}},
 		{&proof.DeliveryRows, "SELECT COUNT(*) FROM event_deliveries WHERE run_id = " + placeholder, []any{runID}},
 		{&proof.AttemptRows, "SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
@@ -697,7 +699,7 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 		authorityID:  "00000000-0000-0000-0000-000000002304",
 		at:           time.Date(2026, 8, 25, 20, 0, 0, 0, time.UTC),
 	}
-	seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "revision-matrix-agent", ""), "active")
+	seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(fixture.forkRun, "revision-matrix-agent", ""), "active")
 	matrixRoute := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("matrix-node")),
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "matrix-flow", FlowInstance: "matrix-flow/one"}),
@@ -822,7 +824,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
-	route := testAgentDeliveryRoute(t, "selected-agent", "fixture/selected-agent")
+	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
 		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -853,6 +855,10 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	}
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
 		t.Fatalf("discard selected fork with delivery history: %v", err)
+	}
+	var agentRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&agentRows); err != nil || agentRows != 0 {
+		t.Fatalf("selected-fork agents after full discard = %d err=%v, want 0", agentRows, err)
 	}
 	for label, query := range map[string]string{
 		"deliveries":      `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
@@ -1197,6 +1203,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 	registerTestAuthorActivityCatalog(t, registrar)
 	requireRunningRunForTest(t, ctx, store, sourceRun, now)
 	requirePausedRunForTest(t, ctx, store, forkRun, now)
+	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {
 		t.Fatal("selected completion fixture store has no event commit owner")
@@ -1235,7 +1242,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 }
 
 func selectedAgentTurnTarget(runID string) runtimeeffects.UsageTarget {
-	identity := mustTestAgentIdentity("selected-agent", "selected-test")
+	identity := mustTestAgentIdentityForRun(runID, "selected-agent", "selected-test")
 	return runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
 		AgentID: "selected-agent", AgentIdentity: identity, SessionID: uuid.NewString(),
@@ -1254,7 +1261,7 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{

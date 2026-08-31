@@ -99,6 +99,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.run_id=o.agent_run_id
 		  AND g.agent_id=o.agent_id
 		  AND g.agent_name_owner=o.agent_name_owner
 		  AND g.agent_name_source=o.agent_name_source
@@ -152,6 +153,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.run_id=o.agent_run_id
 		  AND g.agent_id=o.agent_id
 		  AND g.agent_name_owner=o.agent_name_owner
 		  AND g.agent_name_source=o.agent_name_source
@@ -355,6 +357,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
 		identity, err := agentidentity.FromStorageFields(agentidentity.StorageFields{
+			RunID:   target.RunID,
 			AgentID: recovered.AgentID, NameOwner: recovered.AgentNameOwner, NameSource: recovered.AgentNameSource,
 			RoutePresence: recovered.AgentRoutePresence, FlowScopeKey: recovered.FlowScopeKey,
 			FlowInstanceID: recovered.FlowInstanceID, FlowInstancePath: recovered.FlowInstance,
@@ -437,7 +440,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
 			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,

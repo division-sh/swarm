@@ -185,7 +185,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "storetest-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: fixture.TurnID, RunID: fixture.RunID, AgentID: identity.AgentID(),
-			Identity: agentmemory.Identity{RunID: fixture.RunID, Agent: identity}, Memory: memory,
+			Identity: identity, Memory: memory,
 			SessionID: fixture.SessionID, FlowInstance: identity.FlowInstance(), EntityID: fixture.EntityID,
 			TriggerEventID: fixture.Event.ID(), TriggerEventType: string(fixture.Event.Type()), TaskID: fixture.TaskID,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: capabilityJSON,

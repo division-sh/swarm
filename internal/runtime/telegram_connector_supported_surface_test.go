@@ -481,12 +481,16 @@ func telegramConnectorSupportedSurfaceCredentialStore(t *testing.T, key, value s
 
 func seedTelegramConnectorSupportedSurfaceWorkflowVersion(t *testing.T, ctx context.Context, db *sql.DB, flowInstance string, sqlite bool) {
 	t.Helper()
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		t.Fatal("seed workflow version requires exact run context")
+	}
 	if sqlite {
 		if _, err := db.ExecContext(ctx, `
 			UPDATE flow_instances
 			SET config = json_set(COALESCE(config, '{}'), '$.workflow_version', '1.0.0')
-			WHERE instance_id = ?
-		`, flowInstance); err != nil {
+			WHERE run_id = ? AND instance_path = ?
+		`, runID, flowInstance); err != nil {
 			t.Fatalf("seed sqlite workflow version: %v", err)
 		}
 		return
@@ -494,8 +498,8 @@ func seedTelegramConnectorSupportedSurfaceWorkflowVersion(t *testing.T, ctx cont
 	if _, err := db.ExecContext(ctx, `
 		UPDATE flow_instances
 		SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{workflow_version}', '"1.0.0"'::jsonb, true)
-		WHERE instance_id = $1
-	`, flowInstance); err != nil {
+		WHERE run_id = $1::uuid AND instance_path = $2
+	`, runID, flowInstance); err != nil {
 		t.Fatalf("seed postgres workflow version: %v", err)
 	}
 }

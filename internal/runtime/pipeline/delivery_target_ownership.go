@@ -546,6 +546,7 @@ func acquireDeliveryTargetByDeclaredKey(
 	}
 	stateRecords, err := reader.SelectActiveWorkflowEntityStates(
 		ctx,
+		evt.RunID(),
 		selectionOwner,
 		selectEntityFieldSelectors(expected),
 		source.FlowTerminalStages(flowID),
@@ -591,12 +592,16 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
 	entityID := runtimeidentity.NormalizeEntityID(route.EntityID)
-	existing, ok, err := reader.LoadWorkflowInstance(ctx, identityRoute)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), identityRoute)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
+	}
+	existing, ok, err := reader.LoadWorkflowInstance(ctx, flowIdentity)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
 	if !ok {
-		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, identityRoute, entityID)
+		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, flowIdentity, entityID)
 		if stateErr != nil {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), stateErr)
 		}

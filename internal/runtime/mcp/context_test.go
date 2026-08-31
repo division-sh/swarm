@@ -33,7 +33,7 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	harness.Token.AgentID = actorID
 	harness.Token.Identity = identity
 	target := runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: actorID,
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: identity.RunID, AgentID: actorID,
 		AgentIdentity: identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: identity.FlowInstance(),
 	}
@@ -164,8 +164,9 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 func TestTurnContextRegistryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
 	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	siblingIdentity := agentidentitytest.Runtime(
+	siblingIdentity := agentidentitytest.RuntimeForRun(
 		t,
+		surface.Authority.RunID,
 		surface.ActorID,
 		"mcp-managed-turn-test",
 		"claude",

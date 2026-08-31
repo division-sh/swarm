@@ -48,7 +48,7 @@ func persistConformanceAgentTurnReadbackFixture(
 	rec runtimellm.AgentTurnRecord,
 ) error {
 	t.Helper()
-	if rec.Identity.Agent.IsZero() {
+	if rec.Identity.IsZero() {
 		rec.Identity = conformanceAgentMemoryIdentity(t, rec.RunID, rec.AgentID)
 		rec.FlowInstance = rec.Identity.FlowInstance()
 	}
@@ -59,7 +59,7 @@ func persistConformanceAgentTurnReadbackFixture(
 		eventtest.Producer(events.EventProducerExternal, "conformance"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC(),
 	)
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
-		Store: selected, Selected: selected, Identity: rec.Identity.Agent,
+		Store: selected, Selected: selected, Identity: rec.Identity,
 		RunID: rec.RunID, SessionID: rec.SessionID, TurnID: uuid.NewString(), Memory: rec.Memory,
 		EntityID: rec.EntityID, TaskID: rec.TaskID, Event: event, TurnBlocks: rec.TurnBlocks,
 		ParseOK: rec.ParseOK, Latency: rec.Latency, CreatedAt: time.Now().UTC(),

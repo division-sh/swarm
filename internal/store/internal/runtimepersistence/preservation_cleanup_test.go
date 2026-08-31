@@ -37,12 +37,6 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 	now := time.Now().UTC().Add(time.Minute)
-	agentIdentity := testAgentIdentity(t, "agent-a", "preservation")
-	agentFields, err := agentIdentityFields(agentIdentity)
-	if err != nil {
-		t.Fatalf("agent identity fields: %v", err)
-	}
-	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
 
 	targets := []preservationcleanup.RunTarget{}
 	byRun := map[string]preservationcleanup.RunTarget{}
@@ -64,6 +58,12 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+		agentIdentity := mustTestAgentIdentityForRun(runID, "agent-a", "preservation")
+		agentFields, err := agentIdentityFields(agentIdentity)
+		if err != nil {
+			t.Fatalf("agent identity fields: %v", err)
+		}
+		seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
 		gateChanged := !source.IsDeleted()
 		if gateChanged {
 			entityID := uuid.NewString()
@@ -381,7 +381,7 @@ func seedPreservationClaimedDelivery(t *testing.T, ctx context.Context, pg *Post
 		uuid.NewString(), events.EventType(eventName), "test", "", []byte(`{}`), 0,
 		runID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := testAgentDeliveryRoute(t, "agent-a", "preservation")
+	route := testAgentDeliveryRoute(t, runID, "agent-a", "preservation")
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit preservation delivery %s: %v", eventName, err)
 	}

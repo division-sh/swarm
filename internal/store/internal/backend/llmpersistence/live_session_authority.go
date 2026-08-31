@@ -23,11 +23,11 @@ func requirePostgresLiveSessionAuthority(ctx context.Context, tx *sql.Tx, identi
 	err = tx.QueryRowContext(ctx, `
 		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
 		FROM agents
-		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
-		  AND agent_route_presence = $4 AND flow_scope_key = $5
-		  AND flow_instance_id = $6 AND flow_instance = $7
+		WHERE run_id = $1::uuid AND agent_id = $2 AND agent_name_owner = $3 AND agent_name_source = $4
+		  AND agent_route_presence = $5 AND flow_scope_key = $6
+		  AND flow_instance_id = $7 AND flow_instance = $8
 		FOR UPDATE
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
 	return evaluateLiveSessionAuthority(ctx, identity, operation, epoch, generation, phase, permitStaleEvidence, err)
 }
 
@@ -41,10 +41,10 @@ func requireSQLiteLiveSessionAuthority(ctx context.Context, tx *sql.Tx, identity
 	err = tx.QueryRowContext(ctx, `
 		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
 		FROM agents
-		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+		WHERE run_id = ? AND agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
 		  AND flow_instance_id = ? AND flow_instance = ?
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
 	return evaluateLiveSessionAuthority(ctx, identity, operation, epoch, generation, phase, permitStaleEvidence, err)
 }
 

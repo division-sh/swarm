@@ -60,7 +60,7 @@ func TestImportBoundaryInputBindingDoesNotMaterializeTemplateRouteWithoutConnect
 		t.Fatalf("Resolve(parent.lead_captured) before materialization = %#v, want none", got)
 	}
 	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute("worker", "inst-1"),
+		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "inst-1")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}

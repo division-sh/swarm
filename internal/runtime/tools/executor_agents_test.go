@@ -17,9 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+const toolTestRunID = "22222222-2222-4222-8222-222222222222"
+
 func toolTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
 	t.Helper()
-	return agentidentitytest.RootDeclared(t, agentID, "swarm-test://root/agents/"+strings.TrimSpace(agentID))
+	return agentidentitytest.RootDeclaredForRun(t, toolTestRunID, agentID, "swarm-test://root/agents/"+strings.TrimSpace(agentID))
 }
 
 func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agentidentity.Identity {
@@ -29,7 +31,7 @@ func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agent
 	if flowID == "" && flowPath == "" {
 		return toolTestRootAgentIdentity(t, agentID)
 	}
-	return agentidentitytest.Declared(t, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, "test-instance", flowPath)
+	return agentidentitytest.DeclaredForRun(t, toolTestRunID, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, "test-instance", flowPath)
 }
 
 type captureScheduleScheduler struct {
@@ -74,7 +76,7 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 		EntityID:      "entity-root",
 	}
 
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), runtimeeffects.ExecutionModeLive)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "root-proof",
 		"event_type":   "root.timer.fired",
@@ -128,14 +130,14 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ID:            agentID,
-		Identity:      agentidentitytest.Declared(t, agentID, plan.OwnerURI, flowPath, "chat-1", instancePath),
+		Identity:      agentidentitytest.DeclaredForRun(t, toolTestRunID, agentID, plan.OwnerURI, flowPath, "chat-1", instancePath),
 		FlowID:        flowID,
 		FlowPath:      instancePath,
 		EntityID:      "entity-chat",
 	}
 	scheduler := &captureScheduleScheduler{}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002164"), runtimeeffects.ExecutionModeLive)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "imported-proof",
 		"event_type":   flowPath + "/telegram.followup.requested",
@@ -160,7 +162,7 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		Identity: toolTestRootAgentIdentity(t, "root-agent"),
 		EntityID: "entity-root",
 	}
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), runtimeeffects.ExecutionModeLive)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
 	newExecutor := func() (*Executor, *captureScheduleScheduler) {
 		t.Helper()
 		scheduler := &captureScheduleScheduler{}
@@ -252,7 +254,7 @@ func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 				Identity:      toolTestRootAgentIdentity(t, "root-agent"),
 				EntityID:      "entity-root",
 			}
-			ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+			ctx := runtimecorrelation.WithRunID(context.Background(), toolTestRunID)
 			if tc.mode.Valid() {
 				ctx = runtimeeffects.WithExecutionMode(ctx, tc.mode)
 			}
@@ -304,7 +306,7 @@ func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 	}
 
 	ctx := runtimeeffects.WithExecutionMode(
-		WithActor(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), actor),
+		WithActor(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), actor),
 		runtimeeffects.ExecutionModeLive,
 	)
 	result, err := exec.Execute(ctx, "schedule", map[string]any{

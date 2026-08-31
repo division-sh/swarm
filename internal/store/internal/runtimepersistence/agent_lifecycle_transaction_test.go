@@ -50,7 +50,9 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "subordinate-transaction-agent"
-	identity := testAgentIdentity(t, agentID, "global")
+	activeRunID := uuid.NewString()
+	seedLifecycleRun(t, db, sqlite, activeRunID)
+	identity := mustTestAgentIdentityForRun(activeRunID, agentID, "global")
 	rec := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
@@ -82,10 +84,10 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	}
 	staleToken := runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: started.Generation}
 	staleCtx := runtimeeffects.WithLifecycleToken(ctx, staleToken)
-	activeRunID := uuid.NewString()
 	suspendedRunID := uuid.NewString()
-	seedLifecycleRun(t, db, sqlite, activeRunID)
 	seedLifecycleRun(t, db, sqlite, suspendedRunID)
+	suspendedIdentity := mustTestAgentIdentityForRun(suspendedRunID, agentID, "global")
+	seedTestAgentRow(t, ctx, db, !sqlite, suspendedIdentity, "active")
 	activeIdentity := testAgentMemoryIdentity(t, activeRunID, agentID, "global")
 	active, err := store.Acquire(staleCtx, activeIdentity, "worker-1")
 	if err != nil {
@@ -95,7 +97,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		t.Fatalf("release active session: %v", err)
 	}
 	suspendedID := uuid.NewString()
-	identityFields, err := identity.StorageFields()
+	identityFields, err := suspendedIdentity.StorageFields()
 	if err != nil {
 		t.Fatalf("suspended session identity: %v", err)
 	}
@@ -147,8 +149,8 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil {
 		t.Fatalf("rotate complete set: %v", err)
 	}
-	if len(rotated.Subordinate.Sessions) != 2 {
-		t.Fatalf("rotated set = %#v, want two sessions", rotated.Subordinate)
+	if len(rotated.Subordinate.Sessions) != 1 {
+		t.Fatalf("rotated set = %#v, want one exact-run session", rotated.Subordinate)
 	}
 	for _, mutation := range rotated.Subordinate.Sessions {
 		want := runtimesessions.LifecycleSuccessorSessionID(operationID, mutation.PreviousSessionID)
@@ -193,10 +195,10 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		t.Fatal("injected lifecycle-cell failure committed subordinate mutation")
 	}
 	dropLifecycleCellFailure(t, ctx, db, sqlite)
-	if got := countCurrentLifecycleSessions(t, ctx, db, sqlite, agentID); got != 2 {
-		t.Fatalf("current sessions after rollback = %d, want 2", got)
+	if got := countCurrentLifecycleSessions(t, ctx, db, sqlite, activeRunID, agentID); got != 1 {
+		t.Fatalf("current exact-run sessions after rollback = %d, want 1", got)
 	}
-	if got := loadLifecycleGeneration(t, ctx, db, sqlite, agentID); got != rotated.Generation {
+	if got := loadLifecycleGeneration(t, ctx, db, sqlite, activeRunID, agentID); got != rotated.Generation {
 		t.Fatalf("generation after rollback = %d, want %d", got, rotated.Generation)
 	}
 	if got := countLifecycleOperation(t, ctx, db, sqlite, failedTerminate.OperationID); got != 0 {
@@ -209,8 +211,11 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil {
 		t.Fatalf("terminate complete set: %v", err)
 	}
-	if len(terminated.Subordinate.Sessions) != 2 || countCurrentLifecycleSessions(t, ctx, db, sqlite, agentID) != 0 {
+	if len(terminated.Subordinate.Sessions) != 1 || countCurrentLifecycleSessions(t, ctx, db, sqlite, activeRunID, agentID) != 0 {
 		t.Fatalf("termination outcome = %#v", terminated.Subordinate)
+	}
+	if got := countCurrentLifecycleSessions(t, ctx, db, sqlite, suspendedRunID, agentID); got != 1 {
+		t.Fatalf("sibling-run suspended sessions after exact termination = %d, want 1", got)
 	}
 }
 
@@ -273,27 +278,27 @@ func dropLifecycleCellFailure(t *testing.T, ctx context.Context, db *sql.DB, sql
 	}
 }
 
-func countCurrentLifecycleSessions(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, agentID string) int {
+func countCurrentLifecycleSessions(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, agentID string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = ? AND status IN ('active', 'suspended')`
+	query := `SELECT COUNT(*) FROM agent_sessions WHERE run_id = ? AND agent_id = ? AND status IN ('active', 'suspended')`
 	if !sqlite {
-		query = `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = $1 AND status IN ('active', 'suspended')`
+		query = `SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid AND agent_id = $2 AND status IN ('active', 'suspended')`
 	}
 	var count int
-	if err := db.QueryRowContext(ctx, query, agentID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, query, runID, agentID).Scan(&count); err != nil {
 		t.Fatalf("count current sessions: %v", err)
 	}
 	return count
 }
 
-func loadLifecycleGeneration(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, agentID string) uint64 {
+func loadLifecycleGeneration(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, agentID string) uint64 {
 	t.Helper()
-	query := `SELECT lifecycle_generation FROM agents WHERE agent_id = ?`
+	query := `SELECT lifecycle_generation FROM agents WHERE run_id = ? AND agent_id = ?`
 	if !sqlite {
-		query = `SELECT lifecycle_generation FROM agents WHERE agent_id = $1`
+		query = `SELECT lifecycle_generation FROM agents WHERE run_id = $1::uuid AND agent_id = $2`
 	}
 	var generation uint64
-	if err := db.QueryRowContext(ctx, query, agentID).Scan(&generation); err != nil {
+	if err := db.QueryRowContext(ctx, query, runID, agentID).Scan(&generation); err != nil {
 		t.Fatalf("load lifecycle generation: %v", err)
 	}
 	return generation

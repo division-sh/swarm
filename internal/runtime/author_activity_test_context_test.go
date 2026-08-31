@@ -20,6 +20,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -345,11 +346,26 @@ func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, mana
 }
 
 func registerRuntimeTestAgent(manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) error {
+	if cfg.Identity.IsZero() {
+		name, err := runtimeagentidentity.DeclaredName(cfg.ID, "runtime-test-registration")
+		if err != nil {
+			return err
+		}
+		cfg.Identity, err = runtimeagentidentity.New(agentidentitytest.DefaultRunID, name, runtimeagentidentity.RootRoute())
+		if err != nil {
+			return err
+		}
+	}
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
 	admission, err := runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
 	if err != nil {
 		return err
 	}
-	return manager.MaterializeAdmittedAgentForExecution(context.Background(), runtimemanager.PersistedAgent{
+	ctx := runtimecorrelation.WithRunID(context.Background(), identity.RunID)
+	return manager.MaterializeAdmittedAgentForExecution(ctx, runtimemanager.PersistedAgent{
 		Config: cfg, Topology: admission, Status: "ephemeral",
 	})
 }

@@ -306,7 +306,7 @@ func beginGenericRecoveryPostureMatrix(t *testing.T, fixture neutralEffectParity
 	if !ok {
 		t.Fatal("authored_http_tool registration is missing")
 	}
-	runID := managedNormalEffectStoreTestRunID(fixture.authority.Normal.AgentID)
+	runID := fixture.authority.Normal.Identity.RunID
 	capabilitySurface, ok := managedcapabilities.FromContext(fixture.ctx)
 	if !ok {
 		t.Fatal("generic recovery fixture capability surface is missing")

@@ -25,7 +25,7 @@ import (
 // fact only after resolving the exact receiving handler.
 type ConnectDeliveryRoute struct {
 	Recipient         events.DeliveryRecipient
-	AgentIdentity     agentidentity.Identity
+	AgentPlan         agentidentity.Plan
 	Target            events.RouteIdentity
 	Handler           ConnectReceiverHandler
 	Context           events.DeliveryContext
@@ -62,7 +62,7 @@ func (h ConnectReceiverHandler) NodeID() string                       { return h
 
 func (r ConnectDeliveryRoute) Normalized() ConnectDeliveryRoute {
 	return ConnectDeliveryRoute{
-		Recipient: r.Recipient, AgentIdentity: r.AgentIdentity.Normalize(), Target: r.Target.Normalized(),
+		Recipient: r.Recipient, AgentPlan: r.AgentPlan.Normalize(), Target: r.Target.Normalized(),
 		Handler: r.Handler, Context: r.Context.Normalized(), PayloadProjection: r.PayloadProjection.Normalized(), ConnectClaim: r.ConnectClaim,
 	}
 }
@@ -73,14 +73,14 @@ func (r ConnectDeliveryRoute) identity() ([sha256.Size]byte, error) {
 		return [sha256.Size]byte{}, fmt.Errorf("connect delivery recipient is required")
 	}
 	if r.Recipient.IsAgent() {
-		if err := r.AgentIdentity.Validate(); err != nil {
-			return [sha256.Size]byte{}, fmt.Errorf("connect delivery agent identity: %w", err)
+		if err := r.AgentPlan.Validate(); err != nil {
+			return [sha256.Size]byte{}, fmt.Errorf("connect delivery agent plan: %w", err)
 		}
-		if r.AgentIdentity.AgentID() != r.Recipient.ID() {
-			return [sha256.Size]byte{}, fmt.Errorf("connect delivery recipient does not match agent identity")
+		if r.AgentPlan.Name.AgentID != r.Recipient.ID() {
+			return [sha256.Size]byte{}, fmt.Errorf("connect delivery recipient does not match agent plan")
 		}
-	} else if !r.AgentIdentity.IsZero() {
-		return [sha256.Size]byte{}, fmt.Errorf("connect node delivery cannot carry agent identity")
+	} else if !r.AgentPlan.IsZero() {
+		return [sha256.Size]byte{}, fmt.Errorf("connect node delivery cannot carry agent plan")
 	}
 	if r.Recipient.IsNode() && r.Handler.Empty() {
 		return [sha256.Size]byte{}, fmt.Errorf("connect node delivery requires its exact handler owner")
@@ -95,13 +95,13 @@ func (r ConnectDeliveryRoute) identity() ([sha256.Size]byte, error) {
 	canonical, err := json.Marshal(struct {
 		RecipientType string                 `json:"recipient_type"`
 		RecipientID   string                 `json:"recipient_id"`
-		AgentIdentity agentidentity.Identity `json:"agent_identity,omitempty"`
+		AgentPlan     agentidentity.Plan     `json:"agent_plan,omitempty"`
 		Target        events.RouteIdentity   `json:"target"`
 		HandlerNode   string                 `json:"handler_node,omitempty"`
 		Context       events.DeliveryContext `json:"context"`
 		Projection    map[string]string      `json:"projection"`
 	}{
-		RecipientType: r.Recipient.Code(), RecipientID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
+		RecipientType: r.Recipient.Code(), RecipientID: r.Recipient.ID(), AgentPlan: r.AgentPlan,
 		Target: r.Target, HandlerNode: r.Handler.Node().Key(),
 		Context: r.Context, Projection: projection.Fields(),
 	})
@@ -239,7 +239,7 @@ type connectExecutionClaimPlanCodec struct {
 type connectDeliveryRouteClaimCodec struct {
 	RecipientType string                           `json:"recipient_type"`
 	RecipientID   string                           `json:"recipient_id"`
-	AgentIdentity agentidentity.Identity           `json:"agent_identity,omitempty"`
+	AgentPlan     agentidentity.Plan               `json:"agent_plan,omitempty"`
 	Target        events.RouteIdentity             `json:"target"`
 	HandlerNode   string                           `json:"handler_node,omitempty"`
 	Context       events.DeliveryContext           `json:"context"`
@@ -249,7 +249,7 @@ type connectDeliveryRouteClaimCodec struct {
 func connectExecutionClaimCodec(plan ConnectRoutePlan, route ConnectDeliveryRoute) connectExecutionClaimPlanCodec {
 	route = route.Normalized()
 	return connectExecutionClaimPlanCodec{Plan: connectPlanIdentityCodec(plan), Recipient: connectDeliveryRouteClaimCodec{
-		RecipientType: route.Recipient.Code(), RecipientID: route.Recipient.ID(), AgentIdentity: route.AgentIdentity,
+		RecipientType: route.Recipient.Code(), RecipientID: route.Recipient.ID(), AgentPlan: route.AgentPlan,
 		Target: route.Target, HandlerNode: route.Handler.Node().Key(),
 		Context: route.Context, Projection: route.PayloadProjection,
 	}}
@@ -594,12 +594,12 @@ const (
 // receiver pin and target association; consumers may only inspect the typed
 // recipient selected by that evaluation.
 type ConnectRecipient struct {
-	kind          ConnectRecipientKind
-	agentID       string
-	path          string
-	agentIdentity agentidentity.Identity
-	handler       ConnectReceiverHandler
-	handlerEvent  events.EventType
+	kind         ConnectRecipientKind
+	agentID      string
+	path         string
+	agentPlan    agentidentity.Plan
+	handler      ConnectReceiverHandler
+	handlerEvent events.EventType
 }
 
 func NewConnectNodeRecipient(node runtimeidentity.ExecutableNode, path string) (ConnectRecipient, error) {
@@ -610,16 +610,16 @@ func NewConnectNodeRecipient(node runtimeidentity.ExecutableNode, path string) (
 	return ConnectRecipient{kind: ConnectRecipientNode, path: eventidentity.Normalize(path), handler: handler}, nil
 }
 
-func NewConnectAgentRecipient(id, path string, identity agentidentity.Identity) (ConnectRecipient, error) {
+func NewConnectAgentRecipient(id, path string, plan agentidentity.Plan) (ConnectRecipient, error) {
 	id = strings.TrimSpace(id)
-	identity = identity.Normalize()
+	plan = plan.Normalize()
 	if id == "" {
 		return ConnectRecipient{}, fmt.Errorf("connect agent recipient id is required")
 	}
-	if err := identity.Validate(); err != nil || identity.AgentID() != id {
-		return ConnectRecipient{}, fmt.Errorf("connect agent recipient requires its exact concrete identity")
+	if err := plan.Validate(); err != nil || plan.AgentID() != id {
+		return ConnectRecipient{}, fmt.Errorf("connect agent recipient requires its exact declaration route plan")
 	}
-	return ConnectRecipient{kind: ConnectRecipientAgent, agentID: id, path: eventidentity.Normalize(path), agentIdentity: identity}, nil
+	return ConnectRecipient{kind: ConnectRecipientAgent, agentID: id, path: eventidentity.Normalize(path), agentPlan: plan}, nil
 }
 
 func (r ConnectRecipient) ID() string {
@@ -629,11 +629,11 @@ func (r ConnectRecipient) ID() string {
 	return r.agentID
 }
 
-func (r ConnectRecipient) Kind() ConnectRecipientKind            { return r.kind }
-func (r ConnectRecipient) Path() string                          { return r.path }
-func (r ConnectRecipient) AgentIdentity() agentidentity.Identity { return r.agentIdentity }
-func (r ConnectRecipient) Handler() ConnectReceiverHandler       { return r.handler }
-func (r ConnectRecipient) HandlerEvent() events.EventType        { return r.handlerEvent }
+func (r ConnectRecipient) Kind() ConnectRecipientKind      { return r.kind }
+func (r ConnectRecipient) Path() string                    { return r.path }
+func (r ConnectRecipient) AgentPlan() agentidentity.Plan   { return r.agentPlan }
+func (r ConnectRecipient) Handler() ConnectReceiverHandler { return r.handler }
+func (r ConnectRecipient) HandlerEvent() events.EventType  { return r.handlerEvent }
 
 type ConnectRecipientRegistration struct {
 	receiverPin ConnectReceiverPinIdentity
@@ -1800,7 +1800,7 @@ func evaluateConnectPlanRecipients(plan ConnectRoutePlan, targets []events.Route
 		if err != nil {
 			return nil, nil, err
 		}
-		candidate, err := events.NewConnectCandidateEvidence(registration.receiverPin.EvidenceIdentity(), deliveryRecipient, recipient.path, recipient.agentIdentity, outcome)
+		candidate, err := events.NewConnectCandidateEvidence(registration.receiverPin.EvidenceIdentity(), deliveryRecipient, recipient.path, recipient.agentPlan, outcome)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1833,12 +1833,12 @@ func connectRecipientMatchesTarget(plan ConnectRoutePlan, recipient ConnectRecip
 }
 
 type connectRecipientIdentity struct {
-	kind          ConnectRecipientKind
-	recipientID   string
-	path          string
-	agentIdentity agentidentity.Identity
-	handler       ConnectReceiverHandler
-	handlerEvent  events.EventType
+	kind         ConnectRecipientKind
+	recipientID  string
+	path         string
+	agentPlan    agentidentity.Plan
+	handler      ConnectReceiverHandler
+	handlerEvent events.EventType
 }
 
 func normalizeConnectRecipients(in []ConnectRecipient) []ConnectRecipient {
@@ -1850,7 +1850,7 @@ func normalizeConnectRecipients(in []ConnectRecipient) []ConnectRecipient {
 	for _, recipient := range in {
 		key := connectRecipientIdentity{
 			kind: recipient.kind, recipientID: recipient.ID(), path: recipient.path,
-			agentIdentity: recipient.agentIdentity, handler: recipient.handler, handlerEvent: recipient.handlerEvent,
+			agentPlan: recipient.agentPlan, handler: recipient.handler, handlerEvent: recipient.handlerEvent,
 		}
 		if recipient.kind == 0 || recipient.ID() == "" {
 			continue
@@ -2144,14 +2144,14 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 				return ConnectDeliveryRoute{}, false
 			}
 		}
-		identity, err := agentidentity.New(name, route)
+		plan, err := agentidentity.NewPlan(name, route)
 		if err != nil {
 			return ConnectDeliveryRoute{}, false
 		}
 		return ConnectDeliveryRoute{
-			Recipient:     events.MustAgentDeliveryRecipient(agentID),
-			AgentIdentity: identity,
-			Target:        target,
+			Recipient: events.MustAgentDeliveryRecipient(agentID),
+			AgentPlan: plan,
+			Target:    target,
 		}, true
 	default:
 		return ConnectDeliveryRoute{}, false

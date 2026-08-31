@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -10,6 +11,7 @@ import (
 )
 
 type SelectedContractAgentDeliveryMaterializationRequest struct {
+	RunID             string
 	RecipientPlanning runfork.RunForkSelectedContractRecipientPlanning
 	AgentRuntime      SelectedContractAgentRuntimeMaterialization
 }
@@ -25,12 +27,11 @@ type SelectedContractAgentDeliveryMaterialization struct {
 }
 
 func RequireSelectedContractAgentDeliveryMaterialization(ctx context.Context, req SelectedContractAgentDeliveryMaterializationRequest) (SelectedContractAgentDeliveryMaterialization, error) {
-	_ = ctx
 	planning := req.RecipientPlanning
 	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		return SelectedContractAgentDeliveryMaterialization{}, fmt.Errorf("selected-contract authoritative agent delivery materialization requires %s; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
-	agents, err := selectedContractPlannedAgentRecipients(planning)
+	agents, err := selectedContractPlannedAgentRecipients(req.RunID, planning)
 	if err != nil {
 		return SelectedContractAgentDeliveryMaterialization{}, err
 	}
@@ -77,27 +78,44 @@ func selectedContractAgentRuntimeCoversRecipients(runtime SelectedContractAgentR
 	return true
 }
 
-func selectedContractPlannedAgentRecipients(planning runfork.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Identity, error) {
-	seen := map[agentidentity.Identity]struct{}{}
+func selectedContractPlannedAgentRecipients(runID string, planning runfork.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Identity, error) {
+	plans, err := selectedContractPlannedAgentRecipientPlans(planning)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentidentity.Identity, 0, len(plans))
+	for _, plan := range plans {
+		identity, err := plan.Live(runID)
+		if err != nil {
+			return nil, fmt.Errorf("selected-contract agent recipient %q requires exact run-scoped identity: %w", plan.AgentID(), err)
+		}
+		out = append(out, identity)
+	}
+	sortAgentIdentities(out)
+	return out, nil
+}
+
+func selectedContractPlannedAgentRecipientPlans(planning runfork.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Plan, error) {
+	seen := map[agentidentity.Plan]struct{}{}
 	for _, event := range planning.RecipientPlanEvents {
 		for _, recipient := range event.Recipients {
 			if !recipient.Recipient.IsAgent() {
 				continue
 			}
-			identity := recipient.AgentIdentity.Normalize()
-			if err := identity.Validate(); err != nil {
-				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact concrete identity: %w", recipient.Recipient.ID(), err)
+			plan := recipient.AgentPlan.Normalize()
+			if err := plan.Validate(); err != nil {
+				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact declaration plan: %w", recipient.Recipient.ID(), err)
 			}
-			if identity.AgentID() != recipient.Recipient.ID() {
-				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with concrete identity %s", recipient.Recipient.ID(), identity.Description())
+			if plan.AgentID() != recipient.Recipient.ID() {
+				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with declaration plan %s", recipient.Recipient.ID(), plan.Description())
 			}
-			seen[identity] = struct{}{}
+			seen[plan] = struct{}{}
 		}
 	}
-	out := make([]agentidentity.Identity, 0, len(seen))
-	for identity := range seen {
-		out = append(out, identity)
+	out := make([]agentidentity.Plan, 0, len(seen))
+	for plan := range seen {
+		out = append(out, plan)
 	}
-	sortAgentIdentities(out)
+	sort.Slice(out, func(i, j int) bool { return agentidentity.LessPlan(out[i], out[j]) })
 	return out, nil
 }

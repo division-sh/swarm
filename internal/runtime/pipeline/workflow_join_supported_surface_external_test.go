@@ -144,7 +144,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				route := runtimeflowidentity.RouteForInstancePath(path)
 				entityID := runtimeflowidentity.EntityID(path)
 				createdAt := time.Now().UTC()
-				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+				if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 					Fields:     map[string]any{"expected": []any{"a", "b"}},
@@ -153,7 +153,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("materialize exact join owner: %v", err)
 				}
 				if flowID != "" {
-					if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+					if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
 						t.Fatalf("add flow join route: %v", err)
 					}
 				}
@@ -200,7 +200,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					eventsByMember = append(eventsByMember, event)
 				}
 
-				instance, found, err := coordinator.Load(ctx, route)
+				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, route.InstancePath))
 				if err != nil || !found || instance.CurrentState != "ready" {
 					t.Fatalf("closed workflow = found:%v state:%q err:%v", found, instance.CurrentState, err)
 				}
@@ -227,7 +227,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("wait replay quiescence: %v", err)
 				}
 				cancel()
-				afterReplay, found, err := coordinator.Load(ctx, route)
+				afterReplay, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, route.InstancePath))
 				if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
 					t.Fatalf("replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 				}
@@ -354,7 +354,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					route := runtimeflowidentity.RouteForInstancePath(path)
 					entityID := runtimeflowidentity.EntityID(path)
 					createdAt := time.Now().UTC()
-					if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+					if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 						EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 						Fields:     map[string]any{"expected": outcome.expected},
@@ -363,7 +363,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						t.Fatalf("materialize immediate join owner: %v", err)
 					}
 					if flowID != "" {
-						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
 							t.Fatalf("add flow join route: %v", err)
 						}
 					}
@@ -426,7 +426,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						t.Fatalf("wait occurrence replay quiescence: %v", err)
 					}
 					cancel()
-					afterReplay, found, err := coordinator.Load(ctx, route)
+					afterReplay, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, route.InstancePath))
 					if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
 						t.Fatalf("occurrence replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 					}
@@ -506,13 +506,13 @@ func waitForExactJoinState(
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		instance, found, err := coordinator.Load(ctx, route)
+		instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runtimecorrelation.RunIDFromContext(ctx), route.InstancePath))
 		if err == nil && found && instance.CurrentState == want {
 			return instance
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	instance, found, err := coordinator.Load(ctx, route)
+	instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runtimecorrelation.RunIDFromContext(ctx), route.InstancePath))
 	t.Fatalf("workflow did not reach %q = found:%v state:%q err:%v", want, found, instance.CurrentState, err)
 	return runtimepipeline.WorkflowInstance{}
 }

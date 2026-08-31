@@ -161,7 +161,7 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 			}
 
 			receiver := events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("review-receiver")))
-			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient(mustPersistenceRootNode("reviewer")), "review", agentidentity.Identity{}, events.ConnectCandidateAccepted)
+			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient(mustPersistenceRootNode("reviewer")), "review", agentidentity.Plan{}, events.ConnectCandidateAccepted)
 			if err != nil {
 				t.Fatal(err)
 			}

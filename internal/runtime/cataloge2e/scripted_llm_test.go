@@ -19,13 +19,34 @@ type scriptedLLMRuntime struct {
 	mu             sync.Mutex
 	responses      map[string]llm.Response
 	agentEventFlow map[string][]scriptedAgentFixtureStep
+	runBarriers    map[string]*scriptedManagedRunBarrier
 }
 
 func newScriptedLLMRuntime() *scriptedLLMRuntime {
 	return &scriptedLLMRuntime{
 		responses:      map[string]llm.Response{},
 		agentEventFlow: map[string][]scriptedAgentFixtureStep{},
+		runBarriers:    map[string]*scriptedManagedRunBarrier{},
 	}
+}
+
+type scriptedManagedRunBarrier struct {
+	started chan<- struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (r *scriptedLLMRuntime) SetManagedRunBarrier(runID string, started chan<- struct{}, release <-chan struct{}) {
+	if r == nil {
+		return
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" || started == nil || release == nil {
+		return
+	}
+	r.mu.Lock()
+	r.runBarriers[runID] = &scriptedManagedRunBarrier{started: started, release: release}
+	r.mu.Unlock()
 }
 
 type scriptedAgentFixtureStep struct {
@@ -115,7 +136,16 @@ func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session
 	r.mu.Lock()
 	response, ok := r.responses[agentID+"::"+key]
 	steps := append([]scriptedAgentFixtureStep(nil), r.agentEventFlow[agentID]...)
+	barrier := r.runBarriers[strings.TrimSpace(frame.Turn.Event.RunID)]
 	r.mu.Unlock()
+	if barrier != nil {
+		barrier.once.Do(func() { barrier.started <- struct{}{} })
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-barrier.release:
+		}
+	}
 	if !ok {
 		if response, ok = scriptedResponseForEvent(steps, eventType, entityID); !ok {
 			if response, ok = defaultScriptedResponseForTools(session, eventType); !ok {

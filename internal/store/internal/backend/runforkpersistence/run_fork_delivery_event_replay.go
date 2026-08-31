@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -132,7 +133,11 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		if sourceDelivery.EventID != sourceEventID || string(sourceDelivery.SubscriberClass) != item.SubscriberType || sourceDelivery.SubscriberID != item.SubscriberID {
 			return result, fmt.Errorf("source delivery %s does not exactly match authorized fork replay work", sourceDeliveryID)
 		}
-		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, sourceDelivery.Route, deliveryAuthority)
+		forkRoute, err := projectRunForkReplayDeliveryRoute(sourceDelivery.Route, lineage.SourceRunID, lineage.ForkRunID)
+		if err != nil {
+			return result, fmt.Errorf("project source delivery %s into fork ownership: %w", sourceDeliveryID, err)
+		}
+		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, forkRoute, deliveryAuthority)
 		if err != nil {
 			return result, err
 		}
@@ -187,6 +192,23 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		return result, err
 	}
 	return result, nil
+}
+
+func projectRunForkReplayDeliveryRoute(source events.DeliveryRoute, sourceRunID, forkRunID string) (events.DeliveryRoute, error) {
+	source = source.Normalized()
+	if !source.Recipient.IsAgent() {
+		return source, nil
+	}
+	identity := source.AgentIdentity.Normalize()
+	if identity.RunID != strings.TrimSpace(sourceRunID) {
+		return events.DeliveryRoute{}, fmt.Errorf("source agent route run %q does not match source run %q", identity.RunID, sourceRunID)
+	}
+	forkIdentity, err := agentidentity.New(forkRunID, identity.Name, identity.Route)
+	if err != nil {
+		return events.DeliveryRoute{}, fmt.Errorf("construct fork agent identity: %w", err)
+	}
+	source.AgentIdentity = forkIdentity
+	return source, nil
 }
 
 func admitRunForkReplayEventTargetProjection(projected events.Event) (events.AdmittedEvent, error) {

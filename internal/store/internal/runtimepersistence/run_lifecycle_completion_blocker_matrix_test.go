@@ -21,7 +21,6 @@ func TestRunLifecycleCompletionBlockerMatrixParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()
-			seedCompletionBlockerAgent(t, fixture, ctx)
 			testCompletionSessionBlockers(t, fixture, ctx)
 			testCompletionGateBlockers(t, fixture, ctx)
 			testCompletionEffectBlockers(t, fixture, ctx)
@@ -245,22 +244,23 @@ func seedCompletionBlockerRun(t *testing.T, fixture runLifecycleCandidateParityF
 		t, fixture, ctx, runID,
 		time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC),
 	)
-	query := `INSERT OR IGNORE INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES (?, ?, 'static', '{}', 'active')`
+	query := `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, ?, 'static', '{}', 'active')`
 	if fixture.postgres {
-		query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status) VALUES ($1, $2, 'static', '{}'::jsonb, 'active') ON CONFLICT (instance_id) DO NOTHING`
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, $3, 'static', '{}'::jsonb, 'active') ON CONFLICT (run_id, instance_path) DO NOTHING`
 	}
-	if _, err := fixture.db.ExecContext(ctx, query, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
+	if _, err := fixture.db.ExecContext(ctx, query, runID, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
 		t.Fatalf("seed completion blocker flow instance: %v", err)
 	}
 	if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
 		t.Fatalf("seed completion blocker entity: %v", err)
 	}
+	seedCompletionBlockerAgent(t, fixture, ctx, runID)
 	return runID
 }
 
-func seedCompletionBlockerAgent(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context) {
+func seedCompletionBlockerAgent(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context, runID string) {
 	t.Helper()
-	seedTestAgentRow(t, ctx, fixture.db, fixture.postgres, testAgentIdentity(t, "completion-matrix-agent", semanticRunFixtureFlow), "active")
+	seedTestAgentRow(t, ctx, fixture.db, fixture.postgres, mustTestAgentIdentityForRun(runID, "completion-matrix-agent", semanticRunFixtureFlow), "active")
 }
 
 func insertCompletionBlockerSession(
@@ -272,7 +272,7 @@ func insertCompletionBlockerSession(
 	expiry any,
 ) error {
 	t.Helper()
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "completion-matrix-agent", semanticRunFixtureFlow))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, "completion-matrix-agent", semanticRunFixtureFlow))
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -330,7 +330,7 @@ func insertCompletionBlockerEffect(
 	conflictingRun bool,
 ) {
 	t.Helper()
-	identity := testAgentIdentity(t, "completion-matrix-agent", semanticRunFixtureFlow)
+	identity := mustTestAgentIdentityForRun(runID, "completion-matrix-agent", semanticRunFixtureFlow)
 	fields := testAgentIdentityStorageFields(t, identity)
 	operationID := uuid.NewString()
 	targetID := uuid.NewString()
@@ -372,15 +372,15 @@ func insertCompletionBlockerEffect(
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash,
 			authority_kind, authority_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, runtime_epoch, generation,
-			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, agent_run_id
 		) VALUES (?, 'provider_turn', 'write_or_unknown', 'live', ?,
 		          'normal_agent', 'completion-matrix-agent', ?, ?, ?, ?, ?, ?, ?, 1, 1,
-		          ?, ?, ?, ?, 'matrix-request', ?)`
+		          ?, ?, ?, ?, 'matrix-request', ?, ?)`
 	args := []any{
 		operationID, runLifecycleCandidateParityBundleHash,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		planFingerprint, frameBytes, string(authorityEvidence), string(lineage), operationState,
+		planFingerprint, frameBytes, string(authorityEvidence), string(lineage), operationState, fields.RunID,
 	}
 	if fixture.postgres {
 		query = `
@@ -388,10 +388,10 @@ func insertCompletionBlockerEffect(
 				operation_id, effect_kind, effect_class, execution_mode, bundle_hash,
 				authority_kind, authority_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, runtime_epoch, generation,
-				capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state
+				capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, agent_run_id
 			) VALUES ($1::uuid, 'provider_turn', 'write_or_unknown', 'live', $2,
 			          'normal_agent', 'completion-matrix-agent', $3, $4, $5, $6, $7, $8, $9, 1, 1,
-			          $10, $11, $12::jsonb, $13::jsonb, 'matrix-request', $14)`
+			          $10, $11, $12::jsonb, $13::jsonb, 'matrix-request', $14, $15::uuid)`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("insert completion blocker operation: %v", err)

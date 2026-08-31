@@ -210,7 +210,7 @@ func routeGenerationTestEvent(id, eventType string) events.Event {
 		"",
 		[]byte(`{}`),
 		0,
-		eventtest.UUID("route-generation-run"),
+		busInternalTestRunID,
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),

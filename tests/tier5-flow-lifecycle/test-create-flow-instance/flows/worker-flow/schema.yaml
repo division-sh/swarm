@@ -8,4 +8,4 @@ auto_emit_on_create:
   event: worker.ready
 pins:
   outputs:
-    events: [worker.ready]
+    events: [worker.ready, worker.observed]

@@ -74,7 +74,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							agentID := ""
 							if realSubscriber {
 								agentID = provider.provider + "-" + backend + "-raw-subscriber"
-								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowID, flowInstance, entityID, agentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, ctx, selected, runID, target.FlowID, flowInstance, entityID, agentID, provider.eventName)
 							}
 							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, provider.eventName)
 							if err != nil {
@@ -82,7 +82,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							}
 							var deliveries <-chan *runtimebus.LocalDelivery
 							if realSubscriber {
-								deliveries = subscribeProviderRawSettlementAgent(t, bus, target.FlowID, flowInstance, agentID, provider.eventName)
+								deliveries = subscribeProviderRawSettlementAgent(t, bus, runID, target.FlowID, flowInstance, agentID, provider.eventName)
 							}
 							gateway := newTestInboundGateway(t, bus, nil, nil, selected)
 							response := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 								if got.ID() != rawEventID {
 									t.Fatalf("dispatched raw event = %s, want %s", got.ID(), rawEventID)
 								}
-								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowID, flowInstance, agentID))
+								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, runID, target.FlowID, flowInstance, agentID))
 								waitForInboundBusQuiescence(t, bus)
 							} else {
 								waitForInboundBusQuiescence(t, bus)
@@ -127,15 +127,15 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 
 							if !realSubscriber {
 								replayAgentID := provider.provider + "-" + backend + "-current-topology-only"
-								seedProviderRawSettlementAgent(t, ctx, selected, target.FlowID, flowInstance, entityID, replayAgentID, provider.eventName)
-								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, target.FlowID, flowInstance, replayAgentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, ctx, selected, runID, target.FlowID, flowInstance, entityID, replayAgentID, provider.eventName)
+								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, runID, target.FlowID, flowInstance, replayAgentID, provider.eventName)
 								if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 									Event: record.Events[0].Event, Scope: runtimepipelineobligation.ScopeSubscribed,
 								}, nil); err != nil {
 									t.Fatalf("RecoverPersistedPipeline: %v", err)
 								}
 								requireNoInboundBusEvent(t, replayDeliveries, "consumerless raw committed replay")
-								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, target.FlowID, flowInstance, replayAgentID))
+								runtimebustest.UnsubscribeIdentity(bus, providerRawSettlementAgentIdentity(t, runID, target.FlowID, flowInstance, replayAgentID))
 								waitForInboundBusQuiescence(t, bus)
 							}
 						})
@@ -215,12 +215,12 @@ func assertProviderRawSettlementListReadback(t testing.TB, ctx context.Context, 
 	}
 }
 
-func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, flowID, flowInstance, entityID, agentID, eventName string) {
+func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, runID, flowID, flowInstance, entityID, agentID, eventName string) {
 	t.Helper()
 	agent := runtimemanager.PersistedAgent{
 		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agentID,
-			Identity: providerRawSettlementAgentIdentity(t, flowID, flowInstance, agentID),
+			Identity: providerRawSettlementAgentIdentity(t, runID, flowID, flowInstance, agentID),
 			Role:     "observer", FlowID: flowID, Type: "stub", Model: "regular",
 			FlowPath: flowInstance, EntityID: entityID, Subscriptions: []string{eventName}, Config: []byte(`{}`),
 		}),
@@ -240,20 +240,21 @@ func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected 
 	}
 }
 
-func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
+func subscribeProviderRawSettlementAgent(t testing.TB, bus *runtimebus.EventBus, runID, flowID, flowInstance, agentID, eventName string) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
+	bindInboundGatewayAgentReadinessFinalizer(bus, runID)
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID: agentID, FlowID: flowID, FlowPath: flowInstance, Subscriptions: []string{eventName},
 	})
 	if err != nil {
 		t.Fatalf("admit provider raw subscriber: %v", err)
 	}
-	return runtimebustest.SubscribeIdentity(t, bus, providerRawSettlementAgentIdentity(t, flowID, flowInstance, agentID), admission)
+	return runtimebustest.SubscribeIdentity(t, bus, providerRawSettlementAgentIdentity(t, runID, flowID, flowInstance, agentID), admission)
 }
 
-func providerRawSettlementAgentIdentity(t testing.TB, flowID, flowInstance, agentID string) runtimeagentidentity.Identity {
+func providerRawSettlementAgentIdentity(t testing.TB, runID, flowID, flowInstance, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
-	return runtimeagentidentitytest.Runtime(t, agentID, "runtime-test/provider-raw-settlement", flowID, flowInstance, flowInstance)
+	return runtimeagentidentitytest.RuntimeForRun(t, runID, agentID, "runtime-test/provider-raw-settlement", flowID, flowInstance, flowInstance)
 }
 
 func openProviderRawSettlementStore(t *testing.T, backend string) (providerRawSettlementProofStore, *sql.DB) {

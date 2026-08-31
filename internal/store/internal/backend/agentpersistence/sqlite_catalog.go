@@ -33,7 +33,7 @@ func LoadSQLiteAgentsTx(ctx context.Context, tx *sql.Tx) ([]runtimemanager.Persi
 }
 
 const sqliteAgentRegistryQuery = `
-		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		SELECT run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
 		       role, model, llm_backend, memory_enabled, memory_source,
 		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, runtime_descriptor,
@@ -47,7 +47,7 @@ const sqliteAgentRegistryQuery = `
 			       topology_admission
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
-		ORDER BY created_at ASC, agent_id ASC
+		ORDER BY created_at ASC, run_id ASC, agent_id ASC
 	`
 
 func scanSQLiteAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
@@ -59,7 +59,7 @@ func scanSQLiteAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
 		var startedAt any
 		var lifecycleGeneration int64
 		var topologyRaw []byte
-		if err := rows.Scan(&row.AgentID, &row.Identity.NameOwner, &row.Identity.NameSource, &row.Identity.RoutePresence,
+		if err := rows.Scan(&row.Identity.RunID, &row.AgentID, &row.Identity.NameOwner, &row.Identity.NameSource, &row.Identity.RoutePresence,
 			&row.Identity.FlowScopeKey, &row.Identity.FlowInstanceID, &row.Identity.FlowInstancePath,
 			&row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.MemorySource,
 			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,

@@ -8,11 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -231,21 +234,25 @@ func registerServeTestDurableAgent(
 	selected storetest.AgentFixtureStore,
 	manager *runtimemanager.AgentManager,
 	cfg runtimeactors.AgentConfig,
+	source runtimecorrelation.BundleSourceFact,
 ) {
 	t.Helper()
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
 		t.Fatalf("resolve serve test durable agent identity: %v", err)
 	}
-	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+	if err := source.Validate(); err != nil {
+		t.Fatalf("serve test bundle source: %v", err)
+	}
+	bundleHash := source.BundleHash()
+	ctx := runtimecorrelation.WithRunID(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		bundleHash,
-	))
+	)), identity.RunID)
 	rec := runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "serve-test-declaration",
 	}
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, rec); err != nil {
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, rec, source); err != nil {
 		t.Fatalf("persist serve test durable agent: %v", err)
 	}
 	committed, err := selected.LoadAgents(ctx)
@@ -267,4 +274,38 @@ func registerServeTestDurableAgent(
 		return
 	}
 	t.Fatalf("committed serve test durable agent %s was not readable", identity.Description())
+}
+
+func installServeTestExactAgentReadiness(
+	t testing.TB,
+	bus *runtimebus.EventBus,
+	identities ...runtimeagentidentity.Identity,
+) {
+	t.Helper()
+	if bus == nil || len(identities) == 0 {
+		t.Fatal("serve test exact agent readiness requires a bus and at least one identity")
+	}
+	allowed := make(map[runtimeagentidentity.Identity]struct{}, len(identities))
+	for _, identity := range identities {
+		identity = identity.Normalize()
+		if err := identity.Validate(); err != nil {
+			t.Fatalf("serve test exact readiness identity: %v", err)
+		}
+		allowed[identity] = struct{}{}
+	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			identity := route.AgentIdentity.Normalize()
+			if identity.RunID != event.RunID() {
+				return fmt.Errorf("serve test committed route %s disagrees with event run %q", identity.Description(), event.RunID())
+			}
+			if _, ok := allowed[identity]; !ok {
+				return fmt.Errorf("serve test committed route %s was not pre-materialized", identity.Description())
+			}
+		}
+		return nil
+	}))
 }

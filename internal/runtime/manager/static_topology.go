@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -25,27 +26,23 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 	if err := coordinate.Validate(); err != nil {
 		return nil, err
 	}
-	records, err := am.resolvedStaticTopologyRecords(source)
+	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
-	byIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(records))
-	for _, rec := range records {
-		identity, err := rec.Config.ConcreteIdentity()
+	byIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(blueprints))
+	for _, blueprint := range blueprints {
+		revision, err := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
 		if err != nil {
 			return nil, err
 		}
-		revision, err := lifecycleConfigRevision(rec)
-		if err != nil {
-			return nil, err
-		}
-		desired := runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: revision}
+		desired := runtimeagenttopology.DesiredAgent{Identity: blueprint.Identity, Source: coordinate, ConfigRevision: revision}
 		key, err := desired.Key()
 		if err != nil {
 			return nil, err
 		}
 		if previous, ok := byIdentity[key]; ok && previous != desired {
-			return nil, fmt.Errorf("static declaration %s compiles to conflicting desired records", identity.Description())
+			return nil, fmt.Errorf("static declaration %s compiles to conflicting desired records", blueprint.Identity.Description())
 		}
 		byIdentity[key] = desired
 	}
@@ -59,6 +56,91 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 		return left < right
 	})
 	return out, nil
+}
+
+// FinalizeCommittedAgentReadiness makes every committed agent delivery's exact
+// run-owned lifecycle executable before dispatch. Static declaration plans are
+// materialized here because this is the first boundary that owns a committed
+// run; dynamic and standing agents must already have been materialized by their
+// dedicated readiness owners.
+func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
+	if am == nil || am.lifecycle == nil {
+		return errors.New("committed agent readiness requires manager lifecycle ownership")
+	}
+	runID := strings.TrimSpace(event.RunID())
+	if runID == "" {
+		return errors.New("committed agent readiness requires event run_id")
+	}
+	blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
+	if err != nil {
+		return err
+	}
+	staticByPlan := make(map[runtimeagentidentity.Plan]staticAgentBlueprint, len(blueprints))
+	for _, blueprint := range blueprints {
+		staticByPlan[blueprint.Identity.Normalize()] = blueprint
+	}
+	admission, err := am.staticTopologyAdmission()
+	if err != nil {
+		return err
+	}
+	seen := make(map[runtimeagentidentity.Identity]struct{}, len(routes))
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if !route.Recipient.IsAgent() {
+			continue
+		}
+		identity := route.AgentIdentity.Normalize()
+		if err := identity.Validate(); err != nil {
+			return fmt.Errorf("committed agent route for %q: %w", route.Recipient.ID(), err)
+		}
+		if identity.RunID != runID {
+			return fmt.Errorf("committed agent route %s disagrees with event run %q", identity.Description(), runID)
+		}
+		if _, duplicate := seen[identity]; duplicate {
+			continue
+		}
+		seen[identity] = struct{}{}
+		if _, readyErr := am.lifecycle.committedRouteReadinessByIdentity(identity); readyErr == nil {
+			continue
+		}
+		if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
+			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+				return fmt.Errorf("finalize committed agent %s: %w", identity.Description(), err)
+			}
+			continue
+		}
+		plan, err := identity.Plan()
+		if err != nil {
+			return err
+		}
+		blueprint, static := staticByPlan[plan.Normalize()]
+		if !static {
+			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+				return fmt.Errorf("committed non-static agent %s has no executable lifecycle: %w", identity.Description(), err)
+			}
+			continue
+		}
+		record, err := blueprint.Materialize(runID)
+		if err != nil {
+			return err
+		}
+		record.Topology = admission
+		materialized, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		if materialized != identity {
+			return fmt.Errorf("static declaration materialized %s instead of committed route %s", materialized.Description(), identity.Description())
+		}
+		if err := am.spawnAgentInternal(ctx, record, true); err != nil {
+			if !errors.Is(err, ErrAgentAlreadyExists) {
+				return fmt.Errorf("materialize committed static agent %s: %w", identity.Description(), err)
+			}
+			if _, readyErr := am.ensureExecutableAgentLifecycle(ctx, identity); readyErr != nil {
+				return fmt.Errorf("finalize concurrently materialized static agent %s: %w", identity.Description(), readyErr)
+			}
+		}
+	}
+	return nil
 }
 
 // PrepareStaticTopologyForStartup settles predecessor effect authority and
@@ -80,31 +162,24 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 		return err
 	}
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash, BundleSource: static.BundleSource}
-	records, err := am.resolvedStaticTopologyRecords(source)
+	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {
 		return err
 	}
-	for i := range records {
-		records[i].Topology = admission
-	}
-	desiredAgents, err := desiredAgentsFromRecords(records, coordinate)
+	desiredAgents, err := desiredAgentsFromBlueprints(blueprints, coordinate)
 	if err != nil {
 		return err
 	}
 	if err := verifySourceSetDesiredAgents(completePlan, coordinate, desiredAgents); err != nil {
 		return err
 	}
-	desiredByKey := make(map[string]PersistedAgent, len(records))
-	for _, rec := range records {
-		identity, err := rec.Config.ConcreteIdentity()
+	desiredByKey := make(map[string]staticAgentBlueprint, len(blueprints))
+	for _, blueprint := range blueprints {
+		key, err := blueprint.Identity.Fingerprint()
 		if err != nil {
 			return err
 		}
-		key, err := identity.Fingerprint()
-		if err != nil {
-			return err
-		}
-		desiredByKey[key] = rec
+		desiredByKey[key] = blueprint
 	}
 	if len(desiredByKey) != len(desiredAgents) {
 		return errors.New("static topology plan and materialization record census differ")
@@ -114,7 +189,6 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	if err != nil {
 		return fmt.Errorf("load agents for static topology reconciliation: %w", err)
 	}
-	seen := make(map[string]struct{}, len(desiredByKey))
 	for _, current := range persisted {
 		identity, err := current.Config.ConcreteIdentity()
 		if err != nil {
@@ -137,18 +211,26 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 		if owner.BundleHash != static.BundleHash || owner.BundleSource != static.BundleSource {
 			continue
 		}
-		key, err := identity.Fingerprint()
+		identityPlan, err := identity.Plan()
 		if err != nil {
 			return err
 		}
-		desired, present := desiredByKey[key]
+		key, err := identityPlan.Fingerprint()
+		if err != nil {
+			return err
+		}
+		blueprint, present := desiredByKey[key]
 		if !present {
 			if err := am.commitStaticTopologyReconciliation(ctx, current, nil, admission); err != nil {
 				return err
 			}
 			continue
 		}
-		seen[key] = struct{}{}
+		desired, err := blueprint.Materialize(identity.RunID)
+		if err != nil {
+			return err
+		}
+		desired.Topology = admission
 		currentRevision, err := lifecycleConfigRevision(current)
 		if err != nil {
 			return err
@@ -165,33 +247,6 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 		}
 	}
 
-	for key, desired := range desiredByKey {
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		identity, _ := desired.Config.ConcreteIdentity()
-		if am.roles.LifecycleState == nil {
-			return errors.New("static topology reconciliation requires lifecycle state readback")
-		}
-		state, exists, err := am.roles.LifecycleState.LoadAgentLifecycleState(ctx, identity)
-		if err != nil {
-			return err
-		}
-		if exists {
-			current := PersistedAgent{
-				Config: desired.Config, LifecycleEpoch: state.RuntimeEpoch, LifecycleGeneration: state.Generation,
-				LifecyclePhase: state.Phase, LifecycleRunMode: state.RunMode, Topology: state.Topology,
-				ProcessBinding: state.ProcessBinding,
-			}
-			if err := am.commitStaticTopologyReconciliation(ctx, current, &desired, admission); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := am.commitStaticTopologyReconciliation(ctx, PersistedAgent{}, &desired, admission); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -418,28 +473,24 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 	} else if !predecessorBinding.Equal(currentBinding) {
 		return nil, errors.New("durable topology source-set predecessor differs from the current runtime grant")
 	}
-	records, err := am.resolvedStaticTopologyRecords(source)
+	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
-	desired, err := desiredAgentsFromRecords(records, coordinate)
+	desired, err := desiredAgentsFromBlueprints(blueprints, coordinate)
 	if err != nil {
 		return nil, err
 	}
 	if err := verifySourceSetDesiredAgents(plan, coordinate, desired); err != nil {
 		return nil, err
 	}
-	expectedStatic := make(map[runtimeagentidentity.Identity]string, len(records))
-	for _, rec := range records {
-		identity, identityErr := rec.Config.ConcreteIdentity()
-		if identityErr != nil {
-			return nil, identityErr
-		}
-		revision, revisionErr := lifecycleConfigRevision(rec)
+	expectedStatic := make(map[runtimeagentidentity.Plan]string, len(blueprints))
+	for _, blueprint := range blueprints {
+		revision, revisionErr := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
 		if revisionErr != nil {
 			return nil, revisionErr
 		}
-		expectedStatic[identity.Normalize()] = revision
+		expectedStatic[blueprint.Identity.Normalize()] = revision
 	}
 	if am.roles.LifecycleCensus == nil {
 		return nil, errors.New("durable topology source-set rebind requires the lifecycle cell census")
@@ -448,8 +499,8 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 	prepared := &PreparedDurableTopologySourceSetRebind{
 		manager: am, admission: admission, plan: plan, coordinate: coordinate,
 		currentBinding: currentBinding, currentIsSuccessor: currentIsSuccessor,
-		bindings: make([]durableTopologySourceSetBinding, 0, len(records)),
-		locked:   make([]*agentLifecycleCell, 0, len(records)),
+		bindings: make([]durableTopologySourceSetBinding, 0, len(blueprints)),
+		locked:   make([]*agentLifecycleCell, 0, len(blueprints)),
 	}
 	am.lifecycle.sourceSetPublishMu.Lock()
 	releaseOnError := true
@@ -517,16 +568,17 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 	}
 	am.lifecycle.mu.Unlock()
 
-	for identity, revision := range expectedStatic {
-		state, ok := selected[identity]
-		if !ok {
-			return nil, fmt.Errorf("durable topology source-set rebind is missing declared lifecycle row %s", identity.Description())
-		}
-		if state.Topology.Authority.Kind != runtimeagenttopology.AuthorityStaticDeclarationPlan || state.ConfigRevision != revision {
-			return nil, fmt.Errorf("durable topology source-set rebind found conflicting declaration %s", identity.Description())
-		}
-	}
 	for identity, state := range selected {
+		if state.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan && state.Phase != AgentLifecycleTerminated {
+			planIdentity, planErr := identity.Plan()
+			if planErr != nil {
+				return nil, planErr
+			}
+			revision, declared := expectedStatic[planIdentity.Normalize()]
+			if !declared || state.ConfigRevision != revision {
+				return nil, fmt.Errorf("durable topology source-set rebind found conflicting declaration %s", identity.Description())
+			}
+		}
 		cell := processCells[identity]
 		if state.Phase == AgentLifecycleTerminated {
 			if cell != nil && cell.phase != AgentLifecycleTerminated {
@@ -557,7 +609,11 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		targetTopology := cell.topology
 		switch cell.topology.Authority.Kind {
 		case runtimeagenttopology.AuthorityStaticDeclarationPlan:
-			if _, ok := expectedStatic[identity]; !ok {
+			planIdentity, planErr := identity.Plan()
+			if planErr != nil {
+				return nil, planErr
+			}
+			if _, ok := expectedStatic[planIdentity.Normalize()]; !ok {
 				return nil, fmt.Errorf("durable topology source-set rebind found undeclared static identity %s", identity.Description())
 			}
 			targetTopology = admission
@@ -843,48 +899,70 @@ func sourceSetContainsCoordinate(plan runtimeagenttopology.SourceSetPlan, coordi
 	return false
 }
 
-func (am *AgentManager) resolvedStaticTopologyRecords(source semanticview.Source) ([]PersistedAgent, error) {
-	ordinary, err := StaticAgentMaterializationRecords(source)
+func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Source) ([]staticAgentBlueprint, error) {
+	ordinary, err := staticAgentBlueprintRecords(source)
 	if err != nil {
 		return nil, err
 	}
-	required, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	required, err := staticFlowRequiredAgentBlueprintRecords(source)
 	if err != nil {
 		return nil, err
 	}
-	byIdentity := map[string]PersistedAgent{}
-	for _, rec := range append(ordinary, required...) {
-		if err := am.resolveAgentModel(&rec.Config); err != nil {
+	byIdentity := map[string]staticAgentBlueprint{}
+	for _, blueprint := range append(ordinary, required...) {
+		if err := am.resolveAgentModel(&blueprint.Config); err != nil {
 			return nil, err
 		}
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return nil, err
-		}
-		key, err := identity.Fingerprint()
+		key, err := blueprint.Identity.Fingerprint()
 		if err != nil {
 			return nil, err
 		}
 		if previous, ok := byIdentity[key]; ok {
-			left, _ := lifecycleConfigRevision(previous)
-			right, _ := lifecycleConfigRevision(rec)
+			left, _ := agentConfigPlanRevision(previous.Config, previous.Identity)
+			right, _ := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
 			if left != right {
-				return nil, fmt.Errorf("static declaration %s has conflicting materializations", identity.Description())
+				return nil, fmt.Errorf("static declaration %s has conflicting blueprints", blueprint.Identity.Description())
 			}
 			continue
 		}
-		byIdentity[key] = rec
+		byIdentity[key] = blueprint
 	}
-	out := make([]PersistedAgent, 0, len(byIdentity))
-	for _, rec := range byIdentity {
-		out = append(out, rec)
+	out := make([]staticAgentBlueprint, 0, len(byIdentity))
+	for _, blueprint := range byIdentity {
+		out = append(out, blueprint)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left, _ := out[i].Config.ConcreteIdentity()
-		right, _ := out[j].Config.ConcreteIdentity()
-		leftKey, _ := left.Fingerprint()
-		rightKey, _ := right.Fingerprint()
-		return leftKey < rightKey
+		return runtimeagentidentity.LessPlan(out[i].Identity, out[j].Identity)
+	})
+	return out, nil
+}
+
+func (am *AgentManager) resolvedStaticTopologyRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
+	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+func desiredAgentsFromBlueprints(blueprints []staticAgentBlueprint, coordinate runtimeagenttopology.SourceCoordinate) ([]runtimeagenttopology.DesiredAgent, error) {
+	if err := coordinate.Validate(); err != nil {
+		return nil, err
+	}
+	out := make([]runtimeagenttopology.DesiredAgent, 0, len(blueprints))
+	for _, blueprint := range blueprints {
+		revision, err := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, runtimeagenttopology.DesiredAgent{
+			Identity: blueprint.Identity, Source: coordinate, ConfigRevision: revision,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left, _ := out[i].Key()
+		right, _ := out[j].Key()
+		return left < right
 	})
 	return out, nil
 }
@@ -899,12 +977,16 @@ func desiredAgentsFromRecords(records []PersistedAgent, coordinate runtimeagentt
 		if err != nil {
 			return nil, err
 		}
+		plan, err := identity.Plan()
+		if err != nil {
+			return nil, err
+		}
 		revision, err := lifecycleConfigRevision(rec)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, runtimeagenttopology.DesiredAgent{
-			Identity: identity, Source: coordinate, ConfigRevision: revision,
+			Identity: plan, Source: coordinate, ConfigRevision: revision,
 		})
 	}
 	return out, nil

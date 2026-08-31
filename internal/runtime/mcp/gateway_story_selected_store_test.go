@@ -95,7 +95,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			actor := models.AgentConfig{
 				ExecutionMode:      "live",
 				ID:                 "story-writer",
-				Identity:           agentidentitytest.Declared(t, "story-writer", "mcp-gateway-story://story/story-writer", "story", "instance-1", "story/instance-1"),
+				Identity:           agentidentitytest.DeclaredForRun(t, runID, "story-writer", "mcp-gateway-story://story/story-writer", "story", "instance-1", "story/instance-1"),
 				Type:               "internal",
 				Role:               "story-writer",
 				Model:              "regular",

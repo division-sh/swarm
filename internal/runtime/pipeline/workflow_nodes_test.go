@@ -224,6 +224,29 @@ func loadHarnessInjectionPipelineSource(t *testing.T, root string) semanticview.
 	return semanticview.Wrap(bundle)
 }
 
+func TestWorkflowNodeTargetMatchesExactRootRunCoordinate(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load root coordinate fixture: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	pc := &PipelineCoordinator{module: &previewWorkflowModule{bundle: bundle}}
+	node := pipelineSourceNode(t, source, "", "complete-task")
+	runID := eventtest.UUID("root-node-target-run")
+	target := events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: runID}
+	if !pc.workflowNodeMatchesDeliveryTarget(node, runID, target) {
+		t.Fatalf("exact root target %#v did not match admitted run", target)
+	}
+	if pc.workflowNodeMatchesDeliveryTarget(node, eventtest.UUID("other-root-node-target-run"), target) {
+		t.Fatalf("root target %#v matched a different admitted run", target)
+	}
+}
+
 func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")

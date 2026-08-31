@@ -256,8 +256,9 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				identity := map[string]any{}
 				if normalizedText(values["subscriber_type"]) == "agent" {
 					identity = map[string]any{
-						"name":  map[string]any{"agent_id": values["subscriber_id"], "owner": values["agent_name_owner"], "source": values["agent_name_source"]},
-						"route": map[string]any{"presence": values["agent_route_presence"], "scope_key": values["agent_flow_scope_key"], "instance_id": values["agent_flow_instance_id"], "instance_path": values["agent_flow_instance_path"]},
+						"run_id": values["run_id"],
+						"name":   map[string]any{"agent_id": values["subscriber_id"], "owner": values["agent_name_owner"], "source": values["agent_name_source"]},
+						"route":  map[string]any{"presence": values["agent_route_presence"], "scope_key": values["agent_flow_scope_key"], "instance_id": values["agent_flow_instance_id"], "instance_path": values["agent_flow_instance_path"]},
 					}
 				}
 				values["agent_identity"] = identity

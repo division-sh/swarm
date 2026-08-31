@@ -185,13 +185,13 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 			},
 		},
 	})
-	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
+	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
 		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}), nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	instantiatedCfg, err := buildFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
+	instantiatedCfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {
@@ -255,7 +255,7 @@ func TestAuthoredMockSelectionSurvivesReconfigureAndRestart(t *testing.T) {
 	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	base, err := am.ResolveAgentConfig("mock-lifecycle-agent", "")
+	base, err := am.ResolveAgentConfig(managerIdentityTestRunID, "mock-lifecycle-agent", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig(spawn): %v", err)
 	}
@@ -264,16 +264,16 @@ func TestAuthoredMockSelectionSurvivesReconfigureAndRestart(t *testing.T) {
 	if err := reconfigureAgentThroughLifecycleForTest(t, am, base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}); err != nil {
 		t.Fatalf("lifecycle reconfigure: %v", err)
 	}
-	reconfigured, err := am.ResolveAgentConfig(base.ID, "")
+	reconfigured, err := am.ResolveAgentConfig(base.Identity.RunID, base.ID, "")
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig(reconfigure): %v", err)
 	}
 	assertMockProjection(t, "reconfigure", artifact, map[string]models.AgentConfig{reconfigured.ID: reconfigured}, reconfigured.ID)
 
-	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: base.ID}); err != nil {
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: base.Identity.RunID, AgentID: base.ID}); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
-	restarted, err := am.ResolveAgentConfig(base.ID, "")
+	restarted, err := am.ResolveAgentConfig(base.Identity.RunID, base.ID, "")
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig(restart): %v", err)
 	}
@@ -312,7 +312,7 @@ func TestAgentRuntimeSetRecoveryRederivesUnpinnedBackendFromCurrentConfiguration
 	if _, err := recovered.RecoverAfterStartupAdmission(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("RecoverAfterStartupAdmission: %v", err)
 	}
-	got, err := recovered.ResolveAgentConfig("backend-change-agent", "")
+	got, err := recovered.ResolveAgentConfig(managerIdentityTestRunID, "backend-change-agent", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 	if err != nil {
 		t.Fatalf("lifecycle reconfigure (matching backend): %v", err)
 	}
-	accepted, err := manager.ResolveAgentConfig("backend-patch-agent", "")
+	accepted, err := manager.ResolveAgentConfig(managerIdentityTestRunID, "backend-patch-agent", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig(accepted): %v", err)
 	}
@@ -359,7 +359,7 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 	if len(store.records) != persistedCount {
 		t.Fatalf("conflicting patch persisted %d new record(s)", len(store.records)-persistedCount)
 	}
-	current, resolveErr := manager.ResolveAgentConfig("backend-patch-agent", "")
+	current, resolveErr := manager.ResolveAgentConfig(managerIdentityTestRunID, "backend-patch-agent", "")
 	if resolveErr != nil {
 		t.Fatalf("ResolveAgentConfig: %v", resolveErr)
 	}

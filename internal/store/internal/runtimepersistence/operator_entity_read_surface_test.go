@@ -46,12 +46,13 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES
-			('review/primary', 'review', 'template', '{"workflow_version":"v1"}'::jsonb, 'active', $1),
-			('review/secondary', 'review', 'template', '{"workflow_version":"v2"}'::jsonb, 'active', $1),
-			('triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $1)
-	`, base); err != nil {
+			($1::uuid, 'review/primary', 'review', 'template', '{"workflow_version":"v1"}'::jsonb, 'active', $3),
+			($1::uuid, 'review/secondary', 'review', 'template', '{"workflow_version":"v2"}'::jsonb, 'active', $3),
+			($1::uuid, 'triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $3),
+			($2::uuid, 'triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $3)
+	`, runA, runB, base); err != nil {
 		t.Fatalf("seed flow instances: %v", err)
 	}
 
@@ -192,12 +193,13 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES
-			('review/primary', 'review', 'template', '{"workflow_version":"v1"}', 'active', ?),
-			('review/secondary', 'review', 'template', '{"workflow_version":"v2"}', 'active', ?),
-			('triage', 'triage', 'static', '{"workflow_version":"v1"}', 'active', ?)
-	`, base, base, base); err != nil {
+			(?, 'review/primary', 'review', 'template', '{"workflow_version":"v1"}', 'active', ?),
+			(?, 'review/secondary', 'review', 'template', '{"workflow_version":"v2"}', 'active', ?),
+			(?, 'triage', 'triage', 'static', '{"workflow_version":"v1"}', 'active', ?),
+			(?, 'triage', 'triage', 'static', '{"workflow_version":"v1"}', 'active', ?)
+	`, runA, base, runA, base, runA, base, runB, base); err != nil {
 		t.Fatalf("seed sqlite flow instances: %v", err)
 	}
 

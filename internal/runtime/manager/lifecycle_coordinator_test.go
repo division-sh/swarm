@@ -795,12 +795,12 @@ func TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateReleas
 	}
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("source-set-waiting-event"), events.EventType("test.source_set_wait"), "test", "", nil, 0,
-		eventtest.UUID("source-set-waiting-run"), "", events.EventEnvelope{}, time.Now().UTC(),
+		managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		admission.release()
 		t.Fatal(err)
@@ -899,7 +899,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 	baselineReads := gate.readCount()
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("source-set-cancelled-event"), events.EventType("test.source_set_cancelled"), "test", "", nil, 0,
-		eventtest.UUID("source-set-cancelled-run"), "", events.EventEnvelope{}, time.Now().UTC(),
+		managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
@@ -941,7 +941,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 		t.Fatal("dequeued delivery invoked agent while source-set transition was pending")
 	default:
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatal(err)
 	}

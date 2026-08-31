@@ -228,31 +228,34 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 	if err != nil {
 		t.Fatalf("DeriveRouteTable direct collision proof: %v", err)
 	}
-	directSibling := runtimeflowidentity.DeriveRoute("producer", "inst-direct")
+	directSibling := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "inst-direct"))
 	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directSibling}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute direct sibling: %v", err)
 	}
 	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directSibling}); err != nil {
 		t.Fatalf("exact direct sibling replay: %v", err)
 	}
-	directMismatch := runtimeflowidentity.StoredRoute("worker", "other", directSibling.InstancePath)
-	if directRoutes.HasFlowInstanceRoute(directMismatch) {
-		t.Fatal("direct mismatched identity was reported present")
+	directOtherRun := testRunScopedFlowRouteForRun("88888888-8888-8888-8888-888888888888", directSibling.Route)
+	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directOtherRun}); err != nil {
+		t.Fatalf("same route in another run: %v", err)
 	}
-	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directMismatch}); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
-		t.Fatalf("direct mismatched add error = %v, want complete-owner conflict", err)
+	if !directRoutes.HasFlowInstanceRoute(directSibling) || !directRoutes.HasFlowInstanceRoute(directOtherRun) {
+		t.Fatal("same route in independent runs did not coexist")
 	}
-	if err := directRoutes.RemoveFlowInstanceRoute(directMismatch); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
-		t.Fatalf("direct mismatched remove error = %v, want complete-owner conflict", err)
+	if err := directRoutes.RemoveFlowInstanceRoute(directOtherRun); err != nil {
+		t.Fatalf("remove other-run route: %v", err)
 	}
-	directInconsistent := runtimeflowidentity.StoredRoute("worker", "unowned", "producer/unowned")
+	if !directRoutes.HasFlowInstanceRoute(directSibling) {
+		t.Fatal("removing other-run route removed the original run")
+	}
+	directInconsistent := testUncheckedRunScopedFlowRoute(runtimeflowidentity.StoredRoute("worker", "unowned", "producer/unowned"))
 	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directInconsistent}); err == nil || !strings.Contains(err.Error(), "identity is inconsistent") {
 		t.Fatalf("direct inconsistent add error = %v, want tuple validation failure", err)
 	}
 	if err := directRoutes.RemoveFlowInstanceRoute(directInconsistent); err == nil || !strings.Contains(err.Error(), "identity is inconsistent") {
 		t.Fatalf("direct inconsistent remove error = %v, want tuple validation failure", err)
 	}
-	directCollision := runtimeflowidentity.DeriveRoute("producer", "child")
+	directCollision := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "child"))
 	if err := directRoutes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: directCollision}); err == nil || !strings.Contains(err.Error(), "collides with authored canonical identity") {
 		t.Fatalf("AddFlowInstanceRoute direct collision error = %v, want fail-closed canonical collision", err)
 	}
@@ -262,7 +265,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 	if got := directRoutes.Resolve("producer/child/task.done"); len(got) != 0 {
 		t.Fatalf("direct static descendant route after rejected collision = %#v, want unchanged authority", got)
 	}
-	if got := directRoutes.Resolve("producer/inst-direct/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
+	if got := directRoutes.ResolveForRun(directSibling.RunID, "producer/inst-direct/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 		t.Fatalf("direct sibling route after rejected collision = %#v, want existing route unchanged", got)
 	}
 
@@ -297,17 +300,17 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if got := eb.RouteTable().Resolve("producer/child/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve static descendant before materialization = %#v, want no path-shaped template authority", got)
 			}
-			identity := runtimeflowidentity.StoredRoute("producer", "inst-1", "producer/inst-1")
+			identity := testRunScopedFlowRoute(runtimeflowidentity.StoredRoute("producer", "inst-1", "producer/inst-1"))
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
+			if got := eb.RouteTable().ResolveForRun(identity.RunID, "producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
 				t.Fatalf("Resolve materialized template event = %#v, want grant-backed worker route", got)
 			}
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 				t.Fatalf("exact EventBus identity replay: %v", err)
 			}
-			mismatchedIdentity := runtimeflowidentity.StoredRoute("worker", "other", identity.InstancePath)
+			mismatchedIdentity := testUncheckedRunScopedFlowRoute(runtimeflowidentity.StoredRoute("worker", "other", identity.Route.InstancePath))
 			if eb.RouteTable().HasFlowInstanceRoute(mismatchedIdentity) {
 				t.Fatal("EventBus mismatched identity was reported present")
 			}
@@ -315,19 +318,19 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 				t.Fatalf("EventBus mismatched add error = %v, want complete-owner conflict", err)
 			}
 			deleteCalls := len(store.deleteCalls)
-			if err := eb.RemoveFlowInstanceRoute(mismatchedIdentity); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
-				t.Fatalf("EventBus mismatched remove error = %v, want complete-owner conflict", err)
+			if err := eb.RemoveFlowInstanceRoute(mismatchedIdentity); err == nil || !strings.Contains(err.Error(), "identity is inconsistent") {
+				t.Fatalf("EventBus mismatched remove error = %v, want tuple validation failure", err)
 			}
 			if len(store.deleteCalls) != deleteCalls {
 				t.Fatalf("persistence delete calls = %#v, rejected removal must not reach persistence", store.deleteCalls)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
+			if got := eb.RouteTable().ResolveForRun(identity.RunID, "producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 				t.Fatalf("route after mismatched identity operations = %#v, want installed owner unchanged", got)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.failed"); len(got) != 0 {
+			if got := eb.RouteTable().ResolveForRun(identity.RunID, "producer/inst-1/task.failed"); len(got) != 0 {
 				t.Fatalf("Resolve non-intersecting template event = %#v, want no route", got)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 0 {
+			if got := eb.RouteTable().ResolveForRun(identity.RunID, "producer/inst-2/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve unmaterialized sibling instance = %#v, want no route", got)
 			}
 			if got := eb.RouteTable().Resolve("producer/inst-1/nested/task.done"); len(got) != 0 {
@@ -336,7 +339,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if got := eb.RouteTable().Resolve("producer/child/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve static descendant after materialization = %#v, want lifecycle provenance isolation", got)
 			}
-			collisionIdentity := runtimeflowidentity.DeriveRoute("producer", "child")
+			collisionIdentity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "child"))
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: collisionIdentity}); err == nil || !strings.Contains(err.Error(), "collides with authored canonical identity") {
 				t.Fatalf("AddFlowInstanceRoute canonical collision error = %v, want fail closed", err)
 			}
@@ -377,7 +380,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if got := store.deliveries[evt.ID()]; len(got) != 1 || got[0] != "worker-listener" {
 				t.Fatalf("persisted deliveries = %#v, want worker-listener", got)
 			}
-			secondIdentity := runtimeflowidentity.DeriveRoute("producer", "inst-2")
+			secondIdentity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "inst-2"))
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: secondIdentity}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute(inst-2): %v", err)
 			}
@@ -424,8 +427,8 @@ func TestImportBoundaryWildcardTemplateSourceAndConsumerLifecycleOrdersRemainExa
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
-			sourceIdentity := runtimeflowidentity.DeriveRoute("producer", "source-1")
-			consumerIdentity := runtimeflowidentity.DeriveRoute("worker", "consumer-1")
+			sourceIdentity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "source-1"))
+			consumerIdentity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "consumer-1"))
 			first := sourceIdentity
 			second := consumerIdentity
 			if !sourceFirst {
@@ -746,7 +749,7 @@ func TestImportBoundaryWildcardPreservesTemplateInstanceSubtree(t *testing.T) {
 		t.Fatalf("Resolve before materialization = %#v, want none", routes)
 	}
 	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute("worker", "inst-1"),
+		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "inst-1")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}

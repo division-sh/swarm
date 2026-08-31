@@ -76,8 +76,12 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		DeliveryStore:       pg,
 		FlowRoutes:          bus,
 	})
+	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
 
-	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+		RunID: templateInstanceDeliveryRunID,
+		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
+	}}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
@@ -129,7 +133,11 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
+	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+		RunID: templateInstanceDeliveryRunID,
+		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
+	}}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
@@ -173,6 +181,19 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 	`, 0, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
+}
+
+func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	// This scenario proves entityless system-node routing, so it establishes the
+	// exact route lifecycle owner without introducing an entity-state target.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (
+			run_id, instance_path, flow_template, mode, config, status, created_at
+		) VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb, $5, $6)
+	`, templateInstanceDeliveryRunID, "operating/inst-1", "operating", "template", "active", time.Now().UTC()); err != nil {
+		t.Fatalf("seed run-scoped template route owner: %v", err)
+	}
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
@@ -938,26 +959,26 @@ func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Co
 
 func (s routeMaterializationDBProofStore) ReplaceFlowInstanceRouteRecords(
 	ctx context.Context,
-	identity runtimeflowidentity.Route,
+	identity runtimeflowidentity.RunScopedFlowInstance,
 	routes []runtimebus.FlowInstanceRouteRecord,
 ) error {
 	return s.pg.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
-func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return s.pg.DeleteFlowInstanceRoute(ctx, identity)
 }
 
-func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
+func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return s.pg.ListFlowInstanceRoutes(ctx)
 }
 
-func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	return s.pg.ListFlowInstanceRouteRecords(ctx, identity)
 }
 
-func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return s.pg.ListActiveFlowInstanceDescriptors(ctx)
+func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return s.pg.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
@@ -1040,7 +1061,7 @@ func runtimeTestEventDiagnostics(ctx context.Context, db *sql.DB) string {
 			fmt.Fprintf(&out, "delivery event=%s subscriber=%s[%s] status=%s\n", eventType, subscriberType, subscriberID, status)
 		}
 	}
-	instanceRows, err := db.QueryContext(ctx, `SELECT flow_template, instance_id, status FROM flow_instances ORDER BY created_at, instance_id`)
+	instanceRows, err := db.QueryContext(ctx, `SELECT flow_template, instance_path, status FROM flow_instances ORDER BY created_at, run_id, instance_path`)
 	if err == nil {
 		defer instanceRows.Close()
 		for instanceRows.Next() {

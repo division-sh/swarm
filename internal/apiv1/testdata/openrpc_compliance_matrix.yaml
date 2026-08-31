@@ -20,7 +20,7 @@ policy:
 methods:
   - method: agent.diagnose
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -35,7 +35,7 @@ methods:
     gap_classification: []
   - method: agent.delivery_lifecycle
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -50,7 +50,7 @@ methods:
     gap_classification: []
   - method: agent.usage
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -65,7 +65,7 @@ methods:
     gap_classification: []
   - method: agent.delivery_diagnostics
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -80,7 +80,7 @@ methods:
     gap_classification: []
   - method: agent.get
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -125,7 +125,7 @@ methods:
     gap_classification: []
   - method: agent.replay
     transport: http
-    required_params: [event_id, agent_id]
+    required_params: [event_id, run_id, agent_id]
     declared_errors: [EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayProjectsSingletonEventReplayOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -140,7 +140,7 @@ methods:
     gap_classification: []
   - method: agent.restart
     transport: http
-    required_params: [agent_id]
+    required_params: [run_id, agent_id]
     declared_errors: [AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
@@ -155,8 +155,8 @@ methods:
     gap_classification: []
   - method: agent.send_directive
     transport: http
-    required_params: [agent_id, directive]
-    declared_errors: [AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE]
+    required_params: [agent_id, directive, run_id]
+    declared_errors: [AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -605,10 +605,10 @@ methods:
     gap_classification: []
   - method: entity.list
     transport: http
-    required_params: []
+    required_params: [run_id]
     declared_errors: []
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
-    required_param_validation: {status: not_applicable}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}

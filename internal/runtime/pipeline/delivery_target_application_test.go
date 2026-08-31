@@ -15,6 +15,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -113,7 +114,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 			if _, err := restarted.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
 				t.Fatalf("conflicting exact target error = %v", err)
 			}
-			sibling, exists, err := store.Load(ctx, testWorkflowInstanceRoute(siblingPath))
+			sibling, exists, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, siblingPath))
 			if err != nil || !exists || sibling.EntityID != siblingEntityID || sibling.Fields["account_id"] != "account-1" {
 				t.Fatalf("hostile conflict mutated sibling: found=%t err=%v instance=%#v", exists, err, sibling)
 			}
@@ -215,7 +216,7 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), "is missing at execution") {
 				t.Fatalf("missing exact target error = %v", err)
 			}
-			instances, err := pc.ListWorkflowInstances(ctx)
+			instances, err := pc.ListWorkflowInstances(ctx, testPipelineRunID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -375,7 +376,7 @@ func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothSt
 			}
 
 			route := runtimeflowidentity.StoredRoute("review", runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
-			persisted, found, err := store.LoadEntityState(ctx, route, runtimeidentity.NormalizeEntityID(entityID))
+			persisted, found, err := store.LoadEntityState(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))
 			var fields map[string]any
 			fieldsErr := json.Unmarshal(persisted.Fields, &fields)
 			if err != nil || !found || persisted.CurrentState != "active" || persisted.Revision != 1 || fieldsErr != nil || fields["marker"] != "unchanged" {
@@ -425,10 +426,10 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				name: "lifecycle-only", wantError: "lifecycle companion without state",
 				seed: func(t *testing.T, ctx context.Context, instancePath, _ string, _ *workflowInstanceStore, db *sql.DB) {
 					t.Helper()
-					query := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES (?, 'review', 'template', '{}', 'active', ?)`
-					args := []any{instancePath, time.Now().UTC()}
+					query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'review', 'template', '{}', 'active', ?)`
+					args := []any{runtimecorrelation.RunIDFromContext(ctx), instancePath, time.Now().UTC()}
 					if backend == "postgres" {
-						query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', $2)`
+						query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', $3)`
 					}
 					if _, err := db.ExecContext(ctx, query, args...); err != nil {
 						t.Fatalf("seed lifecycle-only target: %v", err)
@@ -462,10 +463,10 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					if err := store.upsert(ctx, instance); err != nil {
 						t.Fatalf("seed terminated target: %v", err)
 					}
-					query := `UPDATE flow_instances SET status = 'terminated', terminated_at = ? WHERE instance_id = ?`
-					args := []any{time.Now().UTC(), instancePath}
+					query := `UPDATE flow_instances SET status = 'terminated', terminated_at = ? WHERE run_id = ? AND instance_path = ?`
+					args := []any{time.Now().UTC(), runtimecorrelation.RunIDFromContext(ctx), instancePath}
 					if backend == "postgres" {
-						query = `UPDATE flow_instances SET status = 'terminated', terminated_at = $1 WHERE instance_id = $2`
+						query = `UPDATE flow_instances SET status = 'terminated', terminated_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
 					}
 					if _, err := db.ExecContext(ctx, query, args...); err != nil {
 						t.Fatalf("terminate target lifecycle: %v", err)
@@ -485,11 +486,11 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					if err := store.upsert(ctx, instance); err != nil {
 						t.Fatalf("seed draining target: %v", err)
 					}
-					query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = ?`
+					query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE run_id = ? AND instance_path = ?`
 					if backend == "postgres" {
-						query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = $1`
+						query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE run_id = $1::uuid AND instance_path = $2`
 					}
-					if _, err := db.ExecContext(ctx, query, instancePath); err != nil {
+					if _, err := db.ExecContext(ctx, query, runtimecorrelation.RunIDFromContext(ctx), instancePath); err != nil {
 						t.Fatalf("drain target lifecycle: %v", err)
 					}
 				},
@@ -534,7 +535,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					}
 					return
 				}
-				persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+				persisted, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
 				if err != nil || !found || persisted.Revision != 1 || persisted.Fields["marker"] != "unchanged" {
 					t.Fatalf("invalid lifecycle rejection mutated target: found=%t err=%v instance=%#v", found, err, persisted)
 				}
@@ -576,11 +577,11 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 				})); err != nil {
 					t.Fatalf("seed delayed target: %v", err)
 				}
-				query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = ?`
+				query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE run_id = ? AND instance_path = ?`
 				if backend == "postgres" {
-					query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = $1`
+					query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE run_id = $1::uuid AND instance_path = $2`
 				}
-				if _, err := db.ExecContext(ctx, query, instancePath); err != nil {
+				if _, err := db.ExecContext(ctx, query, runtimecorrelation.RunIDFromContext(ctx), instancePath); err != nil {
 					t.Fatalf("drain delayed target: %v", err)
 				}
 
@@ -615,7 +616,7 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 				replayBus := &recordingPipelineBus{}
 				execute("replayed after coordinator reconstruction", newCoordinator(replayBus), replayBus)
 
-				persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+				persisted, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
 				if err != nil || !found || persisted.Revision != 1 || persisted.Fields["marker"] != "unchanged" || persisted.Status != "draining" {
 					t.Fatalf("non-active replay changed target: found=%t err=%v instance=%#v", found, err, persisted)
 				}
@@ -694,7 +695,7 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 			if !result.Handled {
 				t.Fatal("entity-only pre-state handler was not handled")
 			}
-			instance, exists, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+			instance, exists, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
 			if err != nil || !exists {
 				t.Fatalf("load first-mutation workflow instance: found=%t err=%v", exists, err)
 			}
@@ -768,7 +769,7 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 			if err != nil || !exists || !fresh.StateCarrier.Gates["approved"] || fresh.StateCarrier.Fields["marker"] != "current" {
 				t.Fatalf("fresh immutable snapshot = %#v exists=%t err=%v", fresh, exists, err)
 			}
-			stored, exists, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+			stored, exists, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
 			if err != nil || !exists || stored.Gates["approved"] || !stored.Gates["review/approved"] || stored.Fields["marker"] != "current" {
 				t.Fatalf("durable state changed by execution projection: exists=%t err=%v instance=%#v", exists, err, stored)
 			}

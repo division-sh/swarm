@@ -39,7 +39,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			identity := testAgentIdentity(t, "agent-a", "global")
+			identity := mustTestAgentIdentityForRun(runID, "agent-a", "global")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
@@ -131,7 +131,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			identity := testAgentIdentity(t, "terminal-agent", "global")
+			identity := mustTestAgentIdentityForRun(runID, "terminal-agent", "global")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",

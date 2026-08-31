@@ -16,7 +16,6 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -366,12 +365,38 @@ func (am *AgentManager) MaterializeAdmittedAgentForExecution(ctx context.Context
 	if am == nil {
 		return errors.New("agent manager is required")
 	}
-	var err error
-	rec.Config, err = bindRuntimeCreatedIdentity(rec.Config, "manager.ephemeral_execution")
-	if err != nil {
+	if err := requireAdmittedAgentIdentity(ctx, rec.Config); err != nil {
 		return err
 	}
 	return am.spawnAgentInternal(ctx, rec, false)
+}
+
+// MaterializeAdmittedAgent commits the admitted agent lifecycle before
+// constructing its process-local execution. Callers must provide the complete
+// run-scoped identity and a sealed topology admission.
+func (am *AgentManager) MaterializeAdmittedAgent(ctx context.Context, rec PersistedAgent) error {
+	if am == nil {
+		return errors.New("agent manager is required")
+	}
+	if err := requireAdmittedAgentIdentity(ctx, rec.Config); err != nil {
+		return err
+	}
+	return am.spawnAgentInternal(ctx, rec, true)
+}
+
+func requireAdmittedAgentIdentity(ctx context.Context, cfg models.AgentConfig) error {
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		return fmt.Errorf("agent materialization requires complete live identity: %w", err)
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		return errors.New("agent materialization requires exact admitted run_id")
+	}
+	if identity.RunID != runID {
+		return fmt.Errorf("agent materialization identity run_id %s conflicts with admitted run_id %s", identity.RunID, runID)
+	}
+	return nil
 }
 
 func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAgent, persist bool) error {
@@ -487,32 +512,6 @@ func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, iden
 	return executableAgentReadiness{}, errors.New("agent executable readiness did not converge with manager phase")
 }
 
-func bindRuntimeCreatedIdentity(cfg models.AgentConfig, owner string) (models.AgentConfig, error) {
-	cfg.NormalizeRuntimeDescriptor()
-	if !cfg.Identity.IsZero() {
-		if _, err := cfg.ConcreteIdentity(); err != nil {
-			return models.AgentConfig{}, err
-		}
-		return cfg, nil
-	}
-	name, err := runtimeagentidentity.RuntimeName(cfg.ID, owner)
-	if err != nil {
-		return models.AgentConfig{}, err
-	}
-	route := runtimeagentidentity.RootRoute()
-	if flowPath := cfg.CanonicalFlowPath(); flowPath != "" {
-		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
-		if err != nil {
-			return models.AgentConfig{}, err
-		}
-	}
-	cfg.Identity, err = runtimeagentidentity.New(name, route)
-	if err != nil {
-		return models.AgentConfig{}, err
-	}
-	return cfg, nil
-}
-
 func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	ctx context.Context,
 	source semanticview.Source,
@@ -567,18 +566,25 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("agent config is required")
 	}
-	cfg.NormalizeRuntimeDescriptor()
-	configuredProfile, err := llmselection.ResolveActiveBackend(am.llmBackend)
-	if err != nil {
-		return fmt.Errorf("agent %s invalid configured llm backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(am.llmBackend), err)
+	return resolveAgentModel(cfg, am.llmBackend, am.modelAliases, am.requireModelResolution)
+}
+
+func resolveAgentModel(cfg *models.AgentConfig, llmBackend string, modelAliases llmselection.ModelAliases, requireModelResolution bool) error {
+	if cfg == nil {
+		return fmt.Errorf("agent config is required")
 	}
-	resolved, err := runtimellm.ResolveAgentExecution(configuredProfile, am.modelAliases, *cfg)
+	cfg.NormalizeRuntimeDescriptor()
+	configuredProfile, err := llmselection.ResolveActiveBackend(llmBackend)
+	if err != nil {
+		return fmt.Errorf("agent %s invalid configured llm backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(llmBackend), err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(configuredProfile, llmselection.EffectiveModelAliases(modelAliases), *cfg)
 	if err != nil {
 		return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(cfg.ID), err)
 	}
 	*cfg = resolved.Actor
 	if strings.TrimSpace(cfg.Model) == "" {
-		if am.requireModelResolution {
+		if requireModelResolution {
 			return fmt.Errorf("agent %s missing model", strings.TrimSpace(cfg.ID))
 		}
 		return nil

@@ -19,6 +19,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -71,8 +72,8 @@ func (s *faultingDirectiveIntegrationStore) setFault(fault directivePersistenceF
 	s.remaining = 1
 }
 
-func (s *faultingDirectiveIntegrationStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
-	return s.directiveIntegrationStore.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+func (s *faultingDirectiveIntegrationStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity) (runtimeagentcontrol.RunTargetResolution, error) {
+	return s.directiveIntegrationStore.ResolveAgentDirectiveRunTarget(ctx, identity)
 }
 
 func (s *faultingDirectiveIntegrationStore) takeFault(fault directivePersistenceFault) (directiveFaultMode, bool) {
@@ -401,8 +402,9 @@ func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t
 
 func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T) {
 	forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-		seedDirectiveAmbiguityRun(t, backend, "00000000-0000-0000-0000-000000001000")
-		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, backend.name == "postgres", testAgentIdentity(t, "agent-1", "directive/instance-1"), "active")
+		runID := "00000000-0000-0000-0000-000000001000"
+		seedDirectiveAmbiguityRun(t, backend, runID)
+		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, backend.name == "postgres", mustTestAgentIdentityForRun(runID, "agent-1", "directive/instance-1"), "active")
 		failureRaw, err := runtimefailures.MarshalEnvelope(runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure())
 		if err != nil {
 			t.Fatal(err)
@@ -463,7 +465,7 @@ func (h *directiveAmbiguityHarness) workContext(t *testing.T) context.Context {
 func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent) *directiveAmbiguityHarness {
 	t.Helper()
 	runID := uuid.NewString()
-	identity := testAgentIdentity(t, agent.id, "directive/"+agent.id)
+	identity := mustTestAgentIdentityForRun(runID, agent.id, "directive/"+agent.id)
 	seedDirectiveAmbiguityRun(t, backend, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
 	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{
@@ -503,7 +505,8 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		t.Fatalf("construct directive execution topology: %v", err)
 	}
 	rec.Status = "ephemeral"
-	if err := manager.MaterializeAdmittedAgentForExecution(testAuthorActivityContext(), rec); err != nil {
+	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	if err := manager.MaterializeAdmittedAgentForExecution(materializationCtx, rec); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
 	return &directiveAmbiguityHarness{
@@ -555,8 +558,10 @@ func (h *directiveAmbiguityHarness) expireLease(t *testing.T, operationID string
 func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtimeagentcontrol.DirectiveOperation {
 	t.Helper()
 	now := time.Now().UTC()
-	seedDirectiveAmbiguityRun(t, h.backend, "00000000-0000-0000-0000-000000001000")
-	req := directiveOperationReservationForIdentityTest(t, h.request.AgentID, h.request.FlowInstance, uuid.NewString(), uuid.NewString(), "", uuid.NewString(), now)
+	req := directiveOperationReservationForRunIdentityAndPostureTest(
+		t, h.request.RunID, h.request.AgentID, h.request.FlowInstance,
+		uuid.NewString(), uuid.NewString(), "", uuid.NewString(), now, executionposture.Live,
+	)
 	reserved, err := h.backend.store.ReserveDirectiveOperation(testAuthorActivityContext(), req)
 	if err != nil {
 		t.Fatalf("reserve keyless directive: %v", err)

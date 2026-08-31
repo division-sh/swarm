@@ -13,6 +13,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -326,11 +327,21 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eb.AbandonPreparedPublish(context.Background(), prepared) })
 
-	request := prepared.CommitRequest()
-	if got := request.Event.Event().TargetRoute().Normalized(); got != target {
+	request := prepared.SelectedForkCommitRequest(runfork.RunForkSelectedContractExecutionLineage{
+		ForkRunID: lineage.DestinationRunID(), SourceRunID: lineage.SourceRunID(), SourceEventID: lineage.SourceEventID(),
+		ForkEventID: evt.ID(), EventName: string(evt.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: evt.CreatedAt(),
+	})
+	if !request.HasAuthorScope || request.AuthorScope.Kind == "" {
+		t.Fatalf("selected-fork commit author scope = %#v present=%t, want exact scope", request.AuthorScope, request.HasAuthorScope)
+	}
+	if !request.HasAuthorDescriptor || request.AuthorDescriptor.EventType != eventType {
+		t.Fatalf("selected-fork commit author descriptor = %#v present=%t, want %s", request.AuthorDescriptor, request.HasAuthorDescriptor, eventType)
+	}
+	commit := request.Commit
+	if got := commit.Event.Event().TargetRoute().Normalized(); got != target {
 		t.Fatalf("selected-fork event target = %#v, want %#v", got, target)
 	}
-	if err := request.ValidatePreparedEvent(); err != nil {
+	if err := commit.ValidatePreparedEvent(); err != nil {
 		t.Fatalf("validate selected-fork prepared aggregate: %v", err)
 	}
 }

@@ -277,7 +277,7 @@ func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(_ context.C
 
 func (*directRecipientTransactionalStore) SupportsPersistedReplay() bool { return true }
 
-func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
 }
 
@@ -434,7 +434,7 @@ func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (b
 		"",
 		nil,
 		0,
-		"",
+		evt.RunID(),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
 		time.Now().UTC(),
@@ -511,7 +511,7 @@ func TestEngineDispatcherDoesNotConsumeAmbientSQLTransactionAuthority(t *testing
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -588,7 +588,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	recipients := []string{"agent-original"}
 	intents := []runtimeengine.EmitIntent{{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-queued-snapshot"),
-			events.EventType("custom.snapshot"), "", "", payload, 0, "", "", events.EventEnvelope{TargetSet: targetSet},
+			events.EventType("custom.snapshot"), "", "", payload, 0, runtimebustest.DefaultRunID, "", events.EventEnvelope{TargetSet: targetSet},
 			time.Now().UTC()),
 
 		Recipients: recipients,
@@ -727,7 +727,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 			"",
 			[]byte(`{"entity_id":"`+entityID+`"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 			time.Now().UTC(),
@@ -787,7 +787,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -868,7 +868,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 					"",
 					[]byte(`{"entity_id":"ent-claim"}`),
 					0,
-					"",
+					runtimebustest.DefaultRunID,
 					"",
 					events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-claim")),
 					time.Now().UTC(),
@@ -943,7 +943,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	}
 	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-same-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-same-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 
@@ -990,7 +990,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 	}
 	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-preexisting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-preexisting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 	writeAndDispatch := func(intents []runtimeengine.EmitIntent) {
@@ -1040,11 +1040,11 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	}
 	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-conflicting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("evt-conflicting-batch"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","value":"first"}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		Recipients: []string{"reviewer"},
 	}
 	conflict := intent
-	conflict.Event = eventtest.RunCreatingRootIngress(intent.Event.ID(), events.EventType("custom.conflicting"), "", "", []byte(`{"entity_id":"ent-1","value":"conflict"}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), intent.Event.CreatedAt())
+	conflict.Event = eventtest.RunCreatingRootIngress(intent.Event.ID(), events.EventType("custom.conflicting"), "", "", []byte(`{"entity_id":"ent-1","value":"conflict"}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), intent.Event.CreatedAt())
 
 	mock.ExpectBegin()
 	mock.ExpectRollback()
@@ -1113,8 +1113,8 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	}
 	reviewer := runtimebustest.Subscribe(t, eb, "reviewer")
 	intents := []runtimeengine.EmitIntent{
-		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-1"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
-		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-2"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
+		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-1"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":1}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
+		{Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-distinct-2"), events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1","ordinal":2}`), 0, runtimebustest.DefaultRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()), Recipients: []string{"reviewer"}},
 	}
 	mock.ExpectBegin()
 	mock.ExpectCommit()
@@ -1203,7 +1203,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	}
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-outbox-materialized-route"),
-			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, runtimebustest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -1260,7 +1260,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -1329,7 +1329,7 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 			"",
 			[]byte(`{}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("missing-entity"), FlowInstance: "missing-flow"}),
 			time.Now().UTC(),
@@ -1382,7 +1382,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -1454,7 +1454,7 @@ func TestEngineOutboxAndDispatcher_DoesNotFabricateRoutesForPendingInternalDeliv
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -1527,7 +1527,7 @@ func TestEngineDispatcherFailsClosedWithoutPreparedEventAuthority(t *testing.T) 
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -1623,7 +1623,7 @@ func TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence(t *testin
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			runtimebustest.DefaultRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
@@ -1678,7 +1678,7 @@ func TestPublishDirectRejectsFilteredExplicitRecipient(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(
-		eventtest.UUID("evt-filtered-direct-mutation"), events.EventType("human_task.approved"), "runtime", "", []byte(`{}`), 0, "", "",
+		eventtest.UUID("evt-filtered-direct-mutation"), events.EventType("human_task.approved"), "runtime", "", []byte(`{}`), 0, runtimebustest.DefaultRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("wrong-entity"), FlowInstance: "wrong-flow"}),
 		time.Now().UTC(),
 	)

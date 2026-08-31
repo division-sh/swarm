@@ -125,7 +125,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	seedFanInBarrierRun(t, ctx, backend, storetest.Database(backend), runID)
 	runtime := newFanInBarrierRuntime(t, backend, storetest.Database(backend), source)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
+	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(templatefanin.ReceiverFlowInstance)}, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
 		StorageRef:      templatefanin.ReceiverFlowInstance,
 		EntityID:        runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
@@ -284,7 +284,7 @@ func fanInStreamSelectedOwner() string {
 	return eventtest.UUID("fan-in-stream-selected-owner")
 }
 
-func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context) ([]bus.ActiveTargetDescriptor, error) {
+func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
 	return []bus.ActiveTargetDescriptor{{
 		ID: "portfolio", FlowInstance: templatefanin.ReceiverFlowInstance, EntityID: fanInStreamSelectedOwner(),
 	}}, nil

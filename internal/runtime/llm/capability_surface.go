@@ -43,10 +43,24 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 	if err != nil {
 		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn actor identity: %w", err)
 	}
-	sessionIdentity := session.MemoryIdentity.Agent.Normalize()
+	sessionIdentity := session.MemoryIdentity.Normalize()
 	sameSessionActor, sessionIdentityErr := runtimeagentidentity.Equal(actorIdentity, sessionIdentity)
-	if sessionIdentityErr != nil || !sameSessionActor || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
-		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn session actor mismatch")
+	if sessionIdentityErr != nil {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn session identity: %w", sessionIdentityErr)
+	}
+	if !sameSessionActor {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf(
+			"managed capability provider turn actor %s does not match session actor %s",
+			actorIdentity.Description(),
+			sessionIdentity.Description(),
+		)
+	}
+	if strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf(
+			"managed capability provider turn session agent_id %q does not match actor %q",
+			strings.TrimSpace(session.AgentID),
+			actorIdentity.AgentID(),
+		)
 	}
 	if existing, ok := providerTurnAuthorityFromContext(ctx); ok {
 		if existing.Kind != managedcapabilities.AuthorityProviderTurn ||
@@ -160,7 +174,7 @@ func managedCapabilityPlanForTurn(ctx context.Context, runtime Runtime, session 
 	if session == nil || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires exact session actor")
 	}
-	if equal, equalErr := runtimeagentidentity.Equal(session.MemoryIdentity.Agent, actorIdentity); equalErr != nil || !equal {
+	if equal, equalErr := runtimeagentidentity.Equal(session.MemoryIdentity, actorIdentity); equalErr != nil || !equal {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface session identity mismatch")
 	}
 	authority, ok := providerTurnAuthorityFromContext(ctx)

@@ -93,7 +93,7 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
 				t.Fatalf("arm selected-store join: %v", err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load after rejected ownerless join = %v, %v", ok, err)
 			}
@@ -137,7 +137,7 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 				t.Fatal(err)
 			}
 			route := testWorkflowInstanceRoute(path)
-			instance, found, err := store.Load(ctx, route)
+			instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 			if err != nil || !found {
 				t.Fatalf("load workflow instance: found=%v err=%v", found, err)
 			}
@@ -200,7 +200,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute("orders/order-1"), entityID); err != nil {
 				t.Fatalf("arm join: %v", err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute("orders/order-1"))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "orders/order-1"))
 			if err != nil || !ok {
 				t.Fatalf("load instance = %v, %v", ok, err)
 			}
@@ -260,7 +260,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
 				t.Fatal(err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load = %v, %v", ok, err)
 			}
@@ -314,7 +314,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
 				t.Fatalf("arm custom join: %v", err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load custom join = %v, %v", ok, err)
 			}
@@ -427,7 +427,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load before stage transition = %v, %v", ok, err)
 			}
@@ -436,7 +436,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err := commitTestWorkflowLifecycleMutation(ctx, pc, testWorkflowInstanceRoute(path), instance, "awaiting", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
 				t.Fatal(err)
 			}
-			instance, ok, err = store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err = store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load stage-scoped joins = %v, %v", ok, err)
 			}
@@ -630,7 +630,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 					}
 				}
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load final instance = %v, %v", ok, err)
 			}
@@ -717,7 +717,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 					t.Fatalf("arrival error = %v, envelope=%#v", err, envelope)
 				}
 			}
-			instance, ok, loadErr := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, loadErr := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if loadErr != nil || !ok {
 				t.Fatalf("load = %v, %v", ok, loadErr)
 			}
@@ -807,7 +807,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			}
 			assertClass(deliver(pc, "b-stale", "b", "two"), runtimefailures.ClassStaleArrival)
 
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load = %v, %v", ok, err)
 			}
@@ -891,7 +891,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if len(committedSchedules) != 1 || committedSchedules[0].Command.EventType != joinCompleteEvent {
 				t.Fatalf("closed-operation completion schedules = %#v", committedSchedules)
 			}
-			armed, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			armed, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load armed zero join = %v, %v", ok, err)
 			}
@@ -912,7 +912,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if _, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)}); err != nil {
 				t.Fatalf("duplicate completion fire: %v", err)
 			}
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load = %v, %v", ok, err)
 			}
@@ -989,7 +989,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("completion cancellations = %#v", cancellations)
 			}
 
-			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok {
 				t.Fatalf("load exited instance = %v, %v", ok, err)
 			}
@@ -1007,7 +1007,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			if err != nil || result.Handled {
 				t.Fatalf("late discarded completion fire = handled:%v err:%v, want unhandled", result.Handled, err)
 			}
-			instance, ok, err = store.Load(ctx, testWorkflowInstanceRoute(path))
+			instance, ok, err = store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
 			if err != nil || !ok || instance.CurrentState != "dispatching" || len(instance.TransitionHistory) != 1 {
 				t.Fatalf("lifecycle after late completion = instance:%#v found:%v err:%v", instance, ok, err)
 			}

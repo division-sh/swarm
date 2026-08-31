@@ -359,7 +359,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		createdAt,
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	identity := agentidentitytest.RootDeclared(t, agentID, completeEventAgentOwnerURI(agentID))
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, completeEventAgentOwnerURI(agentID))
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
 		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
@@ -567,6 +567,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		WorkOwner:         owner,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.store)
+	f.bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	generation := &completeEventDispatchGeneration{manager: manager, process: process, owner: owner}
 	t.Cleanup(func() {
 		if err := generation.close(); err != nil {

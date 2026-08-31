@@ -12,6 +12,8 @@ import (
 	"testing"
 )
 
+const agentReplayTestRunID = "00000000-0000-0000-0000-000000000001"
+
 func TestAgentReplayUsesV1RPCWithEventIDAndIdempotencyKey(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
@@ -33,6 +35,7 @@ func TestAgentReplayUsesV1RPCWithEventIDAndIdempotencyKey(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"agent", "replay", "agent-1",
 		"--event-id", "event-1",
+		"--run-id", agentReplayTestRunID,
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
@@ -44,6 +47,7 @@ func TestAgentReplayUsesV1RPCWithEventIDAndIdempotencyKey(t *testing.T) {
 	wantParams := map[string]any{
 		"agent_id":        "agent-1",
 		"event_id":        "event-1",
+		"run_id":          agentReplayTestRunID,
 		"idempotency_key": "idem-1",
 	}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
@@ -82,11 +86,11 @@ func TestAgentReplayOmitsIdempotencyKeyWhenNotProvided(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	wantParams := map[string]any{"agent_id": "agent-1", "event_id": "event-1"}
+	wantParams := map[string]any{"agent_id": "agent-1", "event_id": "event-1", "run_id": agentReplayTestRunID}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
@@ -106,12 +110,13 @@ func TestAgentReplayRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "replay", "--event-id", "event-1"}, wantStderr: "requires <agent-id>"},
-		{name: "blank id", args: []string{"agent", "replay", "  ", "--event-id", "event-1"}, wantStderr: "agent id is required"},
-		{name: "missing event id", args: []string{"agent", "replay", "agent-1"}, wantStderr: "--event-id is required"},
-		{name: "blank event id", args: []string{"agent", "replay", "agent-1", "--event-id", "  "}, wantStderr: "--event-id is required"},
-		{name: "extra arg", args: []string{"agent", "replay", "agent-1", "extra", "--event-id", "event-1"}, wantStderr: "accepts one argument"},
-		{name: "unsupported flag", args: []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--unknown"}, wantStderr: "unknown flag"},
+		{name: "missing id", args: []string{"agent", "replay", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, wantStderr: "requires <agent-id>"},
+		{name: "blank id", args: []string{"agent", "replay", "  ", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, wantStderr: "agent id is required"},
+		{name: "missing event id", args: []string{"agent", "replay", "agent-1", "--run-id", agentReplayTestRunID}, wantStderr: "--event-id is required"},
+		{name: "blank event id", args: []string{"agent", "replay", "agent-1", "--event-id", "  ", "--run-id", agentReplayTestRunID}, wantStderr: "--event-id is required"},
+		{name: "missing run id", args: []string{"agent", "replay", "agent-1", "--event-id", "event-1"}, wantStderr: "--run-id is required"},
+		{name: "extra arg", args: []string{"agent", "replay", "agent-1", "extra", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, wantStderr: "accepts one argument"},
+		{name: "unsupported flag", args: []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--run-id", agentReplayTestRunID, "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -140,7 +145,7 @@ func TestAgentReplayFailClosedWithoutToken(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -173,7 +178,7 @@ func TestAgentReplayMapsFailureExitCodes(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			exit := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			exit := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, &stdout, &stderr, testRootCommandOptions(server))
 			if exit != 6 {
 				t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
 			}
@@ -280,7 +285,7 @@ func TestAgentReplayMapsFailureExitCodes(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--run-id", agentReplayTestRunID}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}

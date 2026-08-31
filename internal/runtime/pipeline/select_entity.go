@@ -99,6 +99,7 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 	}
 	candidates, err := pc.workflowStore.selectActiveByFields(
 		ctx,
+		runID,
 		runtimeflowidentity.ScopeKey(source, flowID),
 		selectEntityFieldSelectors(expected),
 		terminalStages,
@@ -137,7 +138,11 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, selected); err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s: %w", label, nodeID, flowID, err)
 	}
-	state, err := pc.currentWorkflowState(ctx, route, entityID)
+	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
+	if err != nil {
+		return selectedHandlerEntity{}, err
+	}
+	state, err := pc.currentWorkflowState(ctx, flowOwner, entityID)
 	if err != nil {
 		return selectedHandlerEntity{}, err
 	}
@@ -199,7 +204,11 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	if entityID == "" {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s derived empty entity_id", nodeID, flowID)
 	}
-	if existing, ok, err := pc.workflowStore.Load(ctx, instance.Route()); err != nil {
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), instance.Route())
+	if err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", nodeID, flowID, err)
+	}
+	if existing, ok, err := pc.workflowStore.Load(ctx, flowIdentity); err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	} else if ok {
 		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || !selectEntityCandidateMatches(existing, expected) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, existing) {

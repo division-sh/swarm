@@ -1,0 +1,13 @@
+name: worker-flow
+mode: template
+instance: worker_id
+initial_state: idle
+terminal_states: [complete]
+states: [idle, complete]
+pins:
+  inputs:
+    events:
+      - event: worker.ready
+        source: external
+  outputs:
+    events: [worker.observed]

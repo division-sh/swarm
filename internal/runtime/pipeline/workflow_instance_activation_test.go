@@ -43,7 +43,7 @@ type concurrentWorkflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
-func (o *workflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+func (o *workflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ runtimeflowidentity.RunScopedFlowInstance, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
 	return PreparedWorkflowLifecycleMutation{Emissions: make([]runtimeengine.EmitIntent, o.emissions)}, nil
 }
 
@@ -58,12 +58,12 @@ func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testi
 		Fields:     map[string]any{},
 		EntityType: "test_entity",
 	}
-	if _, err := store.MaterializeInitialEntry(ctx, instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
+	if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
 		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
 	} else if !strings.Contains(err.Error(), "lifecycle emissions outside its atomic commit") {
 		t.Fatalf("initial materialization error = %v", err)
 	}
-	if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef)); err != nil || found {
+	if _, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef)); err != nil || found {
 		t.Fatalf("rejected initial materialization persisted state: found=%v err=%v", found, err)
 	}
 }
@@ -73,7 +73,7 @@ func (o *workflowInitialMaterializationTestOwner) FinalizeWorkflowLifecycleMutat
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+func (*concurrentWorkflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ runtimeflowidentity.RunScopedFlowInstance, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
 	return PreparedWorkflowLifecycleMutation{}, nil
 }
 
@@ -90,27 +90,27 @@ func (o *concurrentWorkflowInitialMaterializationTestOwner) effectCount() int {
 	return o.effects
 }
 
-func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
+func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
@@ -161,23 +161,23 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				EntityType: "test_entity",
 			}
 
-			first, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			first, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt)
 			if err != nil {
 				t.Fatalf("first MaterializeInitialEntry: %v", err)
 			}
 			if first != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization = %d, want created", first)
 			}
-			persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
+			persisted, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
 			if err != nil {
 				t.Fatalf("load persisted initial materialization: %v", err)
 			}
 			if !found {
 				t.Fatal("persisted initial materialization not found")
 			}
-			rejectVersionOne := `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = ? AND instance_id = ?`
+			rejectVersionOne := `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = ? AND instance_path = ?`
 			if !store.isSQLite() {
-				rejectVersionOne = `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = $1::uuid AND instance_id = $2`
+				rejectVersionOne = `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = $1::uuid AND instance_path = $2`
 			}
 			if _, err := store.testDB().ExecContext(ctx, rejectVersionOne, runID, instance.StorageRef); err == nil {
 				t.Fatal("fresh selected-store schema accepted retired initial materialization projection version 1")
@@ -203,7 +203,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if err := store.upsert(ctx, progressed); err != nil {
 				t.Fatalf("persist legitimate workflow progress: %v", err)
 			}
-			replay, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			replay, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt)
 			if err != nil {
 				t.Fatalf("replay initial creation after workflow progress: %v", err)
 			}
@@ -213,7 +213,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if owner.effects != 1 {
 				t.Fatalf("initial-entry effects = %d, want exactly 1", owner.effects)
 			}
-			afterReplay, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
+			afterReplay, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load progressed workflow after replay: found=%v err=%v", found, err)
 			}
@@ -223,14 +223,14 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 
 			conflict := instance
 			conflict.CurrentState = "active"
-			if _, err := store.MaterializeInitialEntry(ctx, conflict, occurredAt); err == nil {
+			if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, conflict.StorageRef), conflict, occurredAt); err == nil {
 				t.Fatal("conflicting replay succeeded")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
 			}
 			contractConflict := instance
 			contractConflict.EntityType = "different_entity_contract"
-			if _, err := store.MaterializeInitialEntry(ctx, contractConflict, occurredAt); err == nil {
+			if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, contractConflict.StorageRef), contractConflict, occurredAt); err == nil {
 				t.Fatal("conflicting entity contract replay succeeded")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("conflicting entity contract replay failure = %#v, want conflicting duplicate", failure)
@@ -246,20 +246,20 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if _, err := store.testDB().ExecContext(ctx, deleteEntityQuery, runID, instance.StorageRef); err != nil {
 				t.Fatalf("remove materialized entity state: %v", err)
 			}
-			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+			if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt); err == nil {
 				t.Fatal("creation replay accepted an incomplete persisted snapshot")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("incomplete snapshot failure = %#v, want conflicting duplicate", failure)
 			}
 
-			deleteQuery := `DELETE FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_id = ?`
+			deleteQuery := `DELETE FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_path = ?`
 			if !store.isSQLite() {
-				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_id = $2`
+				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_path = $2`
 			}
 			if _, err := store.testDB().ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
 				t.Fatalf("remove immutable creation record: %v", err)
 			}
-			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+			if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt); err == nil {
 				t.Fatal("creation replay inferred identity after immutable record was removed")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("missing creation record failure = %#v, want conflicting duplicate", failure)
@@ -312,7 +312,8 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	results := make(chan materializationResult, 2)
 	for range 2 {
 		go func() {
-			result, err := store.MaterializeInitialEntry(ctx, newInstance(), occurredAt)
+			instance := newInstance()
+			result, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt)
 			results <- materializationResult{result: result, err: err}
 		}()
 	}
@@ -416,6 +417,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				Agents: []DynamicFlowRuntimeAgentExpectation{
 					{
 						Identity: runtimeagentidentity.Identity{
+							RunID: runID,
 							Name: runtimeagentidentity.Name{
 								AgentID: "reviewer-inst-1",
 								Owner:   "agent://review/reviewer",
@@ -432,6 +434,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 					},
 					{
 						Identity: runtimeagentidentity.Identity{
+							RunID: runID,
 							Name: runtimeagentidentity.Name{
 								AgentID: "writer-inst-1",
 								Owner:   "agent://review/writer",
@@ -474,7 +477,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				EntityType: "test_entity",
 			}
 
-			result, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			result, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization: result=%d err=%v", result, err)
 			}
@@ -488,7 +491,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if !readiness.TopologyReadyAt.IsZero() || !readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("new readiness already completed: %#v", readiness)
 			}
-			result, err = store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			result, err = store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt)
 			if err != nil || result != WorkflowInitialMaterializationAlreadyExists {
 				t.Fatalf("exact replay: result=%d err=%v", result, err)
 			}
@@ -580,19 +583,28 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 
 			noAutoPlan := plan
+			noAutoPlan.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)
 			noAutoPlan.Identity = runtimeflowidentity.Instance{
 				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-no-auto",
 				InstancePath: "review/inst-no-auto", EntityID: uuid.NewString(), HasStoredPath: true,
 			}
 			noAutoPlan.BundleHash, noAutoPlan.BundleSource = revisedSourceFact.StorageValues()
 			noAutoPlan.CreationEvent = nil
+			noAutoAgentRoute, err := noAutoPlan.Identity.Route().AgentIdentityRoute()
+			if err != nil {
+				t.Fatalf("no-auto agent route: %v", err)
+			}
+			for idx := range noAutoPlan.Agents {
+				noAutoPlan.Agents[idx].Identity.RunID = runID
+				noAutoPlan.Agents[idx].Identity.Route = noAutoAgentRoute
+			}
 			noAutoInstance := instance
 			noAutoInstance.InstanceID = noAutoPlan.Identity.InstanceID
 			noAutoInstance.StorageRef = noAutoPlan.Identity.InstancePath
 			noAutoInstance.EntityID = noAutoPlan.Identity.EntityID
 			noAutoInstance.RuntimeReadiness = &noAutoPlan
 			noAutoInstance.Fields = map[string]any{}
-			if result, err := store.MaterializeInitialEntry(revisedCtx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
+			if result, err := store.MaterializeInitialEntry(revisedCtx, testRunScopedWorkflowInstanceFromContext(revisedCtx, noAutoInstance.StorageRef), noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("no-auto materialization: result=%d err=%v", result, err)
 			}
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, noAutoPlan, readyAt); err != nil {
@@ -634,7 +646,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				runlifecyclefixture.RequirePostgres(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
 			}
 			nextPlan := plan
+			nextPlan.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)
 			nextPlan.RunID = nextRunID
+			for idx := range nextPlan.Agents {
+				nextPlan.Agents[idx].Identity.RunID = nextRunID
+			}
 			nextCreationEvent := *plan.CreationEvent
 			nextCreationEvent.EventID = uuid.NewString()
 			nextCreationEvent.RunID = nextRunID
@@ -644,7 +660,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			nextInstance := instance
 			nextInstance.RuntimeReadiness = &nextPlan
 			nextContext := runtimecorrelation.WithRunID(ctx, nextRunID)
-			result, err = store.MaterializeInitialEntry(nextContext, nextInstance, occurredAt.Add(time.Hour))
+			result, err = store.MaterializeInitialEntry(nextContext, testRunScopedWorkflowInstanceFromContext(nextContext, nextInstance.StorageRef), nextInstance, occurredAt.Add(time.Hour))
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("successor generation materialization: result=%d err=%v", result, err)
 			}
@@ -700,7 +716,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			changed.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)
 			changed.Agents[0].ConfigRevision = strings.Repeat("c", 64)
 			instance.RuntimeReadiness = &changed
-			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+			if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, occurredAt); err == nil {
 				t.Fatal("changed readiness plan replay succeeded")
 			}
 		})
@@ -846,7 +862,7 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: store,
 		instanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			_, err := store.MaterializeInitialEntry(ctx, WorkflowInstance{
+			_, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, req.Instance.InstancePath), WorkflowInstance{
 				InstanceID:      req.Instance.InstanceID,
 				StorageRef:      req.Instance.InstancePath,
 				EntityID:        req.Instance.EntityID,
@@ -1603,7 +1619,7 @@ states: [initializing, ready]
 		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
 	}
 
-	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("operating/inst-1"))
+	instance, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "operating/inst-1"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

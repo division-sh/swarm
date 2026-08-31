@@ -30,6 +30,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -39,6 +40,8 @@ import (
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
+
+const operatorReplayRunID = "00000000-0000-4000-8000-000000002279"
 
 func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
@@ -269,6 +272,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			t.Run(tc.name+"/"+routeShape.name, func(t *testing.T) {
 				ctx := testAuthorActivityContext(context.Background())
 				f := tc.open(t, ctx)
+				runID := uuid.NewString()
 				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
 					ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
 				})
@@ -276,11 +280,10 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				const agentID = "complete-replay-agent"
-				agentIdentity := runtimebustest.Identity(t, agentID, "target-flow/instance")
+				agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
 				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
 				defer runtimebustest.Unsubscribe(bus, agentID)
 
-				runID := uuid.NewString()
 				parentID := uuid.NewString()
 				originalID := uuid.NewString()
 				entityID := uuid.NewString()
@@ -290,29 +293,29 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID, auditEntityID)
-				if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+				if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
 						Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 					}),
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
-				}); err != nil {
+				}, runStartTestBundleSourceFact()); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
 				var auditCh <-chan *runtimebus.LocalDelivery
-				auditIdentity := runtimebustest.Identity(t, "complete-replay-auditor", "audit-flow/instance")
+				auditIdentity := runtimebustest.IdentityForRun(t, runID, "complete-replay-auditor", "audit-flow/instance")
 				if routeShape.fanOut {
 					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
 					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
-					if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+					if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
 							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
 							Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 						}),
 						Status: "active", HiredBy: "test", StartedAt: createdAt,
-					}); err != nil {
+					}, runStartTestBundleSourceFact()); err != nil {
 						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
 					}
 				}
@@ -488,6 +491,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
+			runID := uuid.NewString()
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
 				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
 			})
@@ -495,16 +499,15 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			const agentID = "route-sibling-replay-agent"
-			identity := runtimebustest.Identity(t, agentID, "target-flow/instance")
+			identity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
 			ch := subscribeOperatorReplayIdentity(t, bus, identity)
 			defer runtimebustest.UnsubscribeIdentity(bus, identity)
 
-			runID := uuid.NewString()
 			parentID := uuid.NewString()
 			originalID := uuid.NewString()
 			createdAt := time.Unix(1700001400, 0).UTC()
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
-			if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+			if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
 					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
@@ -512,7 +515,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 				}),
 				Status: "active", HiredBy: "test", StartedAt: createdAt,
-			}); err != nil {
+			}, runStartTestBundleSourceFact()); err != nil {
 				t.Fatalf("UpsertAgent(%s): %v", identity, err)
 			}
 			firstProjection, err := events.NewDeliveryPayloadProjection(map[string]string{"route_marker": "first"})
@@ -631,7 +634,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				}
 			}
 
-			agentResponse := rpcCall(t, handler, agentReplayBody(originalID, agentID, "exact-agent-routes-"+tc.name))
+			agentResponse := rpcCall(t, handler, agentReplayBodyWithRun(originalID, runID, agentID, "exact-agent-routes-"+tc.name))
 			if agentResponse.Error != nil {
 				t.Fatalf("agent.replay error = %#v", agentResponse.Error)
 			}
@@ -965,11 +968,11 @@ func seedCompleteReplayRun(t testing.TB, ctx context.Context, db *sql.DB, sqlite
 	t.Helper()
 	if sqlite {
 		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: runID, StartedAt: startedAt,
+			RunID: runID, StartedAt: startedAt, BundleHash: runStartTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
 		})
 	} else {
 		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: runID, StartedAt: startedAt,
+			RunID: runID, StartedAt: startedAt, BundleHash: runStartTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
 		})
 	}
 }
@@ -1516,7 +1519,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
 	t.Helper()
 	eventID := uuid.NewString()
-	runID := uuid.NewString()
+	runID := operatorReplayRunID
 	storetest.RequirePostgresRun(t, ctx, storetest.DatabaseForTest(pg), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,
@@ -1582,7 +1585,11 @@ func eventReplayBody(eventID string, subscribers []string, idempotencyKey string
 }
 
 func agentReplayBody(eventID, agentID, idempotencyKey string) string {
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-replay","method":"agent.replay","params":{"event_id":%q,"agent_id":%q,"idempotency_key":%q}}`, eventID, agentID, idempotencyKey)
+	return agentReplayBodyWithRun(eventID, operatorReplayRunID, agentID, idempotencyKey)
+}
+
+func agentReplayBodyWithRun(eventID, runID, agentID, idempotencyKey string) string {
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-replay","method":"agent.replay","params":{"event_id":%q,"agent_id":%q,"run_id":%q,"idempotency_key":%q}}`, eventID, agentID, runID, idempotencyKey)
 }
 
 func assertReplayEventDelivered(t *testing.T, ch <-chan *runtimebus.LocalDelivery, replayEventID, originalEventID string) {
@@ -1601,8 +1608,8 @@ func assertNoReplayEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery) {
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, eventtest.RunCreatingRootIngress(uuid.NewString(),
-			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
+		err := bus.PublishDirect(ctx, eventtest.ExistingRunRootIngress(uuid.NewString(),
+			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
 		}
@@ -1730,7 +1737,7 @@ func stringSliceValue(t *testing.T, value any, field string) []string {
 
 func operatorReplayAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
 	t.Helper()
-	return runtimebustest.Identity(t, agentID, "operator-replay/"+agentID)
+	return runtimebustest.IdentityForRun(t, operatorReplayRunID, agentID, "operator-replay/"+agentID)
 }
 
 func seedActiveOperatorReplayAgent(
@@ -1740,7 +1747,7 @@ func seedActiveOperatorReplayAgent(
 	agentID string,
 ) {
 	t.Helper()
-	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, owner, agentID, operatorReplayAgentIdentity(t, agentID).FlowInstance())
+	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, operatorReplayRunID, agentID, operatorReplayAgentIdentity(t, agentID).FlowInstance())
 }
 
 func subscribeOperatorReplayAgent(

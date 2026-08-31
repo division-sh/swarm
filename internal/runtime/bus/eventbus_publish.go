@@ -28,6 +28,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -382,6 +383,9 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations); err != nil {
 		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
 	}
+	if err := eb.finalizeCommittedAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes()); err != nil {
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
+	}
 	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 	}
@@ -433,6 +437,30 @@ func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
 		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
 			return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
 		}
+	}
+	return nil
+}
+
+func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
+	routes = events.NormalizeDeliveryRoutes(routes)
+	hasAgent := false
+	for _, route := range routes {
+		if route.Recipient.IsAgent() {
+			hasAgent = true
+			break
+		}
+	}
+	if !hasAgent {
+		return nil
+	}
+	eb.mu.RLock()
+	finalizer := eb.agentReadinessFinalizer
+	eb.mu.RUnlock()
+	if finalizer == nil {
+		return errors.New("committed agent readiness finalizer is unavailable")
+	}
+	if err := finalizer.FinalizeCommittedAgentReadiness(ctx, event, routes); err != nil {
+		return fmt.Errorf("finalize committed agent readiness for event %s: %w", event.ID(), err)
 	}
 	return nil
 }
@@ -603,32 +631,37 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 		ctx,
 		table,
 		lister,
+		plans[0].Readiness.RunID,
 		nil,
-		runtimeflowidentity.Route{},
+		runtimeflowidentity.RunScopedFlowInstance{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("derive active route topology before activation: %w", err)
 	}
-	byPath := make(map[string]runtimeflowidentity.Route, len(identities)+len(plans))
+	byIdentity := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(identities)+len(plans))
 	for _, identity := range identities {
-		byPath[identity.InstancePath] = identity
+		byIdentity[identity] = struct{}{}
 	}
 	for index, plan := range plans {
+		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
+		if err != nil {
+			return nil, fmt.Errorf("compose publication activation route %d: %w", index, err)
+		}
 		request := FlowInstanceRouteMaterializationRequest{
-			Identity:            plan.Identity.Route(),
+			Identity:            identity,
 			ActivationVariables: plan.ActivationVariables,
 		}
 		if err := staged.AddFlowInstanceRoute(request); err != nil {
 			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
 		}
-		identity := request.Normalized().Identity
-		byPath[identity.InstancePath] = identity
+		identity = request.Normalized().Identity
+		byIdentity[identity] = struct{}{}
 	}
 	identities = identities[:0]
-	for _, identity := range byPath {
+	for identity := range byIdentity {
 		identities = append(identities, identity)
 	}
-	sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
+	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
 	return flowInstanceRouteTopologyRecordSets(staged, identities), nil
 }
 
@@ -689,6 +722,10 @@ type PreparedPublish struct {
 	providerRawSettlement providerRawSettlementAdmission
 	receiver              receiverDispatchProjection
 	committedHandoffs     []runtimedelivery.DurableHandoffProof
+	authorScope           runtimeauthoractivity.Scope
+	hasAuthorScope        bool
+	authorDescriptor      runtimeauthoractivity.EventDescriptor
+	hasAuthorDescriptor   bool
 }
 
 func validateEventAppendOutcome(outcome EventAppendOutcome) error {
@@ -732,6 +769,19 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		request.DeadLetter = &record
 	}
 	return request
+}
+
+// SelectedForkCommitRequest carries the exact semantic evidence resolved by
+// selected-fork publication preparation into its named atomic store owner.
+func (p PreparedPublish) SelectedForkCommitRequest(lineage runfork.RunForkSelectedContractExecutionLineage) CommitSelectedForkEventRequest {
+	return CommitSelectedForkEventRequest{
+		Commit:              p.CommitRequest(),
+		Lineage:             lineage,
+		AuthorScope:         p.authorScope,
+		HasAuthorScope:      p.hasAuthorScope,
+		AuthorDescriptor:    p.authorDescriptor,
+		HasAuthorDescriptor: p.hasAuthorDescriptor,
+	}
 }
 
 func (eb *EventBus) routeSettlementForPlan(evt, inbound events.Event, plan RoutePlan, class events.EventWriteClass, providerRaw providerRawSettlementAdmission) (events.RouteSettlement, error) {
@@ -842,6 +892,11 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if err != nil {
 		return PreparedPublish{}, err
 	}
+	authorDescriptor, hasAuthorDescriptor, err := publicationAuthorDescriptor(preparedCtx, evt)
+	if err != nil {
+		return PreparedPublish{}, err
+	}
+	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(preparedCtx)
 	publicationClaim, err := eb.claimPipelinePublication(preparedCtx, evt.ID())
 	if err != nil {
 		return PreparedPublish{}, err
@@ -869,6 +924,8 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		Event: evt, admitted: admitted, plan: plan,
 		publicationClaim:   publicationClaim,
 		targetFailureInput: targetFailureInput,
+		authorScope:        authorScope, hasAuthorScope: hasAuthorScope,
+		authorDescriptor: authorDescriptor, hasAuthorDescriptor: hasAuthorDescriptor,
 	}
 	prepared.settlement, err = eb.routeSettlementForPlan(evt, evt, plan, events.EventWriteSelectedForkPublication, providerRawSettlementAdmission{})
 	if err != nil {
@@ -1741,6 +1798,7 @@ func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event)
 }
 
 func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Event, recordDiagnostic bool) (RoutePlan, error) {
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
 	}

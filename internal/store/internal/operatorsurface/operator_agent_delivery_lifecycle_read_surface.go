@@ -37,6 +37,10 @@ func (r *AgentPostgres) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, 
 	if err != nil {
 		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
+	if opts.RunID != "" && opts.RunID != identity.RunID {
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, fmt.Errorf("agent delivery lifecycle run does not match concrete agent identity")
+	}
+	opts.RunID = identity.RunID
 	if err := r.requireAgentDeliveryLifecycleAccess(); err != nil {
 		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
@@ -66,6 +70,10 @@ func (s *AgentSQLite) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, id
 	if err != nil {
 		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
+	if opts.RunID != "" && opts.RunID != identity.RunID {
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, fmt.Errorf("agent delivery lifecycle run does not match concrete agent identity")
+	}
+	opts.RunID = identity.RunID
 	if err := s.requireSQLiteAgentDeliveryLifecycleAccess(); err != nil {
 		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
@@ -139,16 +147,17 @@ func (r *AgentPostgres) ensureAgentDeliveryLifecycleAgentExists(ctx context.Cont
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
-			WHERE agent_id = $1
-			  AND agent_name_owner = $2
-			  AND agent_name_source = $3
-			  AND agent_route_presence = $4
-			  AND flow_scope_key = $5
-			  AND flow_instance_id = $6
-			  AND flow_instance = $7
+			WHERE run_id = $1::uuid
+			  AND agent_id = $2
+			  AND agent_name_owner = $3
+			  AND agent_name_source = $4
+			  AND agent_route_presence = $5
+			  AND flow_scope_key = $6
+			  AND flow_instance_id = $7
+			  AND flow_instance = $8
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load agent delivery lifecycle agent: %w", err)
 	}
@@ -168,7 +177,8 @@ func (s *AgentSQLite) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
-			WHERE agent_id = ?
+			WHERE run_id = ?
+			  AND agent_id = ?
 			  AND agent_name_owner = ?
 			  AND agent_name_source = ?
 			  AND agent_route_presence = ?
@@ -177,7 +187,7 @@ func (s *AgentSQLite) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.
 			  AND flow_instance = ?
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load sqlite agent delivery lifecycle agent: %w", err)
 	}
@@ -277,7 +287,6 @@ func deliveryLifecycleRowsFromSnapshots(
 func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
 	query := runtimedelivery.AgentLifecyclePageQuery{
 		AgentIdentity: identity,
-		RunID:         opts.RunID,
 		Limit:         opts.Limit,
 	}
 	for _, raw := range opts.Statuses {

@@ -56,7 +56,7 @@ func commitSemanticPipelineProcessedEventFixture(ctx context.Context, store any,
 func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event events.Event, agentIDs []string) error {
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
-		routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: mustTestAgentIdentity(agentID, "fixture/"+agentID)})
+		routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: mustTestAgentIdentityForRun(event.RunID(), agentID, "fixture/"+agentID)})
 	}
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
@@ -67,15 +67,15 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 }
 
 func commitSemanticEventFixtureWithRoutes(ctx context.Context, store any, event events.Event, routes []events.DeliveryRoute) error {
-	routes = canonicalDeliveryFixtureRoutes(routes)
+	routes = canonicalDeliveryFixtureRoutes(event.RunID(), routes)
 	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, runtimepipelineobligation.ScopeSubscribed)
 	return err
 }
 
-func canonicalDeliveryFixtureRoutes(routes []events.DeliveryRoute) []events.DeliveryRoute {
+func canonicalDeliveryFixtureRoutes(runID string, routes []events.DeliveryRoute) []events.DeliveryRoute {
 	canonical := make([]events.DeliveryRoute, len(routes))
 	for i, route := range routes {
-		canonical[i] = canonicalDeliveryFixtureRouteValue(route)
+		canonical[i] = canonicalDeliveryFixtureRouteValue(runID, route)
 	}
 	return canonical
 }
@@ -211,7 +211,7 @@ func commitDeliveryReplayEventFixture(
 	if err != nil {
 		return err
 	}
-	route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{Recipient: recipient})
+	route := canonicalDeliveryFixtureRouteValue(replayed.Event().RunID(), events.DeliveryRoute{Recipient: recipient})
 	ctx, release, err := semanticEventFixtureContext(ctx, store, replayed.Event())
 	if err != nil {
 		return err
@@ -392,11 +392,11 @@ func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
 }
 
 func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, event events.Event, routes []events.DeliveryRoute) (err error) {
-	routes = canonicalDeliveryFixtureRoutes(routes)
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
 	}
+	routes = canonicalDeliveryFixtureRoutes(admitted.Event().RunID(), routes)
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork replay events require their closed named persistence operation")
 	}

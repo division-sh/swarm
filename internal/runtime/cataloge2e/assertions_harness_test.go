@@ -301,7 +301,7 @@ func catalogWorkflowInstanceForEntity(workflow catalogWorkflowPersistence, entit
 	if entityID == "" {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
-	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext())
+	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext(), catalogRuntimeRunID)
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}
@@ -376,7 +376,7 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 		}
 		return true
 	}
-	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext())
+	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext(), catalogRuntimeRunID)
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}

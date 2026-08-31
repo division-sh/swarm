@@ -39,14 +39,14 @@ func commitFlowInstanceActivations(
 		if err != nil {
 			return nil, fmt.Errorf("prepare flow activation %d: %w", index, err)
 		}
-		key := record.RunID + "\x00" + record.Route.InstancePath
+		key := record.Identity.RunID + "\x00" + record.Identity.Route.InstancePath
 		if _, duplicate := seen[key]; duplicate {
-			return nil, fmt.Errorf("flow activation %d repeats route %q", index, record.Route.InstancePath)
+			return nil, fmt.Errorf("flow activation %d repeats route %q", index, record.Identity.Route.InstancePath)
 		}
 		seen[key] = struct{}{}
 		created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, story, store, postgres, effects, plan, record)
 		if err != nil {
-			return nil, fmt.Errorf("commit flow activation %s: %w", record.Route.InstancePath, err)
+			return nil, fmt.Errorf("commit flow activation %s: %w", record.Identity.Route.InstancePath, err)
 		}
 		committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: created, Lifecycle: lifecycle})
 	}
@@ -121,21 +121,20 @@ func commitFlowInstanceActivation(
 	if err := record.Validate(); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	ctx = runtimecorrelation.WithRunID(ctx, record.RunID)
-	allowStandingGenerationRebind := plan.StandingGenerationReplacement
+	ctx = runtimecorrelation.WithRunID(ctx, record.Identity.RunID)
 	if postgres {
-		if err := requirePostgresRunActive(ctx, tx, record.RunID); err != nil {
+		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
-		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.RunID), record.RunID, record.Route.InstancePath)
+		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.Identity.RunID), record.Identity.RunID, record.Identity.Route.InstancePath)
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
 			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("lock flow activation route: %w", err)
 		}
-	} else if err := requireSQLiteRunActive(ctx, tx, record.RunID); err != nil {
+	} else if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 
-	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record, allowStandingGenerationRebind)
+	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record)
 	if err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
@@ -146,12 +145,12 @@ func commitFlowInstanceActivation(
 				"flow_instance_already_exists",
 				"flow-instance-activation",
 				"commit",
-				map[string]any{"flow_instance": record.Route.InstancePath},
+				map[string]any{"flow_instance": record.Identity.Route.InstancePath},
 			)
 		}
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, nil
 	}
-	lifecycle, err := insertFlowInstanceActivation(ctx, tx, story, store, postgres, effects, plan, record, allowStandingGenerationRebind)
+	lifecycle, err := insertFlowInstanceActivation(ctx, tx, story, store, postgres, effects, plan, record)
 	if err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
@@ -163,7 +162,6 @@ func loadFlowInstanceActivationEqual(
 	tx *sql.Tx,
 	postgres bool,
 	want runtimepipeline.FlowInstanceActivationRecord,
-	allowStandingGenerationRebind bool,
 ) (bool, bool, error) {
 	query := `
 		SELECT
@@ -175,17 +173,17 @@ func loadFlowInstanceActivationEqual(
 			r.plan, r.created_at
 		FROM flow_instances fi
 		JOIN entity_state es
-		  ON es.flow_instance = fi.instance_id
-		 AND es.run_id = $1::uuid
+		  ON es.flow_instance = fi.instance_path
+		 AND es.run_id = fi.run_id
 		 AND es.entity_id = $2::uuid
 		JOIN workflow_instance_initial_materializations m
 		  ON m.run_id = es.run_id
 		 AND m.entity_id = es.entity_id
-		 AND m.instance_id = es.flow_instance
+		 AND m.instance_path = es.flow_instance
 		JOIN flow_instance_runtime_readiness r
 		  ON r.run_id = es.run_id
-		 AND r.instance_id = es.flow_instance
-		WHERE fi.instance_id = $3
+		 AND r.instance_path = es.flow_instance
+		WHERE fi.run_id = $1::uuid AND fi.instance_path = $3
 	`
 	if !postgres {
 		query = `
@@ -198,17 +196,17 @@ func loadFlowInstanceActivationEqual(
 				r.plan, r.created_at
 			FROM flow_instances fi
 			JOIN entity_state es
-			  ON es.flow_instance = fi.instance_id
-			 AND es.run_id = ?
+			  ON es.flow_instance = fi.instance_path
+			 AND es.run_id = fi.run_id
 			 AND es.entity_id = ?
 			JOIN workflow_instance_initial_materializations m
 			  ON m.run_id = es.run_id
 			 AND m.entity_id = es.entity_id
-			 AND m.instance_id = es.flow_instance
+			 AND m.instance_path = es.flow_instance
 			JOIN flow_instance_runtime_readiness r
 			  ON r.run_id = es.run_id
-			 AND r.instance_id = es.flow_instance
-			WHERE fi.instance_id = ?
+			 AND r.instance_path = es.flow_instance
+			WHERE fi.run_id = ? AND fi.instance_path = ?
 		`
 	}
 	var (
@@ -236,9 +234,13 @@ func loadFlowInstanceActivationEqual(
 			&readiness, &readinessAtRaw,
 		}
 	}
-	err := tx.QueryRowContext(ctx, query, want.RunID, want.EntityID, want.Route.InstancePath).Scan(destinations...)
+	args := []any{want.Identity.RunID, want.EntityID, want.Identity.Route.InstancePath}
+	if !postgres {
+		args = []any{want.EntityID, want.Identity.RunID, want.Identity.Route.InstancePath}
+	}
+	err := tx.QueryRowContext(ctx, query, args...).Scan(destinations...)
 	if err == sql.ErrNoRows {
-		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want, allowStandingGenerationRebind)
+		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want)
 		return false, occupied, occupiedErr
 	}
 	if err != nil {
@@ -283,7 +285,7 @@ func loadFlowInstanceActivationEqual(
 	}
 	equal := strings.TrimSpace(workflowName) == strings.TrimSpace(want.WorkflowName) &&
 		strings.TrimSpace(mode) == want.Mode && strings.TrimSpace(status) == "active" &&
-		strings.Trim(strings.TrimSpace(instancePath), "/") == want.Route.InstancePath &&
+		strings.Trim(strings.TrimSpace(instancePath), "/") == want.Identity.Route.InstancePath &&
 		strings.TrimSpace(entityType) == want.EntityType && strings.TrimSpace(slug) == want.Slug && strings.TrimSpace(name) == want.Name &&
 		strings.TrimSpace(state) == want.CurrentState && projectionVersion == want.InitialProjectionVersion &&
 		jsonEqual(config, want.Config) && jsonEqual(gates, want.Gates) && jsonEqual(fields, want.Fields) &&
@@ -296,47 +298,37 @@ func loadFlowInstanceActivationEqual(
 	return equal, true, nil
 }
 
-func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord, allowStandingGenerationRebind bool) (bool, error) {
+func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord) (bool, error) {
 	query := `
-		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = $1),
-		       COALESCE((SELECT flow_template FROM flow_instances WHERE instance_id = $1), ''),
-		       EXISTS (SELECT 1 FROM entity_state WHERE run_id = $2::uuid AND entity_id = $3::uuid),
-		       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $2::uuid AND entity_id = $3::uuid),
-		       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $2::uuid AND instance_id = $1)
+		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2),
+		       EXISTS (SELECT 1 FROM entity_state WHERE run_id = $1::uuid AND entity_id = $3::uuid),
+		       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND entity_id = $3::uuid),
+		       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2)
 	`
 	if !postgres {
 		query = `
-			SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = ?),
-			       COALESCE((SELECT flow_template FROM flow_instances WHERE instance_id = ?), ''),
+			SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = ? AND instance_path = ?),
 			       EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?),
 			       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = ? AND entity_id = ?),
-			       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ?)
+			       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?)
 		`
 	}
 	var flow, entity, initial, readiness bool
-	var flowTemplate string
 	var err error
 	if postgres {
-		err = tx.QueryRowContext(ctx, query, record.Route.InstancePath, record.RunID, record.EntityID).Scan(&flow, &flowTemplate, &entity, &initial, &readiness)
+		err = tx.QueryRowContext(ctx, query, record.Identity.RunID, record.Identity.Route.InstancePath, record.EntityID).Scan(&flow, &entity, &initial, &readiness)
 	} else {
 		err = tx.QueryRowContext(ctx, query,
-			record.Route.InstancePath,
-			record.Route.InstancePath,
-			record.RunID, record.EntityID,
-			record.RunID, record.EntityID,
-			record.RunID, record.Route.InstancePath,
-		).Scan(&flow, &flowTemplate, &entity, &initial, &readiness)
+			record.Identity.RunID, record.Identity.Route.InstancePath,
+			record.Identity.RunID, record.EntityID,
+			record.Identity.RunID, record.EntityID,
+			record.Identity.RunID, record.Identity.Route.InstancePath,
+		).Scan(&flow, &entity, &initial, &readiness)
 	}
 	if err != nil {
 		return false, err
 	}
-	if entity || initial || readiness {
-		return true, nil
-	}
-	if flow && allowStandingGenerationRebind && strings.TrimSpace(flowTemplate) == strings.TrimSpace(record.WorkflowName) {
-		return false, nil
-	}
-	return flow, nil
+	return flow || entity || initial || readiness, nil
 }
 
 func insertFlowInstanceActivation(
@@ -348,39 +340,38 @@ func insertFlowInstanceActivation(
 	effects *revisionEffects,
 	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
-	allowStandingGenerationRebind bool,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record.State, allowStandingGenerationRebind); err != nil {
+	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record.State); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if postgres {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workflow_instance_initial_materializations (
-				run_id, entity_id, instance_id, projection_version, projection, occurred_at
+				run_id, entity_id, instance_path, projection_version, projection, occurred_at
 			) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
+		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow initial materialization: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
 			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
-		`, record.RunID, record.Route.InstancePath, record.Readiness, record.CreatedAt); err != nil {
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow runtime readiness: %w", err)
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workflow_instance_initial_materializations (
-				run_id, entity_id, instance_id, projection_version, projection, occurred_at
+				run_id, entity_id, instance_path, projection_version, projection, occurred_at
 			) VALUES (?, ?, ?, ?, ?, ?)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
+		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow initial materialization: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
 			) VALUES (?, ?, ?, NULL, NULL, ?, ?)
-		`, record.RunID, record.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
 		}
 	}

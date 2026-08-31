@@ -25,14 +25,14 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
-	identity := sqliteAgentUsageIdentity(t, agentID)
+	identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 	identityFields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("operator read identity fields: %v", err)
 	}
 
-	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
 	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
+	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, agentID)
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -70,9 +70,9 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		params string
 	}{
 		{method: "agent.list", params: `{}`},
-		{method: "agent.get", params: fmt.Sprintf(`{"agent_id":%q}`, agentID)},
-		{method: "agent.diagnose", params: fmt.Sprintf(`{"agent_id":%q,"queue_limit":10}`, agentID)},
-		{method: "agent.delivery_diagnostics", params: fmt.Sprintf(`{"agent_id":%q,"failure_limit":10,"dead_letter_limit":10}`, agentID)},
+		{method: "agent.get", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q}`, runID, agentID)},
+		{method: "agent.diagnose", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"queue_limit":10}`, runID, agentID)},
+		{method: "agent.delivery_diagnostics", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"failure_limit":10,"dead_letter_limit":10}`, runID, agentID)},
 		{method: "conversation.list", params: `{}`},
 		{method: "conversation.list_turns", params: fmt.Sprintf(`{"session_id":%q}`, sessionID)},
 		{method: "conversation.get_turn", params: fmt.Sprintf(`{"session_id":%q,"turn_id":%q}`, sessionID, turnID)},

@@ -264,6 +264,16 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	}
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
 	manager.mu.Lock()
+	if err := manager.staticTopology.Validate(); err != nil {
+		manager.staticTopology = managerTestTopologyAdmission(t)
+	}
+	manager.mu.Unlock()
+	if setter, ok := bus.(interface {
+		SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizer)
+	}); ok {
+		setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
+	}
+	manager.mu.Lock()
 	manager.startupAgentsHydrated = true
 	manager.mu.Unlock()
 	t.Cleanup(func() {

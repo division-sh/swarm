@@ -513,7 +513,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Plan{}),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
@@ -534,7 +534,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Plan{}),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},

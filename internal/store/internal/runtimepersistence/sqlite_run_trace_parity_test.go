@@ -195,8 +195,8 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		t.Fatalf("seed event: %v", err)
 	}
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), eventID)
-	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
+	seedSQLiteTraceAgent(t, ctx, sqliteStore, runID, agentID, base)
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, agentID, "flow-a"))
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -212,7 +212,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		base.Add(time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed task audit: %v", err)
 	}
-	route := testAgentDeliveryRoute(t, agentID, "flow-a")
+	route := testAgentDeliveryRoute(t, runID, agentID, "flow-a")
 	if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
 		t.Fatalf("commit task delivery: %v", err)
 	}
@@ -312,7 +312,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		}
 	}
 	for _, agentID := range []string{"agent-late", "agent-failed", "agent-second", "agent-a", "agent-b"} {
-		seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
+		seedSQLiteTraceAgent(t, ctx, sqliteStore, fixture.runID, agentID, base)
 	}
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000301", fixture.runID, "agent-late", base.Add(4*time.Second))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000302", fixture.runID, "agent-failed", base.Add(2500*time.Millisecond))
@@ -337,7 +337,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	seedDelivery := func(eventID, agentID, sessionID string, state runtimedelivery.State, createdAt, transitionAt time.Time) runtimedelivery.Snapshot {
 		t.Helper()
 		event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), eventID)
-		route := testAgentDeliveryRoute(t, agentID, "flow-a")
+		route := testAgentDeliveryRoute(t, fixture.runID, agentID, "flow-a")
 		if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
 			t.Fatalf("commit trace delivery %s/%s: %v", eventID, agentID, err)
 		}
@@ -382,14 +382,14 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	return fixture
 }
 
-func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, agentID string, startedAt time.Time) {
+func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, agentID string, startedAt time.Time) {
 	t.Helper()
-	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, testAgentIdentity(t, agentID, "flow-a"), "active")
+	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, mustTestAgentIdentityForRun(runID, agentID, "flow-a"), "active")
 }
 
 func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, sessionID, runID, agentID string, updatedAt time.Time) {
 	t.Helper()
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, agentID, "flow-a"))
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -413,9 +413,9 @@ func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteSt
 	if memoryEnabled {
 		memory = agentmemory.Authored(true)
 	}
-	identity := testAgentIdentity(t, agentID, "flow-a")
+	identity := mustTestAgentIdentityForRun(runID, agentID, "flow-a")
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claim), sqliteStore, runtimellm.AgentTurnRecord{
-		AgentID: agentID, Identity: agentmemory.Identity{RunID: runID, Agent: identity}, RunID: runID,
+		AgentID: agentID, Identity: identity, RunID: runID,
 		FlowInstance: identity.FlowInstance(), Memory: memory, SessionID: sessionID,
 		TriggerEventID: event.ID(), TriggerEventType: string(event.Type()), TaskID: "task-1",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true,

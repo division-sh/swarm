@@ -21,7 +21,7 @@ func TestCompositeInventoryReaderCapturesManagedContainersAtPlanTime(t *testing.
 			Kind:          "agent",
 			Action:        ContainerActionStop,
 			ResetEligible: true,
-			RunID:         "run-1",
+			RunID:         "11111111-1111-1111-1111-111111111111",
 			AgentIdentity: testManagedAgentIdentity(),
 		}}, nil
 	})
@@ -173,27 +173,31 @@ func (r *recordingManagedContainerRuntime) StopManagedContainer(_ context.Contex
 }
 
 func managedInspection(name, kind string, resetEligible, running bool) ManagedContainerInspection {
+	identity := ContainerIdentity{
+		Owner:          "runtime",
+		Kind:           kind,
+		ResetEligible:  resetEligible,
+		CreationSource: "test",
+		ContainerName:  name,
+		WorkspaceScope: kind,
+		RunID:          "11111111-1111-1111-1111-111111111111",
+		EntityID:       "entity-a",
+		FlowInstance:   "flow/a",
+	}
+	if kind == "agent" || kind == "flow" {
+		identity.AgentIdentity = testManagedAgentIdentity()
+	}
 	return ManagedContainerInspection{
 		Exists:      true,
 		Running:     running,
 		HasIdentity: true,
-		Identity: ContainerIdentity{
-			Owner:          "runtime",
-			Kind:           kind,
-			ResetEligible:  resetEligible,
-			CreationSource: "test",
-			ContainerName:  name,
-			WorkspaceScope: kind,
-			RunID:          "11111111-1111-1111-1111-111111111111",
-			EntityID:       "entity-a",
-			AgentIdentity:  testManagedAgentIdentity(),
-			FlowInstance:   "flow/a",
-		},
+		Identity:    identity,
 	}
 }
 
 func testManagedAgentIdentity() runtimeagentidentity.Identity {
 	return runtimeagentidentity.Identity{
+		RunID: "11111111-1111-1111-1111-111111111111",
 		Name: runtimeagentidentity.Name{
 			AgentID: "agent-a",
 			Owner:   "test/agents.yaml",

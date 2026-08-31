@@ -179,7 +179,7 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: agent.id}); err == nil || err.Error() != "runtime shutting down" {
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: agent.id}); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("RestartAgent err = %v, want runtime shutting down", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}

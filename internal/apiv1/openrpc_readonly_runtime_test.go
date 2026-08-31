@@ -28,6 +28,7 @@ const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
 const readOnlyProbeBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const readOnlyProbeMissingBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 const readOnlyProbeTurnID = "00000000-0000-4000-8000-000000000401"
+const readOnlyProbeRunID = "11111111-1111-4111-8111-111111111111"
 
 func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
@@ -291,13 +292,13 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
-		"agent.delivery_diagnostics": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
-		"agent.delivery_lifecycle":   {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
-		"agent.diagnose":             {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
-		"agent.get":                  {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
+		"agent.delivery_diagnostics": {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
+		"agent.delivery_lifecycle":   {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
+		"agent.diagnose":             {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
+		"agent.get":                  {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.frame":                {Params: map[string]any{"scope": "static", "agent_id": "researcher", "bundle_hash": readOnlyProbeBundleHash, "flow": "research/inst-1"}, ResultKeys: []string{"version", "scope", "selector", "session_contract", "turn_context"}},
 		"agent.list":                 {Params: map[string]any{}, ResultKeys: []string{"agents"}},
-		"agent.usage":                {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
+		"agent.usage":                {Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
 		"bundle.agents":              {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
 		"bundle.get":                 {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
 		"bundle.list":                {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
@@ -309,7 +310,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"conversation.list_turns":    {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
 		"entity.aggregate":           {Params: map[string]any{}, ResultKeys: []string{"counts"}},
 		"entity.get":                 {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "bookkeeping", "gates", "accumulated"}},
-		"entity.list":                {Params: map[string]any{}, ResultKeys: []string{"entities"}},
+		"entity.list":                {Params: map[string]any{"run_id": readOnlyProbeRunID}, ResultKeys: []string{"entities"}},
 		"event.get":                  {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
 		"event.list":                 {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
 		"health.check":               {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "execution_posture", "bundle"}},
@@ -348,7 +349,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "agent.delivery_diagnostics",
-			Params: map[string]any{"agent_id": "missing"},
+			Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "missing"},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -358,7 +359,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "agent.delivery_lifecycle",
-			Params: map[string]any{"agent_id": "missing"},
+			Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "missing"},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -368,7 +369,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "agent.diagnose",
-			Params: map[string]any{"agent_id": "missing"},
+			Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "missing"},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -378,7 +379,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "agent.usage",
-			Params: map[string]any{"agent_id": "missing"},
+			Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "missing"},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
@@ -388,7 +389,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 		},
 		{
 			Method: "agent.get",
-			Params: map[string]any{"agent_id": "missing"},
+			Params: map[string]any{"run_id": readOnlyProbeRunID, "agent_id": "missing"},
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)

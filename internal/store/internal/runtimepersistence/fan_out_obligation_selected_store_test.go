@@ -763,11 +763,11 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 
 			base := time.Now().UTC().Truncate(time.Microsecond)
 			completing := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
-			flowInsert := `INSERT OR IGNORE INTO flow_instances (instance_id,flow_template,mode,config,status) VALUES (?,?,'static','{}','active')`
+			flowInsert := `INSERT OR IGNORE INTO flow_instances (run_id,instance_path,flow_template,mode,config,status) VALUES (?,?,?,'static','{}','active')`
 			if postgres {
-				flowInsert = `INSERT INTO flow_instances (instance_id,flow_template,mode,config,status) VALUES ($1,$2,'static','{}'::jsonb,'active') ON CONFLICT (instance_id) DO NOTHING`
+				flowInsert = `INSERT INTO flow_instances (run_id,instance_path,flow_template,mode,config,status) VALUES ($1::uuid,$2,$3,'static','{}'::jsonb,'active') ON CONFLICT (run_id,instance_path) DO NOTHING`
 			}
-			if _, err := db.ExecContext(ctx, flowInsert, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
+			if _, err := db.ExecContext(ctx, flowInsert, completing.runID, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
 				t.Fatalf("seed terminal fan-out flow: %v", err)
 			}
 			if err := materializeCompletedRunEntityForTest(ctx, selected, completing.runID); err != nil {

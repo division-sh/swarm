@@ -46,6 +46,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 			if intent.TargetBlueprint.Normalized() != intent.TargetOwnership.Route() {
 				return RoutePlan{}, fmt.Errorf("validate admitted delivery target for %s: blueprint and typed owner disagree: blueprint=%#v owner=%s %#v", intent.Recipient.ID(), intent.TargetBlueprint.Normalized(), intent.TargetOwnership.Code(), intent.TargetOwnership.Route())
 			}
+			if err := validateAgentLifecycleTargetOwnership(*intent); err != nil {
+				return RoutePlan{}, fmt.Errorf("validate admitted delivery target for %s: %w", intent.Recipient.ID(), err)
+			}
 			continue
 		}
 		if intent.Recipient.IsAgent() {
@@ -65,16 +68,19 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 			if p.agentsAvailable {
 				descriptor, ok := p.agents[intent.AgentIdentity.Normalize()]
 				if !ok {
-					if intent.PendingAgentLifecycle {
+					if intent.AgentLifecycle.pending() {
+						if intent.TargetBlueprint.Empty() && intent.AgentLifecycle == agentLifecycleAdmissionStaticDeclaration {
+							continue
+						}
 						owner, err := p.resolveSelectedRoute(intent.TargetBlueprint, intent.StructuralOwnerProof)
 						if err != nil {
 							return RoutePlan{}, fmt.Errorf("resolve pending delivery target for %s: %w", intent.Recipient.ID(), err)
 						}
-						if !owner.MaterializingEntity() {
-							return RoutePlan{}, fmt.Errorf("resolve pending delivery target for %s: lifecycle creation requires materializing_entity ownership", intent.Recipient.ID())
-						}
 						intent.TargetOwnership = owner
 						intent.TargetBlueprint = owner.Route()
+						if err := validateAgentLifecycleTargetOwnership(*intent); err != nil {
+							return RoutePlan{}, fmt.Errorf("resolve pending delivery target for %s: %w", intent.Recipient.ID(), err)
+						}
 						continue
 					}
 					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: exact active agent identity is missing", intent.Recipient.ID())
@@ -133,6 +139,32 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	}
 	plan.ConnectEvaluation = ledger
 	return plan.Normalized(), nil
+}
+
+func validateAgentLifecycleTargetOwnership(intent RoutePlanDeliveryIntent) error {
+	if err := intent.AgentLifecycle.validate(); err != nil {
+		return err
+	}
+	if !intent.AgentLifecycle.pending() {
+		return nil
+	}
+	owner := intent.TargetOwnership
+	if owner.Empty() {
+		if intent.AgentLifecycle == agentLifecycleAdmissionStaticDeclaration && intent.TargetBlueprint.Empty() {
+			return nil
+		}
+		return fmt.Errorf("agent lifecycle admission requires exact target ownership")
+	}
+	if intent.AgentLifecycle.requiresMaterializingEntity() {
+		if !owner.MaterializingEntity() {
+			return fmt.Errorf("flow lifecycle creation requires materializing_entity ownership")
+		}
+		return nil
+	}
+	if !owner.ExistingEntity() && !owner.MaterializingEntity() {
+		return fmt.Errorf("static declaration lifecycle requires existing_entity or materializing_entity ownership")
+	}
+	return nil
 }
 
 func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePlan) (selectedRunTargetOwnerProjection, error) {

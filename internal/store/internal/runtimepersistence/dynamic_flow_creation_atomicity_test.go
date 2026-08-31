@@ -76,9 +76,13 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 			order := order
 			t.Run(backend+"/"+order, func(t *testing.T) {
 				fixture := newDynamicFlowCreationAtomicityFixture(t, backend)
+				flowIdentity := runtimeflowidentity.RunScopedFlowInstance{
+					RunID: fixture.runID,
+					Route: fixture.plan.Identity.Route(),
+				}
 				switch order {
 				case "terminal_wins":
-					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.Route(), identity.NormalizeEntityID(fixture.plan.Identity.EntityID), time.Now().UTC()); err != nil {
+					if err := fixture.workflow.MarkTerminated(fixture.ctx, flowIdentity, identity.NormalizeEntityID(fixture.plan.Identity.EntityID), time.Now().UTC()); err != nil {
 						t.Fatalf("MarkTerminated: %v", err)
 					}
 					err := fixture.commit()
@@ -91,7 +95,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 					}
 					if err := fixture.workflow.MarkTerminated(
 						fixture.ctx,
-						fixture.plan.Identity.Route(),
+						flowIdentity,
 						identity.NormalizeEntityID(fixture.plan.Identity.EntityID),
 						time.Now().UTC(),
 					); err != nil {
@@ -226,7 +230,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err := eventBus.Publish(ctx, parent); err != nil {
 		t.Fatalf("publish causal parent: %v", err)
 	}
-	result, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	result, err := workflow.MaterializeInitialEntry(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: identity.InstancePath, EntityID: identity.EntityID, WorkflowName: identity.TemplateID,
 		WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
 		Config:     map[string]any{"name": "alpha"},
@@ -324,12 +328,12 @@ func (f dynamicFlowCreationAtomicityFixture) assertResult(t *testing.T, creation
 	}
 	f.assertOccurrenceCounts(t, want)
 
-	statusQuery := `SELECT status FROM flow_instances WHERE instance_id = ?`
+	statusQuery := `SELECT status FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if !f.sqlite {
-		statusQuery = `SELECT status FROM flow_instances WHERE instance_id = $1`
+		statusQuery = `SELECT status FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	var status string
-	if err := f.db.QueryRowContext(f.ctx, statusQuery, f.plan.Identity.InstancePath).Scan(&status); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, statusQuery, f.runID, f.plan.Identity.InstancePath).Scan(&status); err != nil {
 		t.Fatalf("load terminal flow instance: %v", err)
 	}
 	if strings.TrimSpace(status) != "terminated" {
@@ -340,10 +344,10 @@ func (f dynamicFlowCreationAtomicityFixture) assertResult(t *testing.T, creation
 func (f dynamicFlowCreationAtomicityFixture) assertOccurrenceCounts(t *testing.T, want int) {
 	t.Helper()
 	eventQuery := `SELECT COUNT(*) FROM events WHERE event_id = ?`
-	readinessQuery := `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ? AND creation_event_emitted_at IS NOT NULL`
+	readinessQuery := `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ? AND creation_event_emitted_at IS NOT NULL`
 	if !f.sqlite {
 		eventQuery = `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`
-		readinessQuery = `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_id = $2 AND creation_event_emitted_at IS NOT NULL`
+		readinessQuery = `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2 AND creation_event_emitted_at IS NOT NULL`
 	}
 	var eventCount, markCount int
 	if err := f.db.QueryRowContext(f.ctx, eventQuery, f.event.ID()).Scan(&eventCount); err != nil {

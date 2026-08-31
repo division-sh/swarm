@@ -245,7 +245,7 @@ type sealedFlowPackageRouteStore struct {
 	targetOwners []runtimebus.ActiveTargetDescriptor
 }
 
-func (s *sealedFlowPackageRouteStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (s *sealedFlowPackageRouteStore) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 

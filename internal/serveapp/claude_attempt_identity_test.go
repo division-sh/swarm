@@ -154,10 +154,7 @@ func (*claudeAttemptProofAgent) Subscriptions() []events.EventType {
 func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
 	a.calls.Add(1)
 	ctx = runtimeactors.WithActor(ctx, a.config)
-	ctx = agentmemory.WithExecution(ctx, a.config.Memory, agentmemory.Identity{
-		RunID: evt.RunID(),
-		Agent: a.config.Identity,
-	})
+	ctx = agentmemory.WithExecution(ctx, a.config.Memory, a.config.Identity)
 	if a.conversation == nil {
 		providerPrompt, err := a.config.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
 		if err != nil {
@@ -317,7 +314,7 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 			restarted, restartedBus, _ := newClaudeAttemptProofManagerForGeneration(t, backend, dockerBin, calls, 2)
 			t.Cleanup(func() { _ = restarted.Shutdown() })
 			cfg := claudeAttemptProofAgentConfig()
-			if _, err := restarted.ResolveAgentConfig(cfg.ID, cfg.CanonicalFlowPath()); err != nil {
+			if _, err := restarted.ResolveAgentConfig(cfg.Identity.RunID, cfg.ID, cfg.CanonicalFlowPath()); err != nil {
 				t.Fatalf("restarted manager did not hydrate the Claude proof agent: %v", err)
 			}
 			runClaudeAttemptProofManager(t, restarted)
@@ -479,7 +476,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 				LLMBackend:       "claude_cli",
 				WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 			}, backend.store)
-			installClaudeAttemptProofManagerTopology(t, backend, manager, claudeAttemptProofAgentConfig())
+			installClaudeAttemptProofManagerTopology(t, backend, manager, eventBus, claudeAttemptProofAgentConfig())
 			runClaudeAttemptProofManager(t, manager)
 			t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -579,13 +576,18 @@ func newClaudeAttemptProofManagerForGeneration(
 		LLMBackend:       "claude_cli",
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend.store)
-	installClaudeAttemptProofManagerTopology(t, backend, manager, claudeAttemptProofAgentConfig(surface))
+	installClaudeAttemptProofManagerTopology(t, backend, manager, eventBus, claudeAttemptProofAgentConfig(surface))
 	return manager, eventBus, coordinator
 }
 
-func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemptProofBackend, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
+func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemptProofBackend, manager *runtimemanager.AgentManager, eventBus *runtimebus.EventBus, cfg runtimeactors.AgentConfig) {
 	t.Helper()
-	registerServeTestDurableAgent(t, backend.store, manager, cfg)
+	registerServeTestDurableAgent(t, backend.store, manager, cfg, claudeAttemptProofBundleSourceFact)
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		t.Fatalf("resolve Claude attempt proof identity: %v", err)
+	}
+	installServeTestExactAgentReadiness(t, eventBus, identity)
 }
 
 func claudeAttemptProofSemanticSource() semanticview.Source {
@@ -674,6 +676,7 @@ func newClaudeAttemptProofEventBus(
 	if err != nil {
 		t.Fatalf("new Claude proof event bus: %v", err)
 	}
+	installServeTestExactAgentReadiness(t, eventBus, claudeAttemptProofAgentIdentity())
 	coordinator, err := runtimedeliverycontinuation.New(
 		backend.store,
 		backend.store,
@@ -728,7 +731,7 @@ func claudeAttemptProofAgentIdentity() agentidentity.Identity {
 	if err != nil {
 		panic(err)
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New(claudeAttemptProofRuntimeID, name, route)
 	if err != nil {
 		panic(err)
 	}
@@ -742,7 +745,7 @@ func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus,
 		surface = surfaces[0]
 	}
 	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.ExistingRunRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, claudeAttemptProofRuntimeID, events.EventEnvelope{}, time.Now().UTC())
 	cfg := claudeAttemptProofAgentConfig(surface)
 	if err := eventBus.PublishDirectRoutes(claudeAttemptProofContext(), evt, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}); err != nil {
 		t.Fatalf("publish Claude proof event: %v", err)

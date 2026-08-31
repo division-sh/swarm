@@ -16,7 +16,7 @@ import (
 )
 
 func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity, now time.Time) error {
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *s
 		}
 		return effects.Add(identity.RunID, runforkrevision.FamilyAgentConversationAudits)
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 	if err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "upsert_conversation", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "upsert_conversation", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `
@@ -130,14 +130,14 @@ func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx
 	if err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
 	if err := storerunstate.RequireSQLiteActiveTx(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requireSQLiteLiveSessionAuthority(ctx, tx, identity.Agent, "project_completion_conversation", false); err != nil {
+	if _, err := requireSQLiteLiveSessionAuthority(ctx, tx, identity, "project_completion_conversation", false); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -163,7 +163,7 @@ func (s *LLMSQLiteOwner) LoadActiveConversation(ctx context.Context, identity ag
 	if err := identity.Validate(); err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
@@ -202,7 +202,7 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 	if update.Watchdog == nil {
 		return fmt.Errorf("watchdog is required")
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "update_watchdog", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity, "update_watchdog", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `

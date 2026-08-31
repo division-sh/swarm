@@ -430,7 +430,10 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		if session != nil {
 			ordinal = session.TurnCount + 1
 		}
-		target = runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: authority.ForkChat.ForkTurnID, Ordinal: ordinal}
+		target = runtimeeffects.UsageTarget{
+			Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: authority.ForkChat.ForkTurnID,
+			Ordinal: ordinal, RunID: authority.ForkChat.SourceRunID,
+		}
 	} else {
 		actor, _ := runtimeactors.ActorFromContext(ctx)
 		effectiveEntityID := strings.TrimSpace(actor.EffectiveEntityID())
@@ -450,7 +453,7 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		target = runtimeeffects.UsageTarget{
 			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID,
 			RunID: strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)), AgentID: strings.TrimSpace(session.AgentID),
-			AgentIdentity: session.MemoryIdentity.Agent, SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
+			AgentIdentity: session.MemoryIdentity, SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
 			FlowInstance: effectiveFlowInstance, EntityID: effectiveEntityID,
 		}
 		if session.Memory.Enabled {
@@ -650,13 +653,13 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 	meta := usageMetadataForProvider(profile, providerModel)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	flowInstance := strings.TrimSpace(turn.FlowInstance)
-	if !turn.Identity.Agent.IsZero() {
-		flowInstance = turn.Identity.Agent.FlowInstance()
+	if !turn.Identity.IsZero() {
+		flowInstance = turn.Identity.FlowInstance()
 	}
 	if flowInstance == "" {
 		flowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
 	}
-	if flowInstance == "" && turn.Identity.Agent.IsZero() {
+	if flowInstance == "" && turn.Identity.IsZero() {
 		flowInstance = "global"
 	}
 	input, output := int64(0), int64(0)
@@ -674,7 +677,7 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 		EntityID:       strings.TrimSpace(turn.EntityID),
 		FlowInstance:   flowInstance,
 		AgentID:        strings.TrimSpace(turn.AgentID),
-		AgentIdentity:  turn.Identity.Agent,
+		AgentIdentity:  turn.Identity,
 		Model:          usage.ResolvedModel,
 		ModelAlias:     mapString(meta, "model_alias"),
 		BackendProfile: coalesce(mapString(meta, "backend_profile"), profile.ID),

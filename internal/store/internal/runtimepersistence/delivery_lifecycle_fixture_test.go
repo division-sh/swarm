@@ -58,8 +58,8 @@ func loadSQLiteDeliveryFixtureEvent(t testing.TB, ctx context.Context, db *sql.D
 
 func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB, eventID string, route events.DeliveryRoute) events.Event {
 	t.Helper()
-	route = canonicalDeliveryFixtureRoute(t, route)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
+	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	store := postgresDeliveryFixtureStore(db)
 	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, event.RunID())
@@ -79,7 +79,7 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 
 func claimPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB, event events.Event, route events.DeliveryRoute) runtimedelivery.ClaimedObligation {
 	t.Helper()
-	route = canonicalDeliveryFixtureRoute(t, route)
+	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	store := postgresDeliveryFixtureStore(db)
 	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
@@ -112,7 +112,7 @@ func seedDeliveryStateFixture(
 	failure *runtimefailures.Envelope,
 ) runtimedelivery.Snapshot {
 	t.Helper()
-	route = canonicalDeliveryFixtureRoute(t, route)
+	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
@@ -164,15 +164,15 @@ func seedDeliveryStateFixture(
 	}
 }
 
-func canonicalDeliveryFixtureRoute(t testing.TB, route events.DeliveryRoute) events.DeliveryRoute {
+func canonicalDeliveryFixtureRoute(t testing.TB, runID string, route events.DeliveryRoute) events.DeliveryRoute {
 	t.Helper()
-	return canonicalDeliveryFixtureRouteValue(route)
+	return canonicalDeliveryFixtureRouteValue(runID, route)
 }
 
-func canonicalDeliveryFixtureRouteValue(route events.DeliveryRoute) events.DeliveryRoute {
+func canonicalDeliveryFixtureRouteValue(runID string, route events.DeliveryRoute) events.DeliveryRoute {
 	route = route.Normalized()
 	if route.Recipient.IsAgent() && route.AgentIdentity.IsZero() {
-		route.AgentIdentity = mustTestAgentIdentity(route.Recipient.ID(), "fixture/"+route.Recipient.ID())
+		route.AgentIdentity = mustTestAgentIdentityForRun(runID, route.Recipient.ID(), "fixture/"+route.Recipient.ID())
 	}
 	return route
 }
@@ -187,7 +187,7 @@ func testEntitylessNodeDeliveryRoute(nodeID string) events.DeliveryRoute {
 }
 
 func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
-	route = canonicalDeliveryFixtureRouteValue(route)
+	route = canonicalDeliveryFixtureRouteValue(event.RunID(), route)
 	switch selected := store.(type) {
 	case *PostgresStore:
 		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -237,7 +237,7 @@ func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 }
 
 func claimDeliveryFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	route = canonicalDeliveryFixtureRouteValue(route)
+	route = canonicalDeliveryFixtureRouteValue(event.RunID(), route)
 	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
 	if err != nil {
 		return runtimedelivery.ClaimedObligation{}, err
@@ -259,7 +259,7 @@ func claimDeliveryFixture(ctx context.Context, store deliveryFixtureStore, event
 
 func loadDeliverySnapshotFixture(t testing.TB, ctx context.Context, store deliveryFixtureStore, eventID string, route events.DeliveryRoute) runtimedelivery.Snapshot {
 	t.Helper()
-	route = canonicalDeliveryFixtureRoute(t, route)
+	route = route.Normalized()
 	var (
 		snapshots []runtimedelivery.Snapshot
 		err       error

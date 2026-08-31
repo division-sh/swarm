@@ -16,8 +16,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -74,8 +72,8 @@ type WorkflowInstance struct {
 // flow_instances lifecycle row exists; declared-key acquisition therefore
 // selects this authority directly rather than inferring state from lifecycle.
 type WorkflowEntityStatePersistenceReader interface {
-	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
-	SelectActiveWorkflowEntityStates(context.Context, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
+	LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
+	SelectActiveWorkflowEntityStates(context.Context, string, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
 }
 
 type workflowEntityStateSelectionCardinality uint8
@@ -322,7 +320,7 @@ func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentit
 }
 
 type WorkflowTargetPersistenceReader interface {
-	LoadWorkflowTargetPersistence(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error)
+	LoadWorkflowTargetPersistence(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error)
 }
 
 // WorkflowInstancePersistenceReader owns exact selected-store workflow reads.
@@ -330,9 +328,9 @@ type WorkflowTargetPersistenceReader interface {
 // query shape, transaction, or SQL executor.
 type WorkflowInstancePersistenceReader interface {
 	WorkflowEntityStatePersistenceReader
-	LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (WorkflowInstance, bool, error)
-	ListWorkflowInstances(context.Context) ([]WorkflowInstance, error)
-	SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error)
+	LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error)
+	ListWorkflowInstances(context.Context, string) ([]WorkflowInstance, error)
+	SelectActiveWorkflowInstances(context.Context, string, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error)
 }
 
 type WorkflowEntityStatePersistenceRecord struct {
@@ -625,11 +623,11 @@ func (r *DeliveryContinuationSignalRegistration) Release() {
 }
 
 type workflowInstanceLifecycleOwner interface {
-	PrepareWorkflowLifecycleMutation(context.Context, *WorkflowInstance, []runtimeworkflowlifecycle.Effect, bool) (PreparedWorkflowLifecycleMutation, error)
+	PrepareWorkflowLifecycleMutation(context.Context, runtimeflowidentity.RunScopedFlowInstance, *WorkflowInstance, []runtimeworkflowlifecycle.Effect, bool) (PreparedWorkflowLifecycleMutation, error)
 	FinalizeWorkflowLifecycleMutation(context.Context, CommittedWorkflowLifecycleMutation) error
-	ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error
-	ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error
-	RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error
+	ArmInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -708,22 +706,22 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.entityStateReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
 }
 
-func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
+func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
 	if s == nil || s.entityStateReader == nil {
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")
 	}
-	return s.entityStateReader.LoadWorkflowEntityState(ctx, route, entityID)
+	return s.entityStateReader.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
-func (s *workflowInstanceStore) LoadTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
+func (s *workflowInstanceStore) LoadTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
 	if s == nil || s.targetReader == nil {
 		return WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence reader is required")
 	}
-	record, err := s.targetReader.LoadWorkflowTargetPersistence(ctx, route, entityID)
+	record, err := s.targetReader.LoadWorkflowTargetPersistence(ctx, identity, entityID)
 	if err != nil {
 		return WorkflowTargetPersistenceRecord{}, err
 	}
-	if err := record.Validate(route, entityID); err != nil {
+	if err := record.Validate(identity.Route, entityID); err != nil {
 		return WorkflowTargetPersistenceRecord{}, err
 	}
 	return record, nil
@@ -782,57 +780,53 @@ func (s *workflowInstanceStore) enabled() bool {
 	return s != nil && s.instanceReader != nil
 }
 
-func (s *workflowInstanceStore) Load(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
-		return WorkflowInstance{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(route.InstancePath)}
+func (s *workflowInstanceStore) Load(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return WorkflowInstance{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.Route.InstancePath)}
 	}
 	if s == nil || s.instanceReader == nil {
 		return WorkflowInstance{}, false, nil
 	}
-	return s.instanceReader.LoadWorkflowInstance(ctx, route)
+	return s.instanceReader.LoadWorkflowInstance(ctx, identity)
 }
 
-func (s *workflowInstanceStore) list(ctx context.Context) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) list(ctx context.Context, runID string) ([]WorkflowInstance, error) {
 	if s == nil || s.instanceReader == nil {
 		return nil, nil
 	}
-	return s.instanceReader.ListWorkflowInstances(ctx)
+	return s.instanceReader.ListWorkflowInstances(ctx, runID)
 }
 
-func (s *workflowInstanceStore) selectActiveByFields(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	return s.selectActiveByFieldsExported(ctx, scopeKey, selectors, excludedStates)
+func (s *workflowInstanceStore) selectActiveByFields(ctx context.Context, runID, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	return s.selectActiveByFieldsExported(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
-func (s *workflowInstanceStore) selectActiveByFieldsExported(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) selectActiveByFieldsExported(ctx context.Context, runID, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
 	if s == nil || s.instanceReader == nil {
 		return nil, nil
 	}
-	return s.instanceReader.SelectActiveWorkflowInstances(ctx, scopeKey, selectors, excludedStates)
+	return s.instanceReader.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
-func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
+func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
 	if s == nil || s.initialCommits == nil {
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
 	}
-	normalized, identity, lifecycle, err := s.prepareInitialEntryLifecycle(ctx, instance, occurredAt)
+	normalized, identity, lifecycle, err := s.prepareInitialEntryLifecycle(ctx, owner, instance, occurredAt)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
 	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
-	initialProjection, err := newWorkflowInitialMaterializationProjection(ctx, identity, normalized, occurredAt)
+	initialProjection, err := newWorkflowInitialMaterializationProjection(owner, identity, normalized, occurredAt)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	state, err := workflowEngineStateRecord(owner, normalized, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, occurredAt)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
-	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), normalized, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, occurredAt)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	record, err := workflowInitialMaterializationRecord(runID, state, initialProjection, normalized.RuntimeReadiness)
+	record, err := workflowInitialMaterializationRecord(state, initialProjection, normalized.RuntimeReadiness)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
@@ -853,9 +847,14 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 
 func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	ctx context.Context,
+	owner runtimeflowidentity.RunScopedFlowInstance,
 	instance WorkflowInstance,
 	occurredAt time.Time,
 ) (WorkflowInstance, runtimeflowidentity.Persisted, WorkflowLifecycleMutationPlan, error) {
+	owner = owner.Normalize()
+	if err := owner.Validate(); err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
 	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
 	if occurredAt.IsZero() {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires an exact occurrence time")
@@ -872,6 +871,9 @@ func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	if !ok {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires canonical instance identity")
 	}
+	if owner.Route != identity.Instance.Route() {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization owner disagrees with persisted route")
+	}
 	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
 	if !ok || !mode.Valid() {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires typed execution mode authority")
@@ -880,14 +882,14 @@ func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}
-	prepared, err := s.lifecycleOwner.PrepareWorkflowLifecycleMutation(ctx, &normalized, []runtimeworkflowlifecycle.Effect{effect}, false)
+	prepared, err := s.lifecycleOwner.PrepareWorkflowLifecycleMutation(ctx, owner, &normalized, []runtimeworkflowlifecycle.Effect{effect}, false)
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}
 	if len(prepared.Emissions) != 0 {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization cannot leave %d lifecycle emissions outside its atomic commit", len(prepared.Emissions))
 	}
-	if err := prepared.Commit.Validate(runtimecorrelation.RunIDFromContext(ctx), identity.Instance.Route(), identity.RowID()); err != nil {
+	if err := prepared.Commit.Validate(owner.RunID, owner.Route, identity.RowID()); err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}
 	return normalized, identity, prepared.Commit, nil
@@ -905,50 +907,50 @@ func (s *workflowInstanceStore) finalizeInitialEntryLifecycle(ctx context.Contex
 
 // ArmInitialEntryTimers projects the durable initial-entry timer facts only
 // after the caller has installed the runtime route that can receive them.
-func (s *workflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+func (s *workflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if s == nil || !s.enabled() {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
 	if s.lifecycleOwner == nil {
 		return fmt.Errorf("workflow instance lifecycle owner is required")
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("workflow initial timer activation requires instance identity")
 	}
-	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, route)
+	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, identity)
 }
 
 // ReconcileInitialEntryTimers mutates the durable initial-entry declaration
 // set and projects exactly the committed successor set.
-func (s *workflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+func (s *workflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if s == nil || !s.enabled() {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
 	if s.lifecycleOwner == nil {
 		return fmt.Errorf("workflow instance lifecycle owner is required")
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("workflow initial timer reconciliation requires instance identity")
 	}
-	return s.lifecycleOwner.ReconcileInitialEntryTimers(ctx, route)
+	return s.lifecycleOwner.ReconcileInitialEntryTimers(ctx, identity)
 }
 
 // RetireInitialEntryTimerWakeups withdraws and joins the exact process-local
 // projections for the durable active set. It does not mutate timer status.
-func (s *workflowInstanceStore) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
+func (s *workflowInstanceStore) RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if s == nil || !s.enabled() {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
 	if s.lifecycleOwner == nil {
 		return fmt.Errorf("workflow instance lifecycle owner is required")
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("workflow initial timer retirement requires instance identity")
 	}
-	return s.lifecycleOwner.RetireInitialEntryTimerWakeups(ctx, route)
+	return s.lifecycleOwner.RetireInitialEntryTimerWakeups(ctx, identity)
 }
 
 func canonicalWorkflowInstancePersistedTime(value time.Time) time.Time {
@@ -1003,13 +1005,14 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	return instance, identity, true, nil
 }
 
-func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID, terminatedAt time.Time) error {
+func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID, terminatedAt time.Time) error {
 	if s == nil || !s.enabled() {
 		return nil
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	flowIdentity = flowIdentity.Normalize()
+	route := flowIdentity.Route
 	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if !route.Valid() || entityID.IsZero() || terminatedAt.IsZero() {
+	if err := flowIdentity.Validate(); err != nil || entityID.IsZero() || terminatedAt.IsZero() {
 		return fmt.Errorf("workflow instance termination requires exact route, entity, and occurrence time")
 	}
 	if s.engineMutations == nil {
@@ -1018,11 +1021,7 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtim
 	if s.decisionCards != nil {
 		return fmt.Errorf("gated workflow termination requires the pipeline lifecycle coordinator")
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return err
-	}
-	instance, found, err := s.Load(ctx, route)
+	instance, found, err := s.Load(ctx, flowIdentity)
 	if err != nil {
 		return err
 	}
@@ -1042,7 +1041,7 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtim
 	expectedRevision := instance.Revision
 	instance.Status = "terminated"
 	instance.TerminatedAt = terminatedAt.UTC()
-	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, terminatedAt.UTC())
+	record, err := workflowEngineStateRecord(flowIdentity, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, terminatedAt.UTC())
 	if err != nil {
 		return err
 	}
@@ -1233,6 +1232,28 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 		config["transition_history"] = append([]WorkflowTransitionRecord{}, p.Control.TransitionHistory...)
 	}
 	return config
+}
+
+// WorkflowInstanceConfigPayloadForRoute wraps activation config with the
+// canonical persisted route controls. Route recovery removes these controls
+// and returns the original activation config to runtime consumers.
+func WorkflowInstanceConfigPayloadForRoute(
+	route runtimeflowidentity.Route,
+	workflowVersion string,
+	config map[string]any,
+) (map[string]any, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
+		return nil, fmt.Errorf("workflow instance config payload requires exact route")
+	}
+	return (workflowInstancePersistedProjection{
+		Config: cloneStringAnyMap(config),
+		Control: workflowInstancePersistedControl{
+			StorageRef: route.InstancePath,
+			InstanceID: route.InstanceID,
+			FlowPath:   route.InstancePath,
+		},
+	}).ConfigPayload(workflowVersion), nil
 }
 
 func (p workflowInstancePersistedProjection) GatesAny() map[string]any {

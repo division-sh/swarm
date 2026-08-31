@@ -123,12 +123,12 @@ func (b *recoveryTestBus) ListEventDeliveryRecipients(_ context.Context, eventID
 func (b *recoveryTestBus) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
-func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
-func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	b.routeListQueries++
-	out := make([]runtimeflowidentity.Route, 0, len(b.storedRoutes))
+	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(b.storedRoutes))
 	for _, route := range b.storedRoutes {
 		out = append(out, route.Identity)
 	}
@@ -140,7 +140,7 @@ func (b *recoveryTestBus) ListSelectedContractRouteRecoveryRecords(context.Conte
 func (b *recoveryTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	req = req.Normalized()
 	identity := req.Identity
-	b.restored = append(b.restored, identity.InstancePath)
+	b.restored = append(b.restored, identity.Route.InstancePath)
 	b.restoredRequests = append(b.restoredRequests, req)
 	return nil
 }
@@ -214,11 +214,15 @@ func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *re
 		if err != nil {
 			t.Fatalf("resolve recovery agent identity: %v", err)
 		}
+		identityPlan, err := identity.Plan()
+		if err != nil {
+			t.Fatalf("resolve recovery agent identity plan: %v", err)
+		}
 		revision, err := lifecycleConfigRevision(store.agents[i])
 		if err != nil {
 			t.Fatalf("resolve recovery agent revision: %v", err)
 		}
-		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: revision})
+		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: identityPlan, Source: coordinate, ConfigRevision: revision})
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
@@ -359,7 +363,7 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 		t.Fatal("live agent execution snapshot is missing")
 	}
 	am.executionPosture = executionposture.MockOnly
-	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: "restart-live"}); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: "restart-live"}); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
 		t.Fatalf("Restart error = %v, want live-agent rejection", err)
 	}
 	after, ok := testExecutionSnapshot(t, am, "restart-live", "")
@@ -376,7 +380,7 @@ type startupReplayTestStore struct {
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	bus := &recoveryTestBus{
 		storedRoutes: []runtimebus.FlowInstanceRouteRecord{{
-			Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: managerIdentityTestRunID, Route: runtimeflowidentity.DeriveRoute("review", "inst-1")},
 		}},
 	}
 	store := &recoveryTestStore{

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -24,9 +25,12 @@ const authorActivityTestBundleSource = "ephemeral"
 
 var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
 
-func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string) []ActiveFlowInstanceDescriptor {
+func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion, runID string) []ActiveFlowInstanceDescriptor {
 	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
 	for idx := range out {
+		if strings.TrimSpace(out[idx].RunID) == "" {
+			out[idx].RunID = strings.TrimSpace(runID)
+		}
 		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
 			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
 		}
@@ -235,6 +239,9 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	if err := bus.SetDeliveryContinuationOwner(permissiveTestDeliveryOwner{}); err != nil {
 		return nil, err
 	}
+	bus.SetCommittedAgentReadinessFinalizer(CommittedAgentReadinessFinalizerFunc(func(context.Context, events.Event, []events.DeliveryRoute) error {
+		return nil
+	}))
 	return bus, nil
 }
 

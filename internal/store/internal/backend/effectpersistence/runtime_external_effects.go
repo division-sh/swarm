@@ -534,10 +534,10 @@ func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.
 	for key, value := range lineage {
 		out[key] = value
 	}
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
-		return out, nil
-	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+		runID = strings.TrimSpace(authority.ForkChat.SourceRunID)
+	}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
 		runID = strings.TrimSpace(authority.Target.RunID)
 		if runID == "" {
@@ -569,6 +569,7 @@ type existingExternalAttempt struct {
 	attemptMode          string
 	kind                 string
 	class                string
+	agentRunID           string
 	agentID              string
 	agentNameOwner       string
 	agentNameSource      string
@@ -973,12 +974,13 @@ func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffec
 		return false
 	}
 	if authority.Kind != runtimeeffects.AuthorityNormalAgent {
-		return e.agentID == "" && e.agentNameOwner == "" && e.agentNameSource == "" &&
+		return e.agentRunID == "" && e.agentID == "" && e.agentNameOwner == "" && e.agentNameSource == "" &&
 			e.agentRoutePresence == "" && e.flowScopeKey == "" &&
 			e.flowInstanceID == "" && e.flowInstance == ""
 	}
 	fields, err := agentIdentityFields(authority.Normal.Identity)
 	return err == nil &&
+		e.agentRunID == fields.RunID &&
 		e.agentID == fields.AgentID &&
 		e.agentNameOwner == fields.NameOwner &&
 		e.agentNameSource == fields.NameSource &&
@@ -1085,7 +1087,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 	err := tx.QueryRowContext(ctx, `
 		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode,
 		       o.effect_kind, o.effect_class,
-		       COALESCE(o.agent_id,''), COALESCE(o.agent_name_owner,''), COALESCE(o.agent_name_source,''),
+		       COALESCE(o.agent_run_id::text,''), COALESCE(o.agent_id,''), COALESCE(o.agent_name_owner,''), COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
@@ -1099,7 +1101,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 		ORDER BY a.attempt_ordinal DESC
 		LIMIT 1
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
-		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
+		&existing.agentRunID, &existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
 		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
@@ -1118,7 +1120,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 	err := tx.QueryRowContext(ctx, `
 		SELECT o.authority_kind, o.authority_id, o.execution_mode, a.execution_mode,
 		       o.effect_kind, o.effect_class,
-		       COALESCE(o.agent_id,''), COALESCE(o.agent_name_owner,''), COALESCE(o.agent_name_source,''),
+		       COALESCE(o.agent_run_id,''), COALESCE(o.agent_id,''), COALESCE(o.agent_name_owner,''), COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
@@ -1132,7 +1134,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 		ORDER BY a.attempt_ordinal DESC
 		LIMIT 1
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
-		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
+		&existing.agentRunID, &existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
 		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
@@ -1287,8 +1289,8 @@ func supersededExternalAttempt(token runtimeeffects.LifecycleToken, currentEpoch
 	})
 }
 
-func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([7]any, error) {
-	var values [7]any
+func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([8]any, error) {
+	var values [8]any
 	if authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		return values, nil
 	}
@@ -1299,7 +1301,7 @@ func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([7]a
 	if fields.AgentID != strings.TrimSpace(authority.Normal.AgentID) {
 		return values, fmt.Errorf("external effect agent identity conflicts with lifecycle token agent_id")
 	}
-	return [7]any{
+	return [8]any{
 		fields.AgentID,
 		fields.NameOwner,
 		fields.NameSource,
@@ -1307,6 +1309,7 @@ func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([7]a
 		fields.FlowScopeKey,
 		fields.FlowInstanceID,
 		fields.FlowInstancePath,
+		fields.RunID,
 	}, nil
 }
 
@@ -1340,13 +1343,13 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
-			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at, agent_run_id
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULLIF($15,0), $16,
-		          NULLIF($17,'')::uuid, NULLIF($18,'')::uuid, NULLIF($19,'')::uuid, NULLIF($20,''), $21, $22::jsonb, $23::jsonb, $24, 'authorized', $25, $25)
+		          NULLIF($17,'')::uuid, NULLIF($18,'')::uuid, NULLIF($19,'')::uuid, NULLIF($20,''), $21, $22::jsonb, $23::jsonb, $24, 'authorized', $25, $25, NULLIF($26,'')::uuid)
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), agentIdentity[7]); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1397,12 +1400,12 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
-			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, 'authorized', ?, ?)
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at, agent_run_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, 'authorized', ?, ?, NULLIF(?,''))
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC(), agentIdentity[7]); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1782,10 +1785,10 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 }
 
 func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Agent.Normalize() {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity.Agent})
+	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Normalize() {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity})
 	}
-	fields, err := agentIdentityFields(req.Identity.Agent)
+	fields, err := agentIdentityFields(req.Identity)
 	if err != nil {
 		return err
 	}
@@ -1796,9 +1799,9 @@ func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req c
 		FROM agents
 		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 		  AND agent_route_presence=$4 AND flow_scope_key=$5
-		  AND flow_instance_id=$6 AND flow_instance=$7
+		  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
 		FOR UPDATE
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase); err != nil {
 		if err == sql.ErrNoRows {
 			return supersededExternalAttempt(req.Token, 0, 0, "absent")
 		}
@@ -1811,10 +1814,10 @@ func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req c
 }
 
 func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Agent.Normalize() {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity.Agent})
+	if !req.Token.Valid() || req.Token.Identity.Normalize() != req.Identity.Normalize() {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_lifecycle_token_invalid", "external-effects", "settle_provider_head", map[string]any{"agent_identity": req.Identity})
 	}
-	fields, err := agentIdentityFields(req.Identity.Agent)
+	fields, err := agentIdentityFields(req.Identity)
 	if err != nil {
 		return err
 	}
@@ -1825,8 +1828,8 @@ func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req c
 		FROM agents
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
-		  AND flow_instance_id=? AND flow_instance=?
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase); err != nil {
+		  AND flow_instance_id=? AND flow_instance=? AND run_id=?
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase); err != nil {
 		if err == sql.ErrNoRows {
 			return supersededExternalAttempt(req.Token, 0, 0, "absent")
 		}
@@ -1839,7 +1842,7 @@ func requireProviderHeadLifecycleSQLiteTx(ctx context.Context, tx *sql.Tx, req c
 }
 
 func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	fields, err := agentIdentityFields(req.Identity.Agent)
+	fields, err := agentIdentityFields(req.Identity)
 	if err != nil {
 		return err
 	}
@@ -1882,7 +1885,7 @@ func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req completion
 }
 
 func promoteProviderHeadSQLiteTx(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
-	fields, err := agentIdentityFields(req.Identity.Agent)
+	fields, err := agentIdentityFields(req.Identity)
 	if err != nil {
 		return err
 	}

@@ -727,12 +727,12 @@ func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggr
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "workflow_version":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.config->>'workflow_version', '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "type", "entity_type":
 		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
@@ -758,12 +758,12 @@ func sqliteOperatorEntityAggregateGroup(groupBy string, add func(any) int) (enti
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "workflow_version":
 		return entityAggregateGroup{
 			Expr: "NULLIF(CAST(json_extract(COALESCE(fi.config, '{}'), '$.workflow_version') AS TEXT), '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "type", "entity_type":
 		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil

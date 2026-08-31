@@ -66,7 +66,7 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	}
 	parentNode := pipelineSourceNode(t, pc.SemanticSource(), "", "fanout-node")
 	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, parentNode)
-	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testWorkflowInstanceRoute(parentPath), identity.NormalizeEntityID(parentEntityID))
+	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testRunScopedWorkflowInstanceFromContext(ctx, parentPath), identity.NormalizeEntityID(parentEntityID))
 	if err != nil {
 		t.Fatalf("load parent workflow state: %v", err)
 	}
@@ -678,7 +678,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {
 	t.Helper()
-	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
+	instance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", storageRef, err)
 	}

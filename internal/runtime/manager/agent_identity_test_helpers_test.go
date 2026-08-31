@@ -12,9 +12,37 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-const managerTestTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const (
+	managerTestTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	managerIdentityTestRunID      = "00000000-0000-0000-0000-000000000001"
+)
+
+func TestRequireAdmittedAgentIdentityRejectsRunlessAndMismatchedIdentity(t *testing.T) {
+	if err := requireAdmittedAgentIdentity(
+		runtimecorrelation.WithRunID(context.Background(), managerIdentityTestRunID),
+		runtimeactors.AgentConfig{ID: "runless-agent"},
+	); err == nil || !strings.Contains(err.Error(), "complete live identity") {
+		t.Fatalf("runless materialization error = %v, want complete live identity rejection", err)
+	}
+
+	config := managerRootAgentConfig("exact-agent")
+	if err := requireAdmittedAgentIdentity(
+		runtimecorrelation.WithRunID(context.Background(), "00000000-0000-0000-0000-000000000002"),
+		config,
+	); err == nil || !strings.Contains(err.Error(), "conflicts with admitted run_id") {
+		t.Fatalf("mismatched materialization error = %v, want run conflict", err)
+	}
+	if err := requireAdmittedAgentIdentity(
+		runtimecorrelation.WithRunID(context.Background(), managerIdentityTestRunID),
+		config,
+	); err != nil {
+		t.Fatalf("exact materialization identity: %v", err)
+	}
+}
 
 func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()
@@ -34,7 +62,7 @@ func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
 	var err error
-	cfg, err = bindRuntimeCreatedIdentity(cfg, "manager.test.static_agent")
+	cfg, err = managerTestBindRuntimeCreatedIdentity(cfg, managerIdentityTestRunID, "manager.test.static_agent")
 	if err != nil {
 		return PersistedAgent{}, err
 	}
@@ -49,6 +77,10 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	if err != nil {
 		return PersistedAgent{}, err
 	}
+	identityPlan, err := identity.Plan()
+	if err != nil {
+		return PersistedAgent{}, err
+	}
 	revision, err := lifecycleConfigRevision(rec)
 	if err != nil {
 		return PersistedAgent{}, err
@@ -56,7 +88,7 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
 	plan, err := runtimeagenttopology.NewSourceSetPlan(
 		[]runtimeagenttopology.SourceCoordinate{coordinate},
-		[]runtimeagenttopology.DesiredAgent{{Identity: identity, Source: coordinate, ConfigRevision: revision}},
+		[]runtimeagenttopology.DesiredAgent{{Identity: identityPlan, Source: coordinate, ConfigRevision: revision}},
 	)
 	if err != nil {
 		return PersistedAgent{}, err
@@ -86,7 +118,7 @@ func installManagerTestStaticTopology(
 	records := make([]PersistedAgent, 0, len(configs))
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(configs))
 	for _, authored := range configs {
-		cfg, err := bindRuntimeCreatedIdentity(authored, "manager.test.static_topology")
+		cfg, err := managerTestBindRuntimeCreatedIdentity(authored, managerIdentityTestRunID, "manager.test.static_topology")
 		if err != nil {
 			t.Fatalf("bind manager test identity: %v", err)
 		}
@@ -101,12 +133,16 @@ func installManagerTestStaticTopology(
 		if err != nil {
 			t.Fatalf("resolve manager test identity: %v", err)
 		}
+		identityPlan, err := identity.Plan()
+		if err != nil {
+			t.Fatalf("resolve manager test identity plan: %v", err)
+		}
 		revision, err := lifecycleConfigRevision(rec)
 		if err != nil {
 			t.Fatalf("resolve manager test config revision: %v", err)
 		}
 		records = append(records, rec)
-		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: revision})
+		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: identityPlan, Source: coordinate, ConfigRevision: revision})
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
@@ -134,7 +170,37 @@ func registerManagerTestEphemeralAgent(ctx context.Context, am *AgentManager, re
 	if err != nil {
 		return err
 	}
-	return am.MaterializeAdmittedAgentForExecution(ctx, rec)
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	return am.MaterializeAdmittedAgentForExecution(runtimecorrelation.WithRunID(ctx, identity.RunID), rec)
+}
+
+func managerTestBindRuntimeCreatedIdentity(cfg runtimeactors.AgentConfig, runID, owner string) (runtimeactors.AgentConfig, error) {
+	cfg.NormalizeRuntimeDescriptor()
+	if !cfg.Identity.IsZero() {
+		if _, err := cfg.ConcreteIdentity(); err != nil {
+			return runtimeactors.AgentConfig{}, err
+		}
+		return cfg, nil
+	}
+	name, err := runtimeagentidentity.RuntimeName(cfg.ID, owner)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, err
+	}
+	route := runtimeagentidentity.RootRoute()
+	if flowPath := cfg.CanonicalFlowPath(); flowPath != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
+		if err != nil {
+			return runtimeactors.AgentConfig{}, err
+		}
+	}
+	cfg.Identity, err = runtimeagentidentity.New(runID, name, route)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, err
+	}
+	return cfg, nil
 }
 
 func managerRootAgentConfig(agentID string, subscriptions ...string) runtimeactors.AgentConfig {
@@ -189,7 +255,7 @@ func managerScopedRuntimeAgentIdentity(agentID, owner, scopeKey, instanceID, ins
 	if err != nil {
 		panic(err)
 	}
-	identity, err := runtimeagentidentity.New(name, route)
+	identity, err := runtimeagentidentity.New(managerIdentityTestRunID, name, route)
 	if err != nil {
 		panic(err)
 	}
@@ -210,8 +276,12 @@ func managerRuntimeAgentIdentityForFlowPath(agentID, instancePath string) runtim
 }
 
 func testAgentIdentity(t testing.TB, am *AgentManager, agentID, flowInstance string) runtimeagentidentity.Identity {
+	return testAgentIdentityForRun(t, am, managerIdentityTestRunID, agentID, flowInstance)
+}
+
+func testAgentIdentityForRun(t testing.TB, am *AgentManager, runID, agentID, flowInstance string) runtimeagentidentity.Identity {
 	t.Helper()
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	identity, err := am.lifecycle.resolveAgentTarget(runID, agentID, flowInstance, false)
 	if err != nil {
 		t.Fatalf("resolve test agent identity %q@%q: %v", agentID, flowInstance, err)
 	}
@@ -219,8 +289,12 @@ func testAgentIdentity(t testing.TB, am *AgentManager, agentID, flowInstance str
 }
 
 func testAgentConfig(t testing.TB, am *AgentManager, agentID, flowInstance string) (runtimeactors.AgentConfig, bool) {
+	return testAgentConfigForRun(t, am, managerIdentityTestRunID, agentID, flowInstance)
+}
+
+func testAgentConfigForRun(t testing.TB, am *AgentManager, runID, agentID, flowInstance string) (runtimeactors.AgentConfig, bool) {
 	t.Helper()
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	identity, err := am.lifecycle.resolveAgentTarget(runID, agentID, flowInstance, false)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, false
 	}
@@ -229,7 +303,7 @@ func testAgentConfig(t testing.TB, am *AgentManager, agentID, flowInstance strin
 
 func testExecutionSnapshot(t testing.TB, am *AgentManager, agentID, flowInstance string) (agentExecutionSnapshot, bool) {
 	t.Helper()
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	identity, err := am.lifecycle.resolveAgentTarget(managerIdentityTestRunID, agentID, flowInstance, false)
 	if err != nil {
 		return agentExecutionSnapshot{}, false
 	}
@@ -255,5 +329,5 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLockedForTest(
 ) (runtimeagentidentity.Identity, *agentLifecycleCell, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.resolveAgentTargetLocked(agentID, flowInstance, includeTerminated)
+	return c.resolveAgentTargetLocked(managerIdentityTestRunID, agentID, flowInstance, includeTerminated)
 }

@@ -32,7 +32,7 @@ func (s *paginatedAgentFrameCatalog) ListBundleCatalogAgents(_ context.Context, 
 	return s.pages[opts.Cursor], nil
 }
 
-func (s *agentFrameEffectiveResolverStub) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error) {
+func (s *agentFrameEffectiveResolverStub) ResolveAgentFrameConfig(runID, agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error) {
 	s.calls++
 	return s.result, s.err
 }
@@ -73,7 +73,7 @@ func TestOperatorAgentFrameInspectionScopesUseCanonicalProjection(t *testing.T) 
 	assertAgentFrameOccurrenceUnresolved(t, static)
 
 	effectiveRaw, err := handler(context.Background(), Request{Params: map[string]any{
-		"scope": "effective", "agent_id": "reviewer", "root": true,
+		"scope": "effective", "agent_id": "reviewer", "run_id": agentidentitytest.DefaultRunID, "root": true,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestOperatorAgentFrameNotFoundDetailsMatchDeclaredSchema(t *testing.T) {
 	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: catalog, Effective: resolver})["agent.frame"]
 	for _, params := range []map[string]any{
 		{"scope": "static", "agent_id": "missing", "bundle_hash": bundleHash, "flow": "review"},
-		{"scope": "effective", "agent_id": "missing", "root": true},
+		{"scope": "effective", "agent_id": "missing", "run_id": agentidentitytest.DefaultRunID, "root": true},
 	} {
 		_, err := handler(context.Background(), Request{Params: params})
 		var appErr *ApplicationError

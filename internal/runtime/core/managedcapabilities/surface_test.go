@@ -10,6 +10,7 @@ import (
 
 func managedCapabilityTestIdentity(agentID string) agentidentity.Identity {
 	return agentidentity.Identity{
+		RunID: "00000000-0000-4000-8000-000000000001",
 		Name:  agentidentity.Name{AgentID: agentID, Owner: "managed-capability-test", Source: agentidentity.NameSourceDeclared},
 		Route: agentidentity.RootRoute(),
 	}
@@ -17,7 +18,8 @@ func managedCapabilityTestIdentity(agentID string) agentidentity.Identity {
 
 func managedCapabilityTestRoutedIdentity(agentID, instanceID string) agentidentity.Identity {
 	return agentidentity.Identity{
-		Name: agentidentity.Name{AgentID: agentID, Owner: "managed-capability-test", Source: agentidentity.NameSourceDeclared},
+		RunID: "00000000-0000-4000-8000-000000000001",
+		Name:  agentidentity.Name{AgentID: agentID, Owner: "managed-capability-test", Source: agentidentity.NameSourceDeclared},
 		Route: agentidentity.Route{
 			Presence: agentidentity.RoutePresent, ScopeKey: "review", InstanceID: instanceID,
 			InstancePath: "review/" + instanceID,
@@ -293,7 +295,7 @@ func TestContinuationFingerprintIgnoresOnlyNormalRuntimeEphemera(t *testing.T) {
 		Authority: Authority{
 			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000501",
 			ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-generation-one",
-			RunID: "00000000-0000-0000-0000-000000000502", SessionID: "00000000-0000-0000-0000-000000000503", TurnOrdinal: 1,
+			RunID: "00000000-0000-4000-8000-000000000001", SessionID: "00000000-0000-0000-0000-000000000503", TurnOrdinal: 1,
 		},
 		Tools: []PlannedTool{{
 			Name: "event.publish", DefinitionHash: "definition-hash",
@@ -347,7 +349,7 @@ func TestProjectNormalContinuationChangesOnlyExcludedCoordinates(t *testing.T) {
 		Authority: Authority{
 			Kind: AuthorityProviderTurn, ID: "00000000-0000-4000-8000-000000000601",
 			ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-generation-one",
-			RunID: "00000000-0000-4000-8000-000000000602", SessionID: "00000000-0000-4000-8000-000000000603", TurnOrdinal: 1,
+			RunID: "00000000-0000-4000-8000-000000000001", SessionID: "00000000-0000-4000-8000-000000000603", TurnOrdinal: 1,
 		},
 		CreatedAt: time.Unix(1, 0).UTC(),
 	}
@@ -378,5 +380,39 @@ func TestProjectNormalContinuationChangesOnlyExcludedCoordinates(t *testing.T) {
 	}
 	if original.Authority.ExecutionAuthorityID != "runtime-generation-one" || original.Authority.SessionID != "00000000-0000-4000-8000-000000000603" {
 		t.Fatalf("original surface mutated: %#v", original.Authority)
+	}
+}
+
+func TestSurfaceRejectsAuthorityRunThatDisagreesWithActorIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		authority Authority
+	}{
+		{
+			name: "normal",
+			authority: Authority{
+				Kind: AuthorityProviderTurn, ID: "00000000-0000-4000-8000-000000000701",
+				ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-owner",
+				RunID: "00000000-0000-4000-8000-000000000702", SessionID: "00000000-0000-4000-8000-000000000703", TurnOrdinal: 1,
+			},
+		},
+		{
+			name: "selected_fork",
+			authority: Authority{
+				Kind: AuthorityProviderTurn, ID: "00000000-0000-4000-8000-000000000704",
+				ExecutionKind: ExecutionSelectedContractFork, ExecutionAuthorityID: "00000000-0000-4000-8000-000000000705",
+				RunID: "00000000-0000-4000-8000-000000000706", SessionID: "00000000-0000-4000-8000-000000000707", TurnOrdinal: 1,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(Plan{
+				ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "test", Transport: "api",
+				ProviderContract: "test.v1", Authority: test.authority, CreatedAt: time.Unix(1, 0).UTC(),
+			})
+			if err == nil || err.Error() != "managed capability authority run does not match actor identity run" {
+				t.Fatalf("New error = %v, want exact authority/actor run mismatch", err)
+			}
+		})
 	}
 }

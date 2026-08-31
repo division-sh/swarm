@@ -37,7 +37,7 @@ func toolTestInboundEvent(eventType events.EventType, payload json.RawMessage, e
 		"",
 		payload,
 		0,
-		"22222222-2222-4222-8222-222222222222",
+		toolTestRunID,
 		"",
 		envelope,
 		time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC),

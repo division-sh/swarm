@@ -48,7 +48,7 @@ func (o agentFixtureFlowActivationCommitter) CommitFlowInstanceActivation(ctx co
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
 		Plan: plan,
 		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
-			Identity: plan.Identity.Route(),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()},
 		}},
 	})
 }
@@ -476,7 +476,7 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 		t.Fatalf("mixed-authority rejection acquired a replacement process capability %d times", got)
 	}
 
-	terminateLifecycleReadinessOwnerForTest(t, ctx, selected, flowIdentity.FlowInstance())
+	terminateLifecycleReadinessOwnerForTest(t, ctx, selected, flowIdentity.RunID, flowIdentity.FlowInstance())
 	if _, err := agentfixture.CommitExact(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "terminate-flow-survivor",
 		Identity: flowIdentity, AgentID: flowIdentity.AgentID(), Trigger: "fixture-proof",
@@ -514,7 +514,7 @@ func seedExactAgentFixtureFlowState(
 		t.Fatal(err)
 	}
 	revision = strings.TrimPrefix(revision, "sha256:")
-	runID := uuid.NewString()
+	runID := identity.RunID
 	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{

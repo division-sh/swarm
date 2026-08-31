@@ -26,9 +26,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string, memory agentmemory.Plan, flowPath string) {
+func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, runID, agentID, entityID string, memory agentmemory.Plan, flowPath string) {
 	t.Helper()
-	identity := testAgentIdentity(t, agentID, flowPath)
+	identity := mustTestAgentIdentityForRun(runID, agentID, flowPath)
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            agentID,
@@ -330,9 +330,12 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		t, readyRunID, uuid.NewString(), "quiescence-settled", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
 	))
 	cancelGenericScheduleFixture(t, ctx, pg, settled, "test_settled", now)
-	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
-	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
-	seedTestAgentRow(t, ctx, db, true, quiescenceIdentity, "active")
+	blockedIdentity := mustTestAgentIdentityForRun(blockedRunID, "quiescence-agent", "quiescence")
+	readyIdentity := mustTestAgentIdentityForRun(readyRunID, "quiescence-agent", "quiescence")
+	blockedFields := testAgentIdentityStorageFields(t, blockedIdentity)
+	readyFields := testAgentIdentityStorageFields(t, readyIdentity)
+	seedTestAgentRow(t, ctx, db, true, blockedIdentity, "active")
+	seedTestAgentRow(t, ctx, db, true, readyIdentity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -343,11 +346,13 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		VALUES
 			(gen_random_uuid(), $1::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '{}'::jsonb,
 				'worker-1', now() + interval '1 minute', 'active', now(), now()),
-			(gen_random_uuid(), $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '{}'::jsonb,
+			(gen_random_uuid(), $2::uuid, $10, $11, $12, $13, $14, $15, $16, TRUE, 'authored', '{}'::jsonb,
 				'worker-1', now() - interval '1 minute', 'active', now(), now())
-	`, blockedRunID, readyRunID, quiescenceFields.AgentID, quiescenceFields.NameOwner,
-		quiescenceFields.NameSource, quiescenceFields.RoutePresence, quiescenceFields.FlowScopeKey,
-		quiescenceFields.FlowInstanceID, quiescenceFields.FlowInstancePath); err != nil {
+	`, blockedRunID, readyRunID, blockedFields.AgentID, blockedFields.NameOwner,
+		blockedFields.NameSource, blockedFields.RoutePresence, blockedFields.FlowScopeKey,
+		blockedFields.FlowInstanceID, blockedFields.FlowInstancePath,
+		readyFields.AgentID, readyFields.NameOwner, readyFields.NameSource, readyFields.RoutePresence,
+		readyFields.FlowScopeKey, readyFields.FlowInstanceID, readyFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed sessions: %v", err)
 	}
 
@@ -387,8 +392,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
-	identity := testAgentIdentity(t, "agent-source", "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
+	identity := mustTestAgentIdentityForRun(runID, "agent-source", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -427,7 +432,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		t.Fatalf("bind delivery session: %v", err)
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
-		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		AgentID: identity.AgentID(), Identity: identity,
 		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-1",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond, RetryCount: 1,
@@ -499,8 +504,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
-	identity := testAgentIdentity(t, "agent-late", "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
+	identity := mustTestAgentIdentityForRun(runID, "agent-late", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -520,7 +525,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		base.Add(2*time.Second), base.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	route := testAgentDeliveryRoute(t, "agent-late", "flow-a")
+	route := testAgentDeliveryRoute(t, runID, "agent-late", "flow-a")
 	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
 		t.Fatalf("commit late delivery: %v", err)
 	}
@@ -533,7 +538,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		t.Fatalf("bind late delivery session: %v", err)
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
-		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		AgentID: identity.AgentID(), Identity: identity,
 		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-late",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond,
@@ -571,8 +576,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "flow-a")
-	identity := testAgentIdentity(t, "agent-task", "flow-a")
+	seedRunDebugAgent(t, pg, ctx, runID, "agent-task", entityID, agentmemory.PlatformDefault(), "flow-a")
+	identity := mustTestAgentIdentityForRun(runID, "agent-task", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -590,7 +595,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		entityID, now.Add(1*time.Second), now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed audit session: %v", err)
 	}
-	route := testAgentDeliveryRoute(t, "agent-task", "flow-a")
+	route := testAgentDeliveryRoute(t, runID, "agent-task", "flow-a")
 	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
 		t.Fatalf("commit task delivery: %v", err)
 	}
@@ -599,7 +604,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("claim task delivery: %v", err)
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
-		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		AgentID: identity.AgentID(), Identity: identity,
 		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "task.started", TaskID: "task-2",
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 8 * time.Millisecond,

@@ -194,6 +194,7 @@ func (s conversationProjection) loadConversationForkSource(ctx context.Context, 
 		}
 		item.SessionID = strings.TrimSpace(item.SessionID)
 		item.RunID = strings.TrimSpace(item.RunID)
+		identityFields.RunID = item.RunID
 		item.Identity, err = runtimeagentidentity.FromStorageFields(identityFields)
 		if err != nil {
 			return runtimerunfork.ConversationForkSource{}, fmt.Errorf("load conversation fork source identity: %w", err)

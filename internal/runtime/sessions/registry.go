@@ -217,7 +217,7 @@ func registryKey(identity agentmemory.Identity) agentmemory.Identity {
 
 func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*Lease, error) {
 	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(lockOwner) == "" {
@@ -226,7 +226,7 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Id
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity.Agent, "acquire"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "acquire"); err != nil {
 		return nil, err
 	}
 
@@ -289,13 +289,13 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 
 func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error) {
 	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return nil, err
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity.Agent, "rotate"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "rotate"); err != nil {
 		return nil, err
 	}
 
@@ -371,13 +371,13 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 
 func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error {
 	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return err
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity.Agent, "increment_turn"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "increment_turn"); err != nil {
 		return err
 	}
 	key := registryKey(identity)
@@ -449,17 +449,17 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 			if keys[left].RunID != keys[right].RunID {
 				return keys[left].RunID < keys[right].RunID
 			}
-			return agentidentity.Less(keys[left].Agent, keys[right].Agent)
+			return agentidentity.Less(keys[left], keys[right])
 		})
 		for _, key := range keys {
 			rec := sr.byKey[key]
-			if rec == nil || rec.Identity.Agent != identity || (rec.Status != "active" && rec.Status != "suspended") {
+			if rec == nil || rec.Identity != identity || (rec.Status != "active" && rec.Status != "suspended") {
 				continue
 			}
 			previous := *rec
 			mutation := LifecycleSessionMutation{
 				PreviousSessionID: previous.SessionID, RunID: previous.Identity.RunID,
-				AgentIdentity: previous.Identity.Agent, FlowInstance: previous.Identity.FlowInstance(), PreviousStatus: previous.Status,
+				AgentIdentity: previous.Identity, FlowInstance: previous.Identity.FlowInstance(), PreviousStatus: previous.Status,
 			}
 			terminated := previous
 			terminated.Status = "terminated"
@@ -495,7 +495,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, identity agentme
 	identity = identity.Normalize()
 	lockOwner = strings.TrimSpace(lockOwner)
 	newSessionID = strings.TrimSpace(newSessionID)
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return err
 	}
 	if lockOwner == "" || newSessionID == "" {
@@ -504,7 +504,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, identity agentme
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity.Agent, "adopt_provider_session"); err != nil {
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "adopt_provider_session"); err != nil {
 		return err
 	}
 
@@ -545,7 +545,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, identity agentme
 
 func (sr *InMemoryRegistry) Snapshot(identity agentmemory.Identity) (*Record, bool) {
 	identity = registryKey(identity)
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return nil, false
 	}
 	sr.mu.Lock()
@@ -560,7 +560,7 @@ func (sr *InMemoryRegistry) Snapshot(identity agentmemory.Identity) (*Record, bo
 
 func (sr *InMemoryRegistry) History(identity agentmemory.Identity) []Record {
 	identity = registryKey(identity)
-	if err := identity.Validate(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return nil
 	}
 	sr.mu.Lock()

@@ -9,14 +9,13 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
 func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	ctx context.Context,
-	route runtimeflowidentity.Route,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	instance *WorkflowInstance,
 	reason string,
@@ -37,11 +36,15 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	if err != nil {
 		return prepared, err
 	}
+	flowIdentity = flowIdentity.Normalize()
+	if err := flowIdentity.Validate(); err != nil {
+		return prepared, err
+	}
+	route := flowIdentity.Route
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
 		return prepared, fmt.Errorf("validate workflow termination owner: %w", err)
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" || entityID.IsZero() {
+	if entityID.IsZero() {
 		return prepared, fmt.Errorf("workflow termination requires exact run and persisted entity identity")
 	}
 	for _, activation := range activations {
@@ -82,7 +85,7 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 
 func (pc *PipelineCoordinator) commitWorkflowTermination(
 	ctx context.Context,
-	route runtimeflowidentity.Route,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	terminatedAt time.Time,
 	retireRoute bool,
@@ -90,12 +93,13 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires the selected workflow engine mutation owner")
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	flowIdentity = flowIdentity.Normalize()
+	route := flowIdentity.Route
 	entityID = identity.NormalizeEntityID(entityID.String())
-	if !route.Valid() || entityID.IsZero() || terminatedAt.IsZero() {
+	if err := flowIdentity.Validate(); err != nil || entityID.IsZero() || terminatedAt.IsZero() {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires exact route, entity, and occurrence time")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -113,7 +117,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	expectedState := strings.TrimSpace(instance.CurrentState)
 	expectedRevision := instance.Revision
-	prepared, err := pc.prepareWorkflowTermination(ctx, route, entityID, &instance, "flow_terminated", terminatedAt.UTC())
+	prepared, err := pc.prepareWorkflowTermination(ctx, flowIdentity, entityID, &instance, "flow_terminated", terminatedAt.UTC())
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -123,8 +127,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	if updatedAt.Before(instance.CreatedAt) {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination time cannot precede creation time")
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
+	state, err := workflowEngineStateRecord(flowIdentity, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -145,7 +148,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	command := WorkflowEngineMutationCommand{State: state, Lifecycle: prepared.Commit, Publications: publications}
 	if retireRoute {
-		command.RouteRetirement = &WorkflowEngineRouteRetirement{Route: route}
+		command.RouteRetirement = &WorkflowEngineRouteRetirement{Identity: state.Identity}
 	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
 	if err != nil {
@@ -166,7 +169,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 		if pc.flowRoutes == nil {
 			return WorkflowInstance{}, fmt.Errorf("committed flow route retirement requires process route owner")
 		}
-		if err := pc.flowRoutes.RetireCommittedFlowInstanceRoute(committed.RouteRetirement.Route); err != nil {
+		if err := pc.flowRoutes.RetireCommittedFlowInstanceRoute(committed.RouteRetirement.Identity); err != nil {
 			return WorkflowInstance{}, err
 		}
 	}
@@ -179,7 +182,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 			return WorkflowInstance{}, err
 		}
 	}
-	persisted, found, err := pc.workflowStore.Load(ctx, route)
+	persisted, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}

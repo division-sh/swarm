@@ -203,8 +203,8 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 
 func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID string, pending []events.Event) {
 	t.Helper()
-	route := managerAgentDeliveryRoute(agentID)
 	for _, evt := range pending {
+		route := managerAgentDeliveryRouteForRun(evt.RunID(), agentID)
 		if _, err := uuid.Parse(evt.ID()); err != nil {
 			t.Fatalf("manager delivery fixture event id %q is not durable: %v", evt.ID(), err)
 		}
@@ -421,7 +421,15 @@ func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, re
 }
 
 func managerAgentDeliveryRoute(agentID string) events.DeliveryRoute {
+	return managerAgentDeliveryRouteForRun(managerIdentityTestRunID, agentID)
+}
+
+func managerAgentDeliveryRouteForRun(runID, agentID string) events.DeliveryRoute {
 	identity := managerAgentIdentity(agentID)
+	identity.RunID = runID
+	if err := identity.Validate(); err != nil {
+		panic(err)
+	}
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 }
 
@@ -430,19 +438,19 @@ func managerAgentIdentity(agentID string) runtimeagentidentity.Identity {
 	if err != nil {
 		panic(err)
 	}
-	identity, err := runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+	identity, err := runtimeagentidentity.New(managerIdentityTestRunID, name, runtimeagentidentity.RootRoute())
 	if err != nil {
 		panic(err)
 	}
 	return identity
 }
 
-func managerAgentDeliveryContext(ctx context.Context, agentID string) context.Context {
-	return runtimedelivery.WithRoute(ctx, managerAgentDeliveryRoute(agentID))
+func managerAgentDeliveryContext(ctx context.Context, runID, agentID string) context.Context {
+	return runtimedelivery.WithRoute(ctx, managerAgentDeliveryRouteForRun(runID, agentID))
 }
 
 func managerAgentClaimContext(ctx context.Context, claim runtimedelivery.Claim, agentID string) context.Context {
-	return runtimedelivery.WithClaim(managerAgentDeliveryContext(ctx, agentID), claim)
+	return runtimedelivery.WithClaim(managerAgentDeliveryContext(ctx, claim.RunID(), agentID), claim)
 }
 
 func managerClaimedDeliveryContext(
@@ -453,7 +461,7 @@ func managerClaimedDeliveryContext(
 	agentID string,
 ) context.Context {
 	t.Helper()
-	ctx = managerAgentDeliveryContext(ctx, agentID)
+	ctx = managerAgentDeliveryContext(ctx, evt.RunID(), agentID)
 	store, ok := am.deliveryStore.(interface {
 		ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
 		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
@@ -469,7 +477,7 @@ func managerClaimedDeliveryContext(
 			t.Fatalf("construct managed delivery authority: %v", err)
 		}
 	}
-	result, err := store.ClaimDelivery(ctx, authority, evt, managerAgentDeliveryRoute(agentID))
+	result, err := store.ClaimDelivery(ctx, authority, evt, managerAgentDeliveryRouteForRun(evt.RunID(), agentID))
 	if err != nil {
 		t.Fatalf("claim manager test delivery: %v", err)
 	}
@@ -486,7 +494,7 @@ func (s *managerDeliveryTestStore) managerTestDeliveryAuthority() runtimedeliver
 
 func (s *managerDeliveryTestStore) makeDeliveryDueNow(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
-	identity, err := managerAgentDeliveryRoute(agentID).Identity()
+	identity, err := managerAgentDeliveryRouteForRun(evt.RunID(), agentID).Identity()
 	if err != nil {
 		t.Fatalf("derive manager delivery fixture route: %v", err)
 	}
