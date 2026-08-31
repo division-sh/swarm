@@ -243,7 +243,8 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	relativePath := slashPath(repoRoot, path)
-	if importsPath(file, "github.com/division-sh/swarm/internal/events/eventtest") {
+	if importsPath(file, "github.com/division-sh/swarm/internal/events/eventtest") &&
+		!strings.HasPrefix(relativePath, "internal/store/storetest/") {
 		t.Fatalf("%s imports internal/events/eventtest from production code; test fixture builders are test-only", relativePath)
 	}
 	eventAliases, dotImported := eventImportAliases(file)
