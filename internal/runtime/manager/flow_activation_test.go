@@ -2825,7 +2825,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 }
 
 func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
 	runKinds := flowActivationStandingRestarts{
 		uuid.NewString(): runtimepipeline.StandingRestartOrdinary,
 		uuid.NewString(): runtimepipeline.StandingRestartActiveIntrinsic,
@@ -2838,10 +2838,10 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 		index++
 		path := fmt.Sprintf("review/standing-%d", index)
 		instances.readiness[flowActivationReadinessKey(runID, path)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath: path, OwningRunSource: authorActivityTestBundleSourceFact,
+			InstancePath: path, OwningRunSource: authorActivityTestSourceArtifactFact,
 			RunStatus: "running", InstanceStatus: "active",
 			Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-				RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+				RunID: runID, BundleHash: bundleHash,
 				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: fmt.Sprintf("standing-%d", index),
@@ -2852,7 +2852,7 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 	}
 	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
 	am.roles.StandingRestarts = runKinds
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestBundleSourceFact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
 	if err != nil {
 		t.Fatalf("inspect standing readiness: %v", err)
 	}

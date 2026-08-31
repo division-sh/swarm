@@ -35290,7 +35290,7 @@ durable_pipeline_processing_obligation_authority:
       release may retire that trigger before transaction unwind. Borrowed-transaction poison defers only the sibling drain
       to transaction unwind. The owner does not scan registries from a lease lock or create a caller retry owner. No caller retries a consumed
       owner and no runtime retry registry exists. Synchronous reservation, hydration, scan close,
-      startup ownership, destructive-reset, and bundle-delete release failures are returned or joined with the primary
+      startup ownership and destructive-reset release failures are returned or joined with the primary
       failure; asynchronous and rollback cleanup records explicit runtime failure after terminal release. EventBus reset
       preserves exact pending operations until preceding route and subscriber retirement succeeds, then attempts every pending
       release, removes only those terminal operations, and joins all cleanup evidence. A failed cursor close removes the local
@@ -35441,7 +35441,7 @@ durable_pipeline_processing_obligation_authority:
         - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
     PPO-PRV-001:
       owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority
-      rule: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority. Bundle delete and destructive reset acquire operation-specific opaque leases on their own exact PostgreSQL sessions, retain those leases across external work, and use separate short operation-owned transactions for persistence. Layered API idempotency and administrative leases reserve independent capacity and cannot borrow a surrounding transaction or wait on their own session.
+      rule: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority. Destructive reset acquires an operation-specific opaque lease on its own exact PostgreSQL session, retains that lease across external work, and uses separate short operation-owned transactions for persistence. Layered API idempotency and administrative leases reserve independent capacity and cannot borrow a surrounding transaction or wait on their own session.
       executable_proofs:
         - {path: internal/store/internal/runtimepersistence/postgres_session_authority_test.go, test: TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback}
         - {path: internal/apiv1/operator_administrative_layering_test.go, test: TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConnection}
@@ -35457,9 +35457,8 @@ agent_topology_authority:
     owner: agent_topology_source_set_head
     rule: >-
       One complete, sorted StaticDeclarationPlan covers every currently admitted loaded
-      bundle source. InstallCompleteSourceSet and boot-only RestoreSourceSet establish the
-      process source set; the bundle-delete final mutation may apply RemoveBundleSource;
-      ApplyDestructiveResetTopology may clear it after quiescence. Each operation owns its
+      source artifact. InstallCompleteSourceSet and boot-only RestoreSourceSet establish the
+      process source set; ApplyDestructiveResetTopology may clear it after quiescence. Each operation owns its
       transaction and returns a typed exact diff. Omission means removal; partial per-runtime
       or per-bundle desired writers are forbidden. Live ReplaceSourceSet, project reload,
       same-process source hot reload, and speculative Dynamic Load are not supported operations.
@@ -35473,39 +35472,6 @@ agent_topology_authority:
       immutable for that process epoch. Existing runs retain their exact bundle authority;
       changed-bundle continuation creates separately bundle-bound work through run.fork and never
       mutates the source authority of an existing run.
-
-      Bundle-source deletion first quiesces and joins the exact retiring runtime generation while
-      its agents retain the predecessor source-set revision. It then reserves every surviving
-      runtime generation and every nonterminated durable static or flow-readiness lifecycle cell
-      before committing source-set removal in the named bundle-delete final mutation. After commit,
-      one source_set_rebind transition preserves each survivor's execution generation, sealed
-      topology variant, phase, run mode, config revision, and exact admission while replacing only
-      its source-set admission revision and lifecycle persistence grant with the exact admitted
-      successor. Exact predecessor and successor grant identities are persisted evidence; ordinal
-      rank or adjacent-generation arithmetic never substitutes for identity. Failed but still
-      desired survivors consume this topology-only rebind; terminated identities are inert.
-
-      RuntimeContextManager owns the aggregate bundle-delete survivor operation because it owns the
-      private runtime managers. Preparation closes aggregate execution admission and process
-      selection before source-set mutation. Registration, direct execution, dequeued EventBus work,
-      lifecycle release, shutdown, and reset cannot bypass that gate. Gate lifetime is owned by the
-      retained process operation rather than a cancelable manager run context. Per-cell durable
-      progress is deterministic and resumable, but no survivor context is republished and bundle
-      deletion cannot report completion until every prepared survivor and process-local projection
-      converges. A pre-commit failure restores exact predecessor visibility without durable rebind;
-      a post-commit or partial-progress failure retains the typed transition and all gates for exact
-      retry. Foreign grants, changed topology/config evidence, non-exact operation identity, and
-      non-adjacent lifecycle evidence fail closed.
-
-      The bundle-delete final transaction records the exact mutation, API request hash, opaque keyed
-      replay-authority digest, original request time, and source-set operation identity. This evidence
-      is mandatory even when an unloaded catalog bundle requires no source-set change. If final API
-      completion fails after commit, a keyed retry may recover exactly one matching committed record
-      only within the API's 24-hour idempotency window; unkeyed, expired, conflicting, or ambiguous
-      replay fails closed. If planning observes the bundle already absent, replay adopts only an exact
-      retained survivor transition. With no pending survivor transition it is a no-op and cannot rotate
-      a generation or repeat persistence.
-
       On later startup, a persisted static lifecycle identity absent from the complete current plan is
       terminalized only through its exact current runtime-generation grant and matching admission; a
       removed source coordinate is never reconstructed as lifecycle authority. Boot-only

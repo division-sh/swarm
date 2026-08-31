@@ -1612,7 +1612,12 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 	if err != nil {
 		t.Fatalf("read healthy standing flow schema: %v", err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1))
+	stoppedSchema := strings.Replace(string(baseSchema), "name: telegram-ingress", "name: telegram-stopped", 1)
+	stoppedSchema = canonicalrouting.WithoutStandingIngressPins(t, stoppedSchema)
+	if ingress := strings.Index(stoppedSchema, "\ningress:\n"); ingress >= 0 {
+		stoppedSchema = stoppedSchema[:ingress+1]
+	}
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
 	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "entities.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow entities: %v", err)
