@@ -8,6 +8,7 @@ type PromptSchemaGuardCase struct {
 	IntentSource     string
 	IntentContent    string
 	FlowID           string
+	EventType        string
 	EmitTool         string
 	RequiredTopLevel []string
 	ForbiddenTokens  []string
@@ -37,11 +38,11 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 			if emitEvent == "" {
 				continue
 			}
-			eventEntry, _, _, ok := effectiveEventDeclarationForFlowEvent(bundle, record.OwnerFlowID, emitEvent)
-			if !ok {
+			compiled, ok, err := bundle.ResolveCompiledFlowEventSchema(record.OwnerFlowID, emitEvent)
+			if err != nil || !ok {
 				continue
 			}
-			required := normalizeStrings(eventEntry.Payload.Required)
+			required := compiled.RequiredFieldNames()
 			if len(required) == 0 {
 				continue
 			}
@@ -54,6 +55,7 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 				IntentSource:     entry.ResolvedIntent.Coordinate,
 				IntentContent:    entry.ResolvedIntent.Content,
 				FlowID:           record.OwnerFlowID,
+				EventType:        emitEvent,
 				EmitTool:         "emit_" + strings.ReplaceAll(emitEvent, ".", "_"),
 				RequiredTopLevel: required,
 			})

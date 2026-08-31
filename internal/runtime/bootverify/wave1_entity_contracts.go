@@ -19,8 +19,9 @@ type wave1EntityContractView struct {
 }
 
 type wave1ResolvedType struct {
-	Kind string
-	Type string
+	Kind       string
+	Type       string
+	IsOptional bool
 }
 
 var wave1PlatformEntityTypes = map[string]wave1ResolvedType{
@@ -156,6 +157,7 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
 	}
 	current := strings.TrimSpace(field.Type)
+	optional := false
 	if current == "" {
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s field %q has empty type", defaultFlowLabel(flowID), view.EntityType, head)
 	}
@@ -170,18 +172,19 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 			}
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q traverses list type %q through unsupported segment %q", ref, current, segment)
 		}
-		kind, named, err := wave1ResolveNamedType(view.Types, current)
+		resolved, err := (runtimecontracts.CatalogTypeReference{Type: current, Catalog: view.Types}).Resolve()
 		if err != nil {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
 		}
-		if kind != "named" {
+		if resolved.Kind != runtimecontracts.CatalogTypeObject {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q cannot traverse non-composite type %q through segment %q", ref, current, segment)
 		}
-		fieldSpec, ok := named.Fields[segment]
+		fieldSpec, ok := resolved.Field(segment)
 		if !ok {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q references undeclared nested field %q", ref, segment)
 		}
-		current = strings.TrimSpace(fieldSpec.Type)
+		current = strings.TrimSpace(fieldSpec.TypeRef)
+		optional = optional || fieldSpec.IsOptional
 		if current == "" {
 			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q nested field %q has empty type", ref, segment)
 		}
@@ -190,7 +193,7 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 	if err != nil {
 		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
 	}
-	return wave1ResolvedType{Kind: kind, Type: current}, view.FlowID, nil
+	return wave1ResolvedType{Kind: kind, Type: current, IsOptional: optional}, view.FlowID, nil
 }
 
 func wave1ResolvePlatformEntityPath(ref string) (wave1ResolvedType, error) {

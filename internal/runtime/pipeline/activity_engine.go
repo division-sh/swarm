@@ -29,6 +29,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -1012,6 +1013,26 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		LoopStage:        payload.LoopStage,
 		ExecutionMode:    evt.ExecutionMode(),
 	}.Normalized()
+	if evt.AdmissionClass() == events.EventAdmissionSelectedForkReplay {
+		if _, ok := evt.SelectedForkLineage(); !ok {
+			return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s selected-fork lineage is missing", evt.ID())
+		}
+		intent.SourceRunID = evt.RunID()
+		intent.SourceEventID = evt.ID()
+		if parentEventID := strings.TrimSpace(payload.ParentEventID); parentEventID != "" {
+			intent.ParentEventID = activityidentity.ForkLineageEventID(evt.RunID(), parentEventID)
+		}
+		intent.EntityID = identity.NormalizeEntityID(evt.EntityID())
+		intent.FlowInstance = evt.FlowInstance()
+		if intent.Generation.Valid() {
+			forked, err := loopruntime.ForkGeneration(intent.Generation, evt.RunID(), evt.EntityID())
+			if err != nil {
+				return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s fork loop generation: %w", evt.ID(), err)
+			}
+			intent.Generation = forked
+		}
+		intent = intent.Normalized()
+	}
 	if payload.ChannelActivationGeneration != nil {
 		intent.ChannelActivationGeneration = *payload.ChannelActivationGeneration
 	}

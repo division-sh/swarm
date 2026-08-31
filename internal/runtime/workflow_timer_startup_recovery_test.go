@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -37,7 +39,7 @@ import (
 type workflowTimerStartupStore interface {
 	externalRuntimeTestDurableEventStore
 	runtimepipeline.WorkflowPersistenceOwner
-	swarmruntime.EventPayloadValidationBinder
+	swarmruntime.EventPayloadAdmissionBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimegenericschedule.Store
@@ -96,6 +98,8 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 }
 
 func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/testdata/workflow-timer-startup"))
+
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
@@ -140,18 +144,18 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
 
-				EventStore:                   selected,
-				EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-				EventPayloadValidationBinder: selected,
-				AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-				RunLifecycleCandidates:       selected,
-				GenericScheduleStore:         selected,
-				TimerObligationReader:        selected,
-				WorkflowPersistence:          workflowPersistence,
-				ManagerStore:                 selected,
-				ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-				DeliveryStore:                selected,
-				PipelineObligations:          selected.PipelineObligations(),
+				EventStore:                  selected,
+				EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+				EventPayloadAdmissionBinder: selected,
+				AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+				RunLifecycleCandidates:      selected,
+				GenericScheduleStore:        selected,
+				TimerObligationReader:       selected,
+				WorkflowPersistence:         workflowPersistence,
+				ManagerStore:                selected,
+				ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+				DeliveryStore:               selected,
+				PipelineObligations:         selected.PipelineObligations(),
 
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck:         false,
@@ -343,18 +347,18 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					GenericScheduleStore:         selected,
-					TimerObligationReader:        selected,
-					WorkflowPersistence:          runtimepipeline.NewWorkflowPersistence(owner),
-					ManagerStore:                 selected,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					GenericScheduleStore:        selected,
+					TimerObligationReader:       selected,
+					WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(owner),
+					ManagerStore:                selected,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
 						WorkflowModule:    module,
@@ -528,17 +532,17 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					WorkflowPersistence:          workflowPersistence,
-					ManagerStore:                 managerStore,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					TimerObligationReader:        selected,
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					WorkflowPersistence:         workflowPersistence,
+					ManagerStore:                managerStore,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:       selected,
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
@@ -663,17 +667,17 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					WorkflowPersistence:          workflowPersistence,
-					ManagerStore:                 selected,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					TimerObligationReader:        selected,
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					WorkflowPersistence:         workflowPersistence,
+					ManagerStore:                selected,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:       selected,
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
@@ -795,21 +799,17 @@ func workflowTimerStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflow
 
 func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"package.yaml":  "name: workflow-timer-startup\nversion: 1\nplatform_version: '>=0.7.0 <0.8.0'\n",
-		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
-		"entities.yaml": "test_entity: {}\n",
-	})
-	bundle.Semantics = runtimecontracts.WorkflowSemanticView{
-		Name: "workflow-timer-startup", Version: "1", InitialStage: "waiting",
-		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}, TerminalStages: []string{"done"},
-		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: delay,
-		}},
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}
+	bundle := loadRuntimeBundleRoot(t, filepath.Join("testdata", "workflow-timer-startup"))
+	bundle.Semantics.Name = "workflow-timer-startup"
+	bundle.Semantics.Version = "1"
+	bundle.Semantics.InitialStage = "waiting"
+	bundle.Semantics.Stages = []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}
+	bundle.Semantics.TerminalStages = []string{"done"}
+	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
+		ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
+		Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+		StartOn: "state:waiting", Delay: delay,
+	}}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "0.7.0"
 	return bundle

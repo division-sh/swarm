@@ -31,6 +31,19 @@ func TestSemanticSourceEventProofConsumesEffectiveReceiverCarries(t *testing.T) 
 	}
 }
 
+func TestResolveEventSchemaBindsConcreteTemplateInstanceToAuthoredDeclaration(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	root := filepath.Join(repoRoot, "examples", "routing", "fan-in", "stream")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := ResolveEventSchema(Wrap(bundle), "operating/ti-proof", "operating/ti-proof/operating.reported")
+	if !resolution.HasCompiled || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaAuthored {
+		t.Fatalf("template-instance schema binding = %#v, want compiled authored declaration", resolution)
+	}
+}
+
 func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testing.T) {
 	root := &runtimecontracts.FlowContractView{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -69,10 +82,6 @@ payload:
   mailbox_id: uuid
   mailbox_payload: object
   decided_at: timestamp
-required:
-  - mailbox_id
-  - mailbox_payload
-  - decided_at
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -94,6 +103,29 @@ required:
 	}
 	if resolution.EventKey != "mailbox.card_decided" {
 		t.Fatalf("EventKey = %q, want mailbox.card_decided", resolution.EventKey)
+	}
+	if !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaPlatform {
+		t.Fatalf("classification = %q/%v, want platform", resolution.Classification, resolution.HasClassification)
+	}
+}
+
+func TestResolveEventSchema_DoesNotInventSchemaForReferenceOnlyPlatformEvent(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+defined_in: platform_tables.diagnostics_encoding
+schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
+note: Full payload schema is owned by the diagnostic subtype.
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"platform.runtime_log": *doc.Content[0],
+	}
+
+	resolution := ResolveEventSchema(Wrap(bundle), "", "platform.runtime_log")
+	if resolution.HasSchema {
+		t.Fatalf("reference-only platform event resolved as payload schema: %#v", resolution)
 	}
 }
 

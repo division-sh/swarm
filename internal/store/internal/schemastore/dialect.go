@@ -468,6 +468,10 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		sqliteBundleHashPredicate("authority_bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
+		"payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		sqliteBundleHashPredicate("payload_schema_bundle_hash"),
+	)
+	predicate = strings.ReplaceAll(predicate,
 		"bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("bundle_hash"),
 	)
@@ -493,7 +497,7 @@ func sqliteRenderPredicate(raw string) (string, error) {
 			sqlitePrefixedSHA256Predicate(digest.column, digest.prefix),
 		)
 	}
-	for _, column := range []string{"profile_digest", "effective_source_digest", "request_hash", "findings_digest"} {
+	for _, column := range []string{"profile_digest", "effective_source_digest", "request_hash", "findings_digest", "payload_schema_digest"} {
 		predicate = strings.ReplaceAll(predicate,
 			column+" ~ '^sha256:[0-9a-f]{64}$'",
 			sqliteSHA256Predicate(column),

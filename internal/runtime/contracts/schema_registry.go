@@ -482,24 +482,11 @@ func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[strin
 	if raw == "" {
 		return map[string]any{}, ""
 	}
-	nullable := eventFieldTypeAllowsNull(raw)
 	if normalized, typeDescription := normalizeEventFieldType(raw); normalized != "" && normalized != raw {
 		prop := eventSchemaForResolvedType(normalized, types, seen)
-		if nullable {
-			prop["nullable"] = true
-		}
 		return prop, typeDescription
 	}
-	prop := eventSchemaForResolvedType(raw, types, seen)
-	if nullable {
-		prop["nullable"] = true
-	}
-	return prop, ""
-}
-
-func eventFieldTypeAllowsNull(raw string) bool {
-	lower := strings.ToLower(strings.TrimSpace(raw))
-	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until")
+	return eventSchemaForResolvedType(raw, types, seen), ""
 }
 
 func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {
@@ -540,23 +527,19 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		}
 		seen[namedName] = struct{}{}
 		defer delete(seen, namedName)
-		named := types.Types[namedName]
-		props := make(map[string]any, len(named.Fields))
-		required := make([]string, 0, len(named.Fields))
-		fieldNames := make([]string, 0, len(named.Fields))
-		for fieldName := range named.Fields {
-			fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
+		resolved, err := (CatalogTypeReference{Type: namedName, Catalog: types}).Resolve()
+		if err != nil {
+			return map[string]any{}
 		}
-		sort.Strings(fieldNames)
-		for _, fieldName := range fieldNames {
-			if fieldName == "" {
-				continue
+		props := make(map[string]any, len(resolved.Fields))
+		required := make([]string, 0, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			prop := eventSchemaForTypeRefSchema(field.TypeRef, types, seen)
+			applySchemaRefinements(prop, field.Refinements)
+			props[field.Name] = prop
+			if !field.IsOptional {
+				required = append(required, field.Name)
 			}
-			spec := named.Fields[fieldName]
-			prop := eventSchemaForTypeRefSchema(spec.Type, types, seen)
-			applySchemaRefinements(prop, spec.Refinements)
-			props[fieldName] = prop
-			required = append(required, fieldName)
 		}
 		return map[string]any{
 			"type":                 "object",
@@ -582,6 +565,8 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		return map[string]any{"type": "object"}
 	case "array":
 		return map[string]any{"type": "array"}
+	case "json", "jsonb":
+		return map[string]any{}
 	default:
 		return map[string]any{"type": typeRef}
 	}
@@ -668,12 +653,12 @@ func eventListItemType(typeRef string) string {
 	switch {
 	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
 		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
-	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
-		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	case strings.HasSuffix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[:len(typeRef)-2])
 	case strings.HasPrefix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[2:])
+	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
+		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	default:
 		return typeRef
 	}

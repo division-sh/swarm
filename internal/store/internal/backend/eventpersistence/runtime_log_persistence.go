@@ -1,6 +1,7 @@
 package eventpersistence
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,13 @@ const runtimeLogEventName = "platform.runtime_log"
 const RuntimeLogEventName = runtimeLogEventName
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
+	var event events.Event
+	if !record.PayloadAdmission.Valid() {
+		return event, fmt.Errorf("runtime log payload admission evidence is required")
+	}
+	if !bytes.Equal(record.Payload, record.PayloadAdmission.Payload()) {
+		return event, fmt.Errorf("runtime log payload differs from its admission evidence")
+	}
 	facts := events.EventFacts{
 		Type:     events.EventType(runtimeLogEventName),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
@@ -24,15 +32,20 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Even
 	}
 	runID := strings.TrimSpace(record.RunID)
 	parentEventID := strings.TrimSpace(record.ParentEventID)
+	var err error
 	if parentEventID != "" {
-		return events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+		event, err = events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
 			RunID: runID, ParentEventID: parentEventID, ExecutionMode: record.ExecutionMode,
 		}})
+	} else if runID != "" {
+		event, err = events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	} else {
+		event, err = events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 	}
-	if runID != "" {
-		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	if err != nil {
+		return event, err
 	}
-	return events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+	return events.ApplyPayloadAdmission(event, record.PayloadAdmission)
 }
 
 func (s *EventPostgresOwner) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -73,9 +86,6 @@ func (s *EventPostgresOwner) PersistRuntimeLog(ctx context.Context, record runti
 		return fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
 	constructed, err := runtimeLogEvent(record)
@@ -128,9 +138,6 @@ func (s *EventSQLiteOwner) PersistRuntimeLog(ctx context.Context, record runtime
 		return fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
 	constructed, err := runtimeLogEvent(record)

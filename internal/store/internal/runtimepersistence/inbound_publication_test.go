@@ -143,7 +143,7 @@ func commitInboundPublicationTestEvent(t *testing.T, _ storeTestDurableEventBusS
 func TestInboundEvidencePersistsTypedNoSubscriberByDesign(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
+		store.SetEventPayloadAdmitter(currentPlatformPayloadAdmitterForStoreTest(t))
 		workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 		runInboundPublicationOperationProof(t, store.backend.ConstructionHandle(), true, store, workflowStore)
 	})
@@ -151,7 +151,7 @@ func TestInboundEvidencePersistsTypedNoSubscriberByDesign(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		store := admitTestPostgresStore(t, db)
-		store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
+		store.SetEventPayloadAdmitter(currentPlatformPayloadAdmitterForStoreTest(t))
 		workflowStore := newPostgresWorkflowTestCoordinator(t, db, store)
 		runInboundPublicationOperationProof(t, db, false, store, workflowStore)
 	})

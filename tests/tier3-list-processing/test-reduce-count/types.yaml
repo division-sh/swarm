@@ -1,0 +1,4 @@
+types:
+  CountedItem:
+    id: text
+    active: boolean

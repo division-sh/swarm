@@ -364,10 +364,14 @@ type publishSelectedContractForkEventsRequest struct {
 }
 
 func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent runfork.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {
-	payload := json.RawMessage("{}")
-	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
-		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
+	var event events.Event
+	if len(sourceEvent.Payload) == 0 {
+		return event, fmt.Errorf("selected-contract source event %s has no admitted payload bytes", strings.TrimSpace(sourceEvent.SourceEventID))
 	}
+	if !json.Valid(sourceEvent.Payload) {
+		return event, fmt.Errorf("selected-contract source event %s has invalid admitted payload bytes", strings.TrimSpace(sourceEvent.SourceEventID))
+	}
+	payload := append(json.RawMessage(nil), sourceEvent.Payload...)
 	envelope := events.EventEnvelope{
 		EntityID:     strings.TrimSpace(sourceEvent.EntityID),
 		FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.FlowInstance), "/"),
@@ -379,7 +383,6 @@ func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourc
 	}
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEvent.SourceEventID, producerID, "", sourceEvent.ExecutionMode)
 	if err != nil {
-		var event events.Event
 		return event, err
 	}
 	return events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{

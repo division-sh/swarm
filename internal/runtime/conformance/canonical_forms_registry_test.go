@@ -351,6 +351,58 @@ func TestCanonicalFormsRegistryPinsWave1RetirementsAndEffectiveStructs(t *testin
 	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowPackageConnect{}), []string{"event", "from", "rename", "to"})
 }
 
+func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	path := filepath.Join(root, "internal/runtime/contracts/workflow_contract_yaml_wave1.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("decodeWave1FieldNode")) {
+		t.Fatal("retired decodeWave1FieldNode owner reappeared")
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+	if err != nil {
+		t.Fatalf("parse paired decoder family: %v", err)
+	}
+	want := map[string]bool{
+		"projectTypeCatalogDocument":     false,
+		"projectNamedTypeDeclarations":   false,
+		"projectNamedTypeDeclaration":    false,
+		"projectTypeFieldSpec":           false,
+		"projectEntityContractsDocument": false,
+		"projectEntityContract":          false,
+		"projectEntityFieldDecl":         false,
+		"decodeWave1FieldValue":          false,
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		if _, tracked := want[function.Name.Name]; !tracked {
+			continue
+		}
+		want[function.Name.Name] = true
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "Decode", "Kind", "Tag", "Content":
+				t.Errorf("%s uses forbidden raw yaml.Node selector %s", function.Name.Name, selector.Sel.Name)
+			}
+			return true
+		})
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("paired decoder owner %s missing", name)
+		}
+	}
+}
+
 func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
 	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "package.connect"}

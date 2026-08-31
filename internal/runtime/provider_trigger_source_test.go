@@ -4,14 +4,18 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/google/uuid"
 )
 
 func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthoredOwnership(t *testing.T) {
@@ -390,6 +394,27 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	schema, ownsSchema := bound.ProducerEventSchema()
 	if !ownsSchema || schema.Classification() != runtimecontracts.CompiledEventSchemaImported || schema.EventName() != bound.EventType() {
 		t.Fatalf("bound provider input schema = (%#v, %v), pin=%#v", schema, ownsSchema, bound)
+	}
+	resolution := semanticview.ResolveEventSchema(wrapped, "coordinator", "inbound.telegram.text_message")
+	if !resolution.HasStructural || !resolution.HasCompiled || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("imported payload reader schema resolution = %#v", resolution)
+	}
+	globalResolution := semanticview.ResolveEventSchema(wrapped, "", "inbound.telegram.text_message")
+	if !globalResolution.HasStructural || !globalResolution.HasCompiled || !globalResolution.HasClassification || globalResolution.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("target-free imported payload schema resolution = %#v", globalResolution)
+	}
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(payloadAdmissionTestBundleHash)
+	if err != nil {
+		t.Fatalf("bundle source fact: %v", err)
+	}
+	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1,"text":"hello"}`)
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "telegram-ingress")
+	if err != nil {
+		t.Fatalf("admit imported provider payload: %v", err)
+	}
+	if admission.Binding().SchemaClass() != events.PayloadSchemaImported {
+		t.Fatalf("imported provider payload schema class = %q", admission.Binding().SchemaClass())
 	}
 	if bound.Digest() == "" || bound.Digest() == basePin.Digest() {
 		t.Fatalf("bound provider input digest = %q, base=%q", bound.Digest(), basePin.Digest())

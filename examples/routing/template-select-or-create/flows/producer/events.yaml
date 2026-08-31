@@ -1,5 +1,5 @@
 account.requested:
-  account_id: text?
+  account_id: text
 account.ready:
   key: account_id
   account_id: text

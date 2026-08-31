@@ -1,2 +1,2 @@
 flow.created:
-  instance_id: string?
+  instance_id: string

@@ -174,6 +174,9 @@ func buildCatalogExecutionTranscript(t testing.TB, fixture testcatalog.Fixture) 
 				t.Fatalf("fixture %s transcript step %d has no event", fixture.Name, stepIndex)
 			}
 			step.Payload = cloneStringAnyMap(step.Payload)
+			if step.Payload == nil {
+				step.Payload = map[string]any{}
+			}
 			step.inputKind = catalogReplayInputRootIngress
 			step.eventID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("swarm/catalog-replay/%s/%d", fixture.Root, stepIndex))).String()
 			step.createdAt = baseTime.Add(time.Duration(stepIndex) * time.Microsecond)

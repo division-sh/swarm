@@ -78,7 +78,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		FlowInstance: templatefanin.ReceiverFlowInstance,
 		EntityID:     fanInStreamSelectedOwner(),
 	}.Normalized()
-	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-a", "operating/a", "report-1", "2026-Q1", 100)
+	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-a", "operating/a", "2026-Q1", 100)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
@@ -86,9 +86,9 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after first = %#v, want 100", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
 
-	duplicate := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-b", "operating/a", "report-2", "2026-Q1", 200)
+	duplicate := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-b", "operating/a", "2026-Q1", 200)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, duplicate, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
@@ -96,9 +96,9 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
 
-	nextWindow := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-c", "operating/a", "report-3", "2026-Q2", 300)
+	nextWindow := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-c", "operating/a", "2026-Q2", 300)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextWindow, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after Q2 = %d, want 1", got)
@@ -109,7 +109,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-3", 300)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 300)
 }
 
 func TestCreateEventIDCarryProjectionReachesHandler(t *testing.T) {
@@ -185,10 +185,10 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	if got := carrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
 	}
-	assertFanInStreamReport(t, carrier.Fields, requestEventID, "", 100)
+	assertFanInStreamReport(t, carrier.Fields, requestEventID, 100)
 }
 
-func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID, reportID string, revenue float64) {
+func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID string, revenue float64) {
 	t.Helper()
 	reports, ok := fields["reports"].(map[string]any)
 	if !ok {
@@ -197,9 +197,6 @@ func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID, r
 	report, ok := reports[operatingID].(map[string]any)
 	if !ok {
 		t.Fatalf("reports[%q] = %#v, want report payload", operatingID, reports[operatingID])
-	}
-	if reportID != "" && report["report_id"] != reportID {
-		t.Fatalf("reports[%q].report_id = %#v, want %q", operatingID, report["report_id"], reportID)
 	}
 	if report["revenue"] != revenue {
 		t.Fatalf("reports[%q].revenue = %#v, want %v", operatingID, report["revenue"], revenue)
@@ -254,7 +251,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		EntityID:     fanInStreamSelectedOwner(),
 	}.Normalized()
 
-	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "report-1", "2026-Q1", 100)
+	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "2026-Q1", 100)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
@@ -265,7 +262,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("Q1 accumulator items after same event id = %d, want 1", got)
 	}
 
-	nextEvent := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id-2", "operating/c", "report-2", "2026-Q1", 300)
+	nextEvent := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id-2", "operating/c", "2026-Q1", 300)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextEvent, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 2 {
 		t.Fatalf("Q1 accumulator items after distinct event id = %d, want 2", got)
@@ -457,13 +454,11 @@ func fanInStreamPublishAndExecute(
 	}
 }
 
-func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, revenue int) events.Event {
+func fanInStreamEvent(eventType, id, flowInstance, periodID string, revenue int) events.Event {
 	if prefix := templatefanin.ProducerFlowID + "/"; strings.HasPrefix(eventType, prefix) {
 		eventType = strings.Trim(strings.TrimSpace(flowInstance), "/") + "/" + strings.TrimPrefix(eventType, prefix)
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"portfolio_id": "portfolio-default",
-		"report_id":    reportID,
 		"period_id":    periodID,
 		"operating_id": flowInstance,
 		"revenue":      revenue,

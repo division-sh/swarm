@@ -696,8 +696,8 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.Type() != events.EventType("inbound.github.push") {
-		t.Fatalf("event type = %q, want inbound.github.push", evt.Type())
+	if evt.Type() != events.EventType("inbound.github.raw.push") {
+		t.Fatalf("event type = %q, want inbound.github.raw.push", evt.Type())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {

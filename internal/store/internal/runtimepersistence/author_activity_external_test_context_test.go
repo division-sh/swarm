@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -83,6 +85,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type externalStoreTestDurableEventBusStore interface {
+	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -138,6 +141,12 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = selected.PipelineObligations()
 	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
+	}
+	selected.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,

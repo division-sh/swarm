@@ -30,7 +30,6 @@ type Options struct {
 	MismatchedProvider        bool
 	DefaultEventIDCorrelation bool
 	ExplicitCorrelation       bool
-	OptionalReplyCorrelation  bool
 	ProviderContinuation      string
 	ContinuationRequestKey    string
 	ContinuationAccountID     string
@@ -100,6 +99,6 @@ func Write(t testing.TB, opts Options) string {
 
 func requiresExplicitCorrelation(opts Options) bool {
 	return opts.ExplicitCorrelation || opts.MissingRepliesTo || opts.MissingCorrelationField ||
-		opts.AmbiguousRequestEdge || opts.MismatchedProvider || opts.OptionalReplyCorrelation ||
+		opts.AmbiguousRequestEdge || opts.MismatchedProvider ||
 		opts.ProviderContinuation != ""
 }

@@ -35,6 +35,10 @@ type selectedForkEventFixtureStore interface {
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
+func bindSemanticEventFixturePayload(event events.Event) (events.Event, error) {
+	return eventtest.AdmitPayload(event, event.RoutingSource().Route().FlowID, string(event.Type()))
+}
+
 func commitSelectedForkEventOutcome(ctx context.Context, store selectedForkEventFixtureStore, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
 	committed, err := store.CommitSelectedForkEvent(ctx, req)
 	return committed.AppendOutcome, err
@@ -113,6 +117,10 @@ func acknowledgePipelineEventFixture(ctx context.Context, selectedStore any, eve
 }
 
 func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRuntimeLogFixtureStore, event events.Event) error {
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -122,6 +130,10 @@ func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRunt
 }
 
 func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story *privateauthoractivity.Mutation, event events.Event) error {
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -145,6 +157,10 @@ func commitSelectedForkEventFixture(
 	event events.Event,
 	lineage runfork.RunForkSelectedContractExecutionLineage,
 ) (err error) {
+	event, err = bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -191,6 +207,11 @@ func commitDeliveryReplayEventFixture(
 	subscriberID string,
 	now time.Time,
 ) error {
+	var err error
+	source, err = bindSemanticEventFixturePayload(source)
+	if err != nil {
+		return err
+	}
 	forkEventID := deterministicRunForkReplayEventID(forkRunID, source.ID())
 	replayed, err := projectRunForkReplayEvent(source, runForkActivationLineage{
 		SourceRunID: source.RunID(),
@@ -287,6 +308,10 @@ func commitSemanticEventFixtureOutcomeWithDisposition(
 	scope runtimepipelineobligation.CommittedScope,
 	disposition *runtimepipelineobligation.Disposition,
 ) (runtimebus.EventAppendOutcome, error) {
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -393,6 +418,10 @@ func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
 
 func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, event events.Event, routes []events.DeliveryRoute) (err error) {
 	routes = canonicalDeliveryFixtureRoutes(routes)
+	event, err = bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -469,6 +498,10 @@ func pipelineObligationOwnerForFixture(store any) runtimepipelineobligation.Stor
 // without invoking active-run or initial-side-effect owners. It still uses the
 // constructed/admitted/record boundary and is not a runtime writer.
 func insertCanonicalEventRecordFixture(ctx context.Context, selectedStore any, event events.Event) error {
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -508,6 +541,10 @@ func insertPostgresCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, 
 func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
 	if tx == nil {
 		return fmt.Errorf("postgres canonical event record fixture requires a transaction")
+	}
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		return err
 	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

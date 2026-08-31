@@ -363,7 +363,7 @@ discovery: {}
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "events.yaml"), `
 flow.started:
   entity_id:
-    type: string
+    type: string?
   topic:
     type: string?
 `)

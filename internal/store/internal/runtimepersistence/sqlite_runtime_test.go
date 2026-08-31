@@ -1058,13 +1058,13 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	store.SetEventPayloadValidator(func(_ context.Context, eventType string, _ []byte) error {
-		if eventType == "item.failed" {
-			return errors.New("schema violation")
+	admitter := func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		if event.Type() == "item.failed" {
+			return events.PayloadAdmission{}, errors.New("schema violation")
 		}
-		return nil
-	})
-	bus, err := newStoreTestEventBus(t, store)
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	}
+	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{PayloadAdmitter: admitter})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1903,6 +1903,7 @@ func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLi
 	}); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
+	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
 	}

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -186,6 +188,9 @@ func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
 		ExecutionPosture:  executionposture.Live,
 		WorkOwner:         newTestManagerWorkOwner(t),
 		ReceiverExecution: eventreceiver.NormalExecution(),
+		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		},
 	})
 }
 

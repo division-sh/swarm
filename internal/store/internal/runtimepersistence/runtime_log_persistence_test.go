@@ -32,7 +32,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 		t.Fatalf("seed sqlite subject event: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "sqlite diagnostic persisted",
@@ -90,7 +90,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["node_id"] = "node-a"
-	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",
@@ -197,7 +197,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("seed direct sqlite runtime log fallback row: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "runtime-owned source",
@@ -309,7 +309,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 		t.Fatalf("seed postgres subject event: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "postgres diagnostic persisted",
@@ -354,7 +354,7 @@ func TestPostgresRuntimeLogPersistenceUsesClosedNamedCommits(t *testing.T) {
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 
 	subject := eventtest.RunCreatingRootIngress(
 		subjectEventID, events.EventType("validation/validation.package_ready"),

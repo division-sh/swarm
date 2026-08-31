@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -47,8 +49,9 @@ func (e *RuntimeLogEntry) NormalizeEntityID() {
 }
 
 type RuntimeLogger struct {
-	persistence RuntimeLogPersistence
-	posture     executionposture.Posture
+	persistence     RuntimeLogPersistence
+	posture         executionposture.Posture
+	payloadAdmitter runtimebus.PayloadAdmitter
 }
 
 // RuntimeLogPersistence owns backend-specific platform.runtime_log persistence
@@ -59,14 +62,15 @@ type RuntimeLogPersistence interface {
 }
 
 type RuntimeLogPersistenceRecord struct {
-	RunID         string
-	Payload       []byte
-	ParentEventID string
-	ExecutionMode executionmode.Mode
+	RunID            string
+	Payload          []byte
+	PayloadAdmission events.PayloadAdmission
+	ParentEventID    string
+	ExecutionMode    executionmode.Mode
 }
 
-func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture) *RuntimeLogger {
-	return &RuntimeLogger{persistence: persistence, posture: posture}
+func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture, payloadAdmitter runtimebus.PayloadAdmitter) *RuntimeLogger {
+	return &RuntimeLogger{persistence: persistence, posture: posture, payloadAdmitter: payloadAdmitter}
 }
 
 func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
@@ -92,7 +96,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		return nil
 	}
 	detail := marshalJSONOrEmpty(e.Detail)
-	payload, err := logRuntimeEventSpec(ctx, l.persistence, l.posture, true, level.String(), component, action, e, detail)
+	payload, err := logRuntimeEventSpec(ctx, l.persistence, l.payloadAdmitter, l.posture, true, level.String(), component, action, e, detail)
 	if err != nil {
 		return err
 	}
@@ -198,7 +202,7 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, posture executionposture.Posture, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
+func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, payloadAdmitter runtimebus.PayloadAdmitter, posture executionposture.Posture, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
 	if persistence == nil {
 		return CanonicalRuntimeLogPayload{}, nil
 	}
@@ -238,7 +242,22 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(encoded)
+	if payloadAdmitter == nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log payload admission owner is required")
+	}
+	admissionEvent, err := events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
+		Type: events.EventTypePlatformRuntimeLog, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: encoded, ExecutionMode: executionmode.Mode(runtimeeffects.ExecutionMode(posture.RootMode())),
+	}})
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("construct runtime log payload admission event: %w", err)
+	}
+	payloadAdmission, err := payloadAdmitter(ctx, admissionEvent, "")
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("admit runtime log payload: %w", err)
+	}
+	admittedPayload := payloadAdmission.Payload()
+	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(admittedPayload)
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
@@ -247,9 +266,10 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 		mode = contextualMode
 	}
 	record := RuntimeLogPersistenceRecord{
-		Payload:       encoded,
-		ParentEventID: parentEventID,
-		ExecutionMode: executionmode.Mode(mode),
+		Payload:          admittedPayload,
+		PayloadAdmission: payloadAdmission,
+		ParentEventID:    parentEventID,
+		ExecutionMode:    executionmode.Mode(mode),
 	}
 	if hasRunID {
 		record.RunID = runID
@@ -347,7 +367,10 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 		if key == "run_id" {
 			continue
 		}
-		details[key] = v
+		if v == nil {
+			continue
+		}
+		details[key] = omitRuntimeLogObjectNulls(v)
 	}
 	if component = strings.TrimSpace(component); component != "" {
 		details["component"] = component
@@ -398,4 +421,26 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 		payload["stack_trace"] = v
 	}
 	return payload
+}
+
+func omitRuntimeLogObjectNulls(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if item == nil {
+				continue
+			}
+			out[key] = omitRuntimeLogObjectNulls(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = omitRuntimeLogObjectNulls(item)
+		}
+		return out
+	default:
+		return value
+	}
 }

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -87,6 +89,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type storeTestDurableEventBusStore interface {
+	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -142,6 +145,10 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = store.PipelineObligations()
 	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = storeTestPayloadAdmitter
+	}
+	store.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
@@ -279,11 +286,16 @@ func admitTestPostgresStore(t testing.TB, db *sql.DB) *PostgresStore {
 	return pg
 }
 
+func storeTestPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+}
+
 func bootstrapTestPostgresStore(t testing.TB, pg *PostgresStore) {
 	t.Helper()
 	if err := pg.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
+	pg.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 }
 
 func failureEnvelopesEqual(got, want runtimefailures.Envelope) bool {

@@ -54,7 +54,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 				"line_item_id": runtimecontracts.CELExpression("vertical.id"),
 			}},
 		}}},
-		{name: "group by key", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{Key: "entity.verticals"}}},
+		{name: "group by source", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "entity.verticals", Key: "status"}}},
 		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals"}}},
 		{name: "reduce source", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals"}}},
 		{name: "count", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "entity.verticals"}}},
@@ -174,9 +174,41 @@ func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
 	if len(readers) != 1 || readers[0].Kind != "guard.checks[0]" || readers[0].Expression != "payload.ready" {
 		t.Fatalf("reader census = %#v, want only guard.checks[0] payload.ready", readers)
 	}
-	conditions := handlerConditions(handler)
-	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].Context != runtimepipeline.WorkflowConditionContextGuard {
+	conditions := handlerConditionExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
+	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].ConditionContext != runtimepipeline.WorkflowConditionContextGuard {
 		t.Fatalf("handler conditions = %#v, want only active guard collection check", conditions)
+	}
+}
+
+func TestExecutableReaderCensusAssignsEveryConditionCompilerDisposition(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard:      &runtimecontracts.GuardSpec{Check: "payload.ready"},
+		Query:      &runtimecontracts.QuerySpec{Source: "payload.items", Filter: "item.ready", StoreAs: "metadata.queried"},
+		Filter:     &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "item.ready", StoreAs: "metadata.filtered"},
+		Count:      &runtimecontracts.CountSpec{ItemsFrom: "payload.items", Condition: "item.ready", StoreAs: "metadata.counted"},
+		Rules:      []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "payload.ready"}},
+	}
+	want := map[string]runtimepipeline.WorkflowConditionContext{
+		"guard.check":              runtimepipeline.WorkflowConditionContextGuard,
+		"query.filter":             runtimepipeline.WorkflowConditionContextQueryFilter,
+		"filter.condition":         runtimepipeline.WorkflowConditionContextFilter,
+		"count.condition":          runtimepipeline.WorkflowConditionContextCount,
+		"rules[0].condition":       runtimepipeline.WorkflowConditionContextRule,
+		"on_complete[0].condition": runtimepipeline.WorkflowConditionContextOnComplete,
+	}
+	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
+		context, expected := want[reader.Kind]
+		if !expected {
+			continue
+		}
+		if !reader.HasConditionContext || reader.ConditionContext != context {
+			t.Errorf("reader %s disposition = (%t, %s), want %s", reader.Kind, reader.HasConditionContext, reader.ConditionContext, context)
+		}
+		delete(want, reader.Kind)
+	}
+	if len(want) != 0 {
+		t.Fatalf("condition compiler census omitted rows: %#v", want)
 	}
 }
 
@@ -195,7 +227,7 @@ func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.status", Window: "entity.items"},
-		GroupBy:    &runtimecontracts.GroupBySpec{Key: "entity.status"},
+		GroupBy:    &runtimecontracts.GroupBySpec{ItemsFrom: "entity.items", Key: "status"},
 		Compute:    &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"entity.status"}}},
 		FanOut: &runtimecontracts.FanOutSpec{
 			ItemsFrom: "entity.items", As: "line_item", Identity: "line_item.id",
@@ -208,7 +240,7 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
 		"accumulate.from":          runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
 		"accumulate.window":        runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
-		"group_by.key":             runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
+		"group_by.items_from":      runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
 		"compute.lookup.on[0]":     runtimepipeline.WorkflowEntityFieldLifecycleCompute,
 		"fan_out.items_from":       runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
 		"on_complete[0].condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
@@ -263,15 +295,6 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 		wantKind string
 	}{
 		{
-			name: "group by key",
-			handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
-				ItemsFrom: "payload.items",
-				Key:       "entity.missing",
-				StoreAs:   "metadata.grouped",
-			}},
-			wantKind: "group_by.key",
-		},
-		{
 			name: "direct expression value ref",
 			handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -312,10 +335,9 @@ shared-node:
   subscribes_to: [item.received]
   event_handlers:
     item.received:
-      group_by:
-        items_from: payload.items
-        key: entity.missing
-        store_as: metadata.grouped
+      guard:
+        check: entity.missing == 'x'
+        on_fail: discard
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -323,18 +345,14 @@ shared-node:
 	}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "group_by.key", "entity.missing") {
-		t.Fatalf("expression reference findings = %#v, want exact flow a shared-node group_by.key failure", report.Errors())
+	if !findingContainsAll(report.Errors(), "expression_field_reference_validation", "flow a", "shared-node", "guard.check", "entity.missing") {
+		t.Fatalf("expression reference findings = %#v, want exact flow a shared-node guard failure", report.Errors())
 	}
 }
 
 func TestHandBuiltScopedNodeRecordsReachReaderAndWriteConsumers(t *testing.T) {
 	bundle := handBuiltScopedReaderBundle(runtimecontracts.SystemNodeEventHandler{
-		GroupBy: &runtimecontracts.GroupBySpec{
-			ItemsFrom: "payload.items",
-			Key:       "entity.status",
-			StoreAs:   "metadata.grouped",
-		},
+		Condition: "entity.status == 'ready'",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{
 				Operation: runtimecontracts.WorkflowDataOperationDelete,

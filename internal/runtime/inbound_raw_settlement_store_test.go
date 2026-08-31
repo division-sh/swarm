@@ -313,7 +313,7 @@ func providerRawSettlementEventID(provider, backend, outcome string, index int) 
 
 func providerRawSettlementCases() []providerRawSettlementCase {
 	return []providerRawSettlementCase{
-		{provider: "github", eventName: "inbound.github.push", request: func(secret, id string) *http.Request {
+		{provider: "github", eventName: "inbound.github.raw.push", request: func(secret, id string) *http.Request {
 			body := []byte(`{"zen":"raw settlement"}`)
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
 			req.Header.Set("X-Hub-Signature-256", githubWebhookSignature(secret, body))

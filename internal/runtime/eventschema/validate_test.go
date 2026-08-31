@@ -7,6 +7,77 @@ import (
 	"testing"
 )
 
+func TestNormalizeOptionalFieldNullsRecursivelyLowersOnlyOptionalObjectFields(t *testing.T) {
+	schema := map[string]any{
+		"type": "object", "required": []any{"record", "items", "empty_text", "empty_list", "empty_object"},
+		"properties": map[string]any{
+			"optional_top": map[string]any{"type": "string"},
+			"record": map[string]any{
+				"type": "object", "required": []any{"required_nested"},
+				"properties": map[string]any{
+					"optional_nested": map[string]any{"type": "string"},
+					"required_nested": map[string]any{"type": "string"},
+				},
+			},
+			"items":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"empty_text":   map[string]any{"type": "string"},
+			"empty_list":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"empty_object": map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+	}
+	payload := map[string]any{
+		"optional_top": nil,
+		"record":       map[string]any{"optional_nested": nil, "required_nested": "present"},
+		"items":        []any{"present"}, "empty_text": "", "empty_list": []any{}, "empty_object": map[string]any{},
+	}
+	got, err := NormalizeOptionalFieldNulls(schema, payload)
+	if err != nil {
+		t.Fatalf("normalize optional nulls: %v", err)
+	}
+	if _, ok := got["optional_top"]; ok {
+		t.Fatalf("top-level optional null survived: %#v", got)
+	}
+	record := got["record"].(map[string]any)
+	if _, ok := record["optional_nested"]; ok {
+		t.Fatalf("nested optional null survived: %#v", record)
+	}
+	if got["empty_text"] != "" || !reflect.DeepEqual(got["empty_list"], []any{}) || !reflect.DeepEqual(got["empty_object"], map[string]any{}) {
+		t.Fatalf("present empty values changed: %#v", got)
+	}
+	if _, exists := payload["optional_top"]; !exists {
+		t.Fatalf("normalization mutated caller payload: %#v", payload)
+	}
+}
+
+func TestNormalizeOptionalFieldNullsRejectsRequiredAndCollectionNulls(t *testing.T) {
+	cases := map[string]struct {
+		schema  map[string]any
+		payload map[string]any
+		want    string
+	}{
+		"required": {
+			schema:  map[string]any{"type": "object", "required": []any{"value"}, "properties": map[string]any{"value": map[string]any{"type": "string"}}},
+			payload: map[string]any{"value": nil}, want: "required and cannot be null",
+		},
+		"list item": {
+			schema:  map[string]any{"type": "object", "required": []any{"values"}, "properties": map[string]any{"values": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}},
+			payload: map[string]any{"values": []any{nil}}, want: "$ .values[0]",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := NormalizeOptionalFieldNulls(tc.schema, tc.payload)
+			if err == nil {
+				t.Fatalf("normalization accepted %s null", name)
+			}
+			needle := strings.ReplaceAll(tc.want, " ", "")
+			if !strings.Contains(strings.ReplaceAll(err.Error(), " ", ""), needle) {
+				t.Fatalf("normalization error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testing.T) {
 	t.Parallel()
 

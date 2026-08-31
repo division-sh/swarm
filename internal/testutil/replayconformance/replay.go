@@ -201,7 +201,10 @@ func Project(eventsByID map[string]operatorread.OperatorEventFull, runID string,
 				!event.CreatedAt().Equal(root.CreatedAt) || event.RunID() != strings.TrimSpace(runID) ||
 				string(event.Type()) != root.EventType || event.SourceAgent() != root.SourceAgent ||
 				!bytesEqual(gotPayload, wantPayload) {
-				return nil, fmt.Errorf("persisted root event %s does not match the exact transcript input", root.EventID)
+				return nil, fmt.Errorf("persisted root event %s does not match the exact transcript input: class=%q/%q id=%q/%q created=%s/%s run=%q/%q type=%q/%q source=%q/%q payload=%s/%s",
+					root.EventID, event.AdmissionClass(), events.EventAdmissionRootIngress, event.ID(), root.EventID,
+					event.CreatedAt().Format(time.RFC3339Nano), root.CreatedAt.Format(time.RFC3339Nano), event.RunID(), strings.TrimSpace(runID),
+					event.Type(), root.EventType, event.SourceAgent(), root.SourceAgent, gotPayload, wantPayload)
 			}
 			included[root.EventID] = struct{}{}
 		}

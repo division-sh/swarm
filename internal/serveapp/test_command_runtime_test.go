@@ -394,7 +394,7 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 				"bundle_hash": bundleHash,
 				"event_name":  "inbound.telegram.text_message",
 				"payload": map[string]any{
-					"conversation_reference": "chat-42", "external_account_reference": "account-42",
+					"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42",
 					"provider_message_reference": 1, "text": "rollback proof",
 				},
 				"idempotency_key": idempotencyKey,
@@ -438,7 +438,7 @@ func TestPublicTemplateInputPublicationRollsBackAfterDeliveryAndCompletionAcross
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
-					"payload":         map[string]any{"conversation_reference": "chat-42", "external_account_reference": "account-42", "provider_message_reference": 1, "text": "late rollback proof"},
+					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"},
 					"idempotency_key": idempotencyKey,
 				})
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {

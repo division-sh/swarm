@@ -444,11 +444,11 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 		return FanOutEffectiveSemantics{}, err
 	}
 
-	collectionType, err := b.resolveFanOutCollectionType(node, eventType, itemsPath)
+	collectionType, err := b.resolveWorkflowCollectionType(node, eventType, itemsPath)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
 	}
-	itemType, err := resolveFanOutCollectionItemType(collectionType)
+	itemType, err := resolveWorkflowCollectionItemType(collectionType, itemsPath.Segments[1:])
 	if err != nil {
 		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q %w", strings.TrimSpace(spec.ItemsFrom), err)
 	}
@@ -481,9 +481,12 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 	}, nil
 }
 
-func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentity.ExecutableNode, eventType string, path paths.Path) (CatalogTypeReference, error) {
+func (b *WorkflowContractBundle) resolveWorkflowCollectionType(node runtimeidentity.ExecutableNode, eventType string, path paths.Path) (CatalogTypeReference, error) {
 	if b == nil {
-		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from requires a loaded contract bundle")
+		return CatalogTypeReference{}, fmt.Errorf("collection source requires a loaded contract bundle")
+	}
+	if len(path.Segments) == 0 {
+		return CatalogTypeReference{}, fmt.Errorf("collection source %q must select a field below %s", path.String(), path.Root.String())
 	}
 	flowID := node.FlowID()
 	field := strings.TrimSpace(path.Segments[0])
@@ -491,22 +494,561 @@ func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentit
 	case paths.RootPayload:
 		ref, ok := ResolveExecutableNodeEventFieldType(b, node, eventType, field)
 		if !ok {
-			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared payload field %s for event %s at executable node %s", field, defaultFanOutEventLabel(eventType), node.Key())
+			return CatalogTypeReference{}, fmt.Errorf("collection source references undeclared payload field %s for event %s at executable node %s", field, defaultFanOutEventLabel(eventType), node.Key())
 		}
 		return ref, nil
 	case paths.RootEntity:
 		primary, err := b.ResolveFlowPrimaryEntity(flowID)
 		if err != nil {
-			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references entity but flow %s has no primary entity contract: %w", defaultPrimaryEntityFlowLabel(flowID), err)
+			return CatalogTypeReference{}, fmt.Errorf("collection source references entity but flow %s has no primary entity contract: %w", defaultPrimaryEntityFlowLabel(flowID), err)
 		}
 		decl, ok := primary.Contract.Fields[field]
 		if !ok {
-			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared entity field %s", field)
+			return CatalogTypeReference{}, fmt.Errorf("collection source references undeclared entity field %s", field)
 		}
 		return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}, nil
 	default:
-		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from must use payload or entity scope")
+		return CatalogTypeReference{}, fmt.Errorf("collection source must use payload or entity scope")
 	}
+}
+
+// WorkflowCollectionItemResolution is the immutable type authority for one
+// executable handler collection source. Boot verification and runtime both
+// consume this result instead of reconstructing intermediate ancestry.
+type WorkflowCollectionSourceKind string
+
+const (
+	WorkflowCollectionSourcePath        WorkflowCollectionSourceKind = "path"
+	WorkflowCollectionSourceEntityTable WorkflowCollectionSourceKind = "entity_table"
+)
+
+// WorkflowCollectionItemResolution carries both runtime source identity and
+// the exact recursive item type. Consumers must not reconstruct either half
+// from the authored string.
+type WorkflowCollectionItemResolution struct {
+	Kind       WorkflowCollectionSourceKind
+	Source     string
+	Path       paths.Path
+	FlowID     string
+	EntityType string
+	Origin     string
+	ItemType   ResolvedCatalogType
+}
+
+type WorkflowCollectionFieldResolution struct {
+	Name       string
+	Type       ResolvedCatalogType
+	IsOptional bool
+}
+
+type WorkflowQueryCollectionPlan struct {
+	Source        WorkflowCollectionItemResolution
+	StoreAs       string
+	StorePath     paths.Path
+	GroupBy       *WorkflowCollectionFieldResolution
+	Select        []WorkflowCollectionFieldResolution
+	OutputItem    ResolvedCatalogType
+	HasOutputItem bool
+}
+
+type WorkflowGroupByCollectionPlan struct {
+	Source    WorkflowCollectionItemResolution
+	StoreAs   string
+	StorePath paths.Path
+	Key       WorkflowCollectionFieldResolution
+}
+
+type WorkflowCollectionOperation string
+
+const (
+	WorkflowCollectionOperationQuery   WorkflowCollectionOperation = "query"
+	WorkflowCollectionOperationFilter  WorkflowCollectionOperation = "filter"
+	WorkflowCollectionOperationGroupBy WorkflowCollectionOperation = "group_by"
+	WorkflowCollectionOperationReduce  WorkflowCollectionOperation = "reduce"
+	WorkflowCollectionOperationCount   WorkflowCollectionOperation = "count"
+)
+
+type workflowCollectionPhase uint8
+
+const (
+	workflowCollectionPhaseQuery workflowCollectionPhase = iota + 1
+	workflowCollectionPhaseFilter
+	workflowCollectionPhaseGroupBy
+	workflowCollectionPhaseReduce
+	workflowCollectionPhaseCount
+	workflowCollectionPhaseComplete
+)
+
+// WorkflowCollectionOutput is the immutable ownership record for one
+// collection-operation target. Every target participates in the same path
+// namespace even when its value is an aggregate rather than a collection.
+type WorkflowCollectionOutput struct {
+	Operation    WorkflowCollectionOperation
+	StoreAs      string
+	StorePath    paths.Path
+	IsCollection bool
+	phase        workflowCollectionPhase
+}
+
+// WorkflowHandlerCollectionPlan is the single phase-aware dataflow authority
+// shared by boot verification and runtime execution for one handler.
+type WorkflowHandlerCollectionPlan struct {
+	Query   *WorkflowQueryCollectionPlan
+	Filter  *WorkflowCollectionItemResolution
+	GroupBy *WorkflowGroupByCollectionPlan
+	Reduce  *WorkflowCollectionItemResolution
+	Count   *WorkflowCollectionItemResolution
+	Outputs []WorkflowCollectionOutput
+}
+
+func EffectiveQueryStoreAs(spec QuerySpec) string {
+	if target := strings.TrimSpace(spec.StoreAs); target != "" {
+		return target
+	}
+	return "computed.query"
+}
+
+func EffectiveFilterStoreAs(spec FilterSpec) string {
+	if target := strings.TrimSpace(spec.StoreAs); target != "" {
+		return target
+	}
+	return "computed.filter"
+}
+
+func EffectiveGroupByStoreAs(spec GroupBySpec) string {
+	if target := strings.TrimSpace(spec.StoreAs); target != "" {
+		return target
+	}
+	return "computed.group_by"
+}
+
+func EffectiveReduceStoreAs(spec ReduceSpec) string {
+	if target := strings.TrimSpace(spec.StoreAs); target != "" {
+		return target
+	}
+	return "computed.reduce"
+}
+
+func EffectiveCountStoreAs(spec CountSpec) string {
+	if target := strings.TrimSpace(spec.StoreAs); target != "" {
+		return target
+	}
+	return "computed.count"
+}
+
+func handlerCollectionOutputs(handler SystemNodeEventHandler) ([]WorkflowCollectionOutput, error) {
+	outputs := make([]WorkflowCollectionOutput, 0, 5)
+	add := func(operation WorkflowCollectionOperation, phase workflowCollectionPhase, storeAs string, collection bool) error {
+		storeAs = strings.TrimSpace(storeAs)
+		path := canonicalWorkflowCollectionOutputPath(paths.Parse(storeAs))
+		if path.IsZero() || len(path.Segments) == 0 {
+			return fmt.Errorf("%s output %q must select a writable field", operation, storeAs)
+		}
+		candidate := WorkflowCollectionOutput{Operation: operation, StoreAs: storeAs, StorePath: path, IsCollection: collection, phase: phase}
+		for _, existing := range outputs {
+			if workflowCollectionPathsOverlap(existing.StorePath, candidate.StorePath) {
+				return fmt.Errorf("collection outputs %s %q and %s %q have duplicate or overlapping ownership", existing.Operation, existing.StoreAs, candidate.Operation, candidate.StoreAs)
+			}
+		}
+		outputs = append(outputs, candidate)
+		return nil
+	}
+	if handler.Query != nil {
+		collection := !handler.Query.Count && strings.TrimSpace(handler.Query.GroupBy) == ""
+		if err := add(WorkflowCollectionOperationQuery, workflowCollectionPhaseQuery, EffectiveQueryStoreAs(*handler.Query), collection); err != nil {
+			return nil, err
+		}
+	}
+	if handler.Filter != nil {
+		if err := add(WorkflowCollectionOperationFilter, workflowCollectionPhaseFilter, EffectiveFilterStoreAs(*handler.Filter), true); err != nil {
+			return nil, err
+		}
+	}
+	if handler.GroupBy != nil {
+		if err := add(WorkflowCollectionOperationGroupBy, workflowCollectionPhaseGroupBy, EffectiveGroupByStoreAs(*handler.GroupBy), false); err != nil {
+			return nil, err
+		}
+	}
+	if handler.Reduce != nil {
+		if err := add(WorkflowCollectionOperationReduce, workflowCollectionPhaseReduce, EffectiveReduceStoreAs(*handler.Reduce), false); err != nil {
+			return nil, err
+		}
+	}
+	if handler.Count != nil {
+		if err := add(WorkflowCollectionOperationCount, workflowCollectionPhaseCount, EffectiveCountStoreAs(*handler.Count), false); err != nil {
+			return nil, err
+		}
+	}
+	return outputs, nil
+}
+
+func canonicalWorkflowCollectionOutputPath(path paths.Path) paths.Path {
+	switch path.Root {
+	case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin:
+		return path
+	default:
+		// writeStepValue stores unrooted and entity-like targets in the same
+		// state-field bucket after stripping any explicit root.
+		path.Root = paths.RootEntity
+		path.Raw = ""
+		return path
+	}
+}
+
+func workflowCollectionPathsOverlap(left, right paths.Path) bool {
+	if left.Root != right.Root {
+		return false
+	}
+	limit := len(left.Segments)
+	if len(right.Segments) < limit {
+		limit = len(right.Segments)
+	}
+	for index := 0; index < limit; index++ {
+		if left.Segments[index] != right.Segments[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolveHandlerCollectionItemType binds direct and handler-produced
+// collection sources to one recursive catalog item type.
+func (b *WorkflowContractBundle) ResolveHandlerCollectionItemType(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, itemsFrom string) (WorkflowCollectionItemResolution, error) {
+	authored := strings.TrimSpace(itemsFrom)
+	if authored == "" {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("collection source is required")
+	}
+	outputs, err := handlerCollectionOutputs(handler)
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, err
+	}
+	resolved, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(authored), workflowCollectionPhaseComplete, outputs, map[string]struct{}{})
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, err
+	}
+	if resolved.ItemType.Kind == CatalogTypeDynamic {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("collection source %q has dynamic item type", authored)
+	}
+	return resolved, nil
+}
+
+func (b *WorkflowContractBundle) resolveHandlerCollectionItemType(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, source paths.Path, consumerPhase workflowCollectionPhase, outputs []WorkflowCollectionOutput, seen map[string]struct{}) (WorkflowCollectionItemResolution, error) {
+	if source.IsZero() {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("collection source is required")
+	}
+	key := source.String()
+	if _, duplicate := seen[key]; duplicate {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("collection source %q has cyclic handler ancestry", key)
+	}
+	seen[key] = struct{}{}
+
+	for _, output := range outputs {
+		if !sameWorkflowCollectionPath(source, output.StorePath, output.StoreAs) {
+			continue
+		}
+		if output.phase >= consumerPhase {
+			return WorkflowCollectionItemResolution{}, fmt.Errorf("%s collection source %q is produced by %s at the same or a later execution phase", collectionConsumerLabel(consumerPhase), key, output.Operation)
+		}
+		if !output.IsCollection {
+			return WorkflowCollectionItemResolution{}, fmt.Errorf("%s output %q is an aggregate, not a collection", output.Operation, key)
+		}
+		switch output.Operation {
+		case WorkflowCollectionOperationQuery:
+			upstream, err := b.resolveQueryCollectionSource(node, eventType, handler, *handler.Query, output.phase, outputs, seen)
+			if err != nil {
+				return WorkflowCollectionItemResolution{}, err
+			}
+			item := upstream.ItemType.Clone()
+			if len(handler.Query.Select) > 0 {
+				item, err = projectQueryCollectionItemType(item, handler.Query.Select)
+				if err != nil {
+					return WorkflowCollectionItemResolution{}, err
+				}
+			}
+			return WorkflowCollectionItemResolution{Kind: WorkflowCollectionSourcePath, Source: key, Path: source, Origin: upstream.Origin, ItemType: item}, nil
+		case WorkflowCollectionOperationFilter:
+			upstream := firstWorkflowCollectionSource(handler.Filter.ItemsFrom, handler.Filter.Source)
+			resolved, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(upstream), output.phase, outputs, seen)
+			if err != nil {
+				return WorkflowCollectionItemResolution{}, err
+			}
+			return WorkflowCollectionItemResolution{Kind: WorkflowCollectionSourcePath, Source: key, Path: source, Origin: resolved.Origin, ItemType: resolved.ItemType.Clone()}, nil
+		default:
+			return WorkflowCollectionItemResolution{}, fmt.Errorf("%s output %q is not a collection", output.Operation, key)
+		}
+	}
+	if handler.Query != nil && source.Root == paths.RootUnknown && strings.TrimSpace(handler.Query.Entities) == key {
+		return b.resolveQueryEntityTable(node, key)
+	}
+
+	if source.Root != paths.RootPayload && source.Root != paths.RootEntity {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("collection source %q is neither an exact payload/entity collection nor a supported query/filter intermediate", key)
+	}
+	collection, err := b.resolveWorkflowCollectionType(node, eventType, source)
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, err
+	}
+	item, err := resolveWorkflowCollectionItemType(collection, source.Segments[1:])
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, err
+	}
+	return WorkflowCollectionItemResolution{
+		Kind: WorkflowCollectionSourcePath, Source: key, Path: source,
+		Origin: source.String(), ItemType: item,
+	}, nil
+}
+
+func (b *WorkflowContractBundle) resolveQueryCollectionSource(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, query QuerySpec, consumerPhase workflowCollectionPhase, outputs []WorkflowCollectionOutput, seen map[string]struct{}) (WorkflowCollectionItemResolution, error) {
+	source := strings.TrimSpace(query.Source)
+	entities := strings.TrimSpace(query.Entities)
+	if source != "" && entities != "" {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query must declare exactly one collection source: source and entities cannot both be set")
+	}
+	if source != "" {
+		path := query.SourcePath
+		if path.IsZero() {
+			path = paths.Parse(source)
+		}
+		return b.resolveHandlerCollectionItemType(node, eventType, handler, path, consumerPhase, outputs, seen)
+	}
+	if entities == "" {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query must declare exactly one collection source: source or entities is required")
+	}
+	if paths.Parse(entities).HasExplicitRoot() {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q must name an entity table; use source for collection paths", entities)
+	}
+	return b.resolveQueryEntityTable(node, entities)
+}
+
+func collectionConsumerLabel(phase workflowCollectionPhase) string {
+	switch phase {
+	case workflowCollectionPhaseQuery:
+		return string(WorkflowCollectionOperationQuery)
+	case workflowCollectionPhaseFilter:
+		return string(WorkflowCollectionOperationFilter)
+	case workflowCollectionPhaseGroupBy:
+		return string(WorkflowCollectionOperationGroupBy)
+	case workflowCollectionPhaseReduce:
+		return string(WorkflowCollectionOperationReduce)
+	case workflowCollectionPhaseCount:
+		return string(WorkflowCollectionOperationCount)
+	default:
+		return "collection"
+	}
+}
+
+func (b *WorkflowContractBundle) resolveQueryEntityTable(node runtimeidentity.ExecutableNode, entities string) (WorkflowCollectionItemResolution, error) {
+	primary, err := b.ResolveFlowPrimaryEntity(node.FlowID())
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q has no exact entity contract: %w", entities, err)
+	}
+	if entities != primary.EntityType {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q does not match flow %s primary entity %q", entities, defaultPrimaryEntityFlowLabel(node.FlowID()), primary.EntityType)
+	}
+	fields := make([]ResolvedCatalogField, 0, len(primary.Contract.Fields))
+	for _, name := range sortedEntityFieldKeys(primary.Contract.Fields) {
+		decl := primary.Contract.Fields[name]
+		resolved, resolveErr := (CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}).Resolve()
+		if resolveErr != nil {
+			return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q field %s: %w", entities, name, resolveErr)
+		}
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved})
+	}
+	item := ResolvedCatalogType{Kind: CatalogTypeObject, Name: primary.EntityType, Fields: fields}
+	return WorkflowCollectionItemResolution{
+		Kind: WorkflowCollectionSourceEntityTable, Source: entities, FlowID: node.FlowID(), EntityType: primary.EntityType,
+		Origin: "entities." + primary.EntityType, ItemType: item,
+	}, nil
+}
+
+func (b *WorkflowContractBundle) ResolveHandlerQueryCollectionPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler) (WorkflowQueryCollectionPlan, error) {
+	plan, err := b.ResolveHandlerCollectionPlan(node, eventType, handler)
+	if err != nil {
+		return WorkflowQueryCollectionPlan{}, err
+	}
+	if plan.Query == nil {
+		return WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires a query")
+	}
+	return *plan.Query, nil
+}
+
+func (b *WorkflowContractBundle) resolveHandlerQueryCollectionPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, outputs []WorkflowCollectionOutput) (WorkflowQueryCollectionPlan, error) {
+	source, err := b.resolveQueryCollectionSource(node, eventType, handler, *handler.Query, workflowCollectionPhaseQuery, outputs, map[string]struct{}{})
+	if err != nil {
+		return WorkflowQueryCollectionPlan{}, err
+	}
+	plan := WorkflowQueryCollectionPlan{Source: source, StoreAs: EffectiveQueryStoreAs(*handler.Query), StorePath: paths.Parse(EffectiveQueryStoreAs(*handler.Query))}
+	item := source.ItemType.Clone()
+	if raw := strings.TrimSpace(handler.Query.GroupBy); raw != "" {
+		field, err := resolveWorkflowCollectionGroupField(item, raw, "query group_by")
+		if err != nil {
+			return WorkflowQueryCollectionPlan{}, err
+		}
+		plan.GroupBy = &field
+	}
+	if len(handler.Query.Select) > 0 {
+		projected, err := projectQueryCollectionItemType(item, handler.Query.Select)
+		if err != nil {
+			return WorkflowQueryCollectionPlan{}, err
+		}
+		plan.OutputItem = projected
+		plan.HasOutputItem = true
+		plan.Select = make([]WorkflowCollectionFieldResolution, 0, len(projected.Fields))
+		for _, field := range projected.Fields {
+			plan.Select = append(plan.Select, WorkflowCollectionFieldResolution{Name: field.Name, Type: field.Type.Clone(), IsOptional: field.IsOptional})
+		}
+	} else if !handler.Query.Count && plan.GroupBy == nil {
+		plan.OutputItem = item
+		plan.HasOutputItem = true
+	}
+	return plan, nil
+}
+
+func (b *WorkflowContractBundle) ResolveHandlerGroupByCollectionPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler) (WorkflowGroupByCollectionPlan, error) {
+	plan, err := b.ResolveHandlerCollectionPlan(node, eventType, handler)
+	if err != nil {
+		return WorkflowGroupByCollectionPlan{}, err
+	}
+	if plan.GroupBy == nil {
+		return WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires group_by")
+	}
+	return *plan.GroupBy, nil
+}
+
+func (b *WorkflowContractBundle) resolveHandlerGroupByCollectionPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, outputs []WorkflowCollectionOutput) (WorkflowGroupByCollectionPlan, error) {
+	sourceText := strings.TrimSpace(handler.GroupBy.ItemsFrom)
+	source, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(sourceText), workflowCollectionPhaseGroupBy, outputs, map[string]struct{}{})
+	if err != nil {
+		return WorkflowGroupByCollectionPlan{}, err
+	}
+	key, err := resolveWorkflowCollectionGroupField(source.ItemType, handler.GroupBy.Key, "group_by key")
+	if err != nil {
+		return WorkflowGroupByCollectionPlan{}, err
+	}
+	storeAs := EffectiveGroupByStoreAs(*handler.GroupBy)
+	return WorkflowGroupByCollectionPlan{Source: source, StoreAs: storeAs, StorePath: paths.Parse(storeAs), Key: key}, nil
+}
+
+// ResolveHandlerCollectionPlan compiles every collection dependency and output
+// before runtime starts the handler. Dependencies may only point to direct
+// inputs or collection values produced by an earlier execution phase.
+func (b *WorkflowContractBundle) ResolveHandlerCollectionPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler) (WorkflowHandlerCollectionPlan, error) {
+	outputs, err := handlerCollectionOutputs(handler)
+	if err != nil {
+		return WorkflowHandlerCollectionPlan{}, err
+	}
+	plan := WorkflowHandlerCollectionPlan{Outputs: append([]WorkflowCollectionOutput(nil), outputs...)}
+	if handler.Query != nil {
+		resolved, err := b.resolveHandlerQueryCollectionPlan(node, eventType, handler, outputs)
+		if err != nil {
+			return WorkflowHandlerCollectionPlan{}, err
+		}
+		plan.Query = &resolved
+	}
+	if handler.Filter != nil {
+		source := firstWorkflowCollectionSource(handler.Filter.ItemsFrom, handler.Filter.Source)
+		resolved, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(source), workflowCollectionPhaseFilter, outputs, map[string]struct{}{})
+		if err != nil {
+			return WorkflowHandlerCollectionPlan{}, err
+		}
+		plan.Filter = &resolved
+	}
+	if handler.GroupBy != nil {
+		resolved, err := b.resolveHandlerGroupByCollectionPlan(node, eventType, handler, outputs)
+		if err != nil {
+			return WorkflowHandlerCollectionPlan{}, err
+		}
+		plan.GroupBy = &resolved
+	}
+	if handler.Reduce != nil {
+		source := firstWorkflowCollectionSource(handler.Reduce.ItemsFrom, handler.Reduce.Source)
+		resolved, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(source), workflowCollectionPhaseReduce, outputs, map[string]struct{}{})
+		if err != nil {
+			return WorkflowHandlerCollectionPlan{}, err
+		}
+		plan.Reduce = &resolved
+	}
+	if handler.Count != nil {
+		source := firstWorkflowCollectionSource(handler.Count.ItemsFrom, handler.Count.Source)
+		resolved, err := b.resolveHandlerCollectionItemType(node, eventType, handler, paths.Parse(source), workflowCollectionPhaseCount, outputs, map[string]struct{}{})
+		if err != nil {
+			return WorkflowHandlerCollectionPlan{}, err
+		}
+		plan.Count = &resolved
+	}
+	return plan, nil
+}
+
+func resolveWorkflowCollectionGroupField(item ResolvedCatalogType, raw, context string) (WorkflowCollectionFieldResolution, error) {
+	if item.Kind != CatalogTypeObject {
+		return WorkflowCollectionFieldResolution{}, fmt.Errorf("%s requires an object collection item, got %s", context, item.Kind)
+	}
+	name := strings.TrimSpace(raw)
+	name = strings.TrimPrefix(name, "item.")
+	if name == "" || strings.Contains(name, ".") {
+		return WorkflowCollectionFieldResolution{}, fmt.Errorf("%s %q must name one top-level item field", context, strings.TrimSpace(raw))
+	}
+	field, ok := item.Field(name)
+	if !ok {
+		return WorkflowCollectionFieldResolution{}, fmt.Errorf("%s references undeclared item field %s", context, name)
+	}
+	if field.IsOptional {
+		return WorkflowCollectionFieldResolution{}, fmt.Errorf("%s references optional item field %s without a presence decision", context, name)
+	}
+	switch field.Type.Kind {
+	case CatalogTypeText, CatalogTypeInteger, CatalogTypeNumber, CatalogTypeBoolean:
+	default:
+		return WorkflowCollectionFieldResolution{}, fmt.Errorf("%s field %s must be scalar, got %s", context, name, field.Type.Kind)
+	}
+	return WorkflowCollectionFieldResolution{Name: name, Type: field.Type.Clone()}, nil
+}
+
+func projectQueryCollectionItemType(item ResolvedCatalogType, selected []string) (ResolvedCatalogType, error) {
+	if item.Kind != CatalogTypeObject {
+		return ResolvedCatalogType{}, fmt.Errorf("query select requires an object collection item, got %s", item.Kind)
+	}
+	fields := make([]ResolvedCatalogField, 0, len(selected))
+	seen := map[string]struct{}{}
+	for _, raw := range selected {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return ResolvedCatalogType{}, fmt.Errorf("query select contains an empty field")
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return ResolvedCatalogType{}, fmt.Errorf("query select repeats field %s", name)
+		}
+		seen[name] = struct{}{}
+		field, ok := item.Field(name)
+		if !ok {
+			return ResolvedCatalogType{}, fmt.Errorf("query select references undeclared item field %s", name)
+		}
+		fields = append(fields, field)
+	}
+	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: item.Name + "QuerySelection", Fields: fields}, nil
+}
+
+func sameWorkflowCollectionPath(left, parsed paths.Path, authored string) bool {
+	if parsed.IsZero() {
+		parsed = paths.Parse(strings.TrimSpace(authored))
+	}
+	if left.Root != parsed.Root || len(left.Segments) != len(parsed.Segments) {
+		return false
+	}
+	for index := range left.Segments {
+		if left.Segments[index] != parsed.Segments[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func firstWorkflowCollectionSource(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func defaultFanOutEventLabel(eventType string) string {
@@ -517,8 +1059,20 @@ func defaultFanOutEventLabel(eventType string) string {
 	return eventType
 }
 
-func resolveFanOutCollectionItemType(ref CatalogTypeReference) (ResolvedCatalogType, error) {
+func resolveWorkflowCollectionItemType(ref CatalogTypeReference, nested []string) (ResolvedCatalogType, error) {
 	resolved, err := ref.Resolve()
+	if err == nil {
+		for _, segment := range nested {
+			if resolved.Kind != CatalogTypeObject {
+				return ResolvedCatalogType{}, fmt.Errorf("collection path segment %q traverses non-object type %s", segment, resolved.Kind)
+			}
+			field, ok := resolved.Field(segment)
+			if !ok {
+				return ResolvedCatalogType{}, fmt.Errorf("collection path references undeclared field %s", segment)
+			}
+			resolved = field.Type.Clone()
+		}
+	}
 	if err == nil && resolved.Kind == CatalogTypeList && resolved.Element != nil {
 		return *resolved.Element, nil
 	}
@@ -532,7 +1086,7 @@ func resolveFanOutCollectionItemType(ref CatalogTypeReference) (ResolvedCatalogT
 		return ref.ResolveReference(inner)
 	}
 	if lower == "array" || strings.HasPrefix(lower, "array ") || strings.HasPrefix(lower, "array(") {
-		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
+		return ResolvedCatalogType{}, fmt.Errorf("must declare an exact collection item type; untyped array is not executable item authority")
 	}
 	if err != nil {
 		return ResolvedCatalogType{}, fmt.Errorf("must reference a collection field: %v", err)

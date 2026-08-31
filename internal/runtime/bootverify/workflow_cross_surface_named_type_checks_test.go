@@ -39,6 +39,7 @@ func TestRun_DoesNotReportLowSignalTwoByTwoExactDuplicateShape(t *testing.T) {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"ticket.classified": {
 				Payload: runtimecontracts.EventPayloadSpec{
+					Required: []string{"category", "priority"},
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "text"},
 						"priority": {Type: "text"},
@@ -47,6 +48,7 @@ func TestRun_DoesNotReportLowSignalTwoByTwoExactDuplicateShape(t *testing.T) {
 			},
 			"ticket.assigned": {
 				Payload: runtimecontracts.EventPayloadSpec{
+					Required: []string{"category", "priority"},
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "text"},
 						"priority": {Type: "text"},
@@ -68,6 +70,7 @@ func TestRun_ReportsTwoCandidateThreeFieldExactDuplicateShape(t *testing.T) {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"ticket.classified": {
 				Payload: runtimecontracts.EventPayloadSpec{
+					Required: []string{"category", "priority", "confidence"},
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category":   {Type: "text"},
 						"priority":   {Type: "text"},
@@ -77,6 +80,7 @@ func TestRun_ReportsTwoCandidateThreeFieldExactDuplicateShape(t *testing.T) {
 			},
 			"ticket.assigned": {
 				Payload: runtimecontracts.EventPayloadSpec{
+					Required: []string{"category", "priority", "confidence"},
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category":   {Type: "text"},
 						"priority":   {Type: "text"},
@@ -174,6 +178,7 @@ func crossSurfaceNamedTypeUseBundle() *runtimecontracts.WorkflowContractBundle {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"proposal.created": {
 				Payload: runtimecontracts.EventPayloadSpec{
+					Required: []string{"summary", "supporting_routes"},
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"summary":           {Type: "text"},
 						"supporting_routes": {Type: "[text]"},

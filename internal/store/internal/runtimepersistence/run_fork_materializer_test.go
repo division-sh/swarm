@@ -1341,6 +1341,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 			sourceEvent.ID(), sourceEvent.Type(), sourceEvent.ProducerType(), sourceEvent.SourceAgent(), sourceEvent.TaskID(), sourceEvent.ChainDepth(), sourceEvent.RunID(), sourceEvent.ParentEventID(), sourceEvent.ExecutionMode(), sourceEvent.Payload(), sourceEvent.Envelope(),
 			forkEvent.ID(), forkEvent.Type(), forkEvent.ProducerType(), forkEvent.SourceAgent(), forkEvent.TaskID(), forkEvent.ChainDepth(), forkEvent.RunID(), forkEvent.ParentEventID(), forkEvent.ExecutionMode(), forkEvent.Payload(), forkEvent.Envelope())
 	}
+	sourcePayloadAdmission, sourceBound := sourceEvent.PayloadAdmission()
+	forkPayloadAdmission, forkBound := forkEvent.PayloadAdmission()
+	if !sourceBound || !forkBound || !forkPayloadAdmission.Binding().Equal(sourcePayloadAdmission.Binding()) {
+		t.Fatalf("fork replay payload binding = %#v/%v, want source binding %#v/%v",
+			forkPayloadAdmission.Binding(), forkBound, sourcePayloadAdmission.Binding(), sourceBound)
+	}
 
 	var forkDeliveryID, deliveryRunID, deliveryEventID, subscriberType, subscriberID, status, reasonCode string
 	var retryCount int

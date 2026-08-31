@@ -1,8 +1,11 @@
 package contracts
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -10,13 +13,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing.T) {
+func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypesWithoutInferringPresence(t *testing.T) {
 	registry := EventSchemaRegistryFromCatalog(map[string]EventCatalogEntry{
 		"scan.requested": {
 			Payload: EventPayloadSpec{
 				Properties: map[string]EventFieldSpec{
 					"corpus_path":   {Type: "string (required for corpus mode — path to signals file in /data)"},
 					"finished_at":   {Type: "timestamp (nullable)"},
+					"provider_data": {Type: "json"},
 					"score":         {Type: "float"},
 					"subcategories": {Type: "array (required for saas_gap, local_services modes)"},
 				},
@@ -37,8 +41,15 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 		t.Fatalf("corpus_path description = %#v", corpusPath["description"])
 	}
 	finishedAt, _ := props["finished_at"].(map[string]any)
-	if finishedAt["type"] != "string" || finishedAt["format"] != "date-time" || finishedAt["nullable"] != true {
-		t.Fatalf("finished_at schema = %#v, want nullable date-time string", finishedAt)
+	if finishedAt["type"] != "string" || finishedAt["format"] != "date-time" {
+		t.Fatalf("finished_at schema = %#v, want date-time string", finishedAt)
+	}
+	if _, inferred := finishedAt["nullable"]; inferred {
+		t.Fatalf("finished_at schema = %#v, prose must not infer field presence", finishedAt)
+	}
+	providerData, _ := props["provider_data"].(map[string]any)
+	if _, constrained := providerData["type"]; constrained {
+		t.Fatalf("provider_data schema = %#v, generic JSON must remain unconstrained", providerData)
 	}
 	score, _ := props["score"].(map[string]any)
 	if score["type"] != "number" {
@@ -104,13 +115,15 @@ func TestEventSchemaRegistryFromCatalog_ProjectsSchemaRefinements(t *testing.T) 
 	}
 }
 
-func TestPlatformEventCatalogImplicitRequiredSkipsNullableFields(t *testing.T) {
+func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(`
 payload:
   required_value: string
-  optional_value: string (nullable)
-  explicitly_optional_value: string (optional; producer may omit it)
+  optional_value: string?
+  described_optional_value:
+    type: string?
+    description: Producer may omit it.
 `), &node); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -119,6 +132,101 @@ payload:
 
 	if len(entry.Payload.Required) != 1 || entry.Payload.Required[0] != "required_value" {
 		t.Fatalf("Required = %#v, want only required_value", entry.Payload.Required)
+	}
+}
+
+func TestPlatformEventCatalogRejectsRetiredRequiredList(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+payload:
+  value: string
+required: [value]
+`), &node); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	defer func() {
+		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "required lists are retired") {
+			t.Fatalf("panic = %v, want retired required-list diagnostic", recovered)
+		}
+	}()
+	_ = platformEventEntryFromYAMLNode(*node.Content[0])
+}
+
+func TestPlatformEventCatalogPreservesNestedFieldPresence(t *testing.T) {
+	registry := EventSchemaRegistryFromBundle(&WorkflowContractBundle{
+		Platform: currentPlatformSpecForSchemaRegistryTest(t),
+	})
+	boot, ok := registry["platform.boot"]
+	if !ok {
+		t.Fatal("platform.boot schema is missing")
+	}
+	payload := map[string]any{
+		"recovery_decision": map[string]any{
+			"outcome":                      "allowed",
+			"reason_code":                  "clean_start",
+			"recovery_on_startup":          false,
+			"recovery_inspection_complete": true,
+			"schedule_replay_count":        0,
+			"schedule_skip_count":          0,
+			"schedule_drop_count":          0,
+			"manager_replay_count":         0,
+			"manager_skip_count":           0,
+			"manager_drop_count":           0,
+			"failure":                      nil,
+		},
+	}
+	normalized, err := eventschema.NormalizeOptionalFieldNulls(boot.Schema, payload)
+	if err != nil {
+		t.Fatalf("NormalizeOptionalFieldNulls: %v", err)
+	}
+	recovery := normalized["recovery_decision"].(map[string]any)
+	if _, present := recovery["failure"]; present {
+		t.Fatalf("optional nested failure survived normalization: %#v", recovery)
+	}
+	recovery["outcome"] = nil
+	if _, err := eventschema.NormalizeOptionalFieldNulls(boot.Schema, normalized); err == nil {
+		t.Fatal("required nested platform field accepted null")
+	}
+}
+
+func TestEventSchemaForNamedTypeRequiresOnlyRequiredFieldEdges(t *testing.T) {
+	types := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Contact": {Fields: map[string]TypeFieldSpec{
+			"name":  {Type: "text"},
+			"email": {Type: "text", IsOptional: true},
+		}},
+	}}
+	schema := eventSchemaForResolvedType("Contact", types, map[string]struct{}{})
+	required, ok := schema["required"].([]string)
+	if !ok || !reflect.DeepEqual(required, []string{"name"}) {
+		t.Fatalf("required = %#v, want [name]", schema["required"])
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok || properties["email"] == nil {
+		t.Fatalf("properties = %#v, want optional email schema retained", schema["properties"])
+	}
+}
+
+func TestCatalogTypeReferenceResolvesRecursiveFieldPresence(t *testing.T) {
+	resolved, err := (CatalogTypeReference{Type: "Contact", Catalog: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
+		"Contact": {Fields: map[string]TypeFieldSpec{
+			"name":    {Type: "text"},
+			"address": {Type: "Address", IsOptional: true},
+		}},
+		"Address": {Fields: map[string]TypeFieldSpec{
+			"city": {Type: "text"},
+		}},
+	}}}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	address, ok := resolved.Field("address")
+	if !ok || !address.IsOptional || address.Type.Kind != CatalogTypeObject {
+		t.Fatalf("address = %#v, want optional object field", address)
+	}
+	city, ok := address.Type.Field("city")
+	if !ok || city.IsOptional || city.Type.Kind != CatalogTypeText {
+		t.Fatalf("city = %#v, want required text field", city)
 	}
 }
 
@@ -168,7 +276,6 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 				"agent_id":      "agent-a",
 				"entity_id":     "00000000-0000-0000-0000-000000000128",
 				"flow_instance": "review/inst-1",
-				"tool_name":     nil,
 				"action":        "llm_call",
 				"failure": map[string]any{
 					"schema_version": runtimefailures.EnvelopeSchemaVersion,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -498,6 +499,17 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = testBundleSourceFact(t, runtimeTestBundleHash)
+	}
+	if opts.PayloadAdmitter == nil && opts.ContractBundle != nil {
+		opts.PayloadAdmitter = NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.BundleSourceFact)
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
+	}
+	if binder, ok := store.(EventPayloadAdmissionBinder); ok {
+		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)

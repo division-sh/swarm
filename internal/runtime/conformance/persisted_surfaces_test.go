@@ -66,6 +66,10 @@ type staticWorkspaceResolver struct {
 	err    error
 }
 
+func conformanceRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+}
+
 type discardCompletionSpendProjection struct{}
 
 func (discardCompletionSpendProjection) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
@@ -674,7 +678,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	entityID := uuid.NewString()
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
 		"cross_flow_write_forbidden",
@@ -1197,7 +1201,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
@@ -1439,7 +1443,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},

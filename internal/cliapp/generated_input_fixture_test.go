@@ -170,7 +170,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 		if rpc.Params["event_name"] != "item.received" || rpc.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", rpc.Params)
 		}
-		if !reflect.DeepEqual(rpc.Params["payload"], map[string]any{}) {
+		if !reflect.DeepEqual(rpc.Params["payload"], map[string]any{"item_id": ""}) {
 			t.Fatalf("generated payload = %#v, want schema-valid root input", rpc.Params["payload"])
 		}
 		writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
@@ -209,6 +209,10 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	resolved := semanticview.ResolveEventSchema(source, "telegram-chat", eventName)
 	if !resolved.HasSchema {
 		t.Fatalf("composed source did not resolve imported Telegram schema: %#v", resolved)
+	}
+	globalResolved := semanticview.ResolveEventSchema(source, "", eventName)
+	if !globalResolved.HasCompiled || !globalResolved.HasClassification || globalResolved.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("target-free composed source did not resolve imported Telegram schema: %#v scopes=%#v", globalResolved, source.FlowScopes())
 	}
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	association := census.ResolveDeclaredInputEndpoint("telegram-chat", eventName)

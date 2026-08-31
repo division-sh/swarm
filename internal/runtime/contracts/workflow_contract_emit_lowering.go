@@ -17,6 +17,7 @@ type EmitFieldLoweringContext struct {
 	Node             runtimeidentity.ExecutableNode
 	TriggerEventType string
 	Site             string
+	SchemaProvider   FlowEventStructuralTypeProvider
 }
 
 func (b *WorkflowContractBundle) LowerEmitSpecFields(ctx EmitFieldLoweringContext, spec EmitSpec) (EmitSpec, error) {
@@ -150,24 +151,25 @@ func (b *WorkflowContractBundle) emitPayloadTargetFields(ctx EmitFieldLoweringCo
 	if b == nil {
 		return nil, nil, fmt.Errorf("emit field lowering requires a workflow contract bundle")
 	}
-	entry, resolved, ok := b.EffectiveEventCatalogEntryForFlowEvent(ctx.Node.FlowID(), eventType)
+	structural, ok := b.resolveEmitStructuralType(ctx, eventType)
 	if !ok {
-		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, eventType); platformOK {
-			entry = platformEntry
-			resolved = platformKey
-			ok = true
+		return nil, nil, fmt.Errorf("emit field lowering requires emitted event %s structural payload schema", strings.TrimSpace(eventType))
+	}
+	fields := make(map[string]struct{}, len(structural.Fields))
+	required := make([]string, 0, len(structural.Fields))
+	for _, field := range structural.Fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			continue
+		}
+		fields[name] = struct{}{}
+		if !field.IsOptional {
+			required = append(required, name)
 		}
 	}
-	if !ok {
-		return nil, nil, fmt.Errorf("emit field lowering requires emitted event %s payload schema", strings.TrimSpace(eventType))
-	}
-	fields := eventPayloadDeclaredFields(entry)
-	required := eventPayloadRequiredFields(entry)
+	sort.Strings(required)
 	if len(fields) == 0 && len(required) == 0 {
-		return nil, nil, fmt.Errorf("emit field lowering requires emitted event %s payload schema", strings.TrimSpace(resolved))
-	}
-	for _, field := range required {
-		fields[field] = struct{}{}
+		return nil, nil, fmt.Errorf("emit field lowering requires emitted event %s payload schema", strings.TrimSpace(eventType))
 	}
 	return fields, required, nil
 }
@@ -188,10 +190,9 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 		}
 		return fields, nil
 	case EmitFromPayload:
-		entry, resolved, ok := b.EffectiveEventCatalogEntryForFlowEvent(ctx.Node.FlowID(), ctx.TriggerEventType)
+		_, resolved, ok := b.EffectiveEventCatalogEntryForFlowEvent(ctx.Node.FlowID(), ctx.TriggerEventType)
 		if !ok {
-			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, ctx.TriggerEventType); platformOK {
-				entry = platformEntry
+			if _, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, ctx.TriggerEventType); platformOK {
 				resolved = platformKey
 				ok = true
 			}
@@ -199,9 +200,15 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 		if !ok {
 			return nil, fmt.Errorf("emit.from payload requires trigger event %s payload schema", strings.TrimSpace(ctx.TriggerEventType))
 		}
-		fields := eventPayloadDeclaredFields(entry)
-		for _, field := range eventPayloadRequiredFields(entry) {
-			fields[field] = struct{}{}
+		structural, ok := b.resolveEmitStructuralType(ctx, ctx.TriggerEventType)
+		if !ok {
+			return nil, fmt.Errorf("emit.from payload requires trigger event %s structural payload schema", strings.TrimSpace(ctx.TriggerEventType))
+		}
+		fields := make(map[string]struct{}, len(structural.Fields))
+		for _, field := range structural.Fields {
+			if name := strings.TrimSpace(field.Name); name != "" {
+				fields[name] = struct{}{}
+			}
 		}
 		if len(fields) == 0 {
 			return nil, fmt.Errorf("emit.from payload requires trigger event %s payload schema", strings.TrimSpace(resolved))
@@ -212,19 +219,17 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 	}
 }
 
-func eventPayloadDeclaredFields(entry EventCatalogEntry) map[string]struct{} {
-	fields := map[string]struct{}{}
-	for field := range entry.Payload.Properties {
-		field = strings.TrimSpace(field)
-		if field != "" {
-			fields[field] = struct{}{}
+func (b *WorkflowContractBundle) resolveEmitStructuralType(ctx EmitFieldLoweringContext, eventType string) (ResolvedCatalogType, bool) {
+	if ctx.SchemaProvider != nil {
+		if structural, ok := ctx.SchemaProvider.ResolveFlowEventStructuralType(ctx.Node.FlowID(), eventType); ok {
+			return structural, true
 		}
 	}
-	return fields
-}
-
-func eventPayloadRequiredFields(entry EventCatalogEntry) []string {
-	return uniqueEmitFieldNames(entry.Payload.Required)
+	compiled, ok, err := b.ResolveEffectiveCompiledFlowEventSchema(ctx.Node.FlowID(), eventType)
+	if err != nil || !ok {
+		return ResolvedCatalogType{}, false
+	}
+	return compiled.StructuralType()
 }
 
 func uniqueEmitFieldNames(groups ...[]string) []string {

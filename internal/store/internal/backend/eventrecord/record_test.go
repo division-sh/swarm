@@ -12,7 +12,11 @@ import (
 
 func validRecord(t *testing.T) Record {
 	t.Helper()
-	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"nested":{"a":null}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 19, 2, 0, 0, 123456000, time.UTC))
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"nested":{"a":1}}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 19, 2, 0, 0, 123456000, time.UTC))
+	event, err := eventtest.AdmitPayload(event, "", "record.valid")
+	if err != nil {
+		t.Fatal(err)
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)
@@ -26,12 +30,20 @@ func validRecord(t *testing.T) Record {
 	return record
 }
 
-func TestRecordEqualDistinguishesNestedNullMapKeys(t *testing.T) {
+func TestRecordEqualDistinguishesNestedMapKeys(t *testing.T) {
 	left := validRecord(t)
 	right := left.Clone()
-	right.Payload = []byte(`{"nested":{"b":null}}`)
+	right.Payload = []byte(`{"nested":{"b":1}}`)
 	if left.Equal(right) {
-		t.Fatal("records with different nested null keys compared equal")
+		t.Fatal("records with different nested keys compared equal")
+	}
+}
+
+func TestRecordValidateRejectsPersistedPayloadNull(t *testing.T) {
+	record := validRecord(t)
+	record.Payload = []byte(`{"nested":{"value":null}}`)
+	if err := record.Validate(); err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+		t.Fatalf("Validate error = %v, want persisted payload null rejection", err)
 	}
 }
 
@@ -57,6 +69,12 @@ func TestRecordValidateRejectsEveryNormalizedScalarFamily(t *testing.T) {
 		{"selected_source_event", func(r *Record) { r.SelectedForkSourceEventID = " " }},
 		{"selected_authority", func(r *Record) { r.SelectedForkAuthorityStamp = " " }},
 		{"scope", func(r *Record) { r.Scope = events.EventScope(" global ") }},
+		{"payload_schema_bundle_hash", func(r *Record) { r.PayloadSchemaBundleHash += " " }},
+		{"payload_schema_bundle_source", func(r *Record) { r.PayloadSchemaBundleSource += " " }},
+		{"payload_schema_flow_id", func(r *Record) { r.PayloadSchemaFlowID = " flow " }},
+		{"payload_schema_event_key", func(r *Record) { r.PayloadSchemaEventKey += " " }},
+		{"payload_schema_digest", func(r *Record) { r.PayloadSchemaDigest += " " }},
+		{"payload_schema_class", func(r *Record) { r.PayloadSchemaClass = events.PayloadSchemaClass(" schema_less ") }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -157,6 +175,10 @@ func validDiagnosticDirectRecord(t *testing.T, eventType events.EventType, runID
 		uuid.NewString(), eventType, "runtime", "", []byte(`{}`), 0, runID, "", envelope,
 		time.Date(2026, 7, 19, 4, 0, 0, 0, time.UTC),
 	)
+	event, err := eventtest.AdmitPayload(event, "", string(eventType))
+	if err != nil {
+		t.Fatal(err)
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)

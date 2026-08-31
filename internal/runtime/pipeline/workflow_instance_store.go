@@ -78,6 +78,10 @@ type WorkflowEntityStatePersistenceReader interface {
 	SelectActiveWorkflowEntityStates(context.Context, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
 }
 
+type WorkflowEntityCollectionPersistenceReader interface {
+	QueryWorkflowEntityCollection(context.Context, WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error)
+}
+
 type workflowEntityStateSelectionCardinality uint8
 
 const (
@@ -205,6 +209,54 @@ func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
 		matchedFlowID = candidate.flowID
 	}
 	return matchedFlowID == o.flowID
+}
+
+// WorkflowEntityCollectionOwner binds query.entities to one admitted flow and
+// its exact primary entity table. It does not infer entity rows from lifecycle
+// projections, which may legitimately be absent for state-only entities.
+type WorkflowEntityCollectionOwner struct {
+	stateOwner WorkflowEntityStateSelectionOwner
+	flowID     string
+	entityType string
+}
+
+func AdmitWorkflowEntityCollectionOwner(source semanticview.Source, flowID, entityType, runID string) (WorkflowEntityCollectionOwner, error) {
+	flowID = strings.TrimSpace(flowID)
+	entityType = strings.TrimSpace(entityType)
+	contract, ok := entityruntime.ResolveForFlow(source, flowID)
+	if !ok {
+		return WorkflowEntityCollectionOwner{}, fmt.Errorf("workflow entity collection flow %s has no exact entity contract", flowID)
+	}
+	if strings.TrimSpace(contract.EntityType) != entityType {
+		return WorkflowEntityCollectionOwner{}, fmt.Errorf("workflow entity collection table %q does not match flow %s primary entity %q", entityType, flowID, contract.EntityType)
+	}
+	stateOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID, runID)
+	if err != nil {
+		return WorkflowEntityCollectionOwner{}, err
+	}
+	return WorkflowEntityCollectionOwner{stateOwner: stateOwner, flowID: flowID, entityType: entityType}, nil
+}
+
+func (o WorkflowEntityCollectionOwner) Valid() bool {
+	return o.stateOwner.Valid() && strings.TrimSpace(o.flowID) != "" && strings.TrimSpace(o.entityType) != ""
+}
+
+func (o WorkflowEntityCollectionOwner) ScopeKey() string {
+	if !o.Valid() {
+		return ""
+	}
+	return o.stateOwner.ScopeKey()
+}
+
+func (o WorkflowEntityCollectionOwner) EntityType() string {
+	if !o.Valid() {
+		return ""
+	}
+	return o.entityType
+}
+
+func (o WorkflowEntityCollectionOwner) Owns(record WorkflowEntityStatePersistenceRecord) bool {
+	return o.Valid() && strings.TrimSpace(record.EntityType) == o.entityType && o.stateOwner.Owns(record.FlowInstance)
 }
 
 // WorkflowTargetPersistencePresence is the closed selected-store truth for an
@@ -387,6 +439,19 @@ func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePe
 			}
 		}
 		if matched {
+			out = append(out, record)
+		}
+	}
+	return out, nil
+}
+
+func FilterWorkflowEntityCollectionRecords(records []WorkflowEntityStatePersistenceRecord, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
+	if !owner.Valid() {
+		return nil, fmt.Errorf("workflow entity collection requires an admitted flow and entity-table owner")
+	}
+	out := make([]WorkflowEntityStatePersistenceRecord, 0, len(records))
+	for _, record := range records {
+		if owner.Owns(record) {
 			out = append(out, record)
 		}
 	}
@@ -578,31 +643,32 @@ type workflowInstancePersistedControl struct {
 }
 
 type workflowInstanceStore struct {
-	entityQuery       entityquery.Reader
-	routeRecovery     runtimeworkflowroute.RecoveryReader
-	activityResults   runtimeactivityresult.Reader
-	activityJournal   ActivityAttemptJournal
-	gateRoutes        GateRouteAdmissionReader
-	timerObligations  runtimetimerobligation.Reader
-	deliveryStore     runtimedelivery.Store
-	pipelineStore     runtimepipelineobligation.Store
-	decisionCards     decisioncard.Store
-	lifecycleOwner    workflowInstanceLifecycleOwner
-	runLifecycle      runtimerunlifecycle.OperationOwner
-	engineMutations   WorkflowEngineMutationOwner
-	fanOutObligations FanOutObligationOwner
-	cardMutations     DecisionCardMutationOwner
-	timerOccurrences  WorkflowTimerOccurrenceOwner
-	timerActivations  WorkflowTimerActivationPersistence
-	readiness         DynamicFlowRuntimeReadinessPersistence
-	standingServices  StandingServicePersistence
-	decisionRoutes    WorkflowDecisionRouteOwner
-	instanceReader    WorkflowInstancePersistenceReader
-	entityStateReader WorkflowEntityStatePersistenceReader
-	targetReader      WorkflowTargetPersistenceReader
-	initialCommits    WorkflowInitialMaterializationCommitOwner
-	deliverySignalMu  sync.RWMutex
-	deliverySignals   map[runtimedelivery.ExecutionAuthority]func()
+	entityQuery            entityquery.Reader
+	routeRecovery          runtimeworkflowroute.RecoveryReader
+	activityResults        runtimeactivityresult.Reader
+	activityJournal        ActivityAttemptJournal
+	gateRoutes             GateRouteAdmissionReader
+	timerObligations       runtimetimerobligation.Reader
+	deliveryStore          runtimedelivery.Store
+	pipelineStore          runtimepipelineobligation.Store
+	decisionCards          decisioncard.Store
+	lifecycleOwner         workflowInstanceLifecycleOwner
+	runLifecycle           runtimerunlifecycle.OperationOwner
+	engineMutations        WorkflowEngineMutationOwner
+	fanOutObligations      FanOutObligationOwner
+	cardMutations          DecisionCardMutationOwner
+	timerOccurrences       WorkflowTimerOccurrenceOwner
+	timerActivations       WorkflowTimerActivationPersistence
+	readiness              DynamicFlowRuntimeReadinessPersistence
+	standingServices       StandingServicePersistence
+	decisionRoutes         WorkflowDecisionRouteOwner
+	instanceReader         WorkflowInstancePersistenceReader
+	entityStateReader      WorkflowEntityStatePersistenceReader
+	entityCollectionReader WorkflowEntityCollectionPersistenceReader
+	targetReader           WorkflowTargetPersistenceReader
+	initialCommits         WorkflowInitialMaterializationCommitOwner
+	deliverySignalMu       sync.RWMutex
+	deliverySignals        map[runtimedelivery.ExecutionAuthority]func()
 }
 
 type DeliveryContinuationSignalRegistration struct {
@@ -666,6 +732,7 @@ type WorkflowPersistenceOwner interface {
 	WorkflowDecisionRouteOwner
 	WorkflowInstancePersistenceReader
 	WorkflowEntityStatePersistenceReader
+	WorkflowEntityCollectionPersistenceReader
 	WorkflowTargetPersistenceReader
 	WorkflowInitialMaterializationCommitOwner
 }
@@ -681,7 +748,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		fanOutObligations: owner,
 		timerActivations:  owner, readiness: owner, standingServices: owner,
 		decisionRoutes: owner, instanceReader: owner, initialCommits: owner,
-		entityStateReader: owner, targetReader: owner,
+		entityStateReader: owner, entityCollectionReader: owner, targetReader: owner,
 	}}
 }
 
@@ -705,7 +772,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
+		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
 }
 
 func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
@@ -713,6 +780,13 @@ func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runti
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")
 	}
 	return s.entityStateReader.LoadWorkflowEntityState(ctx, route, entityID)
+}
+
+func (s *workflowInstanceStore) queryEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
+	if s == nil || s.entityCollectionReader == nil {
+		return nil, fmt.Errorf("workflow entity collection reader is required")
+	}
+	return s.entityCollectionReader.QueryWorkflowEntityCollection(ctx, owner)
 }
 
 func (s *workflowInstanceStore) LoadTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {

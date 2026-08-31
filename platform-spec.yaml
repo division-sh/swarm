@@ -731,9 +731,9 @@ contract_formats:
       producer-owned payload fields.
       The platform validates emit calls against the declared payload
       contract and populates envelope fields separately.
-      Runtime emit-payload validators MUST validate against the
+      Runtime emit-payload admission MUST consume the
       canonical type-aware event schema lowered through the active
-      Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
+      Wave 1 type catalog. Runtime admission MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
       Authored `swarm.source`, `swarm.producer`, and `swarm.consumer`
@@ -785,6 +785,30 @@ contract_formats:
             min: 0
             max: 100
           equal_to: sibling_field
+    recursive_field_presence:
+      owner: internal/runtime/contracts.ResolvedCatalogType
+      rule: |
+        Event payload fields and fields declared inside named types share one
+        recursive structural field-edge model. A field is required by default;
+        exactly one trailing `?` on that field's complete authored type marks
+        only that field edge optional. The marker is consumed during YAML
+        admission through the canonical `internal/yamlsource` effective mapping
+        and never survives as part of the scalar, enum, named, list, or map type
+        name. Duplicate keys, aliases, and merge provenance are resolved by that
+        owner before type meaning is assigned. No raw-node or suffix-parser
+        fallback exists.
+      composition: |
+        Named records preserve required/optional edges recursively when nested
+        directly or as list/map values. Optionality belongs to an object field,
+        not to a list element or map key/value position; optional list elements
+        and explicit null list elements are unsupported. Every schema compiler,
+        connect projection, accumulator projection, node-state resolver,
+        fan-out/join item resolver, entity nested normalizer, and generated tool
+        schema consumes this same structural type.
+      omission: |
+        Absence is the sole runtime representation of an optional field that has
+        no value. Empty string, empty list/map, zero, and false are present
+        values. Explicit null is never an internal optional-value representation.
     strict_payload_contract:
       rule: |
         Event payloads are producer-complete only. Every required declared
@@ -986,6 +1010,44 @@ contract_formats:
         readers MUST NOT infer or repair it. Historical and operator replay consume
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
+      payload_admission:
+        owner: internal/events.PayloadAdmission
+        chronology: |
+          Every persistable event payload is admitted against exactly one pinned
+          effective event schema before route planning, instance-key/window/dedup
+          extraction, event identity, delivery planning, or selected-store
+          mutation. Admission returns one immutable value containing the exact
+          normalized payload bytes and schema binding: bundle hash/source, flow
+          identity when applicable, effective event key, schema digest, and
+          source class. Public ingress, normal EventBus publication, direct and
+          recipient-plan preflight, internal/generated/platform publication, and
+          selected-fork publication consume this owner. A schema-less generated or
+          platform event is admissible only when no authored payload reader is
+          reachable.
+          Admission first consumes the compiled input binding for the supplied flow.
+          When pre-route source provenance names a different flow, as with a
+          target-free normalized provider output, admission may resolve across the
+          pinned effective source only when every matching exact-event input binding
+          has the same event identity, source class, and acceptance-schema digest.
+          Missing or disagreeing bindings fail closed; route planning never chooses or
+          rewrites payload schema authority.
+        normalization: |
+          Admission recursively lowers external null on an optional field to
+          omission, rejects null on a required field, rejects null list elements,
+          rejects unknown members under a closed schema, preserves all non-null
+          present values, and produces the authoritative bytes once. A later
+          surface may compare or clone those bytes but must not normalize,
+          reserialize, reinterpret, or replace their binding.
+        durable_continuity: |
+          SQLite and PostgreSQL persist the exact admitted bytes and every schema
+          binding coordinate atomically. Hydration restores that evidence through
+          the canonical event decoder. Retry, recovery, ordinary replay, and
+          delivery-event fork replay reuse persisted bytes and binding without an
+          ambient schema lookup. A selected-contract fork validates the exact
+          historical bytes against its pinned target bundle before mutation and
+          persists those bytes unchanged with the target binding. Payload JSONB is
+          query projection only. Byte-distinct payloads or binding-distinct events
+          are identity conflicts even when JSON values are semantically equal.
       invariant_ids:
         runtime.event.producer_origin_valid_at_construction:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
@@ -2166,7 +2228,7 @@ type_system:
         type. Non-equality predicates, provenance checks, external file
         checks, rule IDs, and failure routing are not schema refinements.
     runtime_consumption: |
-      Event payload validators, entity materialization/write normalization,
+      Event payload admission, entity materialization/write normalization,
       and generated entity/tool schemas that derive from the shared
       type/schema owner MUST consume the same refinement model. A consumer may
       omit a refinement only when it is a different semantic concept or an
@@ -2197,11 +2259,18 @@ type_system:
           allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
+    optional_record_edge: |
+      Event and named-record fields may append exactly one trailing `?` to the
+      complete type in either terse or verbose form, for example `label: text?`
+      or `child: {type: Child?}`. This denotes omission-capable field presence,
+      not `Optional<T>` type syntax and not a nullable value. Top-level entity
+      field presence remains governed by entity_contracts until #2397.
   restrictions:
     retired:
     - jsonb as an author-declared contract type
     - Inline type: object without declared inner shape
     - Optional<T> in Wave 1
+    - Optional list elements or map key/value types
     - inheritance / extends clauses
     - recursive types in Wave 1
     allowed_composition: |
@@ -3991,12 +4060,19 @@ handler_specification:
       type: object or list of objects
       purpose: Cross-entity read and aggregation.
       sub_fields:
+        source: exact payload/entity path, or for post-query operations an exact query/filter collection path produced by an earlier handler phase
         entities: string — entity table name
-        filter: string — optional condition
+        filter: string — optional CEL condition compiled during boot and runtime against the exact query collection item type when it reads `item`
         group_by: string — field to group by
         count: boolean — count per group
         select: list — literal object field names to include; entries are not expressions or lifecycle entity reads
         store_as: string — where to put results (in emit payload)
+      source_rule: Exactly one of source or entities is required. source is always selected when authored and entities is always a table declaration; authoring both is invalid. Runtime data cardinality never changes source identity.
+      selector_rule: group_by is a required top-level scalar item field. select entries are exact top-level object fields; optional selected fields preserve omission. Neither surface is an executable expression.
+      entity_table_runtime: The runtime reads the exact admitted entity type directly from current-run entity_state through the selected workflow persistence owner. State-only rows and active lifecycle-backed rows are included; wrong-run, wrong-flow, wrong-entity-type, and terminated lifecycle-backed rows are excluded. Each row is normalized to the exact declared entity fields. The workflow-instance lifecycle projection is not an entity-table authority. A missing runtime reader fails closed; entity-table input never falls back to a path or current-entity map.
+      intermediate_outputs: Omitted query.store_as and filter.store_as mean computed.query and computed.filter respectively in both type resolution and runtime storage. No consumer may infer a different default.
+      dataflow_rule: query executes before filter and may read only direct payload/entity input or its declared entities table. filter may additionally read a non-aggregate query collection output. standalone group_by, reduce, and count may read direct input or an earlier query/filter collection output; aggregate outputs are never collection sources. Every explicit-root source must select at least one field below payload or entity.
+      output_ownership_rule: Effective store_as targets for query, filter, standalone group_by, reduce, and count form one exclusive handler-local namespace. Duplicate targets and ancestor/descendant overlaps are invalid regardless of operation phase or result type.
       execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.
     reduce:
@@ -4352,7 +4428,7 @@ handler_specification:
       example: build_evidence
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
+      rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
       are contract errors.'
     namespaces:
@@ -4421,6 +4497,17 @@ handler_specification:
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
+        read_model:
+          schema_owner: The exact effective event-source structural schema is resolved before expression checking; authored, connected, imported, provider, generated, platform, and finite wildcard sources may not fall back to dyn when a payload reader is reachable.
+          required_field: A required field has its declared CEL type and may be read directly.
+          optional_field: '`payload.?field` has stock CEL `optional<T>` type. Direct `payload.field` is valid only where checked-AST control flow proves that exact field path present on every incoming path.'
+          decisions: '`payload.?field.orValue(default)`, `has(payload.field) ? payload.field : default`, and the logically equivalent negated conditional are supported when types agree.'
+          short_circuit: '`has(payload.field) && predicate(payload.field)` and `!has(payload.field) || predicate(payload.field)` prove presence on the evaluated branch. `has(payload.field) || predicate(payload.field)` and `!has(payload.field) && predicate(payload.field)` do not.'
+          nested_records: Optional parent to required child uses `payload.?parent.optMap(p, p.child)`; optional parent to optional child uses `payload.?parent.optFlatMap(p, p.?child)`.
+          lookup: Map/list optional lookup uses stock CEL `m[?key]` and `l[?index]`. Named records use typed dot or optional field selection; bracket lookup on a named record is invalid. This rule follows checked structural type and lexical-scope identity through configured item aliases and comprehension variables; identifier spelling is not authority.
+          facts: Presence facts are exact-path and lexical-scope facts. Nested branches compose, merge retains only facts true on every incoming path, and comprehension facts do not escape their lambda/body.
+          sinks: Optional-to-optional assignment preserves omission. Optional-to-required assignment requires a decision. An absent optional emit result omits the target field; it never emits null.
+        implementation_constraint: Use stock `cel.OptionalTypes()` plus one checked-AST structural/control-flow analysis. Regex/string scanning, custom optional macros, exact-schema `dyn`, alias-name allowlists, and permissive unresolved-source fallback are prohibited.
       event:
         resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
           platform-populated event context fields supplied by the runtime.'
@@ -4443,10 +4530,14 @@ handler_specification:
       checks:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
+        executable_reader_rule: Every expression-bearing entry in the closed executable-reader census, including action values, activity inputs, select bindings, compute inputs, fan-out expressions, and collection sources, is compiled at boot against the exact structural payload/item owner and exact typed sink when one is declared. Activity input sinks consume the admitted tool input schema, so optional-to-optional forwarding is valid while optional-to-required forwarding and incompatible value types fail before execution. Specialized condition, data-accumulation, and emit checks consume the same compiler and do not exempt other reader phases. An undecided optional read is hard invalidity before execution.
         filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
         query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
           when a supported scoped operand is unavailable in the handler context.
+        executable_collection_rule: Every executable query, filter, standalone group_by, reduce, and count collection source is admitted at boot through one immutable handler collection-dataflow owner, whether or not a condition reads `item`. The owner distinguishes direct payload/entity paths, query entity-table inputs, and explicit or canonical-default query/filter intermediate outputs; preserves exact recursive item type through selection; and rejects root-only, missing, dynamic, cyclic, aggregate, unsupported, or temporally unavailable ancestry. The fixed producer/consumer order is query, filter, standalone group_by, reduce, then count. A consumer may read only direct inputs or a collection output produced by an earlier phase; query therefore cannot read a same-handler filter output. Boot and runtime consume the same plan and runtime must not restore a dyn item fallback.
+        collection_output_ownership_rule: Every effective query, filter, standalone group_by, reduce, and count store_as target has exactly one producer in a handler. Exact duplicate and ancestor/descendant target paths are hard invalidity before any read or write, including collisions between collection and aggregate outputs. Sequential overwrite is not compatibility behavior.
+        collection_selector_rule: query.group_by, query.select, and standalone group_by.key are schema-bound item-field selectors, not executable expressions. Group keys must be required top-level scalar fields. Selection fields must exist; optional selections preserve omission per item, while a missing required selected field fails closed. Unknown, nested, wrong-kind, or undecided optional group keys are hard invalidity.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
         presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
         relevant for business meaning, but not for raw field readability.'
@@ -7961,7 +8052,7 @@ engine:
       \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
-    description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
+    description: All guard checks, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
@@ -7970,6 +8061,7 @@ engine:
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
+      item: Exact element value for query.filter, filter.condition, and count.condition. Fan-out expressions use their configured item alias. Item and alias bindings inherit the compiled collection element type and never fall back to dyn.
       fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
@@ -9847,7 +9939,7 @@ tool_model:
       activity input populated from verified inbound GitHub event context. The deployment record stores the app/client id,
       installation id, API base URL, and RSA private key, and caches the returned installation access token until expiry.
       Runtime must fail closed when the inbound-selected installation id is absent or differs from the connected record.
-      Issue-comment bot-loop flows that consume `inbound.github.issue_comment` and call a GitHub App issue-comment
+      Issue-comment bot-loop flows that consume the typed `inbound.github.issue_comment_created` normalized event and call a GitHub App issue-comment
       connector MUST guard app/bot-authored comments before activity lowering, using an `on_fail: discard` handler guard
       or equivalent no-side-effect filter. Delivery-id dedupe alone is not sufficient because an app-authored response is a
       separate GitHub webhook delivery with a new delivery id.
@@ -10839,7 +10931,7 @@ tool_model:
       event_name_policy: >
         New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
         `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
-        manifests because live subscriptions already consume `inbound.github.<event_type>` and
+        manifests because live subscriptions already consume `inbound.github.raw.<event_type>` and
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
@@ -10884,8 +10976,10 @@ tool_model:
         triggers. Missing delivery id fails before dedupe marker persistence.
       event_type: >
         `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
-        `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
-        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at.
+        `inbound.github.raw.<normalized_event_type>` and the raw payload includes provider, provider_event_id, event_type,
+        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at. Pack-declared typed
+        normalized outputs use distinct `inbound.github.<business_event>` names so raw and typed schemas never compete for
+        one event identity.
     - provider: slack
       issue: "#1691"
       signature: >
@@ -13545,7 +13639,7 @@ flow_model:
       importable schemas, but it must error rather than silently omit an invalid
       concrete declaration.
   compiled_event_schema_projection:
-    status: implemented_presence_preserving_w3
+    status: implemented_recursive_structural_presence
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
     rule: >-
       Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml,
@@ -13555,7 +13649,8 @@ flow_model:
       noncanonical package restatements do not become declaration identities.
     fields: >-
       Each declaration carries its canonical package key and qualified authored event name, authored classification,
-      a closed ordered field set with admitted semantic schema and IsOptional, an optional already-admitted scalar
+      a closed ordered recursive structural field set with admitted semantic schema and optionality on every named-record
+      field edge, an optional already-admitted scalar
       business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source
       is never identity or hash input. Readbacks are mutation-isolated.
     canonical_schema_owner: >-
@@ -13564,11 +13659,12 @@ flow_model:
       internal/runtime/canonicaljson owns canonical bytes and their sha256 digest. Consumers must not reserialize or
       independently hash raw event declarations.
     current_grammar_adapter: >-
-      The presence-preserving W3 adapter derives IsOptional exactly once from
-      the admitted trailing-`?` spelling. Requiredness defaults to true; the
-      marker never survives in the semantic type and the retired required-list
-      syntax is not represented. `key:` is admitted only after its referenced
-      field is proved required with boolean, number, or string semantics.
+      The presence-preserving adapter derives field-edge optionality exactly once
+      from the admitted trailing-`?` spelling for both event fields and nested named-record fields through
+      `internal/yamlsource`. Requiredness defaults to true; the marker never survives in the semantic type and the
+      retired required-list syntax is not represented. `key:` is admitted only after its referenced field is proved
+      required with boolean, number, or string semantics. Raw YAML nodes, local suffix trimming, and parallel string-only
+      type projections are not downstream authority.
     migration_boundary: >-
       The stable compiled interface and W3 event-family migration are complete.
       Producer-only intra-package ownership and receiver delivery projections
@@ -13576,8 +13672,8 @@ flow_model:
       business keys, field types and optionality, descriptions, refinements,
       citations, payload requiredness, event metadata, receiver aliases and
       generated carries, plus package-identified boundary snapshots. The
-      remaining decoder families continue under #2300 without reopening event
-      grammar or compatibility paths.
+      remaining unrelated decoder families continue under #2300 without reopening event/named-record field grammar or
+      compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'
@@ -13820,7 +13916,7 @@ durable_data_resources:
     rule: ResourceVersionID hashes only the canonical semantic manifest. Provenance and import attempt identity are attached evidence and are never identity inputs.
     keyless_rows: Every row has a 1-based ordinal. Source order and duplicate payload multiplicity are preserved; row identity and lookup are (version_id, ordinal). Delta compares canonical payload multiplicity and reports order_changed when equal multisets differ in order.
     keyed_rows: Every row has a 1-based ordinal and a canonical typed boolean, number, or string business key. Duplicate business keys reject the whole input. Rows are byte-sorted by canonical business-key bytes for digesting, storage, activation, and replay; delta and named lookup use the business key.
-    import_normalization: External null in an optional field normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
+    import_normalization: External null in an optional field consumes the same recursive structural field-edge owner as event admission and normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
     atomicity: One invalid row rejects the entire candidate and reports all bounded row defects. No partial version or head mutation exists.
     empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row.
   source_operations:
@@ -14232,9 +14328,11 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay. payload_bytes is the authoritative exact admitted payload used by identity, hydration,
-        retry, recovery, replay, and fork. payload is an atomically derived JSON query projection only and cannot
-        become execution or duplicate authority. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
+        and fork/replay. payload_bytes plus the six payload_schema_* coordinates are the authoritative exact admitted
+        payload and pinned schema evidence used by identity, hydration, retry, recovery, replay, and fork. payload is an
+        atomically derived JSON query projection only and cannot become execution or duplicate authority. execution_mode
+        is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it
+        from provider or backend names.'
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
@@ -14248,6 +14346,12 @@ platform_tables:
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
             payload_bytes               BYTEA NOT NULL,
+            payload_schema_bundle_hash  TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            payload_schema_bundle_source TEXT NOT NULL CHECK (payload_schema_bundle_source IN ('persisted', 'ephemeral')),
+            payload_schema_flow_id       TEXT CHECK (payload_schema_flow_id IS NULL OR payload_schema_flow_id = TRIM(payload_schema_flow_id)),
+            payload_schema_event_key     TEXT NOT NULL CHECK (payload_schema_event_key = TRIM(payload_schema_event_key) AND NULLIF(payload_schema_event_key, '') IS NOT NULL),
+            payload_schema_digest        TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$'),
+            payload_schema_class         TEXT NOT NULL CHECK (payload_schema_class IN ('authored', 'imported', 'generated', 'pattern', 'platform', 'schema_less')),
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
             produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
@@ -17639,8 +17743,10 @@ run_model:
       outcomes, and regenerates emitted follow-ups under the fork run_id. This surface is timer-free: relevant timer
       history in the selected revision or any workflow-timer declaration in the selected semantic source rejects the
       request before materialization, because no long-lived timer owner survives the ephemeral container. When selected frontier work is a
-      platform.activity_requested event, source preparation MUST bind the request payload source_event_id to the actual
-      fork-local frontier event before deriving fork-local request/result identities. read_only with reexecute_read executes
+      platform.activity_requested event, source preparation MUST derive fork-local request/result identities from the actual
+      fork-local frontier event and typed selected-fork lineage without rewriting the exact historical request payload.
+      The EventBus validates those exact historical bytes against the selected target contract and persists them unchanged
+      with the target schema binding. read_only with reexecute_read executes
       the connector exactly once under that fork-local generation and does not copy a source attempt;
       an unapproved non_idempotent_write with reuse_recorded_result copies accepted terminal evidence under fork-local
       request/result identities and publishes that recorded result without calling the connector. For activity.approval,
@@ -19057,6 +19163,12 @@ platform_events:
     examples:
       dotted_event_key: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
       simple_owner: platform-spec.yaml#engine.error_model.dead_letter_schema
+  payload_presence:
+    rule: Platform catalog payload fields use the same required-by-default structural grammar as product events and named records.
+      Exactly one trailing `?` on the complete field type marks that field optional; the marker is removed from the effective type.
+    nested_records: Nested platform payload mappings apply the same rule recursively.
+    retired: Parallel `required:` lists and prose-derived optional/nullable meaning are invalid. Runtime null from an external
+      optional field lowers to omission during canonical event admission; platform producers emit omission directly.
   catalog:
     event.replayed:
       description: Durable operator audit evidence that an existing event delivery was replayed. This audit event is diagnostic evidence and is not an author-story occurrence.
@@ -19073,20 +19185,11 @@ platform_events:
         replay_event_id: uuid
         audit_event_id: uuid
         run_id: uuid
-        entity_id: uuid (optional)
+        entity_id: uuid?
         subscribers: array of string
         triggered_by: string
-        actor_token_id: string (optional)
+        actor_token_id: string?
         original_deliveries: array of object
-      required:
-      - original_event_id
-      - original_event_name
-      - replay_event_id
-      - audit_event_id
-      - run_id
-      - subscribers
-      - triggered_by
-      - original_deliveries
       produced_by_type: platform
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
@@ -19121,21 +19224,31 @@ platform_events:
       payload:
         activity_id: string
         tool: string
-        bundle_hash: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
-        workflow_version: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
+        bundle_hash:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
+        workflow_version:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
         input: object
         effect_class: string
         success_event: string
         failure_event: string
-        revision_event: string (optional; generated typed feedback event for an approved activity)
-        rejected_event: string (optional; generated typed rejection event for an approved activity)
+        revision_event:
+          type: string?
+          description: Generated typed feedback event for an approved activity.
+        rejected_event:
+          type: string?
+          description: Generated typed rejection event for an approved activity.
         retry_max_attempts: integer
         retry_backoff: string
         fork_policy: string
         entity_id: string
         node_id: string
         flow_id: string
-        flow_instance: string (optional; exact producing flow instance)
+        flow_instance:
+          type: string?
+          description: Exact producing flow instance.
         handler_event_key: string
         source_event_id: string
         source_run_id: string
@@ -19143,8 +19256,12 @@ platform_events:
         parent_event_id: string
         chain_depth: integer
         attempt: integer
-        loop_generation: object (optional; durable bounded-loop attempt identity)
-        loop_stage: string (optional; source stage claimed with the attempt)
+        loop_generation:
+          type: object?
+          description: Durable bounded-loop attempt identity.
+        loop_stage:
+          type: string?
+          description: Source stage claimed with the attempt.
       produced_by_type: platform
     platform.agent_failed:
       description: Agent session failed after retry.
@@ -19158,7 +19275,7 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         retry_count: integer
         last_event_type: string
@@ -19176,10 +19293,10 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         stack_trace: string
-        conversation_id: string (nullable)
+        conversation_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.event_quarantined:
@@ -19209,7 +19326,7 @@ platform_events:
       routing_class: event_loop_routable
       scope: global
       payload:
-        flow_instance: string
+        flow_instance: string?
         dead_letter_count: integer
         window_minutes: integer
         sample_events: array
@@ -19235,15 +19352,6 @@ platform_events:
         threshold_seconds: integer
         stalled_for_seconds: integer
         emitted_at: string (ISO 8601)
-      required:
-      - run_id
-      - operational_state
-      - blocking_layer
-      - blocking_reason
-      - last_progress_at
-      - threshold_seconds
-      - stalled_for_seconds
-      - emitted_at
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
@@ -19279,18 +19387,10 @@ platform_events:
         agent_id: string
         entity_id: string
         flow_instance: string
-        tool_name: string (nullable)
+        tool_name: string?
         action: string
         failure: platform.failure/v1 envelope
         timestamp: string (ISO 8601)
-      required:
-      - agent_id
-      - entity_id
-      - flow_instance
-      - tool_name
-      - action
-      - failure
-      - timestamp
       produced_by_type: platform
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
@@ -19333,7 +19433,9 @@ platform_events:
       payload:
         reason: string
         paused_by: string
-        last_failure: platform.failure/v1 envelope (nullable; present for safety-triggered pauses and absent for operator control pauses)
+        last_failure:
+          type: platform.failure/v1 envelope?
+          description: Present for safety-triggered pauses and absent for operator control pauses.
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.resumed:
@@ -19375,17 +19477,8 @@ platform_events:
         run_id: string
         run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
         source: string
-        operator_id: string (nullable)
+        operator_id: string?
         timestamp: string (ISO 8601)
-      required:
-      - operation_id
-      - agent_id
-      - directive_text
-      - mode
-      - run_id
-      - run_id_resolution
-      - source
-      - timestamp
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
@@ -19398,7 +19491,7 @@ platform_events:
       scope: flow
       payload:
         agent_id: string
-        flow_instance: string (nullable)
+        flow_instance: string?
         memory_enabled: boolean
         memory_source: string (authored | platform_default)
         model: string
@@ -19433,23 +19526,34 @@ platform_events:
           reason_code: string
           recovery_on_startup: boolean
           recovery_inspection_complete: boolean
-          startup_blocking_timer_count: integer (present when recovery inspection completed)
-          standing_timer_obligation_count: integer (present when recovery inspection completed)
-          timer_obligations: TimerObligationSnapshot (present when recovery inspection completed)
+          startup_blocking_timer_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          standing_timer_obligation_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          timer_obligations:
+            type: TimerObligationSnapshot?
+            description: Present when recovery inspection completed.
+          delivery_recovery_inventory:
+            type: object?
+            description: Present when recovery inspection completed.
           schedule_replay_count: integer
           schedule_skip_count: integer
           schedule_drop_count: integer
           manager_replay_count: integer
           manager_skip_count: integer
           manager_drop_count: integer
-          failure: optional platform.failure/v1 envelope
+          failure: platform.failure/v1 envelope?
         static_agents_started: array<string>
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
         self_check_required: boolean
-        self_check_passed: boolean (nullable)
+        self_check_passed:
+          type: boolean?
+          description: Omitted until the post-publish self-check completes.
       notes:
-      - 'self_check_passed is nullable because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
+      - 'self_check_passed is omitted because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
       produced_by_type: platform
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
@@ -19471,14 +19575,6 @@ platform_events:
         event_ids: array<string>
         event_names: array<string>
         output_count: integer
-      required:
-      - publication_id
-      - provider
-      - provider_event_id
-      - entity_id
-      - event_ids
-      - event_names
-      - output_count
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.
@@ -19491,7 +19587,7 @@ platform_events:
       scope: global
       payload:
         failure: platform.failure/v1 envelope
-        failed_event_id: string (nullable)
+        failed_event_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     mailbox.card_decided:
@@ -19513,16 +19609,6 @@ platform_events:
         card_content_hash: text
         decision_schema_hash: text
         bundle_hash: text
-      required:
-      - card_id
-      - anchor_kind
-      - anchor
-      - decision_id
-      - verdict
-      - fields
-      - card_content_hash
-      - decision_schema_hash
-      - bundle_hash
       produced_by_type: platform
     mailbox.card_deferred:
       description: Platform evidence event emitted when an operator defers a pending typed decision card without deciding it.
@@ -19536,9 +19622,6 @@ platform_events:
       payload:
         card_id: uuid
         until: timestamp
-      required:
-      - card_id
-      - until
       produced_by_type: platform
     mailbox.card_superseded:
       description: >-
@@ -19555,12 +19638,8 @@ platform_events:
       payload:
         card_id: uuid
         anchor_kind: text
-        stage_activation_id: uuid
+        stage_activation_id: uuid?
         reason: text
-      required:
-      - card_id
-      - anchor_kind
-      - reason
       produced_by_type: platform
     mailbox.card_expired:
       description: >-
@@ -19580,11 +19659,6 @@ platform_events:
         anchor_kind: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - anchor_kind
-      - cause
-      - deadline_at
       produced_by_type: platform
     human_task.approved:
       description: Product-facing platform event emitted after an operator approves a persisted human task.
@@ -19602,13 +19676,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.rejected:
       description: Product-facing platform event emitted after an operator rejects a persisted human task.
@@ -19626,13 +19693,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.deferred:
       description: Product-facing platform event emitted when a persisted human task is deferred without terminally deciding it.
@@ -19648,11 +19708,6 @@ platform_events:
         status: text
         cause: text
         resume_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - resume_at
       produced_by_type: platform
     human_task.expired:
       description: Product-facing platform event emitted when a persisted human task reaches its terminal timeout decision.
@@ -19668,11 +19723,6 @@ platform_events:
         status: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - deadline_at
       produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle

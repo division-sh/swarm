@@ -411,8 +411,8 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 		findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload requires artifact_repo.%s_event", label, label)))
 	}
 	var (
-		entry       runtimecontracts.EventCatalogEntry
 		entryFound  bool
+		resolution  semanticview.EventSchemaResolution
 		covered     = artifactRepoResultCoveredPayloadFields(label, payload, spec)
 		runtimeKeys = artifactRepoResultRuntimePayloadFields(label, spec)
 	)
@@ -420,9 +420,11 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 		if strings.Contains(resultEvent, "*") {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event must be a concrete event, got %s", label, resultEvent)))
 		}
-		entry, entryFound = artifactRepoResultEventEntry(source, flowID, resultEvent)
+		_, entryFound = artifactRepoResultEventEntry(source, flowID, resultEvent)
 		if !entryFound {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s does not resolve to a declared event", label, resultEvent)))
+		} else {
+			resolution = semanticview.ResolveEventSchema(source, flowID, resultEvent)
 		}
 	}
 	for target, expr := range payload {
@@ -439,11 +441,11 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 		}
 	}
 	if resultEvent != "" && entryFound {
-		if len(entry.Payload.Properties) == 0 {
+		if !resolution.HasStructural || len(resolution.StructuralType.Fields) == 0 {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s must declare a payload schema for artifact_repo result fields", label, resultEvent)))
 		}
 		for field := range runtimeKeys {
-			if _, ok := entry.Payload.Properties[field]; !ok {
+			if _, ok := resolution.Field(field); !ok {
 				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s schema is missing runtime-owned field %s", label, resultEvent, field)))
 			}
 		}
@@ -453,11 +455,11 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 			if target == "" {
 				continue
 			}
-			if _, ok := entry.Payload.Properties[target]; !ok {
+			if _, ok := resolution.Field(target); !ok {
 				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload.%s is not declared by %s payload schema", label, target, resultEvent)))
 			}
 		}
-		for _, field := range entry.Payload.Required {
+		for _, field := range resolution.RequiredFieldNames() {
 			field = strings.TrimSpace(field)
 			if field == "" {
 				continue

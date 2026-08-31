@@ -283,7 +283,7 @@ store_parity:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle, writer_ownership], proof_ids: [served-event-publish, served-event-replay, event-bus-roles]}
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
-      runtime_deps: [EventStore, EventBusDurable, EventPayloadValidationBinder, DeliveryStore]
+      runtime_deps: [EventStore, EventBusDurable, EventPayloadAdmissionBinder, DeliveryStore]
       nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, WorkflowInstances, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, event_delivery_outcomes, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
       public_methods: [event.publish, event.replay, event.get, event.list, agent.replay, run.start]
@@ -316,7 +316,7 @@ store_parity:
       evidence:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [operator-channel-surface]}
       required_ports: [operatorChannels]
-      runtime_deps: [InboundPayloadValidationBinder, InboundStore]
+      runtime_deps: [InboundPayloadAdmissionBinder, InboundStore]
       platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
       public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
     - id: connected_channel_onboarding
@@ -379,7 +379,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
-      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutObligationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
+      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutObligationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation

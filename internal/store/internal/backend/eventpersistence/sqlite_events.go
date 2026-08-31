@@ -22,29 +22,39 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *EventSQLiteOwner) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
+func (s *EventSQLiteOwner) SetEventPayloadAdmitter(admitter runtimebus.PayloadAdmitter) {
 	if s == nil {
 		return
 	}
-	s.validatorMu.Lock()
-	s.validator = validator
-	s.validatorMu.Unlock()
+	s.payloadAdmitterMu.Lock()
+	s.payloadAdmitter = admitter
+	s.payloadAdmitterMu.Unlock()
 }
 
-func (s *EventSQLiteOwner) validateEventPayload(ctx context.Context, eventType string, payload []byte) error {
+func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admitted events.AdmittedEvent) (events.AdmittedEvent, error) {
 	if s == nil {
-		return nil
+		return events.AdmittedEvent{}, fmt.Errorf("sqlite event owner is required")
 	}
-	s.validatorMu.RLock()
-	validator := s.validator
-	s.validatorMu.RUnlock()
-	if validator == nil {
-		return nil
+	event := admitted.Event()
+	if _, ok := event.PayloadAdmission(); ok {
+		return admitted, nil
 	}
-	if err := validator(ctx, strings.TrimSpace(eventType), payload); err != nil {
-		return fmt.Errorf("validate event payload: %w", err)
+	s.payloadAdmitterMu.RLock()
+	admitter := s.payloadAdmitter
+	s.payloadAdmitterMu.RUnlock()
+	if admitter == nil {
+		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
-	return nil
+	flowID := strings.TrimSpace(event.RoutingSource().Route().FlowID)
+	payload, err := admitter(ctx, event, flowID)
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("admit event payload: %w", err)
+	}
+	restored, err := events.ApplyAdmittedPayload(admitted, payload)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return restored, nil
 }
 
 func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
@@ -63,12 +73,13 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	if story == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
-	evt := admitted.Event()
-	wantIdentity, err := eventrecord.FromAdmitted(admitted, settlement)
+	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
+	evt := admitted.Event()
+	wantIdentity, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	existingIdentity, found, err := loadSQLiteEventIdentity(ctx, tx, wantIdentity.EventID)

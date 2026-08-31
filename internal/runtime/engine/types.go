@@ -289,10 +289,11 @@ func (r ExecutionRequest) StateAddress() StateAddress {
 }
 
 type ExecutionContext struct {
-	Request   ExecutionRequest
-	Base      BaseContext
-	Step      Step
-	Completed []Step
+	Request     ExecutionRequest
+	Base        BaseContext
+	PayloadType *runtimecontracts.ResolvedCatalogType
+	Step        Step
+	Completed   []Step
 }
 
 type ExecutionState struct {

@@ -76,6 +76,11 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
+	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(pipelineObligationTestProvider); ok {
 			opts.PipelineObligations = provider.PipelineObligations()

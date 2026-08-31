@@ -821,8 +821,9 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if evt.Type() == "" || !isValidEventTypeName(string(evt.Type())) {
 		return PreparedPublish{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(ctx, string(evt.Type()), evt.Payload()); err != nil {
+	if eb.payloadAdmitter != nil {
+		evt, err = eb.admitEventPayload(ctx, evt)
+		if err != nil {
 			return PreparedPublish{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
@@ -910,8 +911,9 @@ func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (co
 	if !isValidEventTypeName(string(evt.Type())) {
 		return ctx, events.AdmittedEvent{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(ctx, string(evt.Type()), evt.Payload()); err != nil {
+	if eb.payloadAdmitter != nil {
+		evt, err = eb.admitEventPayload(ctx, evt)
+		if err != nil {
 			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
@@ -1536,7 +1538,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 			if !pass {
 				passthrough = false
 			}
-			admitted, err := admitDeferredEvents(routeCtx, out)
+			admitted, err := eb.admitDeferredEvents(routeCtx, out)
 			if err != nil {
 				return passthrough, nil, runtimepipelineobligation.Continue(), err
 			}
@@ -1672,7 +1674,7 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 		if !pass {
 			passthrough = false
 		}
-		admitted, err := admitDeferredEvents(ctx, out)
+		admitted, err := eb.admitDeferredEvents(ctx, out)
 		if err != nil {
 			return true, nil, runtimepipelineobligation.Continue(), err
 		}
@@ -1681,12 +1683,17 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	return passthrough, deferred, runtimepipelineobligation.Continue(), nil
 }
 
-func admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Event, error) {
+func (eb *EventBus) admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Event, error) {
 	if len(out) == 0 {
 		return nil, nil
 	}
 	deferred := make([]events.Event, 0, len(out))
 	for _, d := range out {
+		var err error
+		d, err = eb.admitEventPayload(ctx, d)
+		if err != nil {
+			return nil, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(d.Type())), err)
+		}
 		_, admitted, err := admitEventForPublish(ctx, d, time.Now())
 		if err != nil {
 			return nil, err
@@ -1717,6 +1724,10 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	var admitted events.AdmittedEvent
+	evt, err = eb.admitEventPayload(ctx, evt)
+	if err != nil {
+		return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+	}
 	ctx, admitted, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
 		return err
@@ -2135,8 +2146,10 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 	if !isValidEventTypeName(string(evt.Type())) {
 		return status, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(ctx, string(evt.Type()), evt.Payload()); err != nil {
+	if eb.payloadAdmitter != nil {
+		var err error
+		evt, err = eb.admitEventPayload(ctx, evt)
+		if err != nil {
 			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
@@ -2195,8 +2208,10 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	if !isValidEventTypeName(string(evt.Type())) {
 		return PublishRecipientPlan{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(ctx, string(evt.Type()), evt.Payload()); err != nil {
+	if eb.payloadAdmitter != nil {
+		var err error
+		evt, err = eb.admitEventPayload(ctx, evt)
+		if err != nil {
 			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
@@ -2210,6 +2225,29 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 		return PublishRecipientPlan{}, err
 	}
 	return eb.publishRecipientPlan(evt, plan), nil
+}
+
+func (eb *EventBus) admitEventPayload(ctx context.Context, event events.Event) (events.Event, error) {
+	if _, admitted := event.PayloadAdmission(); admitted {
+		return event.Clone(), nil
+	}
+	if eb == nil || eb.payloadAdmitter == nil {
+		return event.Clone(), nil
+	}
+	flowID := ""
+	if admission, ok := publicInputAdmissionFromContext(ctx); ok {
+		flowID = strings.TrimSpace(admission.flowID)
+	} else if admission, ok := apiEventPublicationAdmissionFromContext(ctx); ok {
+		flowID = strings.TrimSpace(admission.flowID)
+	}
+	if flowID == "" {
+		flowID = strings.TrimSpace(event.RoutingSource().Route().FlowID)
+	}
+	admission, err := eb.payloadAdmitter(ctx, event, flowID)
+	if err != nil {
+		return event.Clone(), err
+	}
+	return events.ApplyPayloadAdmission(event, admission)
 }
 
 // CheckAPIEventPublishRecipientPlan applies the ordinary publish preflight

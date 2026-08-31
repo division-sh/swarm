@@ -86,16 +86,8 @@ func nodeStateDeclaredTypeCatalogRef(types runtimecontracts.TypeCatalogDocument,
 	if name == "" {
 		return false
 	}
-	if _, ok := types.Types[name]; ok {
-		return true
-	}
-	if _, ok := types.Enums[name]; ok {
-		return true
-	}
-	if _, ok := types.Scalars[name]; ok {
-		return true
-	}
-	return false
+	_, err := (runtimecontracts.CatalogTypeReference{Type: name, Catalog: types}).Resolve()
+	return err == nil
 }
 
 func nodeStateResolvedTypes(source semanticview.Source, flowID string) runtimecontracts.TypeCatalogDocument {

@@ -322,16 +322,16 @@ rows:
   - id: typed_field
     ruled: mechanical-ratified
     paths: "types.types.<type>.<field>, entities.<entity>.<field>"
-    owners: [TypeFieldSpec.UnmarshalYAML, EntityFieldDecl.UnmarshalYAML, decodeWave1FieldNode]
+    owners: [yamlsource.Value, projectTypeFieldSpec, projectEntityFieldDecl, decodeWave1FieldValue]
     information:
-      fact: [type, initial, refinements, materialize_from, project]
+      fact: [type, recursive field presence, initial, refinements, materialize_from, project]
       choice: [indexed, immutable]
       annotation: [description, citation, _unused_reason, _unused_reader_reason]
     spelling:
       canonical_candidate: scalar_type_when_no_non_type_fields_else_mapping
       retired_duplicates: [mapping_with_type_only, one_item_sequence_type, "mapping {type: list, of: T} versus [T]"]
       distinct_overrides: [mapping_with_non_type_fields]
-    f2_bug: "type:list plus of remains accepted although it is the same semantic type as [T]"
+    f2_bug: "closed by #2333: the paired named/entity field family admits effective YAML once through yamlsource; named fields own recursive presence while top-level entity presence remains #2397"
     corpus: {entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
 
   - id: entity_document

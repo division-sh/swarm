@@ -1,4 +1,4 @@
 candidate.submitted:
-  name: string?
-  score: integer?
+  name: string
+  score: integer
 candidate.accepted: {}

@@ -187,6 +187,60 @@ func TestImportBoundaryWildcardBoundedGrantDeliversAcrossSurfaces(t *testing.T) 
 	}
 }
 
+func TestImportBoundaryWildcardPayloadReaderConsumesExactProducerSchema(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		ProducerAuthored:             true,
+		WorkerPayloadReader:          true,
+		WorkerPayloadLocalCandidate:  true,
+		WorkerPayloadLocalCompatible: true,
+		ObserveGrant: "      observe:\n" +
+			"        - source: producer\n" +
+			"          events: [task.done]\n",
+	})
+	report := bootverify.Run(context.Background(), source, bootverify.Options{})
+	if errors := report.Errors(); len(errors) != 0 {
+		t.Fatalf("wildcard payload reader verification errors = %#v", errors)
+	}
+	resolution := semanticview.ResolveEventSchema(source, "worker", "producer/task.done")
+	if !resolution.HasStructural || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaAuthored {
+		t.Fatalf("wildcard payload reader schema resolution = %#v", resolution)
+	}
+}
+
+func TestImportBoundaryWildcardPayloadReaderRejectsMissingAndIncompatibleProducerSchemas(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		opts         importBoundaryWildcardFixtureOptions
+		wantFragment string
+	}{
+		{
+			name:         "missing finite expansion",
+			opts:         importBoundaryWildcardFixtureOptions{ProducerAuthored: true, WorkerPayloadReader: true},
+			wantFragment: "no finite producer schema expansion",
+		},
+		{
+			name: "incompatible expansion",
+			opts: importBoundaryWildcardFixtureOptions{
+				ProducerAuthored:            true,
+				WorkerPayloadReader:         true,
+				WorkerPayloadLocalCandidate: true,
+				ObserveGrant: "      observe:\n" +
+					"        - source: producer\n" +
+					"          events: [task.done]\n",
+			},
+			wantFragment: "incompatible producer schemas",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := loadBusImportBoundaryWildcardSource(t, test.opts)
+			report := bootverify.Run(context.Background(), source, bootverify.Options{})
+			if !importBoundaryWildcardReportContains(report.Errors(), "condition_expression_validation", test.wantFragment) {
+				t.Fatalf("verification errors = %#v, want %q", report.Errors(), test.wantFragment)
+			}
+		})
+	}
+}
+
 func TestImportBoundaryWildcardLocalBoundedGrantDeliversAcrossSurfaces(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ProducerAuthored:   true,
@@ -771,14 +825,17 @@ func TestRootWildcardSubscriptionsRemainUnchanged(t *testing.T) {
 }
 
 type importBoundaryWildcardFixtureOptions struct {
-	ObserveGrant             string
-	WorkerMode               string
-	ProducerMode             string
-	WorkerSubscription       string
-	RootWildcard             bool
-	ProducerAuthored         bool
-	ProducerExtraEvent       string
-	ProducerStaticDescendant bool
+	ObserveGrant                 string
+	WorkerMode                   string
+	ProducerMode                 string
+	WorkerSubscription           string
+	RootWildcard                 bool
+	ProducerAuthored             bool
+	WorkerPayloadReader          bool
+	WorkerPayloadLocalCandidate  bool
+	WorkerPayloadLocalCompatible bool
+	ProducerExtraEvent           string
+	ProducerStaticDescendant     bool
 }
 
 func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildcardFixtureOptions) semanticview.Source {
@@ -791,6 +848,9 @@ func loadBusImportBoundaryWildcardSource(t *testing.T, opts importBoundaryWildca
 	root := writeBusImportBoundaryWildcardFixture(t, opts)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			t.Fatalf("LoadWorkflowContractBundleWithOverrides: %#v", diagnostic)
+		}
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	return semanticview.Wrap(bundle)
@@ -842,31 +902,66 @@ flows:
 	if rootNode != "" {
 		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNode)
 	}
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
+	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n")
+	workerOutput := "pins:\n  outputs:\n    events: [task.done]\n"
+	if opts.WorkerPayloadReader {
+		workerOutput = ""
+	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
 name: worker
 mode: `+mode+`
 initial_state: active
 terminal_states: [done]
 states: [active, done]
-pins:
-  outputs:
-    events: [task.done]
-`)
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "task.done: {}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
+`+workerOutput)
+	if !opts.WorkerPayloadReader || opts.WorkerPayloadLocalCandidate {
+		workerEvents := "task.done: {}\n"
+		if opts.WorkerPayloadLocalCandidate {
+			if opts.WorkerPayloadLocalCompatible {
+				workerEvents = "task.done:\n  work_id: text\n"
+			}
+			workerEvents += "task.start: {}\n"
+		}
+		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), workerEvents)
+	}
+	workerHandler := "{}"
+	if opts.WorkerPayloadReader {
+		workerHandler = "\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000061\n          id: accept_work\n          condition: payload.work_id != \"\""
+	}
+	workerNodes := `
 worker-listener:
   id: worker-listener
   execution_type: system_node
-  subscribes_to: ["`+workerSubscription+`"]
+  subscribes_to: ["` + workerSubscription + `"]
   event_handlers:
-    "`+workerSubscription+`": {}
-`)
-	producerPackage := "name: producer\nversion: \"1.0.0\"\n"
+    "` + workerSubscription + `": ` + workerHandler + `
+`
+	if opts.WorkerPayloadLocalCandidate {
+		workerNodes += `
+worker-source:
+  id: worker-source
+  execution_type: system_node
+  subscribes_to: [task.start]
+  produces: [task.done]
+  event_handlers:
+    task.start:
+      emit:
+        event: task.done
+`
+		if opts.WorkerPayloadLocalCompatible {
+			workerNodes += "        fields:\n          work_id: {literal: local-work-1}\n"
+		}
+	}
+	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), workerNodes)
+	producerPackage := "name: producer\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 	if opts.ProducerStaticDescendant {
-		producerPackage += "platform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: child\n    flow: child\n    mode: static\n"
+		producerPackage += "flows:\n  - id: child\n    flow: child\n    mode: static\n"
 	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "package.yaml"), producerPackage)
+	producerOutput := "events: [task.done]"
+	if opts.WorkerPayloadReader {
+		producerOutput = "events:\n      - event: task.done\n        sink: harness"
+	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
 mode: `+producerMode+`
@@ -875,9 +970,12 @@ terminal_states: [done]
 states: [active, done]
 pins:
   outputs:
-    events: [task.done]
+    `+producerOutput+`
 `)
 	producerEvents := "task.done: {}\n"
+	if opts.WorkerPayloadReader {
+		producerEvents = "task.done:\n  work_id: text\n"
+	}
 	if extra := strings.TrimSpace(opts.ProducerExtraEvent); extra != "" {
 		producerEvents += extra + ": {}\n"
 	}
@@ -895,6 +993,9 @@ producer-source:
       emit:
         event: task.done
 `
+		if opts.WorkerPayloadReader {
+			producerNodes += "        fields:\n          work_id: {literal: work-1}\n"
+		}
 	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), producerEvents)
 	if producerNodes != "" {

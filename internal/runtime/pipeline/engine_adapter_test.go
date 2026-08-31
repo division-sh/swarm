@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -230,6 +231,10 @@ states: [queued]
 child_entity:
   request_id: text
 `,
+		"flows/child/events.yaml": `
+request.received:
+  request_id: text
+`,
 	})
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
@@ -258,7 +263,7 @@ child_entity:
 	eval := pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc}
 	ok, err := eval.EvalBool(`query_entities(request_id == payload.request_id).count == 1`, runtimeengine.BaseContext{
 		FlowID:  "child",
-		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID}),
+		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID, "trigger_event_type": "request.received"}),
 		Payload: values.Wrap(map[string]any{"request_id": "req-existing"}),
 	})
 	if err != nil {
@@ -3394,6 +3399,48 @@ func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCan
 	}
 	if _, ok := canonical["entity_id"]; ok {
 		t.Fatalf("payload properties must not expose envelope entity_id: %#v", canonical)
+	}
+}
+
+type pipelineTestEntityCollectionPersistenceReader struct {
+	records []WorkflowEntityStatePersistenceRecord
+	calls   int
+}
+
+func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityCollection(_ context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
+	r.calls++
+	return FilterWorkflowEntityCollectionRecords(r.records, owner)
+}
+
+func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
+	runID := uuid.NewString()
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "work"},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+		},
+	})
+	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
+		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
+	}}
+	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
+	}}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	rows, err := reader.QueryEntityCollection(ctx, "work", "items")
+	if err != nil {
+		t.Fatalf("QueryEntityCollection: %v", err)
+	}
+	if persisted.calls != 1 || len(rows) != 1 || rows[0]["id"] != "a" || rows[0]["status"] != "queued" {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if _, survives := rows[0]["undeclared"]; survives {
+		t.Fatalf("entity collection leaked undeclared persisted field: %#v", rows[0])
+	}
+	rows[0]["status"] = "mutated"
+	if strings.Contains(string(persisted.records[0].Fields), "mutated") {
+		t.Fatalf("query result aliases persisted fields: %s", persisted.records[0].Fields)
 	}
 }
 

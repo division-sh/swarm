@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -165,6 +167,11 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	}
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {

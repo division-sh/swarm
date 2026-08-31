@@ -252,6 +252,7 @@ pins:
   inputs:
     events:
       - {event: inbound.telegram, source: external}
+      - {event: inbound.telegram.text_message, source: external}
       - {event: inbound.intercom, source: external}
       - {event: inbound.acme_public, source: external}
       - {event: inbound.partner_auth, source: external}
@@ -271,13 +272,13 @@ pins:
 func inboundAdmissionEvents() string {
 	var out strings.Builder
 	for _, event := range []string{"inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
-		fmt.Fprintf(&out, "%s:\n  entity_id: text\n  provider: text\n  event_type: text\n  provider_event_type: text\n  provider_event_id: text\n  provider_delivery_id: text\n  headers: json\n  received_at: text\n", event)
+		fmt.Fprintf(&out, "%s:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n", event)
 	}
 	return out.String()
 }
 
 func inboundAdmissionNodes() string {
-	events := []string{"inbound.telegram", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
+	events := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
 	var out strings.Builder
 	out.WriteString("matrix-sink:\n  id: matrix-sink\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
 	for _, event := range events {

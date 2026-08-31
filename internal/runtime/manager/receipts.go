@@ -433,7 +433,6 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, identit
 			"agent_id":      strings.TrimSpace(agentID),
 			"entity_id":     entityID,
 			"flow_instance": flowInstance,
-			"tool_name":     nil,
 			"action":        "llm_call",
 			"failure":       failure,
 			"timestamp":     now.Format(time.RFC3339Nano),

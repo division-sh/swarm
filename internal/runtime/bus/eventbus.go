@@ -42,10 +42,9 @@ type DeliveryRouteInterceptor interface {
 	InterceptDeliveryRoute(ctx context.Context, evt events.DeliveryEvent, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, outcome runtimepipelineobligation.ExecutionOutcome, err error)
 }
 
-// PayloadValidator validates canonical event-store admission before an event is
-// persisted or direct-recipient eligibility is reported. It does not own
-// producer-surface shaping or routing/delivery/source-target semantics.
-type PayloadValidator func(ctx context.Context, eventType string, payload []byte) error
+// PayloadAdmitter returns the immutable normalized payload and pinned schema
+// evidence before routing, identity extraction, or persistence can observe it.
+type PayloadAdmitter func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error)
 
 type EventBus struct {
 	mu                          sync.RWMutex
@@ -76,7 +75,7 @@ type EventBus struct {
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	flowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
-	payloadValidator            PayloadValidator
+	payloadAdmitter             PayloadAdmitter
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanMaterializer   PublishRecipientPlanMaterializer
 	recipientPlanGuard          PublishRecipientPlanGuard
@@ -281,7 +280,7 @@ type EventBusOptions struct {
 	TemplateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	TemplateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	FlowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
-	PayloadValidator            PayloadValidator
+	PayloadAdmitter             PayloadAdmitter
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	RecipientPlanMaterializer   PublishRecipientPlanMaterializer
 	RecipientPlanGuard          PublishRecipientPlanGuard
@@ -531,7 +530,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		templateInstanceActivator:   opts.TemplateInstanceActivator,
 		templateInstancePlanner:     opts.TemplateInstancePlanner,
 		flowActivationFinalizer:     opts.FlowActivationFinalizer,
-		payloadValidator:            opts.PayloadValidator,
+		payloadAdmitter:             opts.PayloadAdmitter,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
 		recipientPlanMaterializer:   opts.RecipientPlanMaterializer,
 		recipientPlanGuard:          opts.RecipientPlanGuard,

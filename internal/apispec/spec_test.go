@@ -1120,7 +1120,9 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "decision_event_payload_contract")
 	assertScalarValue(t, mappingValue(mailbox, "routing_class"), "event_loop_routable")
 	payload := mustMappingValue(t, mailbox, "payload")
-	required := mustMappingValue(t, mailbox, "required")
+	if mappingValue(mailbox, "required") != nil {
+		t.Fatal("mailbox.card_decided uses retired required list instead of required-by-default field grammar")
+	}
 	for _, field := range []string{
 		"card_id",
 		"anchor_kind",
@@ -1135,20 +1137,22 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		if mappingValue(payload, field) == nil {
 			t.Fatalf("mailbox.card_decided payload missing %s", field)
 		}
-		if !sequenceContainsScalar(required, field) {
-			t.Fatalf("mailbox.card_decided required missing %s", field)
+		if strings.HasSuffix(strings.TrimSpace(scalarValue(mappingValue(payload, field))), "?") {
+			t.Fatalf("mailbox.card_decided required field %s is marked optional", field)
 		}
 	}
 	deferred := mustMappingValue(t, catalog, "mailbox.card_deferred")
 	assertScalarContains(t, mappingValue(deferred, "schema_authority"), "decision_event_payload_contract")
 	deferredPayload := mustMappingValue(t, deferred, "payload")
-	deferredRequired := mustMappingValue(t, deferred, "required")
+	if mappingValue(deferred, "required") != nil {
+		t.Fatal("mailbox.card_deferred uses retired required list instead of required-by-default field grammar")
+	}
 	for _, field := range []string{"card_id", "until"} {
 		if mappingValue(deferredPayload, field) == nil {
 			t.Fatalf("mailbox.card_deferred payload missing %s", field)
 		}
-		if !sequenceContainsScalar(deferredRequired, field) {
-			t.Fatalf("mailbox.card_deferred required missing %s", field)
+		if strings.HasSuffix(strings.TrimSpace(scalarValue(mappingValue(deferredPayload, field))), "?") {
+			t.Fatalf("mailbox.card_deferred required field %s is marked optional", field)
 		}
 	}
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -331,7 +332,7 @@ func (f *fakeSlackManagedConnectorServer) providerHTTPRequestCount() int {
 
 func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBackend, bus *runtimebus.EventBus, gateway *runtimepkg.InboundGateway, webhookPath, updateID, text string) {
 	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%s,"message":{"message_id":7,"chat":{"id":42},"text":%q}}`, updateID, text))
+	body := []byte(fmt.Sprintf(`{"update_id":%s,"message":{"message_id":7,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":%q}}`, updateID, text))
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", body).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, rec, req, "telegram", "telegram-secret")
@@ -349,7 +350,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 			Tool: "slack.post_message",
 			Input: map[string]runtimecontracts.ExpressionValue{
 				"channel": runtimecontracts.CELExpression(`"C123"`),
-				"text":    runtimecontracts.CELExpression("payload.payload.message.text"),
+				"text":    runtimecontracts.CELExpression("payload.text"),
 			},
 		},
 	}
@@ -358,14 +359,14 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram": handler,
+			"inbound.telegram.text_message": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
+	bundle := boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
 				},
 			},
 		},
@@ -377,17 +378,19 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 				nodeID: {
 					ID:                   nodeID,
 					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram"},
+					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram": handler},
+				nodeID: {"inbound.telegram.text_message": handler},
 			},
 			EventOwners: map[string][]string{
-				"inbound.telegram": {nodeID},
+				"inbound.telegram.text_message": {nodeID},
 			},
 		},
-	}))
+	})
+	declareTelegramTextMessageProviderImport(t, bundle)
+	base := semanticview.Wrap(bundle)
 	importSource := slackManagedConnectorPackImportSource{
 		Source: base,
 		projectScopes: []semanticview.ProjectScope{
@@ -405,7 +408,32 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
-	return source
+	return withTelegramTextMessageProviderSchema(t, source)
+}
+
+func declareTelegramTextMessageProviderImport(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if bundle == nil {
+		t.Fatal("bounded Telegram bundle is required")
+	}
+	if len(bundle.PackageTree) != 1 {
+		t.Fatalf("bounded Telegram package tree = %d, want one package", len(bundle.PackageTree))
+	}
+	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{{
+		Provider: "telegram", Event: "inbound.telegram.text_message",
+	}}}
+}
+
+func withTelegramTextMessageProviderSchema(t testing.TB, source semanticview.Source) semanticview.Source {
+	t.Helper()
+	composed, err := runtimepkg.SourceWithProviderTriggerEvents(source, packfixture.TriggerCatalog(t))
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	if resolved := semanticview.ResolveEventSchema(composed, boundedProviderFlowID, "inbound.telegram.text_message"); !resolved.HasStructural {
+		t.Fatalf("normalized Telegram event is missing its structural provider schema: %#v", resolved)
+	}
+	return composed
 }
 
 func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
@@ -491,7 +519,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-	}, "inbound.github.issue_comment", "inbound.github.issues", "inbound.telegram", "inbound.telegram.text_message")
+	}, "inbound.github.raw.issue_comment", "inbound.github.raw.issues", "inbound.telegram")
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
@@ -539,34 +567,52 @@ func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackMan
 }
 
 func loadSlackManagedConnectorInboundEventID(t *testing.T, backend slackManagedConnectorBackend, providerEventID string) string {
+	return loadNormalizedProviderEventID(t, backend, "inbound.telegram.text_message", providerEventID)
+}
+
+func loadNormalizedProviderEventID(t *testing.T, backend slackManagedConnectorBackend, eventName, providerEventID string) string {
 	t.Helper()
 	var eventID string
 	var err error
 	if backend.sqlite {
 		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id
-			FROM events
-			WHERE run_id = ?
-			  AND entity_id = ?
-			  AND event_name = 'inbound.telegram'
-			  AND json_extract(payload, '$.provider_event_id') = ?
-			ORDER BY created_at DESC
+			SELECT normalized.event_id
+			FROM events normalized
+			JOIN events evidence
+			  ON evidence.run_id = normalized.run_id
+			 AND evidence.event_name = 'platform.inbound_recorded'
+			WHERE normalized.run_id = ?
+			  AND normalized.entity_id = ?
+			  AND normalized.event_name = ?
+			  AND json_extract(evidence.payload, '$.provider_event_id') = ?
+			  AND EXISTS (
+				SELECT 1 FROM json_each(evidence.payload, '$.event_ids') ids
+				WHERE ids.value = normalized.event_id
+			  )
+			ORDER BY normalized.created_at DESC
 			LIMIT 1
-		`, backend.runID, backend.entityID, providerEventID).Scan(&eventID)
+		`, backend.runID, backend.entityID, eventName, providerEventID).Scan(&eventID)
 	} else {
 		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT event_id::text
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-			  AND event_name = 'inbound.telegram'
-			  AND payload->>'provider_event_id' = $3
-			ORDER BY created_at DESC
+			SELECT normalized.event_id::text
+			FROM events normalized
+			JOIN events evidence
+			  ON evidence.run_id = normalized.run_id
+			 AND evidence.event_name = 'platform.inbound_recorded'
+			WHERE normalized.run_id = $1::uuid
+			  AND normalized.entity_id = $2::uuid
+			  AND normalized.event_name = $3
+			  AND evidence.payload->>'provider_event_id' = $4
+			  AND EXISTS (
+				SELECT 1 FROM jsonb_array_elements_text(evidence.payload->'event_ids') ids(event_id)
+				WHERE ids.event_id = normalized.event_id::text
+			  )
+			ORDER BY normalized.created_at DESC
 			LIMIT 1
-		`, backend.runID, backend.entityID, providerEventID).Scan(&eventID)
+		`, backend.runID, backend.entityID, eventName, providerEventID).Scan(&eventID)
 	}
 	if err != nil {
-		t.Fatalf("%s load inbound event id for %s: %v", backend.name, providerEventID, err)
+		t.Fatalf("%s load normalized event id for %s/%s: %v", backend.name, eventName, providerEventID, err)
 	}
 	return eventID
 }

@@ -873,6 +873,10 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		envelope,
 		now.Add(-time.Minute),
 	), "mock")
+	snapshot, err := eventtest.AdmitPayload(snapshot, "source-flow", "scan.requested")
+	if err != nil {
+		t.Fatalf("admit source payload: %v", err)
+	}
 	original, err := operatorread.NewOperatorEventFull(snapshot)
 	if err != nil {
 		t.Fatalf("NewOperatorEventFull: %v", err)
@@ -893,6 +897,11 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	}
 	if replay.ExecutionMode() != "mock" {
 		t.Fatalf("replay execution mode = %q, want mock", replay.ExecutionMode())
+	}
+	sourceAdmission, sourceAdmitted := snapshot.PayloadAdmission()
+	replayAdmission, replayAdmitted := replay.PayloadAdmission()
+	if !sourceAdmitted || !replayAdmitted || !replayAdmission.Binding().Equal(sourceAdmission.Binding()) || !bytes.Equal(replayAdmission.Payload(), sourceAdmission.Payload()) {
+		t.Fatalf("replay payload admission = %#v/%v, want exact source admission %#v/%v", replayAdmission.Binding(), replayAdmitted, sourceAdmission.Binding(), sourceAdmitted)
 	}
 	var replayPayload map[string]any
 	if err := json.Unmarshal(replay.Payload(), &replayPayload); err != nil {
@@ -922,6 +931,20 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	}
 	if audit["entity_id"] != "canonical-entity" {
 		t.Fatalf("audit entity_id = %#v, want canonical-entity", audit["entity_id"])
+	}
+}
+
+func TestReplayEventFromOriginalRejectsMissingPayloadAdmission(t *testing.T) {
+	snapshot := eventtest.PersistedProjection(
+		"evt-original", events.EventType("scan.requested"), "origin-agent", "", json.RawMessage(`{"topic":"medicine"}`),
+		0, "run-1", "", events.EventEnvelope{}, time.Unix(1700001200, 0).UTC(),
+	)
+	original, err := operatorread.NewOperatorEventFull(snapshot)
+	if err != nil {
+		t.Fatalf("NewOperatorEventFull: %v", err)
+	}
+	if _, err := replayEventFromOriginal(original, "evt-replay", time.Unix(1700001300, 0).UTC()); err == nil {
+		t.Fatal("replayEventFromOriginal accepted a source without payload admission evidence")
 	}
 }
 

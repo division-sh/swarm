@@ -555,12 +555,45 @@ func TestRestoreAdmittedEventRejectsNonPersistentIdentity(t *testing.T) {
 	facts := validFacts()
 	facts.ID = "not-a-uuid"
 	if _, err := RestoreAdmittedEvent(RestoredEventInput{
-		Class: EventAdmissionRootIngress,
-		Facts: facts,
-		RunID: testRunID,
+		Class:   EventAdmissionRootIngress,
+		Facts:   facts,
+		RunID:   testRunID,
+		Payload: testPayloadAdmission(t, facts.Payload),
 	}); err == nil || !strings.Contains(err.Error(), "must be a UUID") {
 		t.Fatalf("error = %v, want persistent identity failure", err)
 	}
+}
+
+func TestPayloadAdmissionRejectsNonObjectJSON(t *testing.T) {
+	binding := testPayloadAdmission(t, []byte(`{}`)).Binding()
+	for _, payload := range [][]byte{[]byte(`[]`), []byte(`null`), []byte(`"value"`), []byte(`1`)} {
+		if _, err := NewPayloadAdmission(payload, binding); err == nil {
+			t.Fatalf("NewPayloadAdmission(%s) accepted a non-object payload", payload)
+		}
+	}
+	for _, payload := range [][]byte{[]byte(`{"value":null}`), []byte(`{"nested":{"value":null}}`), []byte(`{"items":[null]}`)} {
+		if _, err := NewPayloadAdmission(payload, binding); err == nil {
+			t.Fatalf("NewPayloadAdmission(%s) accepted an internal null value", payload)
+		}
+	}
+}
+
+func testPayloadAdmission(t *testing.T, payload []byte) PayloadAdmission {
+	t.Helper()
+	binding, err := NewPayloadSchemaBinding(PayloadSchemaBindingInput{
+		BundleHash:   "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		BundleSource: "ephemeral", EventKey: "test.event",
+		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		SchemaClass:  PayloadSchemaSchemaLess,
+	})
+	if err != nil {
+		t.Fatalf("NewPayloadSchemaBinding: %v", err)
+	}
+	admission, err := NewPayloadAdmission(payload, binding)
+	if err != nil {
+		t.Fatalf("NewPayloadAdmission: %v", err)
+	}
+	return admission
 }
 
 const testRunID = "11111111-1111-4111-8111-111111111111"

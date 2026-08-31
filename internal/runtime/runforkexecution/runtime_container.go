@@ -297,6 +297,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
+	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.BundleSourceFact)
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
 		ExecutionPosture:            req.AgentRuntime.Options.ExecutionPosture,
 		WorkOwner:                   forkOwner,
@@ -307,7 +308,8 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
 		DeliveryAuthority:           deliveryAuthority,
 		ContractBundle:              req.LoadedSource.Source,
-		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture),
+		PayloadAdmitter:             payloadAdmitter,
+		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
@@ -430,7 +432,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 				err,
 			)
 		}
-		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture).Log(eventCtx, runtimepkg.RuntimeLogEntry{
+		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter).Log(eventCtx, runtimepkg.RuntimeLogEntry{
 			Level:     diaglog.LevelInfo,
 			Message:   "Selected-contract fork event completed local dispatch",
 			Component: "run_fork",
@@ -514,22 +516,6 @@ func projectSelectedContractSourceEventWorkflowStates(
 			continue
 		}
 		out[index].FlowInstance = route
-		if strings.TrimSpace(out[index].EventName) != "platform.activity_requested" {
-			continue
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(out[index].Payload, &payload); err != nil {
-			return nil, fmt.Errorf("decode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
-		}
-		if payload == nil {
-			return nil, fmt.Errorf("selected-contract activity route projection for %s requires object payload", out[index].SourceEventID)
-		}
-		payload["flow_instance"] = route
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("encode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
-		}
-		out[index].Payload = raw
 	}
 	return out, nil
 }
@@ -558,11 +544,11 @@ type selectedContractRuntimeContainerLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
-func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence, posture executionposture.Posture) runtimebus.LoggerHook {
+func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence, posture executionposture.Posture, payloadAdmitter runtimebus.PayloadAdmitter) runtimebus.LoggerHook {
 	if persistence == nil {
 		return nil
 	}
-	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(persistence, posture)}
+	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(persistence, posture, payloadAdmitter)}
 }
 
 func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {

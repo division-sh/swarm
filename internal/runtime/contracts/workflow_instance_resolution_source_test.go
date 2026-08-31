@@ -83,13 +83,14 @@ func TestResolveFlowInputInstanceSourceTypeRejectsProducerReceiverTypeMismatch(t
 			Types: TypeCatalogDocument{},
 		},
 	}
-	bundle := &WorkflowContractBundle{Events: map[string]EventCatalogEntry{
+	events := map[string]EventCatalogEntry{
 		"account.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
 			"account_id": {Type: "integer"},
 		}, Required: []string{"account_id"}}},
-	}}
+	}
+	bundle := instanceResolutionTestBundle(events)
 	pin := mustCompileInputPinForTest(t, "account", "account.ready")
-	_, err = bundle.ResolveFlowInputInstanceSourceType(bundle, "account", pin, instance)
+	_, err = bundle.ResolveFlowInputInstanceSourceType(nil, "account", pin, instance)
 	if err == nil || !strings.Contains(err.Error(), "key_types_incompatible") {
 		t.Fatalf("ResolveFlowInputInstanceSourceType error = %v, want producer/receiver mismatch", err)
 	}
@@ -110,11 +111,12 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 			}},
 		},
 	}
-	bundle := &WorkflowContractBundle{Events: map[string]EventCatalogEntry{
+	events := map[string]EventCatalogEntry{
 		"account.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
 			"external_account_id": {Type: "string"},
 		}, Required: []string{"external_account_id"}}},
-	}}
+	}
+	bundle := instanceResolutionTestBundle(events)
 
 	for _, tc := range []struct {
 		name string
@@ -134,7 +136,7 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 			if err != nil {
 				t.Fatalf("CompileFlowInputPin: %v", err)
 			}
-			evidence, err := bundle.ResolveFlowInputInstanceSourceType(bundle, "account", pin, instance)
+			evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, "account", pin, instance)
 			if err != nil {
 				t.Fatalf("ResolveFlowInputInstanceSourceType: %v", err)
 			}
@@ -142,6 +144,15 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 				t.Fatalf("source kind = %q, want %q", evidence.Source.Kind, tc.kind)
 			}
 		})
+	}
+}
+
+func instanceResolutionTestBundle(events map[string]EventCatalogEntry) *WorkflowContractBundle {
+	return &WorkflowContractBundle{
+		Events: events,
+		projectContracts: map[string]ProjectContractView{
+			".": {Paths: ProjectPackagePaths{Key: ".", ProjectEventsFile: "events.yaml"}, Events: events},
+		},
 	}
 }
 

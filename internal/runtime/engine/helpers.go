@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -16,16 +15,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/google/cel-go/cel"
 )
 
 const handlerAccumulatorBucketKey = "handler_accumulators"
-
-var (
-	executionConditionEnvOnce sync.Once
-	executionConditionEnvRef  *cel.Env
-	executionConditionEnvErr  error
-)
 
 type Accumulator struct {
 	Received map[string]bool  `json:"received,omitempty"`
@@ -148,11 +140,11 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 		}
 		return nil, false, nil
 	case runtimecontracts.ExpressionKindCEL:
-		value, err := evalWorkflowValueExpression(base, state, expr.CEL, opts)
+		result, err := evalWorkflowValueResult(base, state, expr.CEL, opts)
 		if err != nil {
 			return nil, false, err
 		}
-		return value, true, nil
+		return result.Value(), result.Present(), nil
 	default:
 		return nil, false, fmt.Errorf("unsupported expression kind %q", expr.Kind)
 	}
@@ -236,6 +228,20 @@ func evalWorkflowValueExpression(base BaseContext, state ExecutionState, express
 	}, opts)
 }
 
+func evalWorkflowValueResult(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (workflowexpr.ValueResult, error) {
+	return workflowexpr.EvalValueResultWithOptions(expression, workflowexpr.ValueContext{
+		Entity:         base.Entity.Raw(),
+		PlatformEntity: base.PlatformEntity.Raw(),
+		Event:          base.Event.Raw(),
+		Payload:        base.Payload.Raw(),
+		Policy:         base.Policy.Raw(),
+		Computed:       base.Computed.Raw(),
+		FanOut:         state.FanOut,
+		Join:           state.Join,
+		Loop:           state.Loop,
+	}, opts)
+}
+
 func normalizeCELValue(value any) any {
 	return workflowexpr.NormalizeCELValue(value)
 }
@@ -244,7 +250,7 @@ func normalizedCELInputMap(source map[string]any) map[string]any {
 	return workflowexpr.NormalizeCELInputMap(source)
 }
 
-func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec, opts workflowexpr.ValueExpressionOptions, targetOptions func(string, workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	if len(spec.Fields) == 0 {
 		return nil, nil
 	}
@@ -254,7 +260,11 @@ func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontr
 		if target == "" {
 			continue
 		}
-		value, ok, err := evalExpressionValue(base, state, valueSpec, opts)
+		fieldOptions := opts
+		if targetOptions != nil {
+			fieldOptions = targetOptions(target, opts)
+		}
+		value, ok, err := evalExpressionValue(base, state, valueSpec, fieldOptions)
 		if err != nil {
 			return nil, fmt.Errorf("emit field %s: %w", target, err)
 		}
@@ -418,7 +428,7 @@ const (
 
 type compiledExecutionCondition struct {
 	expression string
-	program    cel.Program
+	options    workflowexpr.ValueExpressionOptions
 }
 
 func newExecutionScope(item any, payload, event, entity, platformEntity, policy map[string]any) executionScope {
@@ -443,21 +453,7 @@ func (s executionScope) activation() map[string]any {
 	}
 }
 
-func executionConditionEnv() (*cel.Env, error) {
-	executionConditionEnvOnce.Do(func() {
-		executionConditionEnvRef, executionConditionEnvErr = cel.NewEnv(
-			cel.Variable("item", cel.DynType),
-			cel.Variable("payload", cel.DynType),
-			cel.Variable("event", cel.DynType),
-			cel.Variable("entity", cel.DynType),
-			cel.Variable("_entity", cel.DynType),
-			cel.Variable("policy", cel.DynType),
-		)
-	})
-	return executionConditionEnvRef, executionConditionEnvErr
-}
-
-func compileExecutionCondition(expr string) (*compiledExecutionCondition, error) {
+func compileExecutionCondition(expr string, options workflowexpr.ValueExpressionOptions) (*compiledExecutionCondition, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, nil
@@ -465,21 +461,14 @@ func compileExecutionCondition(expr string) (*compiledExecutionCondition, error)
 	if err := workflowexpr.ValidateEventReferences(expr); err != nil {
 		return nil, err
 	}
-	env, err := executionConditionEnv()
-	if err != nil {
-		return nil, err
-	}
-	ast, issues := env.Compile(expr)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	program, err := env.Program(ast)
-	if err != nil {
+	options.AllowBareItem = true
+	options.RequireBool = true
+	if err := workflowexpr.ValidateValueExpressionWithOptions(expr, options); err != nil {
 		return nil, err
 	}
 	return &compiledExecutionCondition{
 		expression: expr,
-		program:    program,
+		options:    options,
 	}, nil
 }
 
@@ -487,12 +476,14 @@ func (c *compiledExecutionCondition) Eval(scope executionScope) (bool, error) {
 	if c == nil {
 		return true, nil
 	}
-	out, _, err := c.program.Eval(scope.activation())
+	out, err := workflowexpr.EvalValueExpressionWithOptions(c.expression, workflowexpr.ValueContext{
+		Entity: scope.Entity, PlatformEntity: scope.PlatformEntity, Event: scope.Event,
+		Payload: scope.Payload, Policy: scope.Policy, FanOut: map[string]any{"item": scope.Item},
+	}, c.options)
 	if err != nil {
 		return false, err
 	}
-	value := normalizeCELValue(out)
-	boolean, ok := value.(bool)
+	boolean, ok := out.(bool)
 	if !ok {
 		return false, fmt.Errorf("condition %q did not evaluate to bool", c.expression)
 	}

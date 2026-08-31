@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -27,13 +26,6 @@ type FlowInputInstanceSourceTypeEvidence struct {
 	Source       FlowInputInstanceSource
 	SourceType   CatalogTypeReference
 	ReceiverType CatalogTypeReference
-}
-
-// FlowInputInstanceEventCatalog is the narrow event-schema capability needed
-// by source type resolution. Semantic overlays use it to expose admitted
-// provider schemas without moving type ownership out of this package.
-type FlowInputInstanceEventCatalog interface {
-	ResolveFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool)
 }
 
 func ResolveFlowInputInstanceSource(mode FlowInputResolutionMode, raw string) (FlowInputInstanceSource, error) {
@@ -65,11 +57,11 @@ func (s FlowInputInstanceSource) RequiresDeliveryProjection() bool {
 
 // ResolveFlowInputInstanceSourceType centralizes source parsing, authoritative
 // source-type resolution, and receiver compatibility.
-func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(eventCatalog FlowInputInstanceEventCatalog, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
-	return b.resolveFlowInputInstanceSourceType(eventCatalog, flowID, pin, instance, true)
+func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
+	return b.resolveFlowInputInstanceSourceType(schemaProvider, flowID, pin, instance, true)
 }
 
-func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog FlowInputInstanceEventCatalog, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract, requireCompatibility bool) (FlowInputInstanceSourceTypeEvidence, error) {
+func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract, requireCompatibility bool) (FlowInputInstanceSourceTypeEvidence, error) {
 	if instance.Field.Empty() {
 		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver flow %s must declare instance: <field>", strings.TrimSpace(flowID))
 	}
@@ -100,7 +92,7 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog
 	switch source.Kind {
 	case FlowInputInstanceSourcePayload:
 		sourceField := strings.TrimPrefix(source.Path, "payload.")
-		resolved, required, ok := resolveFlowInputInstanceEventFieldType(b, eventCatalog, flowID, pin.EventType(), sourceField)
+		resolved, required, ok := resolveFlowInputInstanceEventFieldType(b, schemaProvider, flowID, pin, sourceField)
 		if !ok {
 			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %s has no declared type on input event %s", source.Path, pin.EventType())
 		}
@@ -122,26 +114,36 @@ func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog
 	return evidence, nil
 }
 
-func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, eventCatalog FlowInputInstanceEventCatalog, flowID, eventType, field string) (CatalogTypeReference, bool, bool) {
-	var entry EventCatalogEntry
+func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, schemaProvider FlowEventStructuralTypeProvider, flowID string, pin CompiledFlowInputPin, field string) (CatalogTypeReference, bool, bool) {
+	var schema CompiledEventSchema
 	var ok bool
-	if eventCatalog != nil {
-		entry, _, ok = eventCatalog.ResolveFlowEventCatalogEntry(flowID, eventType)
-	} else if bundle != nil {
-		entry, _, ok = bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+	if schema, ok = pin.ReceiverEventSchema(); !ok {
+		schema, ok = pin.ProducerEventSchema()
 	}
-	if !ok {
-		return CatalogTypeReference{}, false, false
+	if !ok && bundle != nil {
+		var err error
+		schema, ok, err = bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, pin.EventType())
+		if err != nil {
+			return CatalogTypeReference{}, false, false
+		}
 	}
-	decl, ok := entry.Payload.Properties[strings.TrimSpace(field)]
-	if !ok || strings.TrimSpace(decl.Type) == "" {
+	var resolved ResolvedCatalogField
+	if ok {
+		resolved, ok = schema.StructuralField(field)
+	}
+	if !ok && schemaProvider != nil {
+		if structural, found := schemaProvider.ResolveFlowEventStructuralType(flowID, pin.EventType()); found {
+			resolved, ok = structural.Field(field)
+		}
+	}
+	if !ok || strings.TrimSpace(resolved.TypeRef) == "" {
 		return CatalogTypeReference{}, false, false
 	}
 	var catalog TypeCatalogDocument
 	if bundle != nil {
 		catalog = bundle.ResolvedTypeCatalogForFlow(flowID)
 	}
-	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, slices.Contains(entry.Payload.Required, strings.TrimSpace(field)), true
+	return CatalogTypeReference{Type: strings.TrimSpace(resolved.TypeRef), Catalog: cloneTypeCatalogDocument(catalog)}, !resolved.IsOptional, true
 }
 
 func requireInstanceSourceTypesCompatible(source, target CatalogTypeReference) error {

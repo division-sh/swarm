@@ -1118,18 +1118,6 @@ payload:
   source_entity_id: uuid
   decided_by: text
   decided_at: timestamp
-required:
-  - mailbox_id
-  - mailbox_decision_id
-  - decision
-  - decision_payload
-  - item_type
-  - mailbox_payload
-  - source_event_id
-  - source_flow
-  - source_entity_id
-  - decided_by
-  - decided_at
 `),
 		},
 		{
@@ -2442,19 +2430,28 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 }
 
 func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	node, eventType, handler, ok := firstBundleHandler(bundle)
-	if !ok {
-		t.Fatal("expected at least one handler")
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Task": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"task": {Type: "Task"}},
+				Required:   []string{"task"},
+			}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"complete-task": {
+				ID: "complete-task", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.requested": {Guard: &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}},
+				},
+			},
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{InitialState: "pending", States: []string{"pending"}},
 	}
-	handler.Guard = &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}
-	writeBundleHandler(t, bundle, node, eventType, handler)
-	entry := bundle.Events[eventType]
-	entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{
-		"task": {Type: "object"},
-	}
-	bundle.Events[eventType] = entry
-	writeBundleEventEntry(t, bundle, node, eventType, entry)
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3243,6 +3240,179 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 	}
 }
 
+func TestRunQueryFilterUsesSchemaBoundConditionAdmission(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		wantError  string
+	}{
+		{name: "valid presence decision", expression: `has(item.note) ? item.note == "ready" : false`},
+		{name: "malformed", expression: `item ==`, wantError: "CEL parse failed"},
+		{name: "unknown field", expression: `item.missing == "ready"`, wantError: "undefined field"},
+		{name: "unsafe optional", expression: `item.note == "ready"`, wantError: "read without a presence decision"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := schemaBoundQueryFilterSource(tc.expression)
+			report := Run(context.Background(), source, Options{})
+			if tc.wantError == "" {
+				if reportContains(report.Errors(), "condition_expression_validation", "query") {
+					t.Fatalf("query filter condition findings = %#v", report.Errors())
+				}
+				return
+			}
+			if !reportContains(report.Errors(), "condition_expression_validation", tc.wantError) {
+				t.Fatalf("query filter findings = %#v, want %q", report.Errors(), tc.wantError)
+			}
+		})
+	}
+}
+
+func TestRunActivityInputUsesSchemaBoundExpressionAdmission(t *testing.T) {
+	tests := []struct {
+		name           string
+		expression     string
+		payloadType    string
+		toolInputType  runtimecontracts.ToolSchemaKind
+		toolInputIsReq bool
+		wantError      bool
+	}{
+		{name: "required source to required sink", expression: `payload.id`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true},
+		{name: "optional source with decision to required sink", expression: `payload.?note.orValue("fallback")`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true},
+		{name: "optional source forwarded to optional sink", expression: `payload.?note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString},
+		{name: "undecided optional source", expression: `payload.note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, wantError: true},
+		{name: "optional source forwarded to required sink", expression: `payload.?note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true, wantError: true},
+		{name: "source type mismatches sink", expression: `payload.id`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaInteger, toolInputIsReq: true, wantError: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Run(context.Background(), schemaBoundActivityInputSource(tc.expression, tc.payloadType, tc.toolInputType, tc.toolInputIsReq), Options{})
+			found := reportContains(report.Errors(), "executable_reader_expression_validation", "")
+			if found != tc.wantError {
+				t.Fatalf("activity input findings = %#v, want expression error=%v", report.Errors(), tc.wantError)
+			}
+		})
+	}
+}
+
+func schemaBoundActivityInputSource(expression, payloadType string, toolInputType runtimecontracts.ToolSchemaKind, toolInputRequired bool) semanticview.Source {
+	inputOptions := []runtimecontracts.ToolInputSchemaOption{
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"value": runtimecontracts.MustToolInputSchema(toolInputType),
+		}),
+	}
+	if toolInputRequired {
+		inputOptions = append(inputOptions, runtimecontracts.ToolSchemaRequired("value"))
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"id": {Type: payloadType}, "note": {Type: payloadType},
+				},
+				Required: []string{"id"},
+			}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"notify": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, inputOptions...),
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			)),
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				ID: "worker",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"work.received": {Activity: runtimecontracts.ActivitySpec{Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
+						"value": runtimecontracts.CELExpression(expression),
+					}}},
+				},
+			},
+		},
+	})
+}
+
+func schemaBoundQueryFilterSource(expression string) semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"id":   {Type: "text"},
+				"note": {Type: "text", IsOptional: true},
+			}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[WorkItem]"}},
+				Required:   []string{"items"},
+			}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"query-node": {
+				ID: "query-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"work.received": {Query: &runtimecontracts.QuerySpec{Source: "payload.items", Filter: expression, StoreAs: "metadata.rows"}},
+				},
+			},
+		},
+	})
+}
+
+func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "direct payload",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "payload.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
+			}},
+		},
+		{
+			name: "direct entity",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "entity.items", Condition: "item.score > 5", StoreAs: "computed.filtered",
+			}},
+		},
+		{
+			name: "query intermediate",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Query: &runtimecontracts.QuerySpec{Source: "payload.items", StoreAs: "computed.queried"},
+				Filter: &runtimecontracts.FilterSpec{
+					ItemsFrom: "computed.queried", Condition: "item.score > 5", StoreAs: "computed.filtered",
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+					"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+				}},
+				RootEntities: runtimecontracts.EntityContractsDocument{
+					"work_state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"items": {Type: "[ScoredItem]"}}},
+				},
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+						Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[ScoredItem]"}},
+						Required:   []string{"items"},
+					}},
+				},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"collection-node": {ID: "collection-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": tc.handler}},
+				},
+			})
+			report := Run(context.Background(), source, Options{})
+			for _, finding := range report.Errors() {
+				if finding.CheckID == "condition_expression_validation" {
+					t.Fatalf("condition admission finding = %#v", finding)
+				}
+			}
+		})
+	}
+}
+
 func TestRun_RejectsFanOutNamespaceInGuardConditions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -3459,6 +3629,7 @@ emit:
 }
 
 func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
@@ -3475,13 +3646,27 @@ fan_out:
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{
+			ContractsRoot:      repoRoot,
+			PlatformSpecFile:   filepath.Join(repoRoot, "platform-spec.yaml"),
+			ProjectPackageFile: filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-condition-policy", "package.yaml"),
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"industries": {Type: "text[]"},
+					},
+					Required: []string{"industries"},
+				},
+			},
 			"market_research.industry_assigned": {
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"industry":            {Type: "text"},
 						"taxonomy_categories": {Type: "text[]"},
 					},
+					Required: []string{"industry", "taxonomy_categories"},
 				},
 			},
 		},
@@ -3942,6 +4127,8 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
+	entry.Payload.Properties["current_state"] = runtimecontracts.EventFieldSpec{Type: "text"}
 	entry.Payload.Required = []string{"entity_id", "current_state"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
@@ -4239,7 +4426,7 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4260,7 +4447,7 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4285,7 +4472,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Payload.Required = []string{"score", "reason"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4307,7 +4494,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
 	entry.Payload.Required = nil
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
@@ -4328,8 +4515,12 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
+	entry.Payload.Properties["entity_id"] = runtimecontracts.EventFieldSpec{Type: "uuid"}
 	entry.Payload.Required = []string{"entity_id"}
-	bundle.Events["check.escalated"] = entry
+	writeBundleEventEntry(t, bundle, identitytest.RootNode(t, "test-node"), "check.escalated", entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -5559,7 +5750,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		ID:        "ready",
-		Condition: `entity.revision_count == 0 && payload.score >= 0 && event["source"].entity_id != ""`,
+		Condition: `entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""`,
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 	markFlowInputPinSource(t, bundle, "child", "task.assigned", "harness")
@@ -6699,8 +6890,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 78 {
-		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
+	if got := len(bootCheckRegistry); got != 80 {
+		t.Fatalf("bootCheckRegistry count = %d, want 80", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

@@ -98,7 +98,9 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 
 func newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub) *RuntimeLogger {
 	stub.db = db
-	return NewRuntimeLogger(stub, executionposture.Live)
+	return NewRuntimeLogger(stub, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
 }
 
 func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCapture, want runtimeLogPayloadArg, wantRunID, wantParentEventID string) {
@@ -112,6 +114,95 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 	}
 	if !want.MatchPayload(record.Payload) {
 		t.Fatalf("captured runtime log payload = %s, want %#v", record.Payload, want)
+	}
+}
+
+func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		details := payload["details"].(map[string]any)
+		delete(details, "admission_only_field")
+		normalized, err := json.Marshal(payload)
+		if err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		fixture, err := eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		if err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		return events.NewPayloadAdmission(normalized, fixture.Binding())
+	})
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "info", Message: "normalized", Component: "runtime", Action: "proof",
+		Detail: map[string]any{"admission_only_field": "remove-me"},
+	}); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(capture.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(capture.records))
+	}
+	record := capture.records[0]
+	if string(record.Payload) != string(record.PayloadAdmission.Payload()) {
+		t.Fatalf("persisted payload = %s, admission = %s", record.Payload, record.PayloadAdmission.Payload())
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(record.Payload, &persisted); err != nil {
+		t.Fatalf("decode persisted payload: %v", err)
+	}
+	if _, present := persisted["details"].(map[string]any)["admission_only_field"]; present {
+		t.Fatalf("pre-admission detail survived persistence: %#v", persisted)
+	}
+}
+
+func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "debug", Message: "delivered", Component: "eventbus", Action: "delivered",
+		Detail: map[string]any{
+			"absent": nil,
+			"nested": map[string]any{"present": "value", "absent": nil},
+		},
+	}); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(capture.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(capture.records))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(capture.records[0].Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	details := payload["details"].(map[string]any)
+	if _, present := details["absent"]; present {
+		t.Fatalf("top-level absent detail survived admission: %#v", details)
+	}
+	nested := details["nested"].(map[string]any)
+	if _, present := nested["absent"]; present || nested["present"] != "value" {
+		t.Fatalf("nested details = %#v, want only present value", nested)
+	}
+}
+
+func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
+	err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "debug", Message: "delivered", Component: "eventbus", Action: "delivered",
+		Detail: map[string]any{"items": []any{"present", nil}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+		t.Fatalf("Log error = %v, want null rejection", err)
+	}
+	if len(capture.records) != 0 {
+		t.Fatalf("records = %d, want no persistence after rejected admission", len(capture.records))
 	}
 }
 

@@ -941,7 +941,7 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
 		return TypeCatalogDocument{}, fmt.Errorf("type catalog must be a mapping")
 	}
-	fields, err := root.Mapping()
+	fields, err := uniqueYAMLMappingFields(root, "entity contracts document")
 	if err != nil {
 		return TypeCatalogDocument{}, err
 	}
@@ -964,9 +964,11 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 				return TypeCatalogDocument{}, err
 			}
 		case "types":
-			if err := field.Value.Project(&doc.Types); err != nil {
+			types, err := projectNamedTypeDeclarations(field.Value)
+			if err != nil {
 				return TypeCatalogDocument{}, err
 			}
+			doc.Types = types
 		default:
 			return TypeCatalogDocument{}, NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
 		}
@@ -1099,60 +1101,108 @@ func (n *NamedTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 	if n == nil {
 		return nil
 	}
-	if node == nil || node.Kind == 0 {
-		*n = NamedTypeDecl{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("named type declaration must be a mapping")
-	}
-	decl := NamedTypeDecl{Fields: map[string]TypeFieldSpec{}}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		if key == "" {
-			continue
-		}
-		if strings.HasPrefix(key, "_") {
-			switch key {
-			case "_description":
-				text, err := decodeScalarStringNode(value)
-				if err != nil {
-					return err
-				}
-				decl.Description = text
-			default:
-				return NewUndefinedFieldDiagnostic("type metadata", key, typeMetadataFieldOptions)
-			}
-			continue
-		}
-		var field TypeFieldSpec
-		if err := value.Decode(&field); err != nil {
-			return err
-		}
-		decl.Fields[key] = field
+	decl, err := projectNamedTypeDeclaration(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
 	}
 	*n = decl
 	return nil
+}
+
+func projectNamedTypeDeclarations(value yamlsource.Value) (map[string]NamedTypeDecl, error) {
+	switch value.Presence() {
+	case yamlsource.PresenceNull, yamlsource.PresenceEmptyMapping:
+		return map[string]NamedTypeDecl{}, nil
+	case yamlsource.PresenceMapping:
+	default:
+		return nil, fmt.Errorf("types catalog must be a mapping")
+	}
+	fields, err := uniqueYAMLMappingFields(value, "types catalog")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]NamedTypeDecl, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			return nil, fmt.Errorf("types catalog declares a named type with an empty name")
+		}
+		if name != field.Name {
+			return nil, fmt.Errorf("types catalog named type %q must not have surrounding whitespace", field.Name)
+		}
+		decl, err := projectNamedTypeDeclaration(field.Value)
+		if err != nil {
+			return nil, fmt.Errorf("named type %s: %w", name, err)
+		}
+		out[name] = decl
+	}
+	return out, nil
+}
+
+func projectNamedTypeDeclaration(value yamlsource.Value) (NamedTypeDecl, error) {
+	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+		return NamedTypeDecl{}, fmt.Errorf("named type declaration must be a mapping")
+	}
+	fields, err := uniqueYAMLMappingFields(value, "named type declaration")
+	if err != nil {
+		return NamedTypeDecl{}, err
+	}
+	decl := NamedTypeDecl{Fields: map[string]TypeFieldSpec{}}
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			return NamedTypeDecl{}, fmt.Errorf("named type declaration has an empty field name")
+		}
+		if name != field.Name {
+			return NamedTypeDecl{}, fmt.Errorf("named type field %q must not have surrounding whitespace", field.Name)
+		}
+		if strings.HasPrefix(name, "_") {
+			switch name {
+			case "_description":
+				decl.Description, err = optionalScalarString(field.Value, "type description")
+				if err != nil {
+					return NamedTypeDecl{}, err
+				}
+			default:
+				return NamedTypeDecl{}, NewUndefinedFieldDiagnostic("type metadata", name, typeMetadataFieldOptions)
+			}
+			continue
+		}
+		spec, err := projectTypeFieldSpec(field.Value)
+		if err != nil {
+			return NamedTypeDecl{}, fmt.Errorf("field %s: %w", name, err)
+		}
+		decl.Fields[name] = spec
+	}
+	return decl, nil
 }
 
 func (f *TypeFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	if f == nil {
 		return nil
 	}
-	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
+	spec, err := projectTypeFieldSpec(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
+	}
+	*f = spec
+	return nil
+}
+
+func projectTypeFieldSpec(value yamlsource.Value) (TypeFieldSpec, error) {
+	parsed, err := decodeWave1FieldValue(value, wave1FieldNodeOptions{
 		Context:           "type field",
 		AllowInitial:      false,
 		AllowImmutable:    false,
 		AllowUnusedReason: false,
 	})
 	if err != nil {
-		return err
+		return TypeFieldSpec{}, err
 	}
-	f.Type = parsed.Type
-	f.Description = parsed.Description
-	f.Refinements = parsed.Refinements
-	return nil
+	return TypeFieldSpec{
+		Type: parsed.Type, IsOptional: parsed.IsOptional,
+		Description: parsed.Description, Refinements: parsed.Refinements,
+	}, nil
 }
 
 func (d *EntityContractsDocument) UnmarshalYAML(node *yaml.Node) error {
@@ -1185,8 +1235,11 @@ func projectEntityContractsDocument(root yamlsource.Value) (EntityContractsDocum
 		if key == "" {
 			continue
 		}
-		var entity EntityContract
-		if err := field.Value.Project(&entity); err != nil {
+		if key != field.Name {
+			return nil, fmt.Errorf("entity name %q must not have surrounding whitespace", field.Name)
+		}
+		entity, err := projectEntityContract(field.Value)
+		if err != nil {
 			return nil, err
 		}
 		out[key] = entity
@@ -1198,59 +1251,73 @@ func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	if node == nil || node.Kind == 0 {
-		*e = EntityContract{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("entity contract must be a mapping")
-	}
-	decl := EntityContract{Fields: map[string]EntityFieldDecl{}}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		if key == "" {
-			continue
-		}
-		if strings.HasPrefix(key, "_") {
-			switch key {
-			case "_description":
-				text, err := decodeScalarStringNode(value)
-				if err != nil {
-					return err
-				}
-				decl.Description = text
-			case "_owner":
-				text, err := decodeScalarStringNode(value)
-				if err != nil {
-					return err
-				}
-				decl.Owner = text
-			case "_state_model":
-				return fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", key)
-			default:
-				return NewUndefinedFieldDiagnostic("entity metadata", key, entityMetadataFieldOptions)
-			}
-			continue
-		}
-		if key == "state_field" {
-			return fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", key)
-		}
-		var field EntityFieldDecl
-		if err := value.Decode(&field); err != nil {
-			return err
-		}
-		decl.Fields[key] = field
+	decl, err := projectEntityContract(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
 	}
 	*e = decl
 	return nil
+}
+
+func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
+	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+		return EntityContract{}, fmt.Errorf("entity contract must be a mapping")
+	}
+	fields, err := uniqueYAMLMappingFields(value, "entity contract")
+	if err != nil {
+		return EntityContract{}, err
+	}
+	decl := EntityContract{Fields: map[string]EntityFieldDecl{}}
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			return EntityContract{}, fmt.Errorf("entity contract has an empty field name")
+		}
+		if name != field.Name {
+			return EntityContract{}, fmt.Errorf("entity field %q must not have surrounding whitespace", field.Name)
+		}
+		if strings.HasPrefix(name, "_") {
+			switch name {
+			case "_description":
+				decl.Description, err = optionalScalarString(field.Value, "entity description")
+			case "_owner":
+				decl.Owner, err = optionalScalarString(field.Value, "entity owner")
+			case "_state_model":
+				return EntityContract{}, fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", name)
+			default:
+				return EntityContract{}, NewUndefinedFieldDiagnostic("entity metadata", name, entityMetadataFieldOptions)
+			}
+			if err != nil {
+				return EntityContract{}, err
+			}
+			continue
+		}
+		if name == "state_field" {
+			return EntityContract{}, fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", name)
+		}
+		spec, err := projectEntityFieldDecl(field.Value)
+		if err != nil {
+			return EntityContract{}, fmt.Errorf("field %s: %w", name, err)
+		}
+		decl.Fields[name] = spec
+	}
+	return decl, nil
 }
 
 func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 	if f == nil {
 		return nil
 	}
-	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
+	spec, err := projectEntityFieldDecl(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
+	}
+	*f = spec
+	return nil
+}
+
+func projectEntityFieldDecl(value yamlsource.Value) (EntityFieldDecl, error) {
+	parsed, err := decodeWave1FieldValue(value, wave1FieldNodeOptions{
 		Context:                 "entity field",
 		AllowInitial:            true,
 		AllowImmutable:          true,
@@ -1261,192 +1328,195 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 		AllowProject:            true,
 	})
 	if err != nil {
-		return err
+		return EntityFieldDecl{}, err
 	}
-	f.Type = parsed.Type
-	f.Initial = parsed.Initial
-	f.Indexed = parsed.Indexed
-	f.Immutable = parsed.Immutable
-	f.Description = parsed.Description
-	f.Refinements = parsed.Refinements
-	f.MaterializeFrom = parsed.MaterializeFrom
-	f.Project = parsed.Project
-	f.UnusedReason = parsed.UnusedReason
-	f.UnusedReaderReason = parsed.UnusedReaderReason
-	return nil
+	if parsed.IsOptional {
+		return EntityFieldDecl{}, fmt.Errorf("top-level entity fields do not support typed omission; declare a required field")
+	}
+	return EntityFieldDecl{
+		Type: parsed.Type, Initial: parsed.Initial, Indexed: parsed.Indexed,
+		Immutable: parsed.Immutable, Description: parsed.Description,
+		Refinements: parsed.Refinements, MaterializeFrom: parsed.MaterializeFrom,
+		Project: parsed.Project, UnusedReason: parsed.UnusedReason,
+		UnusedReaderReason: parsed.UnusedReaderReason,
+	}, nil
 }
 
-func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1ParsedFieldNode, error) {
-	if node == nil || node.Kind == 0 {
-		return wave1ParsedFieldNode{}, fmt.Errorf("%s type is required", opts.Context)
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		typ, err := decodeScalarStringNode(node)
+func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (wave1ParsedFieldNode, error) {
+	var field wave1ParsedFieldNode
+	switch value.Presence() {
+	case yamlsource.PresenceScalar:
+		raw, err := requiredLiteralString(value, opts.Context+" type")
 		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
-		if err := validateWave1TypeRef(typ, opts.Context); err != nil {
+		field.Type, field.IsOptional, err = admitEventFieldTypeMarker(raw, opts.Context)
+		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
-		return wave1ParsedFieldNode{Type: typ}, nil
-	case yaml.SequenceNode:
-		values, err := decodeStringListNode(node)
+		if err := validateWave1TypeRef(field.Type, opts.Context); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		return field, nil
+	case yamlsource.PresenceSequence:
+		values, err := value.Sequence()
 		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
 		if len(values) != 1 {
 			return wave1ParsedFieldNode{}, fmt.Errorf("%s list shorthand requires exactly one element type", opts.Context)
 		}
-		typ := "[" + strings.TrimSpace(values[0]) + "]"
-		if err := validateWave1TypeRef(typ, opts.Context); err != nil {
+		element, err := requiredLiteralString(values[0], opts.Context+" element type")
+		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
-		return wave1ParsedFieldNode{Type: typ}, nil
-	case yaml.MappingNode:
+		field.Type = "[" + strings.TrimSpace(element) + "]"
+		if err := rejectEventTypeOptionalMarker(field.Type, opts.Context); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		if err := validateWave1TypeRef(field.Type, opts.Context); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		return field, nil
+	case yamlsource.PresenceMapping:
+	case yamlsource.PresenceEmptyMapping:
+		return wave1ParsedFieldNode{}, fmt.Errorf("%s type is required", opts.Context)
 	default:
-		return wave1ParsedFieldNode{}, fmt.Errorf("unsupported %s yaml node kind %d", opts.Context, node.Kind)
+		return wave1ParsedFieldNode{}, fmt.Errorf("%s type is required", opts.Context)
 	}
 
+	fields, err := uniqueYAMLMappingFields(value, opts.Context)
+	if err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
 	allowed := wave1FieldNodeAllowedKeys(opts)
-
-	var field wave1ParsedFieldNode
-	var listOf string
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
+	byName := make(map[string]yamlsource.MappingField, len(fields))
+	for _, candidate := range fields {
+		key := strings.TrimSpace(candidate.Name)
 		if key == "" {
-			continue
+			return wave1ParsedFieldNode{}, fmt.Errorf("%s has an empty field name", opts.Context)
 		}
-		if _, ok := allowed[key]; !ok {
-			switch key {
-			case "properties", "fields", "shape":
+		if key != candidate.Name {
+			return wave1ParsedFieldNode{}, fmt.Errorf("%s field %q must not have surrounding whitespace", opts.Context, candidate.Name)
+		}
+		if _, ok := allowed[key]; !ok && key != "of" {
+			if key == "properties" || key == "fields" || key == "shape" {
 				return wave1ParsedFieldNode{}, fmt.Errorf("RETIRED: %s inline object declarations are retired; declare a named type in types.yaml", opts.Context)
-			case "of":
-				listValue, err := decodeScalarStringNode(value)
-				if err != nil {
-					return wave1ParsedFieldNode{}, err
-				}
-				listOf = listValue
-				continue
-			case "initial", "immutable", "indexed", "_unused_reason", "_unused_reader_reason", "materialize_from", "project":
-				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
-			default:
-				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
 			}
+			return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
 		}
-		switch key {
-		case "type":
-			typ, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Type = typ
-		case "description":
-			text, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Description = text
-		case "pattern":
-			pattern, err := decodeSchemaRefinementPattern(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, fmt.Errorf("%s pattern: %w", opts.Context, err)
-			}
-			field.Refinements.Pattern = pattern
-		case "length":
-			length, err := decodeSchemaLengthRefinement(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, fmt.Errorf("%s length: %w", opts.Context, err)
-			}
-			field.Refinements.Length = length
-		case "range":
-			bounds, err := decodeSchemaRangeRefinement(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, fmt.Errorf("%s range: %w", opts.Context, err)
-			}
-			field.Refinements.Range = bounds
-		case "equal_to":
-			target, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			target = strings.TrimSpace(target)
-			if target == "" {
-				return wave1ParsedFieldNode{}, fmt.Errorf("%s equal_to field is required", opts.Context)
-			}
-			field.Refinements.EqualTo = target
-		case "citation":
-			if !opts.AllowCitation {
-				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
-			}
-			var citation CriteriaCitation
-			if err := value.Decode(&citation); err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			citation.Criteria = strings.TrimSpace(citation.Criteria)
-			citation.AllowedClasses = normalizeStrings(citation.AllowedClasses)
-			field.Citation = citation
-		case "initial":
-			var initial any
-			if err := value.Decode(&initial); err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Initial = initial
-		case "immutable":
-			immutable, err := decodeBoolNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Immutable = immutable
-		case "indexed":
-			indexed, err := decodeBoolNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Indexed = indexed
-		case "_unused_reason":
-			text, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.UnusedReason = text
-		case "_unused_reader_reason":
-			text, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.UnusedReaderReason = text
-		case "materialize_from":
-			text, err := decodeScalarStringNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.MaterializeFrom = strings.TrimSpace(text)
-		case "project":
-			project, err := decodeProjectionMapNode(value)
-			if err != nil {
-				return wave1ParsedFieldNode{}, err
-			}
-			field.Project = project
-		}
+		byName[key] = candidate
 	}
-	if strings.EqualFold(strings.TrimSpace(field.Type), "list") {
-		if strings.TrimSpace(listOf) == "" {
+
+	typeField, ok := byName["type"]
+	if !ok {
+		return wave1ParsedFieldNode{}, fmt.Errorf("%s type is required", opts.Context)
+	}
+	rawType, err := requiredLiteralString(typeField.Value, opts.Context+" type")
+	if err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
+	field.Type, field.IsOptional, err = admitEventFieldTypeMarker(rawType, opts.Context)
+	if err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
+	if strings.EqualFold(field.Type, "list") {
+		ofField, exists := byName["of"]
+		if !exists {
 			return wave1ParsedFieldNode{}, fmt.Errorf("RETIRED: %s list declarations require an of: element type", opts.Context)
 		}
-		if err := validateWave1TypeRef(listOf, opts.Context); err != nil {
+		element, err := requiredLiteralString(ofField.Value, opts.Context+" list element type")
+		if err != nil {
 			return wave1ParsedFieldNode{}, err
 		}
-		field.Type = fmt.Sprintf("[%s]", strings.TrimSpace(listOf))
+		field.Type = "[" + strings.TrimSpace(element) + "]"
+	} else if _, exists := byName["of"]; exists {
+		return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, "of", allowed)
+	}
+	if err := rejectEventTypeOptionalMarker(field.Type, opts.Context); err != nil {
+		return wave1ParsedFieldNode{}, err
 	}
 	if err := validateWave1TypeRef(field.Type, opts.Context); err != nil {
 		return wave1ParsedFieldNode{}, err
 	}
-	if opts.AllowUnusedReason && strings.TrimSpace(field.UnusedReason) != "" && len(strings.TrimSpace(field.UnusedReason)) < 10 {
+
+	if candidate, ok := byName["description"]; ok {
+		field.Description, err = optionalScalarString(candidate.Value, opts.Context+" description")
+	}
+	if err == nil {
+		if candidate, ok := byName["pattern"]; ok {
+			field.Refinements.Pattern, err = decodeSchemaRefinementPatternValue(candidate.Value)
+		}
+	}
+	if err == nil {
+		if candidate, ok := byName["length"]; ok {
+			field.Refinements.Length, err = decodeSchemaLengthRefinementValue(candidate.Value)
+		}
+	}
+	if err == nil {
+		if candidate, ok := byName["range"]; ok {
+			field.Refinements.Range, err = decodeSchemaRangeRefinementValue(candidate.Value)
+		}
+	}
+	if err == nil {
+		if candidate, ok := byName["equal_to"]; ok {
+			field.Refinements.EqualTo, err = requiredLiteralString(candidate.Value, opts.Context+" equal_to field")
+			field.Refinements.EqualTo = strings.TrimSpace(field.Refinements.EqualTo)
+		}
+	}
+	if err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
+	if candidate, ok := byName["citation"]; ok {
+		if !opts.AllowCitation {
+			return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, "citation", allowed)
+		}
+		if err := candidate.Value.ValidateUniqueMappings(); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		if err := candidate.Value.Project(&field.Citation); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+		field.Citation.Criteria = strings.TrimSpace(field.Citation.Criteria)
+		field.Citation.AllowedClasses = normalizeStrings(field.Citation.AllowedClasses)
+	}
+	if candidate, ok := byName["initial"]; ok {
+		if err := candidate.Value.Project(&field.Initial); err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+	}
+	if candidate, ok := byName["immutable"]; ok {
+		field.Immutable, err = decodeBoolValue(candidate.Value, opts.Context+" immutable")
+	}
+	if err == nil {
+		if candidate, ok := byName["indexed"]; ok {
+			field.Indexed, err = decodeBoolValue(candidate.Value, opts.Context+" indexed")
+		}
+	}
+	if err != nil {
+		return wave1ParsedFieldNode{}, err
+	}
+	for name, target := range map[string]*string{
+		"_unused_reason": &field.UnusedReason, "_unused_reader_reason": &field.UnusedReaderReason,
+		"materialize_from": &field.MaterializeFrom,
+	} {
+		if candidate, ok := byName[name]; ok {
+			*target, err = optionalScalarString(candidate.Value, opts.Context+" "+name)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+		}
+	}
+	if candidate, ok := byName["project"]; ok {
+		field.Project, err = decodeProjectionMapValue(candidate.Value)
+		if err != nil {
+			return wave1ParsedFieldNode{}, err
+		}
+	}
+	if opts.AllowUnusedReason && field.UnusedReason != "" && len(field.UnusedReason) < 10 {
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reason must be at least 10 characters", opts.Context)
 	}
-	if opts.AllowUnusedReaderReason && strings.TrimSpace(field.UnusedReaderReason) != "" && len(strings.TrimSpace(field.UnusedReaderReason)) < 10 {
+	if opts.AllowUnusedReaderReason && field.UnusedReaderReason != "" && len(field.UnusedReaderReason) < 10 {
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reader_reason must be at least 10 characters", opts.Context)
 	}
 	return field, nil
@@ -1486,6 +1556,120 @@ func wave1FieldNodeAllowedKeys(opts wave1FieldNodeOptions) map[string]struct{} {
 		allowed["citation"] = struct{}{}
 	}
 	return allowed
+}
+
+func decodeBoolValue(value yamlsource.Value, context string) (bool, error) {
+	if value.Presence() != yamlsource.PresenceScalar {
+		return false, fmt.Errorf("%s at %s is %s, want boolean scalar", context, value.Location(), value.Presence())
+	}
+	scalar, err := value.Scalar()
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(scalar.Value)) {
+	case "true", "yes", "on", "conditional":
+		return true, nil
+	case "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported bool value %q", scalar.Value)
+	}
+}
+
+func decodeSchemaRefinementPatternValue(value yamlsource.Value) (string, error) {
+	pattern, err := requiredLiteralString(value, "pattern")
+	if err != nil {
+		return "", err
+	}
+	pattern = strings.TrimSpace(pattern)
+	if _, err := regexp.Compile(pattern); err != nil {
+		return "", fmt.Errorf("pattern must compile as a regular expression: %w", err)
+	}
+	return pattern, nil
+}
+
+func decodeSchemaLengthRefinementValue(value yamlsource.Value) (SchemaLengthRefinement, error) {
+	if value.Presence() != yamlsource.PresenceMapping {
+		return SchemaLengthRefinement{}, fmt.Errorf("length must be a mapping with min and/or max")
+	}
+	fields, err := uniqueYAMLMappingFields(value, "length")
+	if err != nil {
+		return SchemaLengthRefinement{}, err
+	}
+	var out SchemaLengthRefinement
+	for _, field := range fields {
+		var bound int
+		if err := field.Value.Project(&bound); err != nil {
+			return SchemaLengthRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
+		}
+		switch field.Name {
+		case "min":
+			out.Min = &bound
+		case "max":
+			out.Max = &bound
+		default:
+			return SchemaLengthRefinement{}, NewUndefinedFieldDiagnostic("length", field.Name, schemaLengthRefinementFieldOptions)
+		}
+	}
+	if out.Min == nil && out.Max == nil {
+		return SchemaLengthRefinement{}, fmt.Errorf("length must declare min and/or max")
+	}
+	if out.Min != nil && *out.Min < 0 {
+		return SchemaLengthRefinement{}, fmt.Errorf("length min must be >= 0")
+	}
+	if out.Max != nil && *out.Max < 0 {
+		return SchemaLengthRefinement{}, fmt.Errorf("length max must be >= 0")
+	}
+	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
+		return SchemaLengthRefinement{}, fmt.Errorf("length min must be <= max")
+	}
+	return out, nil
+}
+
+func decodeSchemaRangeRefinementValue(value yamlsource.Value) (SchemaRangeRefinement, error) {
+	if value.Presence() != yamlsource.PresenceMapping {
+		return SchemaRangeRefinement{}, fmt.Errorf("range must be a mapping with min and/or max")
+	}
+	fields, err := uniqueYAMLMappingFields(value, "range")
+	if err != nil {
+		return SchemaRangeRefinement{}, err
+	}
+	var out SchemaRangeRefinement
+	for _, field := range fields {
+		var bound float64
+		if err := field.Value.Project(&bound); err != nil {
+			return SchemaRangeRefinement{}, fmt.Errorf("%s: %w", field.Name, err)
+		}
+		switch field.Name {
+		case "min":
+			out.Min = &bound
+		case "max":
+			out.Max = &bound
+		default:
+			return SchemaRangeRefinement{}, NewUndefinedFieldDiagnostic("range", field.Name, schemaRangeRefinementFieldOptions)
+		}
+	}
+	if out.Min == nil && out.Max == nil {
+		return SchemaRangeRefinement{}, fmt.Errorf("range must declare min and/or max")
+	}
+	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
+		return SchemaRangeRefinement{}, fmt.Errorf("range min must be <= max")
+	}
+	return out, nil
+}
+
+func decodeProjectionMapValue(value yamlsource.Value) (map[string]any, error) {
+	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+		return nil, fmt.Errorf("entity field project must be a mapping")
+	}
+	if err := value.ValidateUniqueMappings(); err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := value.Project(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func decodeSchemaRefinementPattern(node *yaml.Node) (string, error) {
@@ -1710,6 +1894,7 @@ type wave1FieldNodeOptions struct {
 
 type wave1ParsedFieldNode struct {
 	Type               string
+	IsOptional         bool
 	Initial            any
 	Indexed            bool
 	Immutable          bool
