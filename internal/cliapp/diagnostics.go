@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1527,12 +1528,19 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 func fanOutSemanticRejectionFailureSummary(failure runtimefailures.Envelope) string {
 	parts := []string{eventObservationFailureSummary(&failure)}
 	attributes := failure.Detail.Attributes
-	for _, field := range []string{"event", "path", "constraint", "expected", "actual"} {
+	for _, field := range []string{"event", "path", "constraint", "expected"} {
 		value := strings.TrimSpace(fmt.Sprint(attributes[field]))
 		if value == "" || value == "<nil>" {
 			continue
 		}
 		parts = append(parts, field+"="+value)
+	}
+	if actual, present := attributes["actual"].(string); present {
+		value := actual
+		if strings.TrimSpace(value) == "" {
+			value = strconv.Quote(value)
+		}
+		parts = append(parts, "actual="+value)
 	}
 	return strings.Join(parts, ", ")
 }

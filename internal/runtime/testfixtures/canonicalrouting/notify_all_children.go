@@ -47,6 +47,7 @@ type NotifyAllChildrenOptions struct {
 	NumericRegistrationRows     bool
 	NumericReporterSink         bool
 	NumericInternalSettlement   bool
+	RegistrationUUIDField       bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
@@ -54,6 +55,9 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	t.Helper()
 	if opts.NumericReporterSink && opts.NumericInternalSettlement {
 		t.Fatal("numeric reporter and internal-settlement sinks are mutually exclusive")
+	}
+	if opts.RegistrationUUIDField && !opts.NumericRegistrationRows {
+		t.Fatal("registration UUID field requires numeric registration rows")
 	}
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
@@ -286,6 +290,20 @@ portfolio.notify.completed:
   event_handlers:
     account.registered: {}
 portfolio-coordinator:
+`)
+		}
+		if opts.RegistrationUUIDField {
+			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
+            eligible: entity.threshold >= 70
+`, `            gem_score: account.gem_score
+            external_id: account.external_id
+            eligible: entity.threshold >= 70
+`)
+			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
+  eligible: boolean
+`, `  gem_score: number
+  external_id: uuid
+  eligible: boolean
 `)
 		}
 	}

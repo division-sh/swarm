@@ -42,6 +42,14 @@ func TestValidatePayloadAgainstSchemaReturnsStructuredViolation(t *testing.T) {
 			name: "format", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": "bad"},
 			path: "$.id", constraint: "format", expected: "uuid", actual: "bad",
 		},
+		{
+			name: "format empty string", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": ""},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "",
+		},
+		{
+			name: "format whitespace string", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": "  "},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "  ",
+		},
 	}
 
 	for _, test := range tests {

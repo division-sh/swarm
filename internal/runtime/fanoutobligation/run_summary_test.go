@@ -14,6 +14,19 @@ func TestValidateSemanticRejectionRequiresExactEmitContractEvidence(t *testing.T
 		"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
 		"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
 	}
+	attributes := func(changes map[string]any, remove ...string) map[string]any {
+		out := make(map[string]any, len(exactAttributes)+len(changes))
+		for name, value := range exactAttributes {
+			out[name] = value
+		}
+		for name, value := range changes {
+			out[name] = value
+		}
+		for _, name := range remove {
+			delete(out, name)
+		}
+		return out
+	}
 	for _, test := range []struct {
 		name       string
 		class      failures.Class
@@ -22,8 +35,19 @@ func TestValidateSemanticRejectionRequiresExactEmitContractEvidence(t *testing.T
 		valid      bool
 	}{
 		{name: "exact emit contract", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: exactAttributes, valid: true},
+		{name: "schema mismatch with empty actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": "", "detail": "$.external_id must be uuid",
+		}), valid: true},
+		{name: "schema mismatch with whitespace actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": "  ", "detail": "$.external_id must be uuid",
+		}), valid: true},
 		{name: "authorization", class: failures.ClassAuthorizationDenied, code: "fan_out_authorization_denied", attributes: map[string]any{"action": "publish"}},
 		{name: "forged emit code", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation"},
+		{name: "missing actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(nil, "actual")},
+		{name: "non-string actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{"actual": 0})},
+		{name: "unresolved schema with empty actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"kind": "schema_unresolved", "actual": "",
+		})},
 		{name: "unknown emit kind", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: map[string]any{
 			"event": "company.registered", "kind": "other", "path": "$.gem_score",
 			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",

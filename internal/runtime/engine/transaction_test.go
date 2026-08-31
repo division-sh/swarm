@@ -82,6 +82,23 @@ func TestNormalizeFailurePreservesTypedEmitContractEvidence(t *testing.T) {
 	}
 }
 
+func TestNormalizeFailureAdmitsPresentEmptySchemaMismatchActual(t *testing.T) {
+	err := &EmitPayloadContractError{
+		Event: "company.registered", Kind: EmitPayloadSchemaMismatch,
+		Path: "$.external_id", Constraint: "format", Expected: "uuid", Actual: "",
+		Detail: "payload violates schema: $.external_id must be uuid",
+	}
+
+	failure := NormalizeFailure(err, "runtime.engine", "fan_out.emit")
+	if !IsEmitPayloadContractFailure(err) || !IsEmitPayloadContractFailure(failure) {
+		t.Fatalf("present empty actual was not admitted as exact typed evidence: %#v", failure.Failure)
+	}
+	actual, present := failure.Failure.Detail.Attributes["actual"].(string)
+	if !present || actual != "" {
+		t.Fatalf("normalized actual = %#v, want present empty string", failure.Failure.Detail.Attributes["actual"])
+	}
+}
+
 func TestNormalizeFailureRejectsBareEmitContractSentinelAsSemanticEvidence(t *testing.T) {
 	failure := NormalizeFailure(ErrEmitPayloadContractViolation, "runtime.engine", "fan_out.emit")
 	if failure.Failure.Class != failures.ClassInternalFailure || failure.Failure.Detail.Code == "emit_payload_contract_violation" {
