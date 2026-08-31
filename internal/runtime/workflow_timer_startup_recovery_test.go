@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -97,6 +99,8 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 }
 
 func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/testdata/workflow-timer-startup"))
+
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)

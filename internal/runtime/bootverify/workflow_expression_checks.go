@@ -372,6 +372,7 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 				Node:             node,
 				TriggerEventType: eventType,
 				Site:             siteKey,
+				SchemaProvider:   source,
 			}, spec)
 			if err != nil {
 				return

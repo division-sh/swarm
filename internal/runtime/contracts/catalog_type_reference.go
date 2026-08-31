@@ -87,6 +87,54 @@ func StructuralCatalogTypesEqual(left, right ResolvedCatalogType) bool {
 	return true
 }
 
+// StructuralCatalogTypeAssignable compares executable value shape while
+// preserving the sole scalar widening accepted by the contract type system.
+func StructuralCatalogTypeAssignable(source, target ResolvedCatalogType) bool {
+	if source.Kind == CatalogTypeInteger && target.Kind == CatalogTypeNumber {
+		return true
+	}
+	return StructuralCatalogTypesEqual(source, target)
+}
+
+// StructuralCatalogTypeSyntax renders one deterministic diagnostic spelling
+// when an imported JSON schema has no authored catalog type reference.
+func StructuralCatalogTypeSyntax(resolved ResolvedCatalogType) string {
+	switch resolved.Kind {
+	case CatalogTypeText:
+		return "text"
+	case CatalogTypeInteger:
+		return "integer"
+	case CatalogTypeNumber:
+		return "numeric"
+	case CatalogTypeBoolean:
+		return "boolean"
+	case CatalogTypeList:
+		if resolved.Element == nil {
+			return "[dynamic]"
+		}
+		return "[" + StructuralCatalogTypeSyntax(*resolved.Element) + "]"
+	case CatalogTypeMap:
+		if resolved.Key == nil || resolved.Value == nil {
+			return "map<dynamic,dynamic>"
+		}
+		return "map<" + StructuralCatalogTypeSyntax(*resolved.Key) + "," + StructuralCatalogTypeSyntax(*resolved.Value) + ">"
+	case CatalogTypeObject:
+		fields := append([]ResolvedCatalogField(nil), resolved.Fields...)
+		sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
+		parts := make([]string, 0, len(fields))
+		for _, field := range fields {
+			suffix := ""
+			if field.IsOptional {
+				suffix = "?"
+			}
+			parts = append(parts, field.Name+":"+StructuralCatalogTypeSyntax(field.Type)+suffix)
+		}
+		return "{" + strings.Join(parts, ",") + "}"
+	default:
+		return "dynamic"
+	}
+}
+
 // ResolvedCatalogField carries semantic type and presence together. Optionality
 // belongs to the containing field edge, never to the field's value type.
 type ResolvedCatalogField struct {

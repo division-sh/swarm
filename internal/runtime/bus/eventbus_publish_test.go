@@ -1425,7 +1425,7 @@ func TestEventBusPublish_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
 	}
 	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 }
 
@@ -1455,7 +1455,7 @@ func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T)
 	}
 	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 }
 
@@ -1476,7 +1476,7 @@ func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPl
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}},
 	)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 	if len(status.Requested) != 1 || status.Requested[0].AgentIdentity != identity {
 		t.Fatalf("requested routes = %#v, want %s", status.Requested, identity)

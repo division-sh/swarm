@@ -169,12 +169,11 @@ func positiveLoopAttemptLimit(value any) bool {
 }
 
 func validateLoopInputRevision(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, operation runtimecontracts.WorkflowLoopOperationPlan) []Finding {
-	proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, operation.HandlerEvent)
-	if !proof.HasSchema {
+	resolution := semanticview.ResolveEventSchema(source, plan.FlowID, operation.HandlerEvent)
+	if !resolution.HasStructural {
 		return []Finding{loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s has no typed event schema for revision admission", operation.Node.Key(), operation.HandlerEvent))}
 	}
-	field, ok := proof.Entry.Payload.Properties[plan.RevisionField]
-	if !ok || !joinTextType(field.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+	if !loopRequiredTextField(resolution, plan.RevisionField) {
 		return []Finding{loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s event must require text field %s", operation.Node.Key(), operation.HandlerEvent, plan.RevisionField))}
 	}
 	return nil
@@ -187,9 +186,8 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 		if eventType == "" {
 			continue
 		}
-		proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
-		field, declared := proof.Entry.Payload.Properties[plan.RevisionField]
-		if !proof.HasSchema || !declared || !joinTextType(field.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+		resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventType)
+		if !loopRequiredTextField(resolution, plan.RevisionField) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("%s from %s:%s must emit an event requiring text field %s", site.Source, operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 			continue
 		}
@@ -238,10 +236,9 @@ func validateLoopRegionHandlers(source semanticview.Source, plan runtimecontract
 			if !loopStagesIntersect(topology.HandlerStages(nodeRef, eventType), region) {
 				continue
 			}
-			proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
+			resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventType)
 			if handler.Loop == nil {
-				field, carries := proof.Entry.Payload.Properties[plan.RevisionField]
-				typed := proof.HasSchema && carries && joinTextType(field.Type) && containsString(proof.Entry.Payload.Required, plan.RevisionField)
+				typed := loopRequiredTextField(resolution, plan.RevisionField)
 				if typed {
 					findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s may execute in the loop region but omits loop operation", nodeID, eventType)))
 				} else {
@@ -274,12 +271,12 @@ func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.Wo
 	}
 	location := loopLocation(plan)
 	eventType := strings.TrimSpace(spec.EventType())
-	proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
-	if eventType == "" || !proof.HasSchema {
+	resolution := semanticview.ResolveEventSchema(source, plan.FlowID, eventType)
+	if eventType == "" || !resolution.HasStructural {
 		return []Finding{loopFinding(location, fmt.Sprintf("escape.emit event %s has no typed event schema", eventType))}
 	}
 	findings := make([]Finding, 0)
-	declared := payloadCompletenessDeclaredFields(proof.Entry)
+	declared := payloadCompletenessDeclaredFields(resolution)
 	fields := map[string]struct{}{}
 	for field := range spec.Fields {
 		field = strings.TrimSpace(field)
@@ -290,18 +287,22 @@ func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.Wo
 	for _, field := range payloadCompletenessUndeclaredFields(fields, declared) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s authors undeclared payload field %s", eventType, field)))
 	}
-	for _, field := range payloadCompletenessRequiredFields(proof.Entry) {
+	for _, field := range payloadCompletenessRequiredFields(resolution) {
 		if _, ok := spec.Fields[field]; !ok {
 			findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s omits required payload field %s", eventType, field)))
 		}
 	}
-	revision, declaredRevision := proof.Entry.Payload.Properties[plan.RevisionField]
-	if !declaredRevision || !joinTextType(revision.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+	if !loopRequiredTextField(resolution, plan.RevisionField) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must require text field %s", eventType, plan.RevisionField)))
 	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !loopRevisionExpression(value) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must carry %s from loop.revision_id", eventType, plan.RevisionField)))
 	}
 	return findings
+}
+
+func loopRequiredTextField(resolution semanticview.EventSchemaResolution, fieldName string) bool {
+	field, ok := resolution.Field(fieldName)
+	return ok && !field.IsOptional && field.Type.Kind == runtimecontracts.CatalogTypeText
 }
 
 func validateLoopRecurringTimers(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, region map[string]struct{}) []Finding {

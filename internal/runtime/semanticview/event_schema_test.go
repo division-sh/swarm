@@ -82,10 +82,6 @@ payload:
   mailbox_id: uuid
   mailbox_payload: object
   decided_at: timestamp
-required:
-  - mailbox_id
-  - mailbox_payload
-  - decided_at
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
