@@ -1,6 +1,10 @@
 package engine
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 var (
 	ErrChainDepthExceeded           = errors.New("engine: chain depth exceeded")
@@ -18,3 +22,55 @@ var (
 	ErrNotImplemented               = errors.New("engine: not implemented")
 	ErrFanOutBoundExceeded          = errors.New("engine: fan_out bound exceeded")
 )
+
+type EmitPayloadContractKind string
+
+const (
+	EmitPayloadSchemaUnresolved EmitPayloadContractKind = "schema_unresolved"
+	EmitPayloadSchemaMismatch   EmitPayloadContractKind = "schema_mismatch"
+	EmitPayloadEnvelopeField    EmitPayloadContractKind = "authored_envelope_field"
+)
+
+type EmitPayloadContractError struct {
+	Event      string
+	Kind       EmitPayloadContractKind
+	Path       string
+	Constraint string
+	Expected   string
+	Actual     string
+	Detail     string
+	Cause      error
+}
+
+func (e *EmitPayloadContractError) Error() string {
+	if e == nil {
+		return ErrEmitPayloadContractViolation.Error()
+	}
+	return fmt.Sprintf("%s: event %s %s", ErrEmitPayloadContractViolation, strings.TrimSpace(e.Event), strings.TrimSpace(e.Detail))
+}
+
+func (e *EmitPayloadContractError) Is(target error) bool {
+	return target == ErrEmitPayloadContractViolation
+}
+
+func (e *EmitPayloadContractError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *EmitPayloadContractError) Attributes() map[string]any {
+	if e == nil {
+		return nil
+	}
+	return map[string]any{
+		"event":      strings.TrimSpace(e.Event),
+		"kind":       string(e.Kind),
+		"path":       strings.TrimSpace(e.Path),
+		"constraint": strings.TrimSpace(e.Constraint),
+		"expected":   strings.TrimSpace(e.Expected),
+		"actual":     strings.TrimSpace(e.Actual),
+		"detail":     strings.TrimSpace(e.Detail),
+	}
+}

@@ -16,6 +16,38 @@ import (
 	"github.com/google/uuid"
 )
 
+type Violation struct {
+	Path       string
+	Constraint string
+	Expected   string
+	Actual     string
+	Detail     string
+}
+
+func (v *Violation) Error() string {
+	if v == nil {
+		return "schema validation failed"
+	}
+	return "schema validation failed: " + v.Detail
+}
+
+func violation(path, constraint, expected, actual, detail string, args ...any) error {
+	return &Violation{
+		Path:       strings.TrimSpace(path),
+		Constraint: strings.TrimSpace(constraint),
+		Expected:   strings.TrimSpace(expected),
+		Actual:     strings.TrimSpace(actual),
+		Detail:     fmt.Sprintf(detail, args...),
+	}
+}
+
+func schemaValueType(value any) string {
+	if value == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%T", value)
+}
+
 func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any) error {
 	if schema == nil {
 		return nil
@@ -159,7 +191,7 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 	required := exactRequiredList(schema["required"])
 	for _, key := range required {
 		if _, ok := payload[key]; !ok {
-			return fmt.Errorf("schema validation failed: %s.%s is required", path, key)
+			return violation(path+"."+key, "required", "present", "missing", "%s.%s is required", path, key)
 		}
 	}
 	props := schemaProperties(schema["properties"])
@@ -176,7 +208,7 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 			if allowAdditional {
 				continue
 			}
-			return fmt.Errorf("schema validation failed: %s.%s is not allowed", path, k)
+			return violation(path+"."+k, "additionalProperties", "declared property", "undeclared property", "%s.%s is not allowed", path, k)
 		}
 		if err := validateValue(path+"."+k, propSchema, v); err != nil {
 			return err
@@ -193,10 +225,10 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 		}
 		other, ok := payload[target]
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s.%s must equal %s.%s, but target is missing", path, key, path, target)
+			return violation(path+"."+key, "x-swarm-equalTo", path+"."+target, "target missing", "%s.%s must equal %s.%s, but target is missing", path, key, path, target)
 		}
 		if !reflect.DeepEqual(value, other) {
-			return fmt.Errorf("schema validation failed: %s.%s must equal %s.%s", path, key, path, target)
+			return violation(path+"."+key, "x-swarm-equalTo", path+"."+target, "different value", "%s.%s must equal %s.%s", path, key, path, target)
 		}
 	}
 	return nil
@@ -220,14 +252,14 @@ func validateValue(path string, schema map[string]any, value any) error {
 	}
 	if enumRaw, ok := schema["enum"]; ok {
 		if !valueInEnum(value, enumRaw) {
-			return fmt.Errorf("schema validation failed: %s has invalid enum value %v", path, value)
+			return violation(path, "enum", "declared enum member", fmt.Sprint(value), "%s has invalid enum value %v", path, value)
 		}
 	}
 	switch st {
 	case "string":
 		text, ok := value.(string)
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s must be string", path)
+			return violation(path, "type", "string", schemaValueType(value), "%s must be string", path)
 		}
 		if err := validateStringFormat(path, schema, text); err != nil {
 			return err
@@ -237,18 +269,18 @@ func validateValue(path string, schema map[string]any, value any) error {
 		}
 	case "boolean":
 		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("schema validation failed: %s must be boolean", path)
+			return violation(path, "type", "boolean", schemaValueType(value), "%s must be boolean", path)
 		}
 	case "number":
 		if !isNumeric(value) {
-			return fmt.Errorf("schema validation failed: %s must be number", path)
+			return violation(path, "type", "number", schemaValueType(value), "%s must be number", path)
 		}
 		if err := validateNumericBounds(path, schema, value); err != nil {
 			return err
 		}
 	case "integer":
 		if !isInteger(value) {
-			return fmt.Errorf("schema validation failed: %s must be integer", path)
+			return violation(path, "type", "integer", schemaValueType(value), "%s must be integer", path)
 		}
 		if err := validateNumericBounds(path, schema, value); err != nil {
 			return err
@@ -256,7 +288,7 @@ func validateValue(path string, schema map[string]any, value any) error {
 	case "array":
 		arr, ok := asArray(value)
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s must be array", path)
+			return violation(path, "type", "array", schemaValueType(value), "%s must be array", path)
 		}
 		if itemsRaw, ok := schema["items"]; ok {
 			if itemSchema, ok := itemsRaw.(map[string]any); ok {
@@ -273,17 +305,17 @@ func validateValue(path string, schema map[string]any, value any) error {
 	case "object":
 		obj, ok := value.(map[string]any)
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s must be object", path)
+			return violation(path, "type", "object", schemaValueType(value), "%s must be object", path)
 		}
 		if err := validateSchemaObject(path, schema, obj); err != nil {
 			return err
 		}
 	case "null":
 		if value != nil {
-			return fmt.Errorf("schema validation failed: %s must be null", path)
+			return violation(path, "type", "null", schemaValueType(value), "%s must be null", path)
 		}
 	default:
-		return fmt.Errorf("schema validation failed: %s has unsupported schema type %q", path, st)
+		return violation(path, "type", "supported schema type", st, "%s has unsupported schema type %q", path, st)
 	}
 	return nil
 }
@@ -292,29 +324,29 @@ func validateStringRefinements(path string, schema map[string]any, value string)
 	if pattern, ok := schema["pattern"].(string); ok && pattern != "" {
 		compiled, err := regexp.Compile(pattern)
 		if err != nil {
-			return fmt.Errorf("schema validation failed: %s has invalid pattern refinement", path)
+			return violation(path, "pattern", "valid regular expression", pattern, "%s has invalid pattern refinement", path)
 		}
 		if !compiled.MatchString(value) {
-			return fmt.Errorf("schema validation failed: %s must match pattern %q", path, pattern)
+			return violation(path, "pattern", pattern, value, "%s must match pattern %q", path, pattern)
 		}
 	}
 	length := utf8.RuneCountInString(value)
 	if minRaw, ok := schema["minLength"]; ok {
 		min, ok := runtimesharedjson.AsFloat64(minRaw)
 		if !ok || math.Trunc(min) != min || min < 0 {
-			return fmt.Errorf("schema validation failed: %s minLength is not a supported non-negative integer", path)
+			return violation(path, "minLength", "non-negative integer", fmt.Sprint(minRaw), "%s minLength is not a supported non-negative integer", path)
 		}
 		if length < int(min) {
-			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
+			return violation(path, "minLength", fmt.Sprintf(">= %d", int(min)), fmt.Sprintf("%d", length), "%s length must be >= %d", path, int(min))
 		}
 	}
 	if maxRaw, ok := schema["maxLength"]; ok {
 		max, ok := runtimesharedjson.AsFloat64(maxRaw)
 		if !ok || math.Trunc(max) != max || max < 0 {
-			return fmt.Errorf("schema validation failed: %s maxLength is not a supported non-negative integer", path)
+			return violation(path, "maxLength", "non-negative integer", fmt.Sprint(maxRaw), "%s maxLength is not a supported non-negative integer", path)
 		}
 		if length > int(max) {
-			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
+			return violation(path, "maxLength", fmt.Sprintf("<= %d", int(max)), fmt.Sprintf("%d", length), "%s length must be <= %d", path, int(max))
 		}
 	}
 	return nil
@@ -324,19 +356,19 @@ func validateArrayLength(path string, schema map[string]any, length int) error {
 	if minRaw, ok := schema["minItems"]; ok {
 		min, ok := runtimesharedjson.AsFloat64(minRaw)
 		if !ok || math.Trunc(min) != min || min < 0 {
-			return fmt.Errorf("schema validation failed: %s minItems is not a supported non-negative integer", path)
+			return violation(path, "minItems", "non-negative integer", fmt.Sprint(minRaw), "%s minItems is not a supported non-negative integer", path)
 		}
 		if length < int(min) {
-			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
+			return violation(path, "minItems", fmt.Sprintf(">= %d", int(min)), fmt.Sprintf("%d", length), "%s length must be >= %d", path, int(min))
 		}
 	}
 	if maxRaw, ok := schema["maxItems"]; ok {
 		max, ok := runtimesharedjson.AsFloat64(maxRaw)
 		if !ok || math.Trunc(max) != max || max < 0 {
-			return fmt.Errorf("schema validation failed: %s maxItems is not a supported non-negative integer", path)
+			return violation(path, "maxItems", "non-negative integer", fmt.Sprint(maxRaw), "%s maxItems is not a supported non-negative integer", path)
 		}
 		if length > int(max) {
-			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
+			return violation(path, "maxItems", fmt.Sprintf("<= %d", int(max)), fmt.Sprintf("%d", length), "%s length must be <= %d", path, int(max))
 		}
 	}
 	return nil
@@ -345,24 +377,24 @@ func validateArrayLength(path string, schema map[string]any, length int) error {
 func validateNumericBounds(path string, schema map[string]any, value any) error {
 	n, ok := runtimesharedjson.AsFloat64(value)
 	if !ok {
-		return fmt.Errorf("schema validation failed: %s must be numeric", path)
+		return violation(path, "numeric", "number", schemaValueType(value), "%s must be numeric", path)
 	}
 	if minRaw, ok := schema["minimum"]; ok {
 		min, ok := runtimesharedjson.AsFloat64(minRaw)
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s minimum is not a supported JSON number", path)
+			return violation(path, "minimum", "supported JSON number", fmt.Sprint(minRaw), "%s minimum is not a supported JSON number", path)
 		}
 		if n < min {
-			return fmt.Errorf("schema validation failed: %s must be >= %v", path, min)
+			return violation(path, "minimum", fmt.Sprintf(">= %v", min), fmt.Sprint(n), "%s must be >= %v", path, min)
 		}
 	}
 	if maxRaw, ok := schema["maximum"]; ok {
 		max, ok := runtimesharedjson.AsFloat64(maxRaw)
 		if !ok {
-			return fmt.Errorf("schema validation failed: %s maximum is not a supported JSON number", path)
+			return violation(path, "maximum", "supported JSON number", fmt.Sprint(maxRaw), "%s maximum is not a supported JSON number", path)
 		}
 		if n > max {
-			return fmt.Errorf("schema validation failed: %s must be <= %v", path, max)
+			return violation(path, "maximum", fmt.Sprintf("<= %v", max), fmt.Sprint(n), "%s must be <= %v", path, max)
 		}
 	}
 	return nil
@@ -418,12 +450,12 @@ func validateStringFormat(path string, schema map[string]any, value string) erro
 		return nil
 	case "date-time":
 		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(value)); err != nil {
-			return fmt.Errorf("schema validation failed: %s must be RFC3339 date-time", path)
+			return violation(path, "format", "RFC3339 date-time", value, "%s must be RFC3339 date-time", path)
 		}
 		return nil
 	case "uuid":
 		if _, err := uuid.Parse(strings.TrimSpace(value)); err != nil {
-			return fmt.Errorf("schema validation failed: %s must be uuid", path)
+			return violation(path, "format", "uuid", value, "%s must be uuid", path)
 		}
 		return nil
 	default:

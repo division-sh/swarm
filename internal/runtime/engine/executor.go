@@ -995,7 +995,10 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		}
 		filtered := make([]any, 0, len(items))
 		for _, item := range items {
-			scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			if err != nil {
+				return err
+			}
 			passed, err := compiled.Eval(scope)
 			if err != nil {
 				return err
@@ -1011,7 +1014,10 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	case strings.TrimSpace(spec.GroupBy) != "":
 		grouped := map[string]any{}
 		for _, item := range items {
-			scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			if err != nil {
+				return err
+			}
 			resolved, err := scope.resolveOperand(strings.TrimSpace(spec.GroupBy), executionOperandDefaultItem)
 			if err != nil {
 				return err
@@ -1147,7 +1153,10 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	}
 	filtered := make([]any, 0, len(items))
 	for _, item := range items {
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		if err != nil {
+			return err
+		}
 		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
@@ -1195,7 +1204,10 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 			count++
 			continue
 		}
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		if err != nil {
+			return err
+		}
 		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
@@ -1907,7 +1919,10 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	grouped := make(map[string]any)
 	for _, item := range items {
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		if err != nil {
+			return err
+		}
 		resolved, err := scope.resolveOperand(strings.TrimSpace(spec.Key), executionOperandDefaultItem)
 		if err != nil {
 			return err

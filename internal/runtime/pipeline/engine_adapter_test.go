@@ -26,6 +26,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -2896,6 +2897,17 @@ func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
 	}
 }
 
+func TestPipelineEngineQueryEntityCountRejectsRawNumericCarrierBeforeStoreLookup(t *testing.T) {
+	eval := pipelineEngineEvaluator{}
+	_, err := eval.queryEntityCount(workflowExpressionContext{
+		Payload: map[string]any{"minimum": json.Number("9007199254740992")},
+	}, `score >= payload.minimum`)
+	var projection *workflowexpr.CELProjectionError
+	if !errors.As(err, &projection) || projection.Path != "$.payload.minimum" {
+		t.Fatalf("query_entities hostile operand error = %#v, want exact checked projection", err)
+	}
+}
+
 func TestWorkflowStateGatesForScopeAddsLocalAliasesForChildFlow(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -3250,6 +3262,76 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 	}
 	if !strings.Contains(err.Error(), "invalid enum value") {
 		t.Fatalf("validatePipelineEmitPayload error = %v, want enum detail", err)
+	}
+	var contractErr *runtimeengine.EmitPayloadContractError
+	if !errors.As(err, &contractErr) || contractErr.Event != "child/child.internal" || contractErr.Kind != runtimeengine.EmitPayloadSchemaMismatch || contractErr.Path != "$.mode" || contractErr.Constraint != "enum" || contractErr.Expected != "declared enum member" || contractErr.Actual != "invalid" {
+		t.Fatalf("validatePipelineEmitPayload typed error = %#v", err)
+	}
+}
+
+func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
+	root := &runtimecontracts.FlowContractView{Events: map[string]runtimecontracts.EventCatalogEntry{
+		"company.registered": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"gem_score": {Type: "number"}},
+				Required:   []string{"gem_score"},
+			},
+		},
+		"company.unresolved": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"evidence": {Type: "NotDeclared"}},
+				Required:   []string{"evidence"},
+			},
+		},
+	}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root},
+	})
+
+	tests := []struct {
+		name       string
+		run        func() error
+		event      string
+		kind       runtimeengine.EmitPayloadContractKind
+		path       string
+		constraint string
+		expected   string
+		actual     string
+	}{
+		{
+			name: "unresolved schema", event: "company.unresolved", kind: runtimeengine.EmitPayloadSchemaUnresolved,
+			path: "$", constraint: "resolved_schema", expected: "resolved event payload schema", actual: "unresolved",
+			run: func() error {
+				return validatePipelineEmitPayload(source, "", "company.unresolved", map[string]any{"evidence": "x"}, nil, runtimeengine.EmitSurfaceDeclarative)
+			},
+		},
+		{
+			name: "schema mismatch", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
+			path: "$.gem_score", constraint: "type", expected: "number", actual: "string",
+			run: func() error {
+				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": "7.2"}, nil, runtimeengine.EmitSurfaceDeclarative)
+			},
+		},
+		{
+			name: "authored envelope field", event: "company.registered", kind: runtimeengine.EmitPayloadEnvelopeField,
+			path: "$", constraint: "platform_owned_envelope_fields", expected: "authored business payload only", actual: "entity_id",
+			run: func() error {
+				return rejectAuthoredEnvelopeFields("company.registered", map[string]any{"entity_id": "hostile"})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.run()
+			var contractErr *runtimeengine.EmitPayloadContractError
+			if !errors.As(err, &contractErr) || !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+				t.Fatalf("producer error = %#v, want typed emit contract error", err)
+			}
+			if contractErr.Event != test.event || contractErr.Kind != test.kind || contractErr.Path != test.path || contractErr.Constraint != test.constraint || contractErr.Expected != test.expected || contractErr.Actual != test.actual || strings.TrimSpace(contractErr.Detail) == "" {
+				t.Fatalf("typed producer error = %#v", contractErr)
+			}
+		})
 	}
 }
 

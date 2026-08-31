@@ -44,6 +44,8 @@ type NotifyAllChildrenOptions struct {
 	AutoEmitOnCreate            bool
 	AutoEmitEventRevision       int
 	FanOutDeliveryBarrier       bool
+	NumericRegistrationRows     bool
+	NumericReporterSink         bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
@@ -56,6 +58,8 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	ownerNodes := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "nodes.yaml")
 	ownerEntities := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "entities.yaml")
 	accountAgents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "agents.yaml")
+	accountNodes := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "nodes.yaml")
+	accountEntities := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "entities.yaml")
 	accountEvents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "events.yaml")
 	accountSchema := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
@@ -157,6 +161,108 @@ portfolio.notify.completed:
 `, `      - account.notify.requested
       - portfolio.notify.completed
 `)
+	}
+	if opts.NumericRegistrationRows {
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
+`, `  account_ids: "[json]"
+`)
+		applyClosedReplacement(t, ownerEntities, `  account_ids: "[text]"
+`, `  account_ids: "[json]"
+`)
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            portfolio_id: payload.portfolio_id
+            account_id: account.account_id
+            eng_roles: account.eng_roles
+            gem_score: account.gem_score
+`)
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account.account_id
+`)
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+  key: account_id
+  account_id: text
+`, `account.registered:
+  key: account_id
+  portfolio_id: text
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+`)
+		applyClosedReplacement(t, accountNodes, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+`, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: eng_roles
+            target_field: eng_roles
+          - source_field: gem_score
+            target_field: gem_score
+`)
+		applyClosedReplacement(t, accountEntities, `account_state:
+  account_id: text
+  last_command: text
+`, `account_state:
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  last_command: text
+`)
+		if opts.NumericReporterSink {
+			applyClosedReplacement(t, packageFile, `  - event: account.registered
+    from: portfolio
+    to: account
+`, "")
+			applyClosedReplacement(t, ownerEntities, `  account_ids: "[json]"
+`, `  account_ids: "[json]"
+  observed_account_id: text
+  observed_eng_roles: integer
+  observed_gem_score: number
+`)
+			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
+  id: numeric-registration-observer
+  execution_type: system_node
+  subscribes_to:
+    - account.registered
+  event_handlers:
+    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: observed_account_id
+          - source_field: eng_roles
+            target_field: observed_eng_roles
+          - source_field: gem_score
+            target_field: observed_gem_score
+portfolio-coordinator:
+`)
+		}
 	}
 	if opts.AutoEmitEventRevision == 2 {
 		applyClosedReplacement(t, accountEvents, "account.created", "account.revised")

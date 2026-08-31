@@ -808,8 +808,15 @@ func seedFanOutBarrierOutcomes(t *testing.T, ctx context.Context, db *sql.DB, fi
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,created_at) VALUES ($1,$2,$3,$4,$5,'committed',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, ordinal, eventID, at)
 	}
 	if appendRejection {
-		failure := `{"class":"invalid_input","code":"fixture_rejection","owner":"test","operation":"fan_out","message":"fixture rejection"}`
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, len(eventIDs), failure, at)
+		failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fixture_rejection", "test", "fan_out", map[string]any{"path": "$.fixture"}))
+		if !ok {
+			t.Fatal("construct typed semantic rejection fixture")
+		}
+		failureRaw, err := runtimefailures.MarshalEnvelope(failure)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, len(eventIDs), string(failureRaw), at)
 	}
 	cursor := len(eventIDs)
 	if appendRejection {

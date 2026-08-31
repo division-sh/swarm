@@ -870,7 +870,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
+				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1.0")},
 			},
 		},
 	}, workflowTriggerContext{

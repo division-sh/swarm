@@ -26,6 +26,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/gorilla/websocket"
 )
@@ -614,6 +615,16 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	now := time.Unix(1700000000, 123456789).UTC()
 	runID := "run-1"
 	eventID := "event-1"
+	semanticRejection, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
+		runtimefailures.ClassSchemaInvalid,
+		"emit_payload_contract_violation",
+		"runtime.engine",
+		"fan_out.emit",
+		map[string]any{"event": "company.registered", "path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+	))
+	if !ok {
+		t.Fatal("construct API fan-out semantic rejection")
+	}
 	fakeRuns := &fakeRunReadStore{
 		headers: map[string]operatorread.RunHeader{
 			runID: {
@@ -636,6 +647,14 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				EventCount:     1,
 				EntityCount:    2,
 				Deliveries:     []operatorread.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
+				FanOut: fanoutobligation.RunSummary{
+					RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
+					SemanticRejectionSample: &fanoutobligation.FanOutSemanticRejectionSample{
+						TriggeringDeliveryID: "22222222-2222-4222-8222-222222222222",
+						PackageKey:           "root", ElementID: "33333333-3333-4333-8333-333333333333", Ordinal: 0, Failure: semanticRejection,
+					},
+					BlockedIntents: []fanoutobligation.BlockedIntentDiagnosis{}, MinNextChunk: fanoutobligation.InitialChunkSize, MaxNextChunk: fanoutobligation.InitialChunkSize,
+				},
 			},
 		},
 	}
@@ -742,6 +761,16 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	fanOut := asMap(t, asMap(t, diagnose.Result)["fan_out"])
 	if blocked, ok := fanOut["blocked_intents"].([]any); !ok || len(blocked) != 0 {
 		t.Fatalf("run.diagnose fan_out.blocked_intents = %#v, want empty array", fanOut["blocked_intents"])
+	}
+	if fanOut["semantic_rejected"] != float64(1) || fanOut["rejected"] != nil {
+		t.Fatalf("run.diagnose fan-out disposition projection = %#v", fanOut)
+	}
+	sample := asMap(t, fanOut["semantic_rejection_sample"])
+	failure := asMap(t, sample["failure"])
+	detail := asMap(t, failure["detail"])
+	attributes := asMap(t, detail["attributes"])
+	if sample["ordinal"] != float64(0) || detail["code"] != "emit_payload_contract_violation" || attributes["path"] != "$.gem_score" {
+		t.Fatalf("run.diagnose semantic rejection sample = %#v", sample)
 	}
 	quiescence := asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
 	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) {

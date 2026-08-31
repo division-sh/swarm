@@ -382,7 +382,7 @@ steps:
 			}
 			writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, rpc.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, rpc.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		default:
 			t.Fatalf("unexpected method %q", rpc.Method)
 		}
