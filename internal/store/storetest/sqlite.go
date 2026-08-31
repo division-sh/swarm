@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/platform"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
@@ -47,6 +49,7 @@ func StartSQLiteRuntimeStorePair(t testing.TB) (*store.SQLiteRuntimeStore, *stor
 			_ = sqliteStore.Close()
 			t.Fatalf("BootstrapSchema: %v", err)
 		}
+		bindTestPayloadAdmitter(sqliteStore)
 		t.Cleanup(func() {
 			if err := sqliteStore.Close(); err != nil {
 				t.Errorf("close sqlite runtime store: %v", err)
@@ -86,6 +89,7 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 	}); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
+	bindTestPayloadAdmitter(sqliteStore)
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
 	}
@@ -98,6 +102,7 @@ func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 	t.Helper()
 	postgresStore := NewPostgresStoreForTest(db)
 	BootstrapPostgresRuntimeStore(t, postgresStore)
+	bindTestPayloadAdmitter(postgresStore)
 	return postgresStore
 }
 
@@ -117,7 +122,16 @@ func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore
 	}); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
+	bindTestPayloadAdmitter(sqliteStore)
 	return sqliteStore
+}
+
+func bindTestPayloadAdmitter(selected interface {
+	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
+}) {
+	selected.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+	})
 }
 
 // Database exposes the exact test-owned SQL handle for hostile fixture setup
