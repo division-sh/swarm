@@ -272,9 +272,15 @@ contract_formats:
       Lexical JSON integers inside the I-JSON safe range project to exact CEL
       integers. Decimal and exponent spellings project to CEL doubles even
       when mathematically integral. Native floating-point values remain CEL
-      doubles. Every production JSON boundary feeding this projection preserves
-      number lexemes until this owner runs; no boundary may first erase them to
-      float64. Malformed or unsafe numbers fail before evaluation with the
+      doubles. Every production runtime-carrier JSON writer feeding this
+      projection preserves integer-versus-double kind: integers use integer
+      tokens, while native floating-point and lexical decimal or exponent
+      values use a durable double token containing a decimal point or exponent.
+      Readers preserve that token until this owner runs; no boundary may erase
+      it through a generic float64 decode or an integral-float JSON encoding.
+      Exact numeric spelling is not retained, and semantic canonicalization for
+      resource-version identity remains governed by semantic_json.contract.
+      Malformed or unsafe numbers fail before evaluation with the
       exact recursive value path; unsafe exact integers teach authors to
       declare the field as string. This implemented scope excludes authored
       aggregate/reduce/scoring coercion tracked by #2046.
@@ -3866,7 +3872,9 @@ handler_specification:
         evaluation_capsule: >-
           Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
           or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
-          still prove the same element before any ordinal is evaluated.
+          still prove the same element before any ordinal is evaluated. Live-intent persistence and fork projection use
+          the workflow/CEL runtime-carrier JSON writer; both preserve integer-versus-double kind for every dynamic capsule
+          map and may not use semantic canonicalization or a generic JSON encoder that collapses integral doubles.
         semantic_value_projection: >-
           Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same

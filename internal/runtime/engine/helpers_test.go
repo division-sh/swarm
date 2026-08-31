@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -172,6 +173,36 @@ func TestEmitFieldsPayload_PreservesNativeWholeNumberFloatAsDouble(t *testing.T)
 	}
 	if got := transformed["score"]; got != float64(50) {
 		t.Fatalf("score = %#v, want 50", got)
+	}
+}
+
+func TestEncodePayloadPreservesEagerNumericKindForPersistedEvaluation(t *testing.T) {
+	raw, err := encodePayload(map[string]any{
+		"integer": int64(50),
+		"double":  float64(50),
+		"nested":  []any{json.Number("50.0"), json.Number("5e1")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"double":50.0,"integer":50,"nested":[50.0,50.0]}` {
+		t.Fatalf("encoded payload = %s", raw)
+	}
+	payload, err := decodePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["integer"] != int64(50) || payload["double"] != float64(50) {
+		t.Fatalf("decoded payload kinds = %#v", payload)
+	}
+	result, err := workflowexpr.EvalValueExpressionWithOptions(
+		"payload.integer + 1 == 51 && payload.double + 1.0 == 51.0",
+		workflowexpr.ValueContext{Payload: payload},
+		workflowexpr.ValueExpressionOptions{},
+	)
+	matched, ok := result.(bool)
+	if err != nil || !ok || !matched {
+		t.Fatalf("persisted event arithmetic = %#v err=%v", result, err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
 
@@ -146,6 +148,12 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 
 			element := runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: uuid.NewString()}
+			eagerScore, err := workflowexpr.EvalValueExpressionWithOptions(
+				"25.0 * 3.0", workflowexpr.ValueContext{}, workflowexpr.ValueExpressionOptions{},
+			)
+			if err != nil || eagerScore != float64(75) {
+				t.Fatalf("eager computed score = %#v err=%v, want native double 75", eagerScore, err)
+			}
 			intent := fanoutobligation.IntentRequest{
 				Key: fanoutobligation.IntentKey{
 					RunID: runID, TriggeringDeliveryID: claimed.Claim.DeliveryID(), ElementRef: element,
@@ -161,6 +169,10 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 					Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),
 					EntityID: entityID, HandlerEventKey: string(event.Type()), ProducerSource: event.RoutingSource(),
 					DeliveryRoute: &route, Lineage: events.LineageFromEvent(event), CurrentState: "active",
+					Computed: map[string]any{
+						"integer": int64(75), "double": eagerScore,
+						"nested": []any{json.Number("75.0"), json.Number("75e0")},
+					},
 				},
 			}
 			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
@@ -257,6 +269,25 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			assertFanOutIntentCount(t, ctx, db, backend, runID, 1)
 			assertFanOutBarrierCount(t, ctx, db, runID, 1)
+			var capsuleRaw []byte
+			if err := db.QueryRowContext(ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2`, runID, claimed.Claim.DeliveryID()).Scan(&capsuleRaw); err != nil {
+				t.Fatalf("load committed fan-out capsule: %v", err)
+			}
+			var persistedCapsule fanoutobligation.Capsule
+			if err := canonicaljson.DecodePreservingNumberLexemes(capsuleRaw, &persistedCapsule); err != nil {
+				t.Fatalf("decode committed fan-out capsule: %v", err)
+			}
+			projected, err := workflowexpr.ProjectCELValue(persistedCapsule.Computed)
+			if err != nil {
+				t.Fatalf("project committed fan-out capsule: %v", err)
+			}
+			result, err := workflowexpr.EvalValueExpressionWithOptions(
+				"computed.integer + 1 == 76 && computed.double + 1.0 == 76.0 && computed.nested[0] + 1.0 == 76.0 && computed.nested[1] + 1.0 == 76.0",
+				workflowexpr.ValueContext{Computed: projected.(map[string]any)}, workflowexpr.ValueExpressionOptions{},
+			)
+			if matched, ok := result.(bool); err != nil || !ok || !matched {
+				t.Fatalf("deferred capsule arithmetic = %#v err=%v capsule=%s", result, err, capsuleRaw)
+			}
 			var status string
 			var persistedHandle []byte
 			var summary, schedule any

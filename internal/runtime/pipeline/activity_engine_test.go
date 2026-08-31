@@ -263,12 +263,17 @@ func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
 	}
 
 	emissions := &pipelineEmissionPlan{}
-	if err := (pipelineActivityDispatcher{emissions: emissions}).publishActivityResult(context.Background(), recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
+	if err := (pipelineActivityDispatcher{emissions: emissions}).publishActivityResult(context.Background(), recovered, recovered.SuccessEvent, map[string]any{
+		"ok": true, "integer_score": int64(75), "double_score": float64(75),
+	}); err != nil {
 		t.Fatalf("publishActivityResult: %v", err)
 	}
 	emitted := emissions.immutableEvents()
 	if len(emitted) != 1 || emitted[0].ExecutionMode() != executionmode.Mock {
 		t.Fatalf("result events = %#v, want one mock event", emitted)
+	}
+	if got, want := string(emitted[0].Payload()), `{"double_score":75.0,"integer_score":75,"ok":true}`; got != want {
+		t.Fatalf("activity result payload = %s, want %s", got, want)
 	}
 
 }

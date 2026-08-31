@@ -2051,9 +2051,9 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 		NodeKey: "root.fan-out-source", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
 		Lineage:     events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
-		StateFields: map[string]any{"integer": json.Number("75"), "decimal": json.Number("75.0")},
+		StateFields: map[string]any{"integer": int64(75), "decimal": float64(75)},
 	}
-	capsuleJSON, err := json.Marshal(capsule)
+	capsuleJSON, err := fanoutobligation.MarshalCapsule(capsule)
 	if err != nil {
 		t.Fatalf("encode fan-out capsule: %v", err)
 	}

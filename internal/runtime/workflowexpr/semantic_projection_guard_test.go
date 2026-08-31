@@ -80,6 +80,55 @@ func TestWorkflowCELProjectionJSONSourcesPreserveNumberLexemes(t *testing.T) {
 	}
 }
 
+func TestWorkflowCELProjectionJSONWritersPreserveNumberKinds(t *testing.T) {
+	runtimeRoot := workflowProjectionRuntimeRoot(t)
+	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
+	boundaries := []struct {
+		name, path, function string
+	}{
+		{name: "delivery payload projection", path: filepath.Join(repoRoot, "internal", "events", "semantic_boundary.go"), function: "NewDeliveryEvent"},
+		{name: "external event publication", path: filepath.Join(repoRoot, "internal", "apiv1", "operator_event_publish.go"), function: "eventPublicationPayload"},
+		{name: "ordinary event payload", path: filepath.Join(runtimeRoot, "engine", "executor.go"), function: "encodePayload"},
+		{name: "dynamic flow auto-emit payload", path: filepath.Join(runtimeRoot, "manager", "flow_activation.go"), function: "buildDynamicFlowRuntimeCreationEventPlan"},
+		{name: "activity result payload", path: filepath.Join(runtimeRoot, "pipeline", "activity_engine.go"), function: "publishActivityResultWithID"},
+		{name: "workflow engine state", path: filepath.Join(runtimeRoot, "pipeline", "engine_mutation_commit.go"), function: "workflowEngineStateRecord"},
+		{name: "workflow activation state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_activation.go"), function: "PersistenceRecord"},
+		{name: "initial workflow projection", path: filepath.Join(runtimeRoot, "pipeline", "workflow_initial_materialization_commit.go"), function: "workflowInitialMaterializationRecord"},
+		{name: "fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_obligation.go"), function: "commitFanOutIntentTx"},
+		{name: "entity source revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_obligation.go"), function: "insertFanOutEntitySourceRevisionTx"},
+		{name: "fork fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_materializer.go"), function: "materializeRunForkFanOutObligations"},
+		{name: "selected-contract fork event route", path: filepath.Join(runtimeRoot, "runforkexecution", "runtime_container.go"), function: "projectSelectedContractSourceEventWorkflowStates"},
+		{name: "selected-contract fork event mutation", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_selected_contract_execution_mutation.go"), function: "projectRunForkSelectedContractSourceEventWorkflowState"},
+	}
+	for _, boundary := range boundaries {
+		t.Run(boundary.name, func(t *testing.T) {
+			raw, err := os.ReadFile(boundary.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preserving, erasing, found := workflowProjectionWriterBoundaryFacts(string(raw), boundary.function)
+			if !found || !preserving || erasing {
+				t.Fatalf("writer boundary %s facts = found:%v preserving:%v erasing:%v", boundary.function, found, preserving, erasing)
+			}
+		})
+	}
+	spec, err := os.ReadFile(filepath.Join(repoRoot, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obligation := range []string{
+		"production runtime-carrier JSON writer feeding this",
+		"preserves integer-versus-double kind",
+		"integral-float JSON encoding",
+		"resource-version identity remains governed by semantic_json.contract",
+		"Live-intent persistence and fork projection use",
+	} {
+		if !strings.Contains(string(spec), obligation) {
+			t.Errorf("platform spec lost runtime numeric writer obligation %q", obligation)
+		}
+	}
+}
+
 func TestFanOutSummaryRetiredRejectedVocabularyStaysAbsent(t *testing.T) {
 	runtimeRoot := workflowProjectionRuntimeRoot(t)
 	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
@@ -149,6 +198,65 @@ func arbitraryName(raw []byte, destination any) error { return json.Unmarshal(ra
 	if !found || canonical || projected || useNumber || !unmarshal {
 		t.Fatalf("hostile source facts = found:%v canonical:%v projected:%v use_number:%v unmarshal:%v", found, canonical, projected, useNumber, unmarshal)
 	}
+}
+
+func TestWorkflowProjectionWriterGuardDetectsKindErasingEncoder(t *testing.T) {
+	for name, hostile := range map[string]string{
+		"json marshal": `package hostile
+import "encoding/json"
+func arbitraryName(value any) ([]byte, error) { return json.Marshal(value) }
+`,
+		"semantic canonicalization": `package hostile
+import "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+func arbitraryName(value any) ([]byte, error) { return canonicaljson.Bytes(value) }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			preserving, erasing, found := workflowProjectionWriterBoundaryFacts(hostile, "arbitraryName")
+			if !found || preserving || !erasing {
+				t.Fatalf("hostile writer facts = found:%v preserving:%v erasing:%v", found, preserving, erasing)
+			}
+		})
+	}
+}
+
+func workflowProjectionWriterBoundaryFacts(source, functionName string) (preserving, erasing, found bool) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "source.go", source, 0)
+	if err != nil {
+		return false, false, false
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name == nil || function.Name.Name != functionName {
+			continue
+		}
+		found = true
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel == nil {
+				return true
+			}
+			owner, _ := selector.X.(*ast.Ident)
+			switch {
+			case owner != nil && owner.Name == "canonicaljson" && selector.Sel.Name == "MarshalPreservingNumberKinds":
+				preserving = true
+			case owner != nil && owner.Name == "fanoutobligation" && selector.Sel.Name == "MarshalCapsule":
+				preserving = true
+			case owner != nil && owner.Name == "json" && selector.Sel.Name == "Marshal":
+				erasing = true
+			case owner != nil && owner.Name == "canonicaljson" && (selector.Sel.Name == "Bytes" || selector.Sel.Name == "Encode"):
+				erasing = true
+			}
+			return true
+		})
+		break
+	}
+	return preserving, erasing, found
 }
 
 func workflowProjectionSourceBoundaryFacts(source, functionName string) (canonical, projected, useNumber, unmarshal, found bool) {

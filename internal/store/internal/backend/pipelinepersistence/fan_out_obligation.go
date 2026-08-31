@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -37,7 +38,7 @@ func commitFanOutIntentTx(
 	if err != nil {
 		return err
 	}
-	capsule, err := json.Marshal(request.Capsule)
+	capsule, err := fanoutobligation.MarshalCapsule(request.Capsule)
 	if err != nil {
 		return fmt.Errorf("encode fan-out capsule: %w", err)
 	}
@@ -132,7 +133,7 @@ func bindFanOutSourceTx(
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source run disagrees with originating intent")
 		}
 		var fields map[string]any
-		if err := json.Unmarshal(stateFields, &fields); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(stateFields, &fields); err != nil {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("decode fan-out entity source state: %w", err)
 		}
 		value, ok := fields[source.Field]
@@ -188,7 +189,7 @@ func insertFanOutEntitySourceRevisionTx(
 	triggerEventID string,
 	createdAt time.Time,
 ) (string, error) {
-	encoded, err := json.Marshal(value)
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(value)
 	if err != nil {
 		return "", fmt.Errorf("encode fan-out entity source revision: %w", err)
 	}

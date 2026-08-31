@@ -385,27 +385,27 @@ func workflowEngineStateRecord(
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	fields, err := canonicaljson.Bytes(projection.Fields)
+	fields, err := canonicaljson.MarshalPreservingNumberKinds(projection.Fields)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	bookkeeping, err := canonicaljson.Bytes(projection.Bookkeeping)
+	bookkeeping, err := canonicaljson.MarshalPreservingNumberKinds(projection.Bookkeeping)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	gates, err := canonicaljson.Bytes(projection.GatesAny())
+	gates, err := canonicaljson.MarshalPreservingNumberKinds(projection.GatesAny())
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	accumulator, err := canonicaljson.Bytes(projection.Accumulator)
+	accumulator, err := canonicaljson.MarshalPreservingNumberKinds(projection.Accumulator)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	config, err := canonicaljson.Bytes(projection.ConfigPayload(instance.WorkflowVersion))
+	config, err := canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(instance.WorkflowVersion))
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	initialFields, err := canonicaljson.Bytes(instance.InitialFieldValues)
+	initialFields, err := canonicaljson.MarshalPreservingNumberKinds(instance.InitialFieldValues)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}

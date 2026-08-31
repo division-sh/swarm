@@ -630,7 +630,7 @@ func eventPublicationPayload(params map[string]any) (json.RawMessage, bool, erro
 	}
 	entityID, supplied := cloned["entity_id"]
 	payloadEntityIDPresent := supplied && !isEmptyParam(entityID)
-	encoded, err := json.Marshal(cloned)
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(cloned)
 	if err != nil {
 		return nil, false, err
 	}

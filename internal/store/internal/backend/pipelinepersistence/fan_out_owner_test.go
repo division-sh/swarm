@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -23,6 +24,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -129,6 +131,59 @@ func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T)
 			decimal, decimalOK := intent.Request.Capsule.StateFields["decimal"].(json.Number)
 			if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
 				t.Fatalf("hydrated capsule numerics = integer:%#v decimal:%#v, want lexical json.Number carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
+			}
+		})
+	}
+}
+
+func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := fanOutReadbackTestDB(t, backend)
+			newValueType := "TEXT"
+			if backend == "postgres" {
+				newValueType = "JSONB"
+			}
+			if _, err := db.Exec(`CREATE TABLE entity_mutations (
+				mutation_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, entity_id TEXT NOT NULL,
+				domain TEXT NOT NULL, path TEXT NOT NULL, old_value ` + newValueType + ` NOT NULL,
+				new_value ` + newValueType + ` NOT NULL, caused_by_event TEXT,
+				writer_type TEXT NOT NULL, writer_id TEXT NOT NULL, handler_step TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL
+			)`); err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := uuid.NewString()
+			mutationID, err := insertFanOutEntitySourceRevisionTx(
+				context.Background(), tx, backend == "postgres", privaterunforkrevision.NewEffects(),
+				runID, uuid.NewString(), "items",
+				[]any{map[string]any{"integer": int64(75), "double": float64(75), "exponent": json.Number("75e0")}},
+				uuid.NewString(), time.Now().UTC(),
+			)
+			if err != nil {
+				_ = tx.Rollback()
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			var raw []byte
+			if err := db.QueryRow(`SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var items []map[string]any
+			if err := canonicaljson.DecodePreservingNumberLexemes(raw, &items); err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range map[string]string{"integer": "75", "double": "75.0", "exponent": "75.0"} {
+				got, ok := items[0][field].(json.Number)
+				if !ok || got.String() != want {
+					t.Fatalf("persisted entity revision %s = %#v, want %q", field, items[0][field], want)
+				}
 			}
 		})
 	}
@@ -265,10 +320,11 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 	if err != nil {
 		t.Fatal(err)
 	}
-	capsule, err := json.Marshal(fanoutobligation.Capsule{
+	capsule, err := fanoutobligation.MarshalCapsule(fanoutobligation.Capsule{
 		NodeKey: "root.fan-out", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
+		Lineage:     events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
+		StateFields: map[string]any{"integer": int64(75), "double": float64(75)},
 	})
 	if err != nil {
 		t.Fatal(err)

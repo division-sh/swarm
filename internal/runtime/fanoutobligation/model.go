@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -101,6 +102,12 @@ type Capsule struct {
 	StateFields      map[string]any            `json:"state_fields,omitempty"`
 	StateBookkeeping map[string]any            `json:"state_bookkeeping,omitempty"`
 	StateGates       map[string]bool           `json:"state_gates,omitempty"`
+}
+
+// MarshalCapsule preserves the admitted integer-versus-double carrier kind
+// needed when the capsule is evaluated after its originating handler returns.
+func MarshalCapsule(c Capsule) ([]byte, error) {
+	return canonicaljson.MarshalPreservingNumberKinds(c)
 }
 
 func (c Capsule) Validate() error {
