@@ -260,8 +260,16 @@ func TestOperatorChannelTerminalReplayAfterCredentialRotationSelectedStoreParity
 
 				current = false
 				replayed, replayedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
-				if !errors.Is(err, operatorchannel.ErrCredentialStale) || replayed.State != operatorchannel.StateBound || replayedBinding.Revision != binding.Revision {
-					t.Fatalf("rotated terminal replay = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
+				if mode == unresolvedOperatorChannelProofCompletionFailed {
+					if err != nil || replayed.State != operatorchannel.StateBound || replayed.ProofStatus != operatorchannel.ProofActive || replayedBinding.Revision != binding.Revision {
+						t.Fatalf("written proof recovery after rotation = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
+					}
+					responsibilities, listErr := fixture.store.ListPendingProofResponsibilities(ctx)
+					if listErr != nil || len(responsibilities) != 0 {
+						t.Fatalf("written proof responsibility remained fenced = %#v err:%v", responsibilities, listErr)
+					}
+				} else if !errors.Is(err, operatorchannel.ErrCredentialStale) || replayed.State != operatorchannel.StateBound || replayedBinding.Revision != binding.Revision {
+					t.Fatalf("unwritten proof recovery after rotation = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
 				}
 				if _, _, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, false, now.Add(4*time.Second)); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
 					t.Fatalf("changed terminal replay decision error = %v", err)

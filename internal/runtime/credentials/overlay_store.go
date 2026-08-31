@@ -198,6 +198,17 @@ func (s *OverlayStore) currentValueMatchesSeal(ctx context.Context, evidence Val
 	return home.matchExactValue(ctx, evidence.Key, snapshot.CredentialValue(), evidence.Seal)
 }
 
+func (s *OverlayStore) observedValueMatchesSeal(ctx context.Context, evidence ValueEvidence, value string) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	home, ok := s.writable.(valueSealKeyHome)
+	if !ok || home == nil {
+		return false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	return home.matchExactValue(ctx, evidence.Key, value, evidence.Seal)
+}
+
 func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error) {
 	snapshot, err := s.Snapshot(ctx, key)
 	if err != nil {
