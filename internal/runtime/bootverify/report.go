@@ -52,6 +52,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"declared_agent_name_valid":               "Give every agent declaration one scoped URI owner and one non-empty literal public name, or remove the invalid declaration.",
 	"dialect_compliance":                      "Replace the unsupported contract dialect form with the promoted platform-spec shape or remove it.",
 	"emit_field_expression_validation":        "Fix the emit field expression so it references declared fields and uses supported CEL syntax.",
+	"executable_reader_expression_validation": "Fix the executable value expression so it consumes the exact typed payload and makes every optional-field decision explicit.",
 	"entity_write_target_compliance":          "Update the entity write target to a declared writable entity field or remove the invalid write.",
 	"entity_writer_coverage":                  "Add a supported writer for each required entity field or remove/relax the field requirement in the contract.",
 	"event_cycle_detection":                   "Break the event cycle by changing one handler emission, transition, or subscription so the static event graph is acyclic.",

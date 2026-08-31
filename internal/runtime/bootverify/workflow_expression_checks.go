@@ -20,6 +20,9 @@ func checkDataAccumulationExpressionValidation(c *checkerContext) []Finding {
 func checkEmitFieldExpressionValidation(c *checkerContext) []Finding {
 	return c.emitFieldExpressions()
 }
+func checkExecutableReaderExpressionValidation(c *checkerContext) []Finding {
+	return c.executableReaderExpressions()
+}
 func checkExpressionFieldReferenceValidation(c *checkerContext) []Finding {
 	return c.expressionFieldReferences()
 }
@@ -182,6 +185,61 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 	return c.emitFieldExprFindings
 }
 
+func (c *checkerContext) executableReaderExpressions() []Finding {
+	if c.executableReaderExprLoaded {
+		return c.executableReaderExprFindings
+	}
+	c.executableReaderExprLoaded = true
+	for _, record := range wave1ScopedNodeRecords(c.source) {
+		nodeRef, _ := record.Identity()
+		nodeID := nodeRef.Key()
+		for eventType, handler := range record.Entry.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
+			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+				if executableReaderHasSpecializedExpressionCheck(expr) {
+					continue
+				}
+				if err := strings.TrimSpace(expr.ResultTypeError); err != "" {
+					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
+						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("node %s handler %s %s has no exact result schema: %s", nodeID, eventType, expr.Kind, err), Location: nodeID,
+					})
+					continue
+				}
+				if payloadTypeErr != nil && workflowexpr.ExpressionReferencesRoot(expr.Expression, "payload") {
+					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
+						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("node %s handler %s %s has no exact payload schema: %v", nodeID, eventType, expr.Kind, payloadTypeErr), Location: nodeID,
+					})
+					continue
+				}
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, executableReaderExpressionOptions(expr, payloadType)); err != nil {
+					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
+						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("node %s handler %s %s %q is invalid: %v", nodeID, eventType, expr.Kind, expr.Expression, err), Location: nodeID,
+					})
+				}
+			}
+		}
+	}
+	return c.executableReaderExprFindings
+}
+
+func executableReaderHasSpecializedExpressionCheck(expr expressionReference) bool {
+	if expr.HasConditionContext {
+		return true
+	}
+	switch expr.Phase {
+	case runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
+		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
+		runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *checkerContext) expressionFieldReferences() []Finding {
 	if c.entityRefLoaded {
 		return c.entityRefFindings
@@ -291,6 +349,7 @@ type expressionReference struct {
 	ResultType                runtimecontracts.ResolvedCatalogType
 	HasResultType             bool
 	ResultOptional            bool
+	ResultTypeError           string
 	ConditionContext          runtimepipeline.WorkflowConditionContext
 	HasConditionContext       bool
 	ConditionCollectionSource string

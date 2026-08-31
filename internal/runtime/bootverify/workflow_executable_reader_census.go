@@ -29,8 +29,8 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Action": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendActionExecutableReaders(out, "action", handler.Action)
 	},
-	"Activity": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendActivityExecutableReaders(out, "activity", handler.Activity)
+	"Activity": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
+		appendActivityExecutableReaders(out, ctx, "activity", handler.Activity)
 	},
 	"CreateEntity": noHandlerExecutableReaders,
 	"SelectEntity": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
@@ -114,8 +114,8 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"Action": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendActionExecutableReaders(out, prefix+".action", rule.Action)
 	},
-	"Activity": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendActivityExecutableReaders(out, prefix+".activity", rule.Activity)
+	"Activity": func(out *[]expressionReference, ctx executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
+		appendActivityExecutableReaders(out, ctx, prefix+".activity", rule.Activity)
 	},
 	"DataAccumulation": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendDataAccumulationExecutableReaders(out, prefix+".data_accumulation", rule.DataAccumulation)
@@ -244,10 +244,59 @@ func appendActionExecutableReaders(out *[]expressionReference, kind string, acti
 	}
 }
 
-func appendActivityExecutableReaders(out *[]expressionReference, kind string, activity runtimecontracts.ActivitySpec) {
+func appendActivityExecutableReaders(out *[]expressionReference, ctx executableReaderContext, kind string, activity runtimecontracts.ActivitySpec) {
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
-	appendExpressionValueMapExecutableReaders(out, kind+".input", activity.Input, phase)
+	keys := make([]string, 0, len(activity.Input))
+	for key := range activity.Input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		before := len(*out)
+		appendExpressionValueExecutableReaders(out, kind+".input."+strings.TrimSpace(key), activity.Input[key], phase)
+		resultType, resultOptional, found, err := activityInputResultType(ctx.source, activity.Tool, key)
+		for index := before; index < len(*out); index++ {
+			if err != nil {
+				(*out)[index].ResultTypeError = err.Error()
+				continue
+			}
+			if found {
+				(*out)[index].ResultType = resultType
+				(*out)[index].HasResultType = true
+				(*out)[index].ResultOptional = resultOptional
+			}
+		}
+	}
 	// Approval.Decision is an opaque stable identifier, not an expression.
+}
+
+func activityInputResultType(source semanticview.Source, toolID, field string) (runtimecontracts.ResolvedCatalogType, bool, bool, error) {
+	toolID = strings.TrimSpace(toolID)
+	field = strings.TrimSpace(field)
+	if source == nil || toolID == "" || field == "" {
+		return runtimecontracts.ResolvedCatalogType{}, false, false, nil
+	}
+	tool, ok := source.ToolEntries()[toolID]
+	if !ok {
+		return runtimecontracts.ResolvedCatalogType{}, false, false, nil
+	}
+	input := tool.InputSchema()
+	property, ok := input.Property(field)
+	if !ok {
+		if additional, hasAdditional := input.AdditionalPropertiesSchema(); hasAdditional {
+			property, ok = additional, true
+		} else if allowed, declared := input.AdditionalPropertiesAllowed(); declared && allowed {
+			property, ok = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaAny), true
+		}
+	}
+	if !ok {
+		return runtimecontracts.ResolvedCatalogType{}, false, false, nil
+	}
+	resolved, err := runtimecontracts.ResolveJSONSchemaStructuralType(property.Projection(), "tool."+toolID+".input."+field)
+	if err != nil {
+		return runtimecontracts.ResolvedCatalogType{}, false, false, fmt.Errorf("resolve activity input %s for tool %s: %w", field, toolID, err)
+	}
+	return resolved, !input.IsRequired(field), true, nil
 }
 
 func appendSelectExecutableReaders(out *[]expressionReference, kind string, spec *runtimecontracts.SelectEntitySpec) {

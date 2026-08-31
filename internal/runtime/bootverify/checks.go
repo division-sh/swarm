@@ -166,6 +166,9 @@ type checkerContext struct {
 	emitFieldExprLoaded   bool
 	emitFieldExprFindings []Finding
 
+	executableReaderExprLoaded   bool
+	executableReaderExprFindings []Finding
+
 	fanOutLoaded   bool
 	fanOutFindings []Finding
 
@@ -256,6 +259,7 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
 	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
+	{ID: "executable_reader_expression_validation", Severity: "error", Run: checkExecutableReaderExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
 	{ID: "primary_entity_validation", Severity: "error", Run: checkPrimaryEntityValidation},

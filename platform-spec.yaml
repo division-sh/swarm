@@ -4530,6 +4530,7 @@ handler_specification:
       checks:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
+        executable_reader_rule: Every expression-bearing entry in the closed executable-reader census, including action values, activity inputs, select bindings, compute inputs, fan-out expressions, and collection sources, is compiled at boot against the exact structural payload/item owner and exact typed sink when one is declared. Activity input sinks consume the admitted tool input schema, so optional-to-optional forwarding is valid while optional-to-required forwarding and incompatible value types fail before execution. Specialized condition, data-accumulation, and emit checks consume the same compiler and do not exempt other reader phases. An undecided optional read is hard invalidity before execution.
         filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
         query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed

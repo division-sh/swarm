@@ -3268,6 +3268,70 @@ func TestRunQueryFilterUsesSchemaBoundConditionAdmission(t *testing.T) {
 	}
 }
 
+func TestRunActivityInputUsesSchemaBoundExpressionAdmission(t *testing.T) {
+	tests := []struct {
+		name           string
+		expression     string
+		payloadType    string
+		toolInputType  runtimecontracts.ToolSchemaKind
+		toolInputIsReq bool
+		wantError      bool
+	}{
+		{name: "required source to required sink", expression: `payload.id`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true},
+		{name: "optional source with decision to required sink", expression: `payload.?note.orValue("fallback")`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true},
+		{name: "optional source forwarded to optional sink", expression: `payload.?note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString},
+		{name: "undecided optional source", expression: `payload.note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, wantError: true},
+		{name: "optional source forwarded to required sink", expression: `payload.?note`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaString, toolInputIsReq: true, wantError: true},
+		{name: "source type mismatches sink", expression: `payload.id`, payloadType: "text", toolInputType: runtimecontracts.ToolSchemaInteger, toolInputIsReq: true, wantError: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Run(context.Background(), schemaBoundActivityInputSource(tc.expression, tc.payloadType, tc.toolInputType, tc.toolInputIsReq), Options{})
+			found := reportContains(report.Errors(), "executable_reader_expression_validation", "")
+			if found != tc.wantError {
+				t.Fatalf("activity input findings = %#v, want expression error=%v", report.Errors(), tc.wantError)
+			}
+		})
+	}
+}
+
+func schemaBoundActivityInputSource(expression, payloadType string, toolInputType runtimecontracts.ToolSchemaKind, toolInputRequired bool) semanticview.Source {
+	inputOptions := []runtimecontracts.ToolInputSchemaOption{
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"value": runtimecontracts.MustToolInputSchema(toolInputType),
+		}),
+	}
+	if toolInputRequired {
+		inputOptions = append(inputOptions, runtimecontracts.ToolSchemaRequired("value"))
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.received": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"id": {Type: payloadType}, "note": {Type: payloadType},
+				},
+				Required: []string{"id"},
+			}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"notify": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, inputOptions...),
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			)),
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				ID: "worker",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"work.received": {Activity: runtimecontracts.ActivitySpec{Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
+						"value": runtimecontracts.CELExpression(expression),
+					}}},
+				},
+			},
+		},
+	})
+}
+
 func schemaBoundQueryFilterSource(expression string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
@@ -6826,8 +6890,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 79 {
-		t.Fatalf("bootCheckRegistry count = %d, want 79", got)
+	if got := len(bootCheckRegistry); got != 80 {
+		t.Fatalf("bootCheckRegistry count = %d, want 80", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
