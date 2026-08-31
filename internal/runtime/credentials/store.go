@@ -100,6 +100,7 @@ type valueSealStore interface {
 	hasDurableValueSealKeyHome() bool
 	sealCurrentValue(context.Context, string) (ValueEvidence, error)
 	currentValueMatchesSeal(context.Context, ValueEvidence) (bool, error)
+	observedValueMatchesSeal(context.Context, ValueEvidence, string) (bool, error)
 }
 
 type valueSealKeyHome interface {
@@ -309,10 +310,32 @@ func (o *SnapshotOwner) SealCurrentValue(ctx context.Context, key string) (Value
 }
 
 func (o *SnapshotOwner) CurrentValueMatchesSeal(ctx context.Context, evidence ValueEvidence) (bool, error) {
+	_, current, err := o.ObserveValueMatchingSeal(ctx, evidence)
+	return current, err
+}
+
+// ObserveValueMatchingSeal returns the exact credential observation whose raw
+// value was checked against the supplied durable evidence.
+func (o *SnapshotOwner) ObserveValueMatchingSeal(ctx context.Context, evidence ValueEvidence) (AdmittedSnapshot, bool, error) {
 	if o == nil || o.values == nil {
-		return false, fmt.Errorf("credential snapshot owner is required")
+		return AdmittedSnapshot{}, false, fmt.Errorf("credential snapshot owner is required")
 	}
-	return CurrentValueMatchesSeal(ctx, o.values, evidence)
+	if err := evidence.Validate(); err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	snapshot, err := o.Observe(ctx, evidence.Key)
+	if err != nil {
+		return AdmittedSnapshot{}, false, err
+	}
+	if !snapshot.Present || !credentialValueUsable(snapshot.CredentialValue()) {
+		return snapshot, false, nil
+	}
+	owner, ok := o.values.(valueSealStore)
+	if !ok || owner == nil {
+		return AdmittedSnapshot{}, false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	current, err := owner.observedValueMatchesSeal(ctx, evidence, snapshot.CredentialValue())
+	return snapshot, current, err
 }
 
 func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapshot, error) {

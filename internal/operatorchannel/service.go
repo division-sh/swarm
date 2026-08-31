@@ -329,26 +329,32 @@ func (s *Service) materializeProof(ctx context.Context, responsibility ProofResp
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, responsibility.Operation.ProofID, responsibility.Operation.ProofRevision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
+	existing, found, err := s.proofs.Get(ctx, proof.Interface)
+	if err != nil {
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
+	if found && existing.ProofID == proof.ProofID && existing.Revision == proof.Revision {
+		if !proofMatchesResponsibility(existing, proof) {
+			err = fmt.Errorf("%w: existing proof %q revision %d contradicts its durable responsibility", ErrRevisionConflict, proof.ProofID, proof.Revision)
+		} else {
+			// The file write is already durable. Its deployment occurrence is
+			// immutable even when a later serve completes the database handoff.
+			return s.store.CompleteProofResponsibility(ctx, responsibility.Operation.OperationID, existing.ProofID, existing.Revision, ProofActive, "", now)
+		}
+	}
+	if err != nil {
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
 	current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, proof.ProviderCredential)
 	if currentErr != nil || !current {
 		err := errors.Join(fmt.Errorf("%w: provider credential changed before proof materialization", ErrCredentialStale), currentErr)
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, responsibility.Operation.ProofID, responsibility.Operation.ProofRevision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
-	existing, found, err := s.proofs.Get(ctx, proof.Interface)
-	if err == nil && found && existing.ProofID == proof.ProofID && existing.Revision == proof.Revision {
-		if !proofMatchesResponsibility(existing, proof) {
-			err = fmt.Errorf("%w: existing proof %q revision %d contradicts its durable responsibility", ErrRevisionConflict, proof.ProofID, proof.Revision)
-		} else {
-			// The file write is already durable. Its deployment occurrence is
-			// immutable even when a later serve completes the database handoff.
-			proof = existing
-		}
-	} else if err == nil {
-		proof.MintingDeploymentID = s.deploymentID
-		err = s.proofs.Put(ctx, proof)
-	}
-	if err != nil {
+	proof.MintingDeploymentID = s.deploymentID
+	if err := s.proofs.Put(ctx, proof); err != nil {
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
