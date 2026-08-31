@@ -797,19 +797,20 @@ func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *ru
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
 		"package.yaml":  "name: workflow-timer-startup\nversion: 1\nplatform_version: '>=0.7.0 <0.8.0'\n",
-		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
+		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\npins:\n  inputs:\n    events:\n      - event: generic.tick\n        source: external\n",
 		"entities.yaml": "test_entity: {}\n",
+		"events.yaml":   "generic.tick: {}\n",
 	})
-	bundle.Semantics = runtimecontracts.WorkflowSemanticView{
-		Name: "workflow-timer-startup", Version: "1", InitialStage: "waiting",
-		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}, TerminalStages: []string{"done"},
-		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: delay,
-		}},
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}
+	bundle.Semantics.Name = "workflow-timer-startup"
+	bundle.Semantics.Version = "1"
+	bundle.Semantics.InitialStage = "waiting"
+	bundle.Semantics.Stages = []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}
+	bundle.Semantics.TerminalStages = []string{"done"}
+	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
+		ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
+		Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+		StartOn: "state:waiting", Delay: delay,
+	}}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "0.7.0"
 	return bundle
