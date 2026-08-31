@@ -650,11 +650,21 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseAwaitingExternalIdentity, Now: now.Add(2 * time.Second)}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("stale phase advance = %v", err)
 	}
+	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseActivatingProvider,
+		BindingRevision: 4, Now: now.Add(2 * time.Second),
+	}); !errors.Is(err, channelonboarding.ErrInvalidRequest) {
+		t.Fatalf("binding revision outside confirmation/publication phase = %v", err)
+	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: 4, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = 4
+		}
+		op, err = store.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatalf("advance %s: %v", phase, err)
 		}

@@ -251,6 +251,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, err
 		}
 	}
+	if req.BindingRevision > 0 && req.Phase != domain.PhaseAwaitingOperatorConfirmation && req.Phase != domain.PhasePublishingActivation {
+		return domain.Operation{}, domain.ErrInvalidRequest
+	}
 	if req.RebindCoordinate != nil {
 		coordinate := req.RebindCoordinate.Normalized()
 		if err := coordinate.Validate(); err != nil {
