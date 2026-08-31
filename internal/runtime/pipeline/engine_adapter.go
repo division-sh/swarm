@@ -865,6 +865,11 @@ func newCoordinatorEngineEvaluator(pc *PipelineCoordinator) runtimeengine.Evalua
 }
 
 func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext, predicate string) (int, error) {
+	projected, err := projectWorkflowExpressionContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	ctx = projected
 	if e.coordinator == nil || e.coordinator.workflowStore == nil || !e.coordinator.workflowStore.enabled() {
 		return 0, nil
 	}
@@ -1232,7 +1237,7 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 	}
 	envelope := pc.handlerEmitEnvelope(ctx, engineTriggerContext(req), strings.TrimSpace(eventType))
 	if emitSurface := runtimeengine.EmitSurfaceFromContext(ctx); emitSurface == runtimeengine.EmitSurfaceDeclarative {
-		if err := rejectAuthoredEnvelopeFields(out); err != nil {
+		if err := rejectAuthoredEnvelopeFields(eventType, out); err != nil {
 			return nil, err
 		}
 	}
@@ -1252,7 +1257,10 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 		return nil
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
-		return fmt.Errorf("%w: event %s payload schema is unresolved: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)
+		return &runtimeengine.EmitPayloadContractError{
+			Event: proof.EventKey(), Kind: runtimeengine.EmitPayloadSchemaUnresolved, Path: "$", Constraint: "resolved_schema",
+			Expected: "resolved event payload schema", Actual: "unresolved", Detail: "payload schema is unresolved: " + err.Error(), Cause: err,
+		}
 	}
 	schema := resolution.Schema
 	allowed := eventPayloadProperties(proof.Entry)
@@ -1261,18 +1269,30 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 		validationPayload = runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(validationPayload, allowed)
 	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
-		return fmt.Errorf("%w: event %s payload violates schema: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)
+		var violation *runtimeeventschema.Violation
+		if !errors.As(err, &violation) || violation == nil {
+			return fmt.Errorf("event %s schema validator returned untyped violation: %w", proof.EventKey(), err)
+		}
+		return &runtimeengine.EmitPayloadContractError{
+			Event: proof.EventKey(), Kind: runtimeengine.EmitPayloadSchemaMismatch,
+			Path: violation.Path, Constraint: violation.Constraint, Expected: violation.Expected, Actual: violation.Actual,
+			Detail: "payload violates schema: " + violation.Detail, Cause: violation,
+		}
 	}
 	return nil
 }
 
-func rejectAuthoredEnvelopeFields(payload map[string]any) error {
+func rejectAuthoredEnvelopeFields(eventType string, payload map[string]any) error {
 	fields := runtimeeventpayload.RuntimeOwnedCanonicalContextFields(payload)
 	if len(fields) == 0 {
 		return nil
 	}
 	sort.Strings(fields)
-	return fmt.Errorf("%w: authored emit payload must not include platform-owned envelope field(s): %s", runtimeengine.ErrEmitPayloadContractViolation, strings.Join(fields, ", "))
+	return &runtimeengine.EmitPayloadContractError{
+		Event: strings.TrimSpace(eventType), Kind: runtimeengine.EmitPayloadEnvelopeField, Path: "$", Constraint: "platform_owned_envelope_fields",
+		Expected: "authored business payload only", Actual: strings.Join(fields, ", "),
+		Detail: "authored emit payload must not include platform-owned envelope field(s): " + strings.Join(fields, ", "),
+	}
 }
 
 func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType string) map[string]struct{} {

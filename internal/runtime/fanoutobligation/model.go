@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -101,6 +102,12 @@ type Capsule struct {
 	StateFields      map[string]any            `json:"state_fields,omitempty"`
 	StateBookkeeping map[string]any            `json:"state_bookkeeping,omitempty"`
 	StateGates       map[string]bool           `json:"state_gates,omitempty"`
+}
+
+// MarshalCapsule preserves the admitted integer-versus-double carrier kind
+// needed when the capsule is evaluated after its originating handler returns.
+func MarshalCapsule(c Capsule) ([]byte, error) {
+	return canonicaljson.MarshalPreservingNumberKinds(c)
 }
 
 func (c Capsule) Validate() error {
@@ -332,33 +339,82 @@ func ValidateSemanticRejection(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("semantic rejection requires a typed failure envelope: %w", err)
 	}
-	if failure.Retryable || !failure.Deterministic || failure.Class == runtimefailures.ClassInternalFailure || failure.Class == runtimefailures.ClassOutcomeUncertain {
-		return errors.New("semantic rejection requires deterministic non-retryable item failure evidence")
+	if failure.Class != runtimefailures.ClassSchemaInvalid || failure.Detail.Code != "emit_payload_contract_violation" || failure.Retryable || !failure.Deterministic {
+		return errors.New("semantic rejection requires exact emit-contract failure evidence")
 	}
-	return nil
+	attributes := failure.Detail.Attributes
+	for _, name := range []string{"event", "kind", "path", "constraint", "expected", "detail"} {
+		value, present := attributes[name].(string)
+		if !present || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("semantic rejection emit-contract attribute %q is required", name)
+		}
+	}
+	actual, actualPresent := attributes["actual"].(string)
+	if !actualPresent {
+		return errors.New("semantic rejection emit-contract attribute \"actual\" is required")
+	}
+	switch attributes["kind"] {
+	case "schema_mismatch":
+		// Empty and whitespace-only strings are legitimate rejected values. The
+		// typed attribute's presence distinguishes them from missing evidence.
+		return nil
+	case "schema_unresolved", "authored_envelope_field":
+		if strings.TrimSpace(actual) == "" {
+			return errors.New("semantic rejection emit-contract attribute \"actual\" is required")
+		}
+		return nil
+	default:
+		return errors.New("semantic rejection requires a recognized emit-contract rejection kind")
+	}
 }
 
 type RunSummary struct {
-	RunID           string                   `json:"run_id"`
-	Intents         int                      `json:"intents"`
-	Open            int                      `json:"open"`
-	Blocked         int                      `json:"blocked"`
-	BlockedIntents  []BlockedIntentDiagnosis `json:"blocked_intents"`
-	Cardinality     int                      `json:"cardinality"`
-	Cursor          int                      `json:"cursor"`
-	Owed            int                      `json:"owed"`
-	Committed       int                      `json:"committed"`
-	Rejected        int                      `json:"rejected"`
-	Canceled        int                      `json:"canceled"`
-	Settled         int                      `json:"settled"`
-	Unsettled       int                      `json:"unsettled"`
-	BarrierArmed    int                      `json:"barrier_armed"`
-	BarrierPending  int                      `json:"barrier_closed_pending"`
-	BarrierTerminal int                      `json:"barrier_terminal"`
-	MinNextChunk    int                      `json:"min_next_chunk"`
-	MaxNextChunk    int                      `json:"max_next_chunk"`
-	LastChunkMaxMS  int64                    `json:"last_chunk_max_ms"`
-	OldestAgeMS     int64                    `json:"oldest_age_ms"`
+	RunID                   string                         `json:"run_id"`
+	Intents                 int                            `json:"intents"`
+	Open                    int                            `json:"open"`
+	Blocked                 int                            `json:"blocked"`
+	BlockedIntents          []BlockedIntentDiagnosis       `json:"blocked_intents"`
+	Cardinality             int                            `json:"cardinality"`
+	Cursor                  int                            `json:"cursor"`
+	Owed                    int                            `json:"owed"`
+	Committed               int                            `json:"committed"`
+	SemanticRejected        int                            `json:"semantic_rejected"`
+	SemanticRejectionSample *FanOutSemanticRejectionSample `json:"semantic_rejection_sample"`
+	Canceled                int                            `json:"canceled"`
+	Settled                 int                            `json:"settled"`
+	Unsettled               int                            `json:"unsettled"`
+	BarrierArmed            int                            `json:"barrier_armed"`
+	BarrierPending          int                            `json:"barrier_closed_pending"`
+	BarrierTerminal         int                            `json:"barrier_terminal"`
+	MinNextChunk            int                            `json:"min_next_chunk"`
+	MaxNextChunk            int                            `json:"max_next_chunk"`
+	LastChunkMaxMS          int64                          `json:"last_chunk_max_ms"`
+	OldestAgeMS             int64                          `json:"oldest_age_ms"`
+}
+
+type FanOutSemanticRejectionSample struct {
+	TriggeringDeliveryID string                   `json:"triggering_delivery_id"`
+	PackageKey           string                   `json:"package_key"`
+	ElementID            string                   `json:"element_id"`
+	Ordinal              int                      `json:"ordinal"`
+	Failure              runtimefailures.Envelope `json:"failure"`
+}
+
+func (s FanOutSemanticRejectionSample) Validate() error {
+	if _, err := uuid.Parse(strings.TrimSpace(s.TriggeringDeliveryID)); err != nil {
+		return errors.New("fan-out semantic rejection sample requires triggering delivery identity")
+	}
+	if _, err := (runtimecontracts.FanOutElementRef{PackageKey: s.PackageKey, ElementID: s.ElementID}).ContractElementRef(); err != nil {
+		return err
+	}
+	if s.Ordinal < 0 {
+		return errors.New("fan-out semantic rejection sample ordinal cannot be negative")
+	}
+	raw, err := runtimefailures.MarshalEnvelope(s.Failure)
+	if err != nil {
+		return err
+	}
+	return ValidateSemanticRejection(raw)
 }
 
 type BlockedIntentDiagnosis struct {
@@ -387,11 +443,22 @@ func (s RunSummary) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(s.RunID)); err != nil {
 		return errors.New("fan-out run summary requires canonical run identity")
 	}
-	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.Rejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.BarrierArmed < 0 || s.BarrierPending < 0 || s.BarrierTerminal < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.LastChunkMaxMS < 0 || s.OldestAgeMS < 0 {
+	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.SemanticRejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.BarrierArmed < 0 || s.BarrierPending < 0 || s.BarrierTerminal < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.LastChunkMaxMS < 0 || s.OldestAgeMS < 0 {
 		return errors.New("fan-out run summary counts cannot be negative")
 	}
-	if s.Cursor != s.Committed+s.Rejected || s.Cardinality != s.Cursor+s.Owed+s.Canceled || s.Committed != s.Settled+s.Unsettled {
+	if s.Cursor != s.Committed+s.SemanticRejected || s.Cardinality != s.Cursor+s.Owed+s.Canceled || s.Committed != s.Settled+s.Unsettled {
 		return errors.New("fan-out run summary progress facts are contradictory")
+	}
+	if (s.SemanticRejected == 0) != (s.SemanticRejectionSample == nil) {
+		return errors.New("fan-out semantic rejection count disagrees with deterministic sample")
+	}
+	if s.SemanticRejectionSample != nil {
+		if s.SemanticRejectionSample.Ordinal >= s.Cardinality {
+			return errors.New("fan-out semantic rejection sample ordinal is outside run cardinality")
+		}
+		if err := s.SemanticRejectionSample.Validate(); err != nil {
+			return fmt.Errorf("fan-out semantic rejection sample: %w", err)
+		}
 	}
 	if (s.Intents == 0) != (s.MinNextChunk == 0 && s.MaxNextChunk == 0) || s.MinNextChunk > s.MaxNextChunk || s.MaxNextChunk > MaxChunkSize {
 		return errors.New("fan-out run summary adaptive chunk facts are contradictory")

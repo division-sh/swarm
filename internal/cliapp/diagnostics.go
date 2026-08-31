@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/cli/readwindow"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/spf13/cobra"
 )
@@ -84,6 +86,7 @@ type DiagnosticRunDiagnosisResult struct {
 	BlockingReason   *string                        `json:"blocking_reason"`
 	Heuristics       []string                       `json:"heuristics"`
 	FailedDeliveries []diagnosticRunFailureDelivery `json:"failed_deliveries"`
+	FanOut           fanoutobligation.RunSummary    `json:"fan_out"`
 	TestQuiescence   *diagnosticRunTestQuiescence   `json:"test_quiescence"`
 }
 
@@ -1186,6 +1189,12 @@ func validateDiagnosticRunDiagnosis(result DiagnosticRunDiagnosisResult) error {
 			return err
 		}
 	}
+	if err := result.FanOut.Validate(); err != nil {
+		return fmt.Errorf("malformed run.diagnose result: fan_out: %w", err)
+	}
+	if result.FanOut.RunID != result.Run.RunID {
+		return fmt.Errorf("malformed run.diagnose result: fan_out.run_id must match run.run_id")
+	}
 	return nil
 }
 
@@ -1455,6 +1464,13 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 			formatCLIHumanCount(len(result.FailedDeliveries), "failed delivery", "failed deliveries"),
 		)})
 	}
+	rows = append(rows, cliLabeledDetailRow{Label: "fan out", Value: fmt.Sprintf(
+		"%s, %s, %s, %s",
+		formatCLIHumanCount(result.FanOut.Committed, "committed item", "committed items"),
+		formatCLIHumanCount(result.FanOut.SemanticRejected, "semantic rejection", "semantic rejections"),
+		formatCLIHumanCount(result.FanOut.Canceled, "canceled item", "canceled items"),
+		formatCLIHumanCount(result.FanOut.Unsettled, "unsettled item", "unsettled items"),
+	)})
 	if layer := stringPointerValue(result.BlockingLayer); layer != "" {
 		value := formatCLIHumanCode(cliHumanCodeRunBlockingLayer, layer)
 		if reason := stringPointerValue(result.BlockingReason); reason != "" {
@@ -1483,6 +1499,17 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		}
 		failures = append(failures, value)
 	}
+	semanticRejections := []string{}
+	if sample := result.FanOut.SemanticRejectionSample; sample != nil {
+		semanticRejections = append(semanticRejections, fmt.Sprintf(
+			"delivery %s, element %s/%s, ordinal %d, %s",
+			sample.TriggeringDeliveryID,
+			sample.PackageKey,
+			sample.ElementID,
+			sample.Ordinal,
+			fanOutSemanticRejectionFailureSummary(sample.Failure),
+		))
+	}
 	titleState := formatCLIHumanCode(cliHumanCodeOperationalState, state)
 	if strings.EqualFold(strings.TrimSpace(state), "forked") {
 		titleState = diagnosticRunStatusLabel(result.Run)
@@ -1493,8 +1520,29 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		Sections: []cliLabeledDetailSection{
 			{Label: "notes", Items: result.Heuristics},
 			{Label: "failed deliveries", Items: failures},
+			{Label: "fan-out semantic rejection sample", Items: semanticRejections},
 		},
 	})
+}
+
+func fanOutSemanticRejectionFailureSummary(failure runtimefailures.Envelope) string {
+	parts := []string{eventObservationFailureSummary(&failure)}
+	attributes := failure.Detail.Attributes
+	for _, field := range []string{"event", "path", "constraint", "expected"} {
+		value := strings.TrimSpace(fmt.Sprint(attributes[field]))
+		if value == "" || value == "<nil>" {
+			continue
+		}
+		parts = append(parts, field+"="+value)
+	}
+	if actual, present := attributes["actual"].(string); present {
+		value := actual
+		if strings.TrimSpace(value) == "" {
+			value = strconv.Quote(value)
+		}
+		parts = append(parts, "actual="+value)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func diagnosticRunStatusLabel(run diagnosticRunHeader) string {

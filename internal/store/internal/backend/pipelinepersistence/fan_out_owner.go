@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -73,7 +74,7 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		return fanoutobligation.Intent{}, fmt.Errorf("decode fan-out lease time: %w", err)
 	}
 	var capsule fanoutobligation.Capsule
-	if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(capsuleRaw, &capsule); err != nil {
 		return fanoutobligation.Intent{}, fmt.Errorf("decode fan-out capsule: %w", err)
 	}
 	source := fanoutobligation.SourceRef{
@@ -604,7 +605,7 @@ func commitFanOutChunk(
 				}
 				committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
 				if err != nil {
-					return fanOutPublicationSemanticError(outcome.Ordinal, err)
+					return fmt.Errorf("commit fan-out publication ordinal %d: %w", outcome.Ordinal, err)
 				}
 				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 				if err != nil {
@@ -845,14 +846,6 @@ func semanticJSONEqual(actual any, expected json.RawMessage) bool {
 	return leftDecoder.Decode(&left) == nil && rightDecoder.Decode(&right) == nil && reflect.DeepEqual(left, right)
 }
 
-func fanOutPublicationSemanticError(ordinal int, err error) error {
-	failure, ok := runtimefailures.EnvelopeFromError(err)
-	if !ok || failure.Retryable || !failure.Deterministic || failure.Class == runtimefailures.ClassInternalFailure || failure.Class == runtimefailures.ClassOutcomeUncertain {
-		return fmt.Errorf("commit fan-out publication ordinal %d: %w", ordinal, err)
-	}
-	return runtimepipeline.NewFanOutItemSemanticError(ordinal, failure, err)
-}
-
 func nullableText(raw string) any {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -969,8 +962,23 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),COALESCE(MAX(last_chunk_ms),0),MIN(CASE WHEN status IN ('open','blocked') THEN created_at END) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Intents, &summary.Open, &summary.Blocked, &summary.Cardinality, &summary.Cursor, &summary.Owed, &summary.MinNextChunk, &summary.MaxNextChunk, &summary.LastChunkMaxMS, &oldestRaw); err != nil {
 		return summary, err
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind='committed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.Rejected); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind='committed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.SemanticRejected); err != nil {
 		return summary, err
+	}
+	if summary.SemanticRejected > 0 {
+		var sample fanoutobligation.FanOutSemanticRejectionSample
+		var failureRaw any
+		if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,package_key,element_id,ordinal,failure FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='semantic_rejected' ORDER BY triggering_delivery_id,package_key,element_id,ordinal LIMIT 1`, summary.RunID).Scan(
+			&sample.TriggeringDeliveryID, &sample.PackageKey, &sample.ElementID, &sample.Ordinal, &failureRaw,
+		); err != nil {
+			return summary, err
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope(jsonRawMessageValue(failureRaw))
+		if err != nil {
+			return summary, fmt.Errorf("decode fan-out semantic rejection sample: %w", err)
+		}
+		sample.Failure = failure
+		summary.SemanticRejectionSample = &sample
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='canceled' THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Canceled); err != nil {
 		return summary, err

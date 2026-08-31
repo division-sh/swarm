@@ -1,0 +1,141 @@
+package fanoutobligation
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
+)
+
+func TestValidateSemanticRejectionRequiresExactEmitContractEvidence(t *testing.T) {
+	exactAttributes := map[string]any{
+		"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+		"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+	}
+	attributes := func(changes map[string]any, remove ...string) map[string]any {
+		out := make(map[string]any, len(exactAttributes)+len(changes))
+		for name, value := range exactAttributes {
+			out[name] = value
+		}
+		for name, value := range changes {
+			out[name] = value
+		}
+		for _, name := range remove {
+			delete(out, name)
+		}
+		return out
+	}
+	for _, test := range []struct {
+		name       string
+		class      failures.Class
+		code       string
+		attributes map[string]any
+		valid      bool
+	}{
+		{name: "exact emit contract", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: exactAttributes, valid: true},
+		{name: "schema mismatch with empty actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": "", "detail": "$.external_id must be uuid",
+		}), valid: true},
+		{name: "schema mismatch with whitespace actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": "  ", "detail": "$.external_id must be uuid",
+		}), valid: true},
+		{name: "authorization", class: failures.ClassAuthorizationDenied, code: "fan_out_authorization_denied", attributes: map[string]any{"action": "publish"}},
+		{name: "forged emit code", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation"},
+		{name: "missing actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(nil, "actual")},
+		{name: "non-string actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{"actual": 0})},
+		{name: "unresolved schema with empty actual", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: attributes(map[string]any{
+			"kind": "schema_unresolved", "actual": "",
+		})},
+		{name: "unknown emit kind", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: map[string]any{
+			"event": "company.registered", "kind": "other", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope, ok := failures.EnvelopeFromError(failures.New(test.class, test.code, "test", "semantic_rejection", test.attributes))
+			if !ok {
+				t.Fatal("construct semantic rejection evidence")
+			}
+			raw, err := failures.MarshalEnvelope(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = ValidateSemanticRejection(raw)
+			if test.valid && err != nil {
+				t.Fatalf("exact semantic rejection rejected: %v", err)
+			}
+			if !test.valid && err == nil {
+				t.Fatal("non-emit semantic rejection validated")
+			}
+		})
+	}
+}
+
+func TestRunSummarySemanticRejectionEvidenceIsClosedAndExplicit(t *testing.T) {
+	failure, ok := failures.EnvelopeFromError(failures.New(
+		failures.ClassSchemaInvalid, "emit_payload_contract_violation", "runtime.engine", "fan_out.emit",
+		map[string]any{
+			"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		},
+	))
+	if !ok {
+		t.Fatal("construct typed semantic rejection")
+	}
+	summary := RunSummary{
+		RunID: uuid.NewString(), Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
+		SemanticRejectionSample: &FanOutSemanticRejectionSample{
+			TriggeringDeliveryID: uuid.NewString(), PackageKey: "root", ElementID: uuid.NewString(), Ordinal: 0, Failure: failure,
+		},
+		BlockedIntents: []BlockedIntentDiagnosis{}, MinNextChunk: InitialChunkSize, MaxNextChunk: InitialChunkSize,
+	}
+	if err := summary.Validate(); err != nil {
+		t.Fatalf("RunSummary.Validate: %v", err)
+	}
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"semantic_rejected":1`) || !strings.Contains(text, `"semantic_rejection_sample":{`) || strings.Contains(text, `"rejected":`) {
+		t.Fatalf("run summary JSON = %s", text)
+	}
+
+	withoutSample := summary
+	withoutSample.SemanticRejectionSample = nil
+	if err := withoutSample.Validate(); err == nil {
+		t.Fatal("semantic rejection count without sample validated")
+	}
+	withoutCount := summary
+	withoutCount.SemanticRejected = 0
+	if err := withoutCount.Validate(); err == nil {
+		t.Fatal("semantic rejection sample without count validated")
+	}
+	outOfRange := summary
+	outOfRange.SemanticRejectionSample = &FanOutSemanticRejectionSample{
+		TriggeringDeliveryID: summary.SemanticRejectionSample.TriggeringDeliveryID,
+		PackageKey:           summary.SemanticRejectionSample.PackageKey,
+		ElementID:            summary.SemanticRejectionSample.ElementID,
+		Ordinal:              summary.Cardinality,
+		Failure:              failure,
+	}
+	if err := outOfRange.Validate(); err == nil {
+		t.Fatal("out-of-range semantic rejection sample validated")
+	}
+}
+
+func TestRunSummaryZeroSemanticRejectionsSerializesExplicitNullSample(t *testing.T) {
+	summary := RunSummary{RunID: uuid.NewString(), BlockedIntents: []BlockedIntentDiagnosis{}}
+	if err := summary.Validate(); err != nil {
+		t.Fatalf("zero RunSummary.Validate: %v", err)
+	}
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"semantic_rejection_sample":null`) {
+		t.Fatalf("zero run summary omitted explicit null sample: %s", raw)
+	}
+}

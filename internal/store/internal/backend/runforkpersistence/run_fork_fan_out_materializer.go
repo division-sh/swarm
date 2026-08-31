@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -66,7 +67,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			return fmt.Errorf("load materialized fork fan-out %s: %w", sourceIntent.Request.Key.String(), err)
 		}
 		var capsule fanoutobligation.Capsule
-		if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(capsuleRaw, &capsule); err != nil {
 			return fmt.Errorf("decode materialized fork fan-out capsule: %w", err)
 		}
 		source := sourceIntent.Source
@@ -218,7 +219,7 @@ func materializeRunForkFanOutObligations(
 		if err := intent.Validate(); err != nil {
 			return 0, fmt.Errorf("validate materialized fork fan-out %s: %w", intent.Request.Key.String(), err)
 		}
-		capsule, err := json.Marshal(intent.Request.Capsule)
+		capsule, err := fanoutobligation.MarshalCapsule(intent.Request.Capsule)
 		if err != nil {
 			return 0, fmt.Errorf("encode materialized fork fan-out capsule: %w", err)
 		}

@@ -14,14 +14,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -89,6 +92,98 @@ func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testin
 			got := fanOutIntentSQLArgs(request, test.source, []byte(`{}`), fanoutobligation.StatusOpen, now)[7:15]
 			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("source SQL args = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := fanOutReadbackTestDB(t, backend)
+			command := seedFanOutReadbackClaim(t, db)
+
+			var capsuleRaw []byte
+			if err := db.QueryRow(`SELECT capsule FROM fan_out_intents WHERE run_id=$1`, command.Claim.Key.RunID).Scan(&capsuleRaw); err != nil {
+				t.Fatal(err)
+			}
+			var capsule fanoutobligation.Capsule
+			if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+				t.Fatal(err)
+			}
+			capsule.StateFields = map[string]any{
+				"integer": json.Number("75"),
+				"decimal": json.Number("75.0"),
+			}
+			capsuleRaw, err := json.Marshal(capsule)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE fan_out_intents SET capsule=$1 WHERE run_id=$2`, string(capsuleRaw), command.Claim.Key.RunID); err != nil {
+				t.Fatal(err)
+			}
+
+			intent, err := scanFanOutIntent(db.QueryRow(`SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1`, command.Claim.Key.RunID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			integer, integerOK := intent.Request.Capsule.StateFields["integer"].(json.Number)
+			decimal, decimalOK := intent.Request.Capsule.StateFields["decimal"].(json.Number)
+			if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
+				t.Fatalf("hydrated capsule numerics = integer:%#v decimal:%#v, want lexical json.Number carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
+			}
+		})
+	}
+}
+
+func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := fanOutReadbackTestDB(t, backend)
+			newValueType := "TEXT"
+			if backend == "postgres" {
+				newValueType = "JSONB"
+			}
+			if _, err := db.Exec(`CREATE TABLE entity_mutations (
+				mutation_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, entity_id TEXT NOT NULL,
+				domain TEXT NOT NULL, path TEXT NOT NULL, old_value ` + newValueType + ` NOT NULL,
+				new_value ` + newValueType + ` NOT NULL, caused_by_event TEXT,
+				writer_type TEXT NOT NULL, writer_id TEXT NOT NULL, handler_step TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL
+			)`); err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := uuid.NewString()
+			mutationID, err := insertFanOutEntitySourceRevisionTx(
+				context.Background(), tx, backend == "postgres", privaterunforkrevision.NewEffects(),
+				runID, uuid.NewString(), "items",
+				[]any{map[string]any{"integer": int64(75), "double": float64(75), "exponent": json.Number("75e0")}},
+				uuid.NewString(), time.Now().UTC(),
+			)
+			if err != nil {
+				_ = tx.Rollback()
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			var raw []byte
+			if err := db.QueryRow(`SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var items []map[string]any
+			if err := canonicaljson.DecodePreservingNumberLexemes(raw, &items); err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range map[string]string{"integer": "75", "double": "75.0", "exponent": "75.0"} {
+				got, ok := items[0][field].(json.Number)
+				if !ok || got.String() != want {
+					t.Fatalf("persisted entity revision %s = %#v, want %q", field, items[0][field], want)
+				}
 			}
 		})
 	}
@@ -225,10 +320,11 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 	if err != nil {
 		t.Fatal(err)
 	}
-	capsule, err := json.Marshal(fanoutobligation.Capsule{
+	capsule, err := fanoutobligation.MarshalCapsule(fanoutobligation.Capsule{
 		NodeKey: "root.fan-out", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
+		Lineage:     events.EventLineage{RunID: runID, ParentEventID: eventID, ExecutionMode: executionmode.Live},
+		StateFields: map[string]any{"integer": int64(75), "double": float64(75)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -244,11 +340,11 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 		runID, deliveryID, "root", elementID, "bundle-v1:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
 		t.Fatal(err)
 	}
-	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit", nil))
-	if !ok {
-		t.Fatal("construct fan-out readback failure")
-	}
-	failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+		Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+		Path: "$.item", Constraint: "type", Expected: "declared item", Actual: "invalid item", Detail: "fan-out test item is invalid",
+	}, "test", "commit")
+	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {
 		t.Fatal(err)
 	}

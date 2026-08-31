@@ -83,7 +83,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
 		t.Fatalf("last revenue after first = %#v, want 100", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
@@ -93,7 +93,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
 		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
@@ -106,7 +106,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q2"); got != 1 {
 		t.Fatalf("Q2 accumulator items = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(300) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-3", 300)
@@ -182,13 +182,13 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	if got := fanInStreamAccumulatorItemCount(t, carrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("producer-driven stream accumulator items = %d, want 1", got)
 	}
-	if got := carrier.Fields["last_revenue"]; got != float64(100) {
+	if got := carrier.Fields["last_revenue"]; got != int64(100) {
 		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
 	}
 	assertFanInStreamReport(t, carrier.Fields, requestEventID, "", 100)
 }
 
-func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID, reportID string, revenue float64) {
+func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID, reportID string, revenue int64) {
 	t.Helper()
 	reports, ok := fields["reports"].(map[string]any)
 	if !ok {

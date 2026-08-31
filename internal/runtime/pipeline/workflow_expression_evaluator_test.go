@@ -1,8 +1,12 @@
 package pipeline
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func TestNormalizeWorkflowExpressionStringLiterals(t *testing.T) {
@@ -155,6 +159,83 @@ func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected computed namespace condition to evaluate true")
+	}
+}
+
+func TestWorkflowExpressionEvaluatorProjectsEveryNumericContextSeam(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(
+		`entity.value == 1 && _entity.value == 2 && payload.value == 4 && policy.value == 5 && computed.value == 6 && accumulated[0] == 7 && fan_out.count == 8 && _loop.index == 9 && count(accumulated >= 7) == 2`,
+		workflowExpressionContext{
+			Entity:         map[string]any{"value": json.Number("1")},
+			PlatformEntity: map[string]any{"value": json.Number("2")},
+			Event:          map[string]any{"value": json.Number("3")},
+			Payload:        map[string]any{"value": json.Number("4")},
+			Policy:         map[string]any{"value": json.Number("5")},
+			Computed:       map[string]any{"value": json.Number("6")},
+			Accumulated:    []any{json.Number("7"), json.Number("7.25")},
+			FanOut:         map[string]any{"count": json.Number("8")},
+			Loop:           map[string]any{"index": json.Number("9")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("EvalBool projected roots: %v", err)
+	}
+	if !ok {
+		t.Fatal("EvalBool projected roots = false")
+	}
+	projected, err := projectWorkflowExpressionContext(workflowExpressionContext{
+		Event: map[string]any{"value": json.Number("3")},
+	})
+	if err != nil || projected.Event["value"] != int64(3) {
+		t.Fatalf("projected event root = %#v, %v", projected.Event, err)
+	}
+	ok, err = eval.EvalBool(`join.completed == 10`, workflowExpressionContext{
+		Join: map[string]any{"completed": json.Number("10")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("EvalBool projected join = %t, %v", ok, err)
+	}
+}
+
+func TestWorkflowExpressionEvaluatorProjectsPolicyAndQueryOperands(t *testing.T) {
+	normalized, _, err := normalizeWorkflowExpression(`payload.score >= {{minimum}}`, workflowExpressionContext{
+		Payload: map[string]any{"score": json.Number("7.25")},
+		Policy:  map[string]any{"minimum": json.Number("7.0")},
+	})
+	if err != nil {
+		t.Fatalf("normalizeWorkflowExpression policy: %v", err)
+	}
+	if normalized != `payload.score >= 7.0` {
+		t.Fatalf("normalized policy expression = %q, want numeric literal", normalized)
+	}
+
+	projected, err := projectWorkflowExpressionContext(workflowExpressionContext{
+		Payload: map[string]any{"minimum": json.Number("7.25")},
+	})
+	if err != nil {
+		t.Fatalf("projectWorkflowExpressionContext: %v", err)
+	}
+	predicate, err := parseWorkflowEntityQueryPredicate(`score >= payload.minimum`, projected)
+	if err != nil {
+		t.Fatalf("parseWorkflowEntityQueryPredicate: %v", err)
+	}
+	if value, ok := predicate.Value.(float64); !ok || value != 7.25 {
+		t.Fatalf("query operand = %#v (%T), want float64(7.25)", predicate.Value, predicate.Value)
+	}
+}
+
+func TestWorkflowExpressionEvaluatorRejectsHostileCarrierBeforeCEL(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`payload.items[0].score > 1`, workflowExpressionContext{
+		Payload: map[string]any{"items": []any{map[string]any{"score": json.Number("9007199254740992")}}},
+	})
+	if err == nil {
+		t.Fatal("EvalBool accepted out-of-range carrier")
+	}
+	var projection *workflowexpr.CELProjectionError
+	if !errors.As(err, &projection) || projection.Path != "$.payload.items[0].score" {
+		t.Fatalf("EvalBool hostile error = %#v, want exact projected path", err)
 	}
 }
 

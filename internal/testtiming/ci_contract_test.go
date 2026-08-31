@@ -178,12 +178,14 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 
 	const (
 		runtimePackage            = "github.com/division-sh/swarm/internal/runtime"
+		conformancePackage        = "github.com/division-sh/swarm/internal/runtime/conformance"
 		serveappPackage           = "github.com/division-sh/swarm/internal/serveapp"
 		storePackage              = "github.com/division-sh/swarm/internal/store"
 		runtimePersistencePackage = "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 		testPostgresPackage       = "github.com/division-sh/swarm/internal/testpostgres"
 	)
 	runtimeIsSpecial := false
+	conformanceIsSpecial := false
 	serveappIsSpecial := false
 	storeIsSpecial := false
 	runtimePersistenceIsSpecial := false
@@ -191,6 +193,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	for _, pkg := range policy.SpecialPackages {
 		if pkg == runtimePackage {
 			runtimeIsSpecial = true
+		}
+		if pkg == conformancePackage {
+			conformanceIsSpecial = true
 		}
 		if pkg == serveappPackage {
 			serveappIsSpecial = true
@@ -208,6 +213,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !runtimeIsSpecial {
 		t.Fatal("internal/runtime must remain isolated from broad package co-scheduling")
 	}
+	if !conformanceIsSpecial {
+		t.Fatal("internal/runtime/conformance must remain isolated from broad package co-scheduling")
+	}
 	if !serveappIsSpecial {
 		t.Fatal("internal/serveapp must remain isolated from broad package co-scheduling")
 	}
@@ -223,6 +231,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	runtimeUnit, ok := policy.Units["runtime-full"]
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
+	}
+	conformanceUnit, ok := policy.Units["conformance-full"]
+	if !ok || !slices.Equal(conformanceUnit.Packages, []string{conformancePackage}) || conformanceUnit.Run != "" || conformanceUnit.CountMode != "count-1" || conformanceUnit.BudgetClass != "full" {
+		t.Fatalf("conformance-full unit = %#v, want one complete uncached conformance proof", conformanceUnit)
 	}
 	serveappUnit, ok := policy.Units["serveapp-full"]
 	if !ok || !slices.Equal(serveappUnit.Packages, []string{serveappPackage}) || serveappUnit.Run != "" || serveappUnit.CountMode != "count-1" || serveappUnit.BudgetClass != "full" {
@@ -248,6 +260,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
+		foundConformance := false
 		foundServeapp := false
 		foundStore := false
 		foundTestPostgres := false
@@ -255,6 +268,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		for _, unit := range policy.Profiles[profileName].Units {
 			if unit == "runtime-full" {
 				foundRuntime = true
+			}
+			if unit == "conformance-full" {
+				foundConformance = true
 			}
 			if unit == "serveapp-full" {
 				foundServeapp = true
@@ -273,6 +289,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
+		}
+		if !foundConformance {
+			t.Errorf("profile %s does not include conformance-full", profileName)
 		}
 		if !foundServeapp {
 			t.Errorf("profile %s does not include serveapp-full", profileName)

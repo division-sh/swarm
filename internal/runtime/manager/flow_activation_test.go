@@ -3507,14 +3507,18 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"component_id":   {Type: "string"},
 				"component_type": {Type: "string"},
+				"integer_score":  {Type: "integer"},
+				"double_score":   {Type: "number"},
 			},
-			Required: []string{"component_id", "component_type"},
+			Required: []string{"component_id", "component_type", "integer_score", "double_score"},
 		},
 	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
 		"component_id":   "component-1",
 		"component_type": "api",
+		"integer_score":  int64(75),
+		"double_score":   float64(75),
 	}
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
@@ -3527,6 +3531,9 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 	}
 	if got := payload["component_type"]; got != "api" {
 		t.Fatalf("component_type payload = %#v, want api", got)
+	}
+	if got, want := string(event.Payload()), `{"component_id":"component-1","component_type":"api","double_score":75.0,"integer_score":75}`; got != want {
+		t.Fatalf("auto-emit payload = %s, want %s", got, want)
 	}
 	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
 		if _, ok := payload[key]; ok {

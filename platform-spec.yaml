@@ -240,6 +240,8 @@ contract_formats:
     - decision-card provenance, verdict fields, change payloads, persistence, lifecycle events, replay, fork cloning, and readback
     - complete JSON-RPC request envelopes admitted by the v1 HTTP and WebSocket server
     - complete JSON-RPC response and subscription-notification envelopes emitted by the v1 HTTP and WebSocket server
+    - ordinary and deferred event-payload, persisted workflow-state, persisted and fork-projected fan-out capsules, exact entity-revision, and resource-version values
+      projected into workflow/CEL evaluation, including deferred fan-out emit fields
     explicitly_deferred_scope:
     - unrelated event payload interpreters
     - provider ingress and module ABI payloads
@@ -262,6 +264,26 @@ contract_formats:
       persistence, lifecycle events, replay, fork cloning, API output, and
       readback consume the same admitted value. This section does not claim
       that the deferred #2046 boundaries already consume this owner.
+    workflow_cel_projection: >
+      `internal/runtime/workflowexpr.ProjectCELValue` is the sole checked
+      recursive projection from admitted runtime carriers into workflow/CEL
+      values. It calls `canonicaljson.NormalizeNumber` for every number and
+      never owns a parser, safe-range constant, or fallback number policy.
+      Lexical JSON integers inside the I-JSON safe range project to exact CEL
+      integers. Decimal and exponent spellings project to CEL doubles even
+      when mathematically integral. Native floating-point values remain CEL
+      doubles. Every production runtime-carrier JSON writer feeding this
+      projection preserves integer-versus-double kind: integers use integer
+      tokens, while native floating-point and lexical decimal or exponent
+      values use a durable double token containing a decimal point or exponent.
+      Readers preserve that token until this owner runs; no boundary may erase
+      it through a generic float64 decode or an integral-float JSON encoding.
+      Exact numeric spelling is not retained, and semantic canonicalization for
+      resource-version identity remains governed by semantic_json.contract.
+      Malformed or unsafe numbers fail before evaluation with the
+      exact recursive value path; unsafe exact integers teach authors to
+      declare the field as string. This implemented scope excludes authored
+      aggregate/reduce/scoring coercion tracked by #2046.
   authoritative_yaml_source:
     canonical_owner: platform-spec.yaml#contract_formats.authoritative_yaml_source
     implementation_owner: internal/yamlsource
@@ -2163,8 +2185,11 @@ type_system:
       equal_to: |
         `equal_to: <sibling_field>` declares pure same-object field equality.
         The target must be a declared sibling field with the same resolved
-        type. Non-equality predicates, provenance checks, external file
-        checks, rule IDs, and failure routing are not schema refinements.
+        type. Equality compares admitted semantic values rather than runtime
+        carrier types, so numerically equal integer, decimal, and exponent
+        representations agree. Non-equality predicates, provenance checks,
+        external file checks, rule IDs, and failure routing are not schema
+        refinements.
     runtime_consumption: |
       Event payload validators, entity materialization/write normalization,
       and generated entity/tool schemas that derive from the shared
@@ -3847,7 +3872,14 @@ handler_specification:
         evaluation_capsule: >-
           Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
           or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
-          still prove the same element before any ordinal is evaluated.
+          still prove the same element before any ordinal is evaluated. Live-intent persistence and fork projection use
+          the workflow/CEL runtime-carrier JSON writer; both preserve integer-versus-double kind for every dynamic capsule
+          map and may not use semantic canonicalization or a generic JSON encoder that collapses integral doubles.
+        semantic_value_projection: >-
+          Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
+          through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
+          checked owner. No source-specific float64 conversion, numeric-string coercion, private parser, or unchecked CEL
+          normalizer may reinterpret persisted values.
         progress: >-
           Cardinality plus one contiguous cursor represents the unissued suffix. Each visited ordinal receives exactly
           one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the
@@ -3863,11 +3895,23 @@ handler_specification:
           division. A typed retryable selected-store failure advances nothing and applies the same halving. Restart and
           fork without valid tuning state use 4. Chunk boundaries never change semantic output.
         failure_isolation: >-
-          Publication plans, outcomes, cursor advancement, and closure commit atomically. A typed item-semantic error may
-          become semantic_rejected. A typed safe aggregate error is bisected lower-half first. Retryable infrastructure
-          errors advance nothing. Outcome-uncertain results are read back by structured operation identity before retry.
-          Unknown errors, raw database strings, invariants, and internal failures block the intent with typed diagnosis;
-          they are never parsed into rejection or blindly retried.
+          Publication plans, outcomes, cursor advancement, and closure commit atomically. Only a typed emit-contract
+          failure may become semantic_rejected. Publication-planner, authorization, conflicting-duplicate, non-emit
+          schema, store, unknown, and internal failures never advance an ordinal as semantic rejection. A typed safe
+          aggregate error is bisected lower-half first. Retryable infrastructure errors advance nothing.
+          Outcome-uncertain results are read back by structured operation identity before retry. Unknown errors, raw
+          database strings, invariants, and internal failures block the intent with typed diagnosis; they are never
+          parsed into rejection or blindly retried. Chunk-command and persisted-outcome validation revalidate the
+          complete typed emit-contract envelope; direct store callers and corrupted records cannot bypass this owner.
+        semantic_rejection_evidence: >-
+          Every semantic_rejected ordinal persists one deterministic non-retryable FailureEnvelope produced from a typed
+          emit-contract error. The error retains event, rejection kind, path, constraint, expected, actual, and stable
+          detail. Every required emit-contract attribute is present and string-typed. A schema-mismatch actual is either a stable semantic
+          category or the exact rejected textual scalar; the latter may be empty or whitespace-only, and key presence
+          distinguishes that value from missing evidence. Other evidence attributes remain non-blank. Schema validation
+          selects the first violation by canonical field order, independent of map iteration.
+          Run diagnostics expose the count as semantic_rejected and exactly one nullable sample selected by
+          triggering_delivery_id, package_key, element_id, then ordinal. The sample is null exactly when the count is zero.
         lifecycle: >-
           Open or blocked owed suffix prevents normal run completion and test quiescence. Run stop/cancel atomically
           preserves the issued prefix and terminalizes the suffix. An armed or closed-unfired delivery barrier also
@@ -29865,7 +29909,7 @@ api_specification:
         description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
         type: object
         additionalProperties: false
-        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, rejected, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
+        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, semantic_rejected, semantic_rejection_sample, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
         properties:
           run_id: {type: string}
           intents: {type: integer, minimum: 0}
@@ -29879,7 +29923,12 @@ api_specification:
           cursor: {type: integer, minimum: 0}
           owed: {type: integer, minimum: 0}
           committed: {type: integer, minimum: 0}
-          rejected: {type: integer, minimum: 0}
+          semantic_rejected: {type: integer, minimum: 0}
+          semantic_rejection_sample:
+            description: Deterministic first semantic rejection by triggering_delivery_id, package_key, element_id, and ordinal; null exactly when semantic_rejected is zero.
+            oneOf:
+            - {$ref: '#/components/schemas/FanOutSemanticRejectionSample'}
+            - {type: 'null'}
           canceled: {type: integer, minimum: 0}
           settled: {type: integer, minimum: 0}
           unsettled: {type: integer, minimum: 0}
@@ -29890,6 +29939,17 @@ api_specification:
           max_next_chunk: {type: integer, minimum: 0, maximum: 32}
           last_chunk_max_ms: {type: integer, minimum: 0}
           oldest_age_ms: {type: integer, minimum: 0}
+      FanOutSemanticRejectionSample:
+        description: Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.
+        type: object
+        additionalProperties: false
+        required: [triggering_delivery_id, package_key, element_id, ordinal, failure]
+        properties:
+          triggering_delivery_id: {type: string}
+          package_key: {type: string}
+          element_id: {type: string}
+          ordinal: {type: integer, minimum: 0}
+          failure: {$ref: '#/components/schemas/FailureEnvelope'}
       FanOutBlockedIntentDiagnosis:
         description: Exact blocked fan-out intent identity, remaining suffix, and typed owning failure.
         type: object

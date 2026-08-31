@@ -37,36 +37,6 @@ type FanOutChunkOutcome struct {
 	Failure     json.RawMessage
 }
 
-// FanOutItemSemanticError is the only store-call failure that may become a
-// terminal ordinal outcome. The ordinal is part of the typed evidence rather
-// than inferred from a database or error string.
-type FanOutItemSemanticError struct {
-	Ordinal int
-	Failure runtimefailures.Envelope
-	cause   error
-}
-
-func NewFanOutItemSemanticError(ordinal int, failure runtimefailures.Envelope, cause error) error {
-	if ordinal < 0 || runtimefailures.ValidateEnvelope(failure) != nil || failure.Retryable || !failure.Deterministic || failure.Class == runtimefailures.ClassInternalFailure || failure.Class == runtimefailures.ClassOutcomeUncertain {
-		return fmt.Errorf("fan-out item semantic failure evidence is invalid")
-	}
-	return &FanOutItemSemanticError{Ordinal: ordinal, Failure: failure, cause: cause}
-}
-
-func (e *FanOutItemSemanticError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return fmt.Sprintf("fan-out ordinal %d: %s", e.Ordinal, e.Failure.Detail.Code)
-}
-
-func (e *FanOutItemSemanticError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.cause
-}
-
 // FanOutSafeAggregateError explicitly authorizes deterministic lower-half-first
 // isolation. Unknown aggregate failures must block instead of being bisected.
 type FanOutSafeAggregateError struct {
@@ -93,11 +63,6 @@ func (e *FanOutSafeAggregateError) Unwrap() error {
 		return nil
 	}
 	return e.cause
-}
-
-func FanOutItemSemanticFailure(err error) (*FanOutItemSemanticError, bool) {
-	var failure *FanOutItemSemanticError
-	return failure, errors.As(err, &failure)
 }
 
 func FanOutSafeAggregateFailure(err error) (*FanOutSafeAggregateError, bool) {

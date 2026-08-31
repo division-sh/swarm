@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -808,8 +809,15 @@ func seedFanOutBarrierOutcomes(t *testing.T, ctx context.Context, db *sql.DB, fi
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,created_at) VALUES ($1,$2,$3,$4,$5,'committed',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, ordinal, eventID, at)
 	}
 	if appendRejection {
-		failure := `{"class":"invalid_input","code":"fixture_rejection","owner":"test","operation":"fan_out","message":"fixture rejection"}`
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, len(eventIDs), failure, at)
+		failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+			Event: "fan-out.fixture", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+			Path: "$.fixture", Constraint: "type", Expected: "declared fixture", Actual: "invalid fixture", Detail: "fan-out fixture is invalid",
+		}, "test", "fan_out")
+		failureRaw, err := runtimefailures.MarshalEnvelope(failure.Failure)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,'semantic_rejected',$6,$7)`, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, len(eventIDs), string(failureRaw), at)
 	}
 	cursor := len(eventIDs)
 	if appendRejection {

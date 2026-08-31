@@ -2,10 +2,172 @@ package eventschema
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestValidatePayloadAgainstSchemaReturnsStructuredViolation(t *testing.T) {
+	tests := []struct {
+		name       string
+		schema     map[string]any
+		payload    map[string]any
+		path       string
+		constraint string
+		expected   string
+		actual     string
+	}{
+		{
+			name: "required", schema: map[string]any{"type": "object", "required": []any{"score"}}, payload: map[string]any{},
+			path: "$.score", constraint: "required", expected: "present", actual: "missing",
+		},
+		{
+			name: "additional property", schema: map[string]any{"type": "object", "additionalProperties": false}, payload: map[string]any{"extra": true},
+			path: "$.extra", constraint: "additionalProperties", expected: "declared property", actual: "undeclared property",
+		},
+		{
+			name: "nested type", schema: map[string]any{"type": "object", "properties": map[string]any{"row": map[string]any{"type": "object", "properties": map[string]any{"score": map[string]any{"type": "number"}}}}}, payload: map[string]any{"row": map[string]any{"score": "7.2"}},
+			path: "$.row.score", constraint: "type", expected: "number", actual: "string",
+		},
+		{
+			name: "array item", schema: map[string]any{"type": "object", "properties": map[string]any{"rows": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}}}, payload: map[string]any{"rows": []any{1, "two"}},
+			path: "$.rows[1]", constraint: "type", expected: "integer", actual: "string",
+		},
+		{
+			name: "minimum", schema: map[string]any{"type": "object", "properties": map[string]any{"score": map[string]any{"type": "number", "minimum": 8}}}, payload: map[string]any{"score": 7.25},
+			path: "$.score", constraint: "minimum", expected: ">= 8", actual: "7.25",
+		},
+		{
+			name: "format", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": "bad"},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "bad",
+		},
+		{
+			name: "format empty string", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": ""},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "",
+		},
+		{
+			name: "format whitespace string", schema: map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}}}, payload: map[string]any{"id": "  "},
+			path: "$.id", constraint: "format", expected: "uuid", actual: "  ",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePayloadAgainstSchema(test.schema, test.payload)
+			var violation *Violation
+			if !errors.As(err, &violation) {
+				t.Fatalf("validation error = %#v, want *Violation", err)
+			}
+			if violation.Path != test.path || violation.Constraint != test.constraint || violation.Expected != test.expected || violation.Actual != test.actual || strings.TrimSpace(violation.Detail) == "" {
+				t.Fatalf("violation = %#v, want path=%q constraint=%q expected=%q actual=%q", violation, test.path, test.constraint, test.expected, test.actual)
+			}
+		})
+	}
+}
+
+func TestSchemaViolationActualUsesStableSemanticCategories(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "native float", value: float64(7), want: "number"},
+		{name: "native integer", value: int64(7), want: "number"},
+		{name: "lexical integer", value: json.Number("7"), want: "number"},
+		{name: "lexical decimal", value: json.Number("7.0"), want: "number"},
+		{name: "boolean", value: true, want: "boolean"},
+		{name: "array", value: []any{1}, want: "array"},
+		{name: "object", value: map[string]any{"value": 1}, want: "object"},
+		{name: "null", value: nil, want: "null"},
+	}
+	schema := map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePayloadAgainstSchema(schema, map[string]any{"value": test.value})
+			var violation *Violation
+			if !errors.As(err, &violation) || violation.Actual != test.want {
+				t.Fatalf("violation = %#v, want actual=%q", violation, test.want)
+			}
+			for _, carrier := range []string{"float64", "int64", "json.Number", "[]interface", "map[string]interface"} {
+				if strings.Contains(violation.Actual, carrier) {
+					t.Fatalf("actual leaked Go carrier %q: %#v", carrier, violation)
+				}
+			}
+		})
+	}
+}
+
+func TestValidatePayloadAgainstSchemaComparesEqualToBySemanticValue(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"source": map[string]any{"type": "number"},
+			"copy":   map[string]any{"type": "number", "x-swarm-equalTo": "source"},
+		},
+		"required":             []any{"source", "copy"},
+		"additionalProperties": false,
+	}
+	for _, test := range []struct {
+		name   string
+		source any
+		copy   any
+	}{
+		{name: "integer and decimal", source: int64(1), copy: float64(1)},
+		{name: "lexical integer and decimal", source: json.Number("1"), copy: json.Number("1.0")},
+		{name: "decimal and exponent", source: json.Number("1.25"), copy: json.Number("1.25e0")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := ValidatePayloadAgainstSchema(schema, map[string]any{"source": test.source, "copy": test.copy}); err != nil {
+				t.Fatalf("semantically equal payload rejected: %v", err)
+			}
+		})
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"source": int64(1), "copy": float64(1.5)}); err == nil || !strings.Contains(err.Error(), "must equal") {
+		t.Fatalf("semantically different payload error = %v, want equal_to violation", err)
+	}
+}
+
+func TestValidatePayloadAgainstSchemaSelectsStableFirstViolation(t *testing.T) {
+	tests := []struct {
+		name    string
+		schema  map[string]any
+		payload map[string]any
+		path    string
+	}{
+		{
+			name: "field validation",
+			schema: map[string]any{"type": "object", "properties": map[string]any{
+				"zeta":  map[string]any{"type": "number"},
+				"alpha": map[string]any{"type": "number"},
+			}},
+			payload: map[string]any{"zeta": "wrong", "alpha": false},
+			path:    "$.alpha",
+		},
+		{
+			name: "equal_to validation",
+			schema: map[string]any{"type": "object", "properties": map[string]any{
+				"zeta":         map[string]any{"type": "number", "x-swarm-equalTo": "zeta_source"},
+				"zeta_source":  map[string]any{"type": "number"},
+				"alpha":        map[string]any{"type": "number", "x-swarm-equalTo": "alpha_source"},
+				"alpha_source": map[string]any{"type": "number"},
+			}},
+			payload: map[string]any{"zeta": 2, "zeta_source": 3, "alpha": 4, "alpha_source": 5},
+			path:    "$.alpha",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for attempt := 0; attempt < 100; attempt++ {
+				err := ValidatePayloadAgainstSchema(test.schema, test.payload)
+				var violation *Violation
+				if !errors.As(err, &violation) || violation.Path != test.path {
+					t.Fatalf("attempt %d violation = %#v, want path %q", attempt, violation, test.path)
+				}
+			}
+		})
+	}
+}
 
 func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testing.T) {
 	t.Parallel()

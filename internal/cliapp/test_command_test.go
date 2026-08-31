@@ -56,7 +56,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				}
 				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 			case 2:
-				if req.Params["event_name"] != "item.processed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != "run-1" || req.Params["source_event_id"] != "event-1" {
+				if req.Params["event_name"] != "item.processed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != testPublishedRunID || req.Params["source_event_id"] != "event-1" {
 					t.Fatalf("event.publish follow-up params = %#v", req.Params)
 				}
 				payload, ok := req.Params["payload"].(map[string]any)
@@ -71,7 +71,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
 			}
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "run.trace":
 			traceCalls++
 			row := validRunCommandTraceRow("event-1")
@@ -91,11 +91,12 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
-			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != testPublishedRunID {
 				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
+			entity["run_id"] = testPublishedRunID
 			entity["entity_type"] = "default"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
@@ -399,7 +400,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			}
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "run.trace":
 			received := validRunCommandTraceRow("event-1")
 			received["event_name"] = "item.received"
@@ -407,7 +408,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			processed["event_name"] = "item.processed"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{received, processed}})
 		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["type"] != "item" {
+			if req.Params["run_id"] != testPublishedRunID || req.Params["type"] != "item" {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
@@ -415,11 +416,12 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
-			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != testPublishedRunID {
 				t.Fatalf("entity.get params = %#v", req.Params)
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
+			entity["run_id"] = testPublishedRunID
 			entity["entity_type"] = "item"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
@@ -546,7 +548,7 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 
 	var calls []jsonRPCRequest
 	var publishCalls int
-	activeRunID := "run-1"
+	activeRunID := testPublishedRunID
 	setupEntityIDs := map[string]string{}
 	setupEntityTypes := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1028,7 +1030,7 @@ steps:
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		case "mailbox.list":
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []any{map[string]any{"kind": "decision_card", "decision_card": mailboxCardSummaryResult("card-1")}}})
 		case "mailbox.get":
@@ -1122,9 +1124,9 @@ steps:
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
-					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 				case "mailbox.list":
-					want := map[string]any{"status": "pending", "run_id": "run-1", "anchor_kind": "human_task", "limit": float64(200)}
+					want := map[string]any{"status": "pending", "run_id": testPublishedRunID, "anchor_kind": "human_task", "limit": float64(200)}
 					if !reflect.DeepEqual(req.Params, want) {
 						t.Fatalf("mailbox.list params = %#v, want %#v", req.Params, want)
 					}
@@ -1204,7 +1206,7 @@ steps:
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
-					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+					writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 				case "mailbox.list":
 					lookup = true
 					t.Fatal("mailbox lookup occurred for an invalid cross-anchor selector")
@@ -1253,7 +1255,7 @@ steps:
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		default:
 			t.Fatalf("unexpected method before decide validation = %s", req.Method)
 		}
@@ -1551,6 +1553,7 @@ func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {
 		"blocking_reason":   "",
 		"heuristics":        []string{},
 		"failed_deliveries": []any{},
+		"fan_out":           validDiagnosticFanOutSummary(runID),
 		"test_quiescence": map[string]any{
 			"ready":                     ready,
 			"active_deliveries":         activeDeliveries,

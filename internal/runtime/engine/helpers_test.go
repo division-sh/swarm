@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -133,7 +134,7 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("nested transform missing: %#v", transformed)
 	}
-	if got := nested["score"]; got != 9 {
+	if got := nested["score"]; got != int64(9) {
 		t.Fatalf("nested.score = %#v", got)
 	}
 	if got := nested["state"]; got != "researching" {
@@ -158,20 +159,50 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	}
 }
 
-func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
+func TestEmitFieldsPayload_PreservesNativeWholeNumberFloatAsDouble(t *testing.T) {
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{"raw_score": 25.0}),
 	}
 	transformed, err := emitFieldsPayload(base, ExecutionState{}, runtimecontracts.EmitSpec{
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"score": runtimecontracts.CELExpression("payload.raw_score * 2"),
+			"score": runtimecontracts.CELExpression("payload.raw_score * 2.0"),
 		},
 	}, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
-	if got := transformed["score"]; got != 50 {
+	if got := transformed["score"]; got != float64(50) {
 		t.Fatalf("score = %#v, want 50", got)
+	}
+}
+
+func TestEncodePayloadPreservesEagerNumericKindForPersistedEvaluation(t *testing.T) {
+	raw, err := encodePayload(map[string]any{
+		"integer": int64(50),
+		"double":  float64(50),
+		"nested":  []any{json.Number("50.0"), json.Number("5e1")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"double":50.0,"integer":50,"nested":[50.0,50.0]}` {
+		t.Fatalf("encoded payload = %s", raw)
+	}
+	payload, err := decodePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["integer"] != int64(50) || payload["double"] != float64(50) {
+		t.Fatalf("decoded payload kinds = %#v", payload)
+	}
+	result, err := workflowexpr.EvalValueExpressionWithOptions(
+		"payload.integer + 1 == 51 && payload.double + 1.0 == 51.0",
+		workflowexpr.ValueContext{Payload: payload},
+		workflowexpr.ValueExpressionOptions{},
+	)
+	matched, ok := result.(bool)
+	if err != nil || !ok || !matched {
+		t.Fatalf("persisted event arithmetic = %#v err=%v", result, err)
 	}
 }
 
@@ -210,7 +241,7 @@ fields:
 	if batch["scan_id"] != "scan-1" || batch["geography"] != "us" {
 		t.Fatalf("batch = %#v, want scan/geography from payload", batch)
 	}
-	if got := transformed["count"]; got != 0 {
+	if got := transformed["count"]; got != int64(0) {
 		t.Fatalf("count = %#v, want 0", got)
 	}
 	if got := transformed["quoted_literal"]; got != "ready" {
@@ -251,7 +282,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 	if got := state.StateCarrier.Fields["literal"]; got != "fixed" {
 		t.Fatalf("literal = %#v", got)
 	}
-	if got := state.StateCarrier.Fields["dispatch_count"]; got != 3 {
+	if got := state.StateCarrier.Fields["dispatch_count"]; got != int64(3) {
 		t.Fatalf("dispatch_count = %#v", got)
 	}
 	if got := state.StateCarrier.Bookkeeping["last_data_accumulation_source"]; got != "task.completed" {
@@ -349,7 +380,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
-	if got := state.StateCarrier.Fields["revision_count"]; got != 1.0 && got != 1 {
+	if got := state.StateCarrier.Fields["revision_count"]; got != int64(1) {
 		t.Fatalf("revision_count = %#v, want 1", got)
 	}
 }

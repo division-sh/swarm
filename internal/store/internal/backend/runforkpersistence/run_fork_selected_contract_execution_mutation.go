@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -490,14 +491,14 @@ func projectRunForkSelectedContractSourceEventWorkflowState(
 		return event, nil
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload, &payload); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity workflow route %s: %w", event.SourceEventID, err)
 	}
 	if payload == nil {
 		return event, fmt.Errorf("selected-contract activity workflow route %s requires object payload", event.SourceEventID)
 	}
 	payload["flow_instance"] = route.InstancePath
-	raw, err := json.Marshal(payload)
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return event, fmt.Errorf("encode selected-contract activity workflow route %s: %w", event.SourceEventID, err)
 	}

@@ -44,11 +44,21 @@ type NotifyAllChildrenOptions struct {
 	AutoEmitOnCreate            bool
 	AutoEmitEventRevision       int
 	FanOutDeliveryBarrier       bool
+	NumericRegistrationRows     bool
+	NumericReporterSink         bool
+	NumericInternalSettlement   bool
+	RegistrationUUIDField       bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
 func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	t.Helper()
+	if opts.NumericReporterSink && opts.NumericInternalSettlement {
+		t.Fatal("numeric reporter and internal-settlement sinks are mutually exclusive")
+	}
+	if opts.RegistrationUUIDField && !opts.NumericRegistrationRows {
+		t.Fatal("registration UUID field requires numeric registration rows")
+	}
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
 	packageFile := filepath.Join(root, "package.yaml")
@@ -56,6 +66,8 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	ownerNodes := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "nodes.yaml")
 	ownerEntities := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "entities.yaml")
 	accountAgents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "agents.yaml")
+	accountNodes := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "nodes.yaml")
+	accountEntities := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "entities.yaml")
 	accountEvents := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "events.yaml")
 	accountSchema := filepath.Join(root, "flows", NotifyAllChildrenChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
@@ -157,6 +169,143 @@ portfolio.notify.completed:
 `, `      - account.notify.requested
       - portfolio.notify.completed
 `)
+	}
+	if opts.NumericRegistrationRows {
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
+  portfolio_id: text
+`, `portfolio.opened:
+  portfolio_id: text
+  threshold: integer
+`)
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
+`, `  account_ids: "[json]"
+`)
+		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
+`, `  portfolio_id: text
+  threshold: integer
+`)
+		applyClosedReplacement(t, ownerEntities, `  account_ids: "[text]"
+`, `  account_ids: "[json]"
+`)
+		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
+            target_field: portfolio_id
+`, `          - source_field: portfolio_id
+            target_field: portfolio_id
+          - source_field: threshold
+            target_field: threshold
+`)
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            portfolio_id: payload.portfolio_id
+            account_id: account.account_id
+            eng_roles: account.eng_roles
+            gem_score: account.gem_score
+            eligible: entity.threshold >= 70
+`)
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account.account_id
+`)
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+  key: account_id
+  account_id: text
+`, `account.registered:
+  key: account_id
+  portfolio_id: text
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  eligible: boolean
+`)
+		applyClosedReplacement(t, accountNodes, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+`, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: eng_roles
+            target_field: eng_roles
+          - source_field: gem_score
+            target_field: gem_score
+          - source_field: eligible
+            target_field: eligible
+`)
+		applyClosedReplacement(t, accountEntities, `account_state:
+  account_id: text
+  last_command: text
+`, `account_state:
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  eligible: boolean
+  last_command: text
+`)
+		if opts.NumericReporterSink {
+			applyClosedReplacement(t, packageFile, `  - event: account.registered
+    from: portfolio
+    to: account
+`, "")
+			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+  key: account_id
+`, `account.registered:
+  swarm:
+    consumer: external
+  key: account_id
+`)
+		}
+		if opts.NumericInternalSettlement {
+			applyClosedReplacement(t, packageFile, `  - event: account.registered
+    from: portfolio
+    to: account
+`, "")
+			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
+  id: numeric-registration-observer
+  execution_type: system_node
+  subscribes_to:
+    - account.registered
+  event_handlers:
+    account.registered: {}
+portfolio-coordinator:
+`)
+		}
+		if opts.RegistrationUUIDField {
+			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
+            eligible: entity.threshold >= 70
+`, `            gem_score: account.gem_score
+            external_id: account.external_id
+            eligible: entity.threshold >= 70
+`)
+			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
+  eligible: boolean
+`, `  gem_score: number
+  external_id: uuid
+  eligible: boolean
+`)
+		}
 	}
 	if opts.AutoEmitEventRevision == 2 {
 		applyClosedReplacement(t, accountEvents, "account.created", "account.revised")

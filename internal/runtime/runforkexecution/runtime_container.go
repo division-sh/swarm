@@ -14,6 +14,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -518,14 +519,14 @@ func projectSelectedContractSourceEventWorkflowStates(
 			continue
 		}
 		var payload map[string]any
-		if err := json.Unmarshal(out[index].Payload, &payload); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(out[index].Payload, &payload); err != nil {
 			return nil, fmt.Errorf("decode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
 		}
 		if payload == nil {
 			return nil, fmt.Errorf("selected-contract activity route projection for %s requires object payload", out[index].SourceEventID)
 		}
 		payload["flow_instance"] = route
-		raw, err := json.Marshal(payload)
+		raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 		if err != nil {
 			return nil, fmt.Errorf("encode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
 		}

@@ -897,6 +897,10 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		if got != 1 {
 			t.Fatalf("revision_count = %v, want 1", got)
 		}
+	case int64:
+		if got != 1 {
+			t.Fatalf("revision_count = %v, want 1", got)
+		}
 	default:
 		t.Fatalf("revision_count = %#v (%T), want 1", instance.Fields["revision_count"], instance.Fields["revision_count"])
 	}
@@ -1553,7 +1557,7 @@ node-a:
 	if !ok {
 		t.Fatal("expected created entity to persist")
 	}
-	if got := instance.Fields["revision_count"]; got != float64(0) && got != 0 {
+	if got := instance.Fields["revision_count"]; got != int64(0) {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)

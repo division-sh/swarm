@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,6 +27,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 )
@@ -1252,13 +1254,17 @@ func decodeWorkflowInstanceJSONMap(label string, raw []byte) (map[string]any, er
 		return map[string]any{}, nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &out); err != nil {
 		return nil, fmt.Errorf("%s must be a JSON object: %w", label, err)
 	}
 	if out == nil {
 		return map[string]any{}, nil
 	}
-	return out, nil
+	projected, err := workflowexpr.ProjectCELValue(out)
+	if err != nil {
+		return nil, fmt.Errorf("%s contains an invalid semantic value: %w", label, err)
+	}
+	return projected.(map[string]any), nil
 }
 
 func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]bool, error) {

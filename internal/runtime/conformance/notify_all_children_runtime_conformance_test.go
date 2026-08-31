@@ -1,10 +1,14 @@
 package conformance
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -135,6 +141,7 @@ type notifyAllChildrenRuntimeOptions struct {
 	processTopology        *notifyAllChildrenProcessTopology
 	bundleSourceFact       runtimecorrelation.BundleSourceFact
 	enableGenericSchedules bool
+	maintenanceInterval    time.Duration
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -480,6 +487,436 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			}
 		})
 	}
+}
+
+func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.DatabaseForTest(selected)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.setup(t)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+				NumericRegistrationRows: true,
+				NumericReporterSink:     true,
+				RegistrationUUIDField:   true,
+			})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+				maintenanceInterval: 10 * time.Millisecond,
+			})
+
+			validRunID := uuid.NewString()
+			validCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), validRunID)
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, validCtx, "numeric-fan-out-reporter", runtime.bundleSourceFact)); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
+			publishNotifyAllChildrenRunCreatingEvent(t, validCtx, runtime, source, validRunID, "portfolio.opened", map[string]any{
+				"portfolio_id": "portfolio-numeric-valid",
+				"threshold":    75,
+			})
+			assertNotifyAllChildrenMetadata(t, validCtx, selected, db, "portfolio", "portfolio_id", "portfolio-numeric-valid")
+			for batch := 0; batch < 20; batch++ {
+				rows := make([]map[string]any, 0, 25)
+				for row := 0; row < 25; row++ {
+					ordinal := batch*25 + row
+					rows = append(rows, map[string]any{
+						"account_id":  fmt.Sprintf("numeric-%03d", ordinal),
+						"eng_roles":   ordinal,
+						"gem_score":   float64(ordinal) + 0.25,
+						"external_id": uuid.NewString(),
+					})
+				}
+				publishNotifyAllChildrenEventAsync(t, validCtx, runtime, source, validRunID, "portfolio.accounts.register.requested", map[string]any{
+					"portfolio_id": "portfolio-numeric-valid",
+					"account_ids":  rows,
+				})
+			}
+			waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
+
+			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("valid FanOutRunSummary: %v", err)
+			}
+			if validSummary.Intents != 20 || validSummary.Cardinality != 500 || validSummary.Cursor != 500 || validSummary.Committed != 500 || validSummary.SemanticRejected != 0 || validSummary.SemanticRejectionSample != nil || validSummary.Settled != 500 || validSummary.Unsettled != 0 || validSummary.Owed != 0 {
+				t.Fatalf("valid numeric reporter summary = %#v", validSummary)
+			}
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, validCtx, selected, db, validRunID)
+			if len(registrations) != 500 {
+				t.Fatalf("valid numeric registration events = %d, want 500", len(registrations))
+			}
+			first := registrations["numeric-000"]
+			if first.ID == "" || first.EngRoles != 0 || first.GemScore != 0.25 {
+				t.Fatalf("first numeric registration = %#v", first)
+			}
+			last := registrations["numeric-499"]
+			if last.ID == "" || last.EngRoles != 499 || last.GemScore != 499.25 {
+				t.Fatalf("last numeric registration = %#v", last)
+			}
+			operatorStore, ok := selected.(interface {
+				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+			})
+			if !ok {
+				t.Fatalf("numeric fan-out store %T lacks operator event readback", selected)
+			}
+			view, err := operatorStore.LoadOperatorEvent(validCtx, last.ID)
+			if err != nil {
+				t.Fatalf("load numeric registration operator event: %v", err)
+			}
+			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || strings.TrimSpace(fmt.Sprint(view.Payload["external_id"])) == "" || view.Payload["eligible"] != true || len(view.Deliveries) != 0 || view.NoDelivery == nil {
+				t.Fatalf("numeric registration operator readback = payload:%#v deliveries:%#v", view.Payload, view.Deliveries)
+			}
+
+			mixedRunID := validRunID
+			mixedCtx := validCtx
+			publishNotifyAllChildrenEvent(t, mixedCtx, runtime, source, mixedRunID, "portfolio.accounts.register.requested", map[string]any{
+				"portfolio_id": "portfolio-numeric-valid",
+				"account_ids": []map[string]any{
+					{"account_id": "mixed-before", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString()},
+					{"account_id": "mixed-empty-uuid", "eng_roles": 2, "gem_score": 2.25, "external_id": ""},
+					{"account_id": "mixed-bad-number", "eng_roles": 3, "gem_score": "not-a-number", "external_id": uuid.NewString()},
+					{"account_id": "mixed-after", "eng_roles": 4, "gem_score": 4.25, "external_id": uuid.NewString()},
+				},
+			})
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, mixedRunID, 5*time.Minute)
+			mixedSummary, err := selected.FanOutRunSummary(mixedCtx, mixedRunID, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("mixed FanOutRunSummary: %v", err)
+			}
+			if mixedSummary.Intents != 21 || mixedSummary.Cardinality != 504 || mixedSummary.Cursor != 504 || mixedSummary.Committed != 502 || mixedSummary.SemanticRejected != 2 || mixedSummary.Settled != 502 || mixedSummary.Unsettled != 0 || mixedSummary.Owed != 0 {
+				t.Fatalf("mixed numeric reporter summary = %#v", mixedSummary)
+			}
+			sample := mixedSummary.SemanticRejectionSample
+			if sample == nil || sample.Ordinal != 1 || sample.Failure.Detail.Code != "emit_payload_contract_violation" {
+				t.Fatalf("mixed semantic rejection sample = %#v", sample)
+			}
+			attrs := sample.Failure.Detail.Attributes
+			actual, actualPresent := attrs["actual"].(string)
+			if attrs["event"] != "portfolio/account.registered" || attrs["kind"] != "schema_mismatch" || attrs["path"] != "$.external_id" || attrs["constraint"] != "format" || attrs["expected"] != "uuid" || !actualPresent || actual != "" {
+				t.Fatalf("mixed semantic rejection evidence = %#v", attrs)
+			}
+			rejections := loadNotifyAllChildrenSemanticRejections(t, mixedCtx, selected, db, mixedRunID)
+			if len(rejections) != 2 {
+				t.Fatalf("durable semantic rejections = %#v, want ordinals 1 and 2", rejections)
+			}
+			for ordinal, want := range map[int]map[string]string{
+				1: {"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": ""},
+				2: {"path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+			} {
+				failure, present := rejections[ordinal]
+				if !present {
+					t.Fatalf("durable semantic rejection ordinal %d is missing: %#v", ordinal, rejections)
+				}
+				for name, value := range want {
+					actualValue, valuePresent := failure.Detail.Attributes[name].(string)
+					if !valuePresent || actualValue != value {
+						t.Fatalf("durable semantic rejection ordinal %d attribute %s = %#v, want present %q", ordinal, name, failure.Detail.Attributes[name], value)
+					}
+				}
+			}
+			mixedRegistrations := loadNotifyAllChildrenNumericRegistrations(t, mixedCtx, selected, db, mixedRunID)
+			if len(mixedRegistrations) != 502 || mixedRegistrations["mixed-before"].ID == "" || mixedRegistrations["mixed-after"].ID == "" || mixedRegistrations["mixed-empty-uuid"].ID != "" || mixedRegistrations["mixed-bad-number"].ID != "" {
+				t.Fatalf("mixed numeric registrations = %#v", mixedRegistrations)
+			}
+			for _, accountID := range []string{"mixed-before", "mixed-after"} {
+				accepted, err := operatorStore.LoadOperatorEvent(mixedCtx, mixedRegistrations[accountID].ID)
+				if err != nil || len(accepted.Deliveries) != 0 || accepted.NoDelivery == nil {
+					t.Fatalf("mixed accepted registration %s readback = %#v err=%v", accountID, accepted, err)
+				}
+			}
+			assertNotifyAllChildrenFanOutRunStatus(t, mixedCtx, selected, mixedRunID)
+		})
+	}
+}
+
+func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.DatabaseForTest(selected)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.setup(t)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+				NumericRegistrationRows:   true,
+				NumericInternalSettlement: true,
+			})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+				maintenanceInterval: 10 * time.Millisecond,
+			})
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.bundleSourceFact)); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
+				"portfolio_id": "portfolio-numeric-internal",
+				"threshold":    75,
+			})
+			rows := make([]map[string]any, 0, 25)
+			for ordinal := 0; ordinal < 25; ordinal++ {
+				rows = append(rows, map[string]any{
+					"account_id": fmt.Sprintf("internal-%02d", ordinal),
+					"eng_roles":  ordinal,
+					"gem_score":  float64(ordinal) + 0.25,
+				})
+			}
+			publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+				"portfolio_id": "portfolio-numeric-internal",
+				"account_ids":  rows,
+			})
+			waitNotifyAllChildrenFanOutCursor(t, runtime, db, runID, len(rows))
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, runID, time.Minute)
+
+			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil || summary.Cardinality != len(rows) || summary.Cursor != len(rows) || summary.Committed != len(rows) || summary.Settled != len(rows) || summary.Unsettled != 0 || summary.Owed != 0 {
+				t.Fatalf("internal-delivery fan-out summary = %#v err=%v", summary, err)
+			}
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runID)
+			if len(registrations) != len(rows) {
+				t.Fatalf("internal-delivery registrations = %d, want %d", len(registrations), len(rows))
+			}
+			operatorStore, ok := selected.(interface {
+				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+			})
+			if !ok {
+				t.Fatalf("numeric fan-out store %T lacks operator event readback", selected)
+			}
+			last, err := operatorStore.LoadOperatorEvent(ctx, registrations["internal-24"].ID)
+			if err != nil || len(last.Deliveries) != 1 || last.NoDelivery != nil {
+				t.Fatalf("internal-delivery operator readback = %#v err=%v", last, err)
+			}
+		})
+	}
+}
+
+func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.DatabaseForTest(selected)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.setup(t)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{NumericRegistrationRows: true})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{maintenanceInterval: 10 * time.Millisecond})
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.bundleSourceFact)); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-numeric-template", "threshold": 75})
+			rows := []map[string]any{
+				{"account_id": "template-zero", "eng_roles": 0, "gem_score": 0.25},
+				{"account_id": "template-negative", "eng_roles": -7, "gem_score": -7.5},
+				{"account_id": "template-positive", "eng_roles": 19, "gem_score": 19.75},
+			}
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+				"portfolio_id": "portfolio-numeric-template",
+				"account_ids":  rows,
+			})
+			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil || summary.Cardinality != len(rows) || summary.Committed != len(rows) || summary.Settled != len(rows) || summary.SemanticRejected != 0 {
+				t.Fatalf("template numeric fan-out summary = %#v err=%v", summary, err)
+			}
+			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, selected)
+			if len(descriptors) != len(rows) {
+				t.Fatalf("template numeric downstream entities = %#v, want %d", descriptors, len(rows))
+			}
+			for _, row := range rows {
+				accountID := row["account_id"].(string)
+				descriptor, ok := descriptors[accountID]
+				if !ok {
+					t.Fatalf("template numeric downstream entity %s was not materialized", accountID)
+				}
+				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "account_id", accountID)
+				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "eng_roles", row["eng_roles"])
+				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "gem_score", row["gem_score"])
+			}
+		})
+	}
+}
+
+func assertNotifyAllChildrenFanOutRunStatus(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID string) {
+	t.Helper()
+	runs, ok := selected.(apiv1.RunReadStore)
+	if !ok {
+		t.Fatalf("numeric fan-out store %T lacks the canonical run-read API owner", selected)
+	}
+	const token = "numeric-fan-out-status-token"
+	handler, err := apiv1.NewHandler(apiv1.Options{
+		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
+		AuthTokens:       []string{token},
+		Handlers:         apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),
+	})
+	if err != nil {
+		t.Fatalf("construct run.diagnose API: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	tokenFile := filepath.Join(t.TempDir(), "api-token")
+	if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
+		t.Fatalf("write API token: %v", err)
+	}
+	configFile := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(configFile, []byte("runtime:\n  execution_posture: live\n"), 0o600); err != nil {
+		t.Fatalf("write CLI runtime config: %v", err)
+	}
+
+	var jsonOut, jsonErr bytes.Buffer
+	if code := cliapp.Execute(ctx, []string{
+		"run", "status", runID, "--json", "--config", configFile, "--api-server", server.URL, "--api-token-file", tokenFile,
+	}, &jsonOut, &jsonErr, nil); code != 0 {
+		t.Fatalf("numeric fan-out JSON run status code=%d stderr=%s stdout=%s", code, jsonErr.String(), jsonOut.String())
+	}
+	result := map[string]any{}
+	if err := json.Unmarshal(jsonOut.Bytes(), &result); err != nil {
+		t.Fatalf("decode numeric fan-out JSON run status: %v; output=%s", err, jsonOut.String())
+	}
+	fanOut, _ := result["fan_out"].(map[string]any)
+	sample, _ := fanOut["semantic_rejection_sample"].(map[string]any)
+	failure, _ := sample["failure"].(map[string]any)
+	detail, _ := failure["detail"].(map[string]any)
+	attributes, _ := detail["attributes"].(map[string]any)
+	actual, actualPresent := attributes["actual"].(string)
+	if fanOut["committed"] != float64(502) || fanOut["semantic_rejected"] != float64(2) || fanOut["rejected"] != nil || attributes["path"] != "$.external_id" || !actualPresent || actual != "" {
+		t.Fatalf("numeric fan-out API/CLI JSON projection = %#v", fanOut)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := cliapp.Execute(ctx, []string{
+		"run", "status", runID, "--config", configFile, "--api-server", server.URL, "--api-token-file", tokenFile,
+	}, &humanOut, &humanErr, nil); code != 0 {
+		t.Fatalf("numeric fan-out human run status code=%d stderr=%s stdout=%s", code, humanErr.String(), humanOut.String())
+	}
+	for _, want := range []string{"502 committed items", "2 semantic rejections", "$.external_id", `actual=""`, "emit_payload_contract_violation"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("numeric fan-out human run status missing %q:\n%s", want, humanOut.String())
+		}
+	}
+}
+
+type notifyAllChildrenNumericRegistration struct {
+	ID       string
+	EngRoles int
+	GemScore float64
+}
+
+func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[int]runtimefailures.Envelope {
+	t.Helper()
+	query := `SELECT ordinal,failure::text FROM fan_out_outcomes WHERE run_id=$1::uuid AND outcome_kind='semantic_rejected' ORDER BY ordinal`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT ordinal,failure FROM fan_out_outcomes WHERE run_id=? AND outcome_kind='semantic_rejected' ORDER BY ordinal`
+	}
+	rows, err := db.QueryContext(ctx, query, runID)
+	if err != nil {
+		t.Fatalf("query semantic rejection outcomes: %v", err)
+	}
+	defer rows.Close()
+	out := map[int]runtimefailures.Envelope{}
+	for rows.Next() {
+		var ordinal int
+		var raw string
+		if err := rows.Scan(&ordinal, &raw); err != nil {
+			t.Fatalf("scan semantic rejection outcome: %v", err)
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope([]byte(raw))
+		if err != nil {
+			t.Fatalf("decode semantic rejection outcome %d: %v", ordinal, err)
+		}
+		if _, duplicate := out[ordinal]; duplicate {
+			t.Fatalf("duplicate semantic rejection ordinal %d", ordinal)
+		}
+		out[ordinal] = failure
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate semantic rejection outcomes: %v", err)
+	}
+	return out
+}
+
+func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[string]notifyAllChildrenNumericRegistration {
+	t.Helper()
+	query := `SELECT CAST(event_id AS TEXT),payload FROM events WHERE run_id=$1::uuid AND event_name=$2 ORDER BY created_at,event_id`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT event_id,payload FROM events WHERE run_id=? AND event_name=? ORDER BY created_at,event_id`
+	}
+	rows, err := db.QueryContext(ctx, query, runID, "portfolio/account.registered")
+	if err != nil {
+		t.Fatalf("query numeric registration events: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]notifyAllChildrenNumericRegistration{}
+	for rows.Next() {
+		var (
+			id  string
+			raw any
+		)
+		if err := rows.Scan(&id, &raw); err != nil {
+			t.Fatalf("scan numeric registration event: %v", err)
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &payload); err != nil {
+			t.Fatalf("decode numeric registration event: %v", err)
+		}
+		accountID, _ := payload["account_id"].(string)
+		engRoles, _ := payload["eng_roles"].(float64)
+		gemScore, _ := payload["gem_score"].(float64)
+		if accountID == "" {
+			t.Fatalf("numeric registration event %s lacks account identity: %#v", id, payload)
+		}
+		out[accountID] = notifyAllChildrenNumericRegistration{ID: id, EngRoles: int(engRoles), GemScore: gemScore}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read numeric registration events: %v", err)
+	}
+	return out
 }
 
 func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, eventName string) string {
@@ -1538,7 +1975,7 @@ func newNotifyAllChildrenRuntime(
 		actions:  runtimepipeline.NewContractActionRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
+	coordinatorOptions := runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.Live,
 		Module:           module,
 		BundleSourceFact: bundleSourceFact,
@@ -1570,7 +2007,8 @@ func newNotifyAllChildrenRuntime(
 		GenericSchedules:        genericSchedules,
 		TestEngineEmitNow:       engineNow,
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
-	})
+	}
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, coordinatorOptions)
 
 	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
@@ -1625,6 +2063,9 @@ func newNotifyAllChildrenRuntime(
 				t.Errorf("stop notify-all-children generic schedules: %v", err)
 			}
 		})
+	}
+	if opts.maintenanceInterval > 0 {
+		coordinator.SetTestMaintenanceInterval(opts.maintenanceInterval)
 	}
 	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact))
 	maintenanceDone := make(chan struct{})
@@ -1958,7 +2399,12 @@ func publishNotifyAllChildrenEventAsync(t *testing.T, ctx context.Context, runti
 
 func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime, runID string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.bundleSourceFact), 30*time.Second)
+	waitNotifyAllChildrenRuntimeWithin(t, runtime, runID, 30*time.Second)
+}
+
+func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenRuntime, runID string, timeout time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.bundleSourceFact), timeout)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -1985,6 +2431,35 @@ func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime
 		select {
 		case <-ctx.Done():
 			t.Fatalf("wait for durable fan-out settlement: %v; summary=%#v", ctx.Err(), summary)
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, db *sql.DB, runID string, cardinality int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.bundleSourceFact), 5*time.Minute)
+	defer cancel()
+	query := `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1::uuid`
+	if _, ok := runtime.selected.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=?`
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var total, cursor, owed int
+		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed); err != nil {
+			t.Fatalf("load fan-out cursor: %v", err)
+		}
+		if total == cardinality && cursor == cardinality && owed == 0 {
+			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatalf("wait fan-out EventBus settlement: %v", err)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for fan-out cursor: %v; total=%d cursor=%d owed=%d", ctx.Err(), total, cursor, owed)
 		case <-ticker.C:
 		}
 	}
@@ -2141,6 +2616,23 @@ func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend 
 	}
 	dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
 	t.Fatalf("%s.%s = %s, want %s (all fields %#v, last error %v)", flowInstance, field, gotJSON, wantJSON, fields, lastErr)
+}
+
+func loadNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, flowInstance string) map[string]any {
+	t.Helper()
+	query := `SELECT fields FROM entity_state WHERE flow_instance = $1 ORDER BY updated_at DESC LIMIT 1`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT fields FROM entity_state WHERE flow_instance = ? ORDER BY updated_at DESC LIMIT 1`
+	}
+	var raw any
+	if err := db.QueryRowContext(ctx, query, flowInstance).Scan(&raw); err != nil {
+		t.Fatalf("load %s metadata: %v", flowInstance, err)
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &fields); err != nil {
+		t.Fatalf("decode %s metadata: %v", flowInstance, err)
+	}
+	return fields
 }
 
 func loadNotifyAllChildrenFailure(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, eventID string) runtimefailures.Envelope {
