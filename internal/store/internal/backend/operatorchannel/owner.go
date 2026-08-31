@@ -389,6 +389,9 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			}
 			return err
 		}
+		if err := requireActiveOnboardingParent(txctx, tx, runner.dialect(), op); err != nil {
+			return err
+		}
 		if op.Revision != req.ExpectedRevision {
 			return domain.ErrRevisionConflict
 		}
@@ -478,6 +481,36 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 		return out, binding, err
 	}
 	return out, binding, terminalErr
+}
+
+// requireActiveOnboardingParent admits a nonterminal identity mutation only
+// while the exact durable onboarding responsibility still owns it. Keeping
+// this read in the confirmation transaction makes teardown retirement and
+// confirmation serialize at the selected-store owner.
+func requireActiveOnboardingParent(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
+	parentID := strings.TrimSpace(op.OnboardingOperationID)
+	if parentID == "" {
+		return nil
+	}
+	query := `SELECT phase,identity_operation_id FROM channel_onboarding_operations WHERE operation_id=?`
+	if d == dialectPostgres {
+		query += ` FOR UPDATE`
+	}
+	var phase string
+	var identityOperationID sql.NullString
+	if err := tx.QueryRowContext(ctx, d.bind(query), parentID).Scan(&phase, &identityOperationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: onboarding parent is unavailable", domain.ErrConflict)
+		}
+		return err
+	}
+	if phase == "succeeded" || phase == "failed" || phase == "retired" {
+		return fmt.Errorf("%w: onboarding parent is already %s", domain.ErrConflict, phase)
+	}
+	if strings.TrimSpace(identityOperationID.String) != op.OperationID {
+		return fmt.Errorf("%w: onboarding parent no longer owns identity operation", domain.ErrRevisionConflict)
+	}
+	return nil
 }
 
 func (s *PostgresOwner) UnbindOperatorChannel(ctx context.Context, req domain.UnbindRequest) (domain.Operation, domain.Binding, error) {
