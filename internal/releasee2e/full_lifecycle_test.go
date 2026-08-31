@@ -854,7 +854,6 @@ func assertFullLifecycleHistoryAbsent(t *testing.T, rpc *releaseRPCClient, runID
 type fullLifecycleCrashCheckpoint struct {
 	EventID  string
 	Delivery fullLifecycleEventDelivery
-	EntityID string
 }
 
 func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProcess, runID string, providerMessageReference int, receipt fullLifecycleIngressReceipt) fullLifecycleCrashCheckpoint {
@@ -884,7 +883,7 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 			delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" {
 			return false, fmt.Errorf("pending normalized route target is not exact: receipt=%#v event=%#v delivery=%#v", receipt, event, delivery)
 		}
-		checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery, EntityID: event.EntityID}
+		checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery}
 		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 			return false, err
 		}
