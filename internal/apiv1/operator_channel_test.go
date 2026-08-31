@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -20,6 +21,12 @@ import (
 type recordingOperatorChannelIdempotency struct {
 	delegate APIIdempotencyStore
 	actors   []string
+}
+
+type operatorChannelAPICredentialCurrentness struct{}
+
+func (operatorChannelAPICredentialCurrentness) CurrentValueMatchesSeal(_ context.Context, evidence runtimecredentials.ValueEvidence) (bool, error) {
+	return evidence.Validate() == nil, nil
 }
 
 type directOperatorChannelDestructiveTestAdapter struct {
@@ -67,7 +74,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 		ChannelPackVersion: "1.0.0", ChannelManifestHash: "sha256:" + strings.Repeat("a", 64),
 		SemanticGeneration: "operator-channel-api-contract",
 	}.Normalized()
-	service, err := operatorchannel.NewService(selected, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	service, err := operatorchannel.NewService(selected, proofs, operatorChannelAPICredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +88,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 		Channels: service, Destructive: directOperatorChannelDestructiveTestAdapter{service: service, now: now},
 		Readback: operatorChannelIdentityReadbackAdapter{service: service}, Idempotency: idempotency, Now: func() time.Time { return now },
 	})
-	for _, method := range []string{"channel.connect", "channel.reconnect", "channel.rebind", "channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.list"} {
+	for _, method := range []string{"channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.list"} {
 		if handlers[method] == nil {
 			t.Fatalf("operator channel handler %s is missing", method)
 		}
@@ -105,43 +112,6 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	if listed["principal_id"] != principal.ID || len(listed["channels"].([]any)) != 1 {
 		t.Fatalf("channel.list result = %#v", listed)
 	}
-
-	for _, body := range []string{
-		`{"jsonrpc":"2.0","id":"missing","method":"channel.connect","params":{"interface":"` + identity.Selector + `"}}`,
-		`{"jsonrpc":"2.0","id":"unknown","method":"channel.connect","params":{"interface":"` + identity.Selector + `","expected_revision":0,"unexpected":true}}`,
-	} {
-		response := rpcCall(t, handler, body)
-		if response.Error == nil || response.Error.Code != -32602 {
-			t.Fatalf("channel.connect admission response = %#v, want invalid params", response)
-		}
-	}
-
-	shortSelector := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"short","method":"channel.connect","params":{"interface":"provider.telegram.hitl_channel","expected_revision":0}}`)
-	requireOperatorChannelAPIErrorCode(t, shortSelector, ChannelInterfaceNotFoundCode)
-
-	connectBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":"connect","method":"channel.connect","params":{"interface":%q,"expected_revision":0,"save_proof":true,"idempotency_key":"connect-key"}}`, identity.Selector)
-	connected := rpcCall(t, handler, connectBody)
-	if connected.Error != nil {
-		t.Fatalf("channel.connect error = %#v", connected.Error)
-	}
-	operation := asMap(t, asMap(t, connected.Result)["operation"])
-	if operation["state"] != string(operatorchannel.StateAwaitingClaim) || operation["challenge"] == "" {
-		t.Fatalf("channel.connect operation = %#v", operation)
-	}
-	for _, absent := range []string{"claimed_at", "completed_at"} {
-		if _, present := operation[absent]; present {
-			t.Fatalf("channel.connect operation exposed zero %s: %#v", absent, operation)
-		}
-	}
-	if _, present := operation["expires_at"]; !present {
-		t.Fatalf("channel.connect operation omitted challenge expiry: %#v", operation)
-	}
-	replayed := rpcCall(t, handler, connectBody)
-	if replayed.Error != nil || asMap(t, asMap(t, replayed.Result)["operation"])["operation_id"] != operation["operation_id"] {
-		t.Fatalf("channel.connect replay = %#v", replayed)
-	}
-	changed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"changed","method":"channel.connect","params":{"interface":%q,"expected_revision":0,"save_proof":false,"idempotency_key":"connect-key"}}`, identity.Selector))
-	requireOperatorChannelAPIErrorCode(t, changed, IdempotencyConflictCode)
 
 	missingProof := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"missing-proof","method":"channel.proof_revoke","params":{"interface":%q,"expected_revision":1,"idempotency_key":"missing-proof"}}`, identity.Selector))
 	requireOperatorChannelAPIErrorCode(t, missingProof, ChannelProofUnavailableCode)

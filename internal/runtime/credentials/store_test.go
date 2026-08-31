@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,18 +324,127 @@ func TestFileStoreDeleteWithReceiptCannotDeleteSuccessorOccurrence(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if deleted, err := store.DeleteWithReceipt(ctx, first.Key, first.Receipt, first.Epoch); err != nil || deleted {
+	if deleted, err := store.DeleteWithReceipt(ctx, first.Key, first.Receipt); err != nil || deleted {
 		t.Fatalf("stale delete = %v, %v; want false, nil", deleted, err)
 	}
 	if value, found, err := store.Get(ctx, second.Key); err != nil || !found || value != "second" {
 		t.Fatalf("successor after stale delete = %q, %v, %v", value, found, err)
 	}
-	if deleted, err := store.DeleteWithReceipt(ctx, second.Key, second.Receipt, second.Epoch); err != nil || !deleted {
+	if deleted, err := store.DeleteWithReceipt(ctx, second.Key, second.Receipt); err != nil || !deleted {
 		t.Fatalf("current delete = %v, %v; want true, nil", deleted, err)
 	}
 	if _, found, err := store.Get(ctx, second.Key); err != nil || found {
 		t.Fatalf("credential after current delete found=%v err=%v", found, err)
 	}
+}
+
+func TestCredentialValueSealOwnsExactKeyAndValueCurrentness(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, "provider", "token-a"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := SealCurrentValue(ctx, store, "provider")
+	if err != nil {
+		t.Fatalf("SealCurrentValue: %v", err)
+	}
+	second, err := SealCurrentValue(ctx, store, "provider")
+	if err != nil || second != first {
+		t.Fatalf("same value evidence = %#v, %v; want %#v", second, err, first)
+	}
+	current, err := CurrentValueMatchesSeal(ctx, store, first)
+	if err != nil || !current {
+		t.Fatalf("CurrentValueMatchesSeal = %v, %v; want true, nil", current, err)
+	}
+	if err := store.Set(ctx, "provider", "token-a"); err != nil {
+		t.Fatal(err)
+	}
+	current, err = CurrentValueMatchesSeal(ctx, store, first)
+	if err != nil || !current {
+		t.Fatalf("same-value reset current = %v, %v; want true, nil", current, err)
+	}
+	if err := store.Set(ctx, "provider", "token-b"); err != nil {
+		t.Fatal(err)
+	}
+	current, err = CurrentValueMatchesSeal(ctx, store, first)
+	if err != nil || current {
+		t.Fatalf("rotated value current = %v, %v; want false, nil", current, err)
+	}
+	otherKey, err := store.SetAndSealForTest(ctx, "signing", "token-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherKey.Seal == first.Seal {
+		t.Fatal("same value under different keys produced the same seal")
+	}
+}
+
+func TestCredentialValueSealValidationNeverMintsMissingKey(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, "provider", "token-a"); err != nil {
+		t.Fatal(err)
+	}
+	evidence := ValueEvidence{Key: "provider", Seal: ValueSeal("credential-value-seal-v1:" + strings.Repeat("0", 64))}
+	if _, err := CurrentValueMatchesSeal(ctx, store, evidence); !errors.Is(err, ErrValueSealKeyUnavailable) {
+		t.Fatalf("validation error = %v, want ErrValueSealKeyUnavailable", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "value_seal_key") {
+		t.Fatal("validation minted a value seal key")
+	}
+}
+
+func TestCredentialValueSealUsesEffectiveOverlayValueAndDurableKeyHome(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("PROVIDER", "env-token-a")
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	file, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Set(ctx, "provider", "file-token"); err != nil {
+		t.Fatal(err)
+	}
+	overlay := NewOverlayStore(EnvStore{}, file)
+	evidence, err := SealCurrentValue(ctx, overlay, "provider")
+	if err != nil {
+		t.Fatalf("SealCurrentValue overlay: %v", err)
+	}
+	t.Setenv("PROVIDER", "env-token-b")
+	current, err := CurrentValueMatchesSeal(ctx, overlay, evidence)
+	if err != nil || current {
+		t.Fatalf("rotated env current = %v, %v; want false, nil", current, err)
+	}
+	t.Setenv("PROVIDER", "env-token-a")
+	current, err = CurrentValueMatchesSeal(ctx, overlay, evidence)
+	if err != nil || !current {
+		t.Fatalf("restored env current = %v, %v; want true, nil", current, err)
+	}
+	if _, err := SealCurrentValue(ctx, EnvStore{}, "provider"); !errors.Is(err, ErrValueSealKeyUnavailable) {
+		t.Fatalf("env-only seal error = %v, want ErrValueSealKeyUnavailable", err)
+	}
+	if err := RequireDurableValueSealKeyHome(NewOverlayStore(EnvStore{}, nil)); !errors.Is(err, ErrValueSealKeyUnavailable) {
+		t.Fatalf("overlay without writable key home error = %v, want ErrValueSealKeyUnavailable", err)
+	}
+}
+
+func (s *FileStore) SetAndSealForTest(ctx context.Context, key, value string) (ValueEvidence, error) {
+	if err := s.Set(ctx, key, value); err != nil {
+		return ValueEvidence{}, err
+	}
+	return SealCurrentValue(ctx, s, key)
 }
 
 func writeCredentialsFixtureFile(t *testing.T, path, contents string) {

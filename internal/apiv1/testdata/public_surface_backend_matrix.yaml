@@ -318,7 +318,7 @@ store_parity:
       required_ports: [operatorChannels]
       runtime_deps: [InboundPayloadValidationBinder, InboundStore]
       platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
-      public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
+      public_methods: [channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
     - id: connected_channel_onboarding
       semantic_owners: [internal/channelonboarding, internal/store selected channelOnboarding]
       selected_purposes: [runtime]
@@ -815,27 +815,6 @@ mutating_api_parity_ledger:
     proof_refs:
       - {kind: go_test, name: TestChannelConnectTelegramFirstUserJourney}
     notes: Retry resumes the selected-store operation from settled evidence without rotating credentials or blindly resending uncertain effects.
-  - method: channel.connect
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_connect_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Exact interface selection and the awaiting-claim operation are served through the selected-store owner.
-  - method: channel.reconnect
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_reconnect_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Same-account re-verification remains revision-fenced on both selected stores.
-  - method: channel.rebind
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_rebind_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Different-account replacement is claimant-confirmed and revision-fenced on both selected stores.
   - method: channel.confirm
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

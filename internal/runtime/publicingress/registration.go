@@ -109,23 +109,23 @@ type registrationState struct {
 }
 
 type registrationIntent struct {
-	BaseFingerprint      string
-	ExposureGenerationID string
-	IntentID             string
-	CallbackToken        string
-	CallbackURL          string
-	SlotID               string
-	ObservedAt           time.Time
-	ExpiresAt            time.Time
-	Authority            runtimeeffects.Authority
-	CredentialEpochs     map[string]string
-	Applied              bool
-	Matched              bool
-	EffectOperationID    string
-	EffectAttemptID      string
-	EffectAttemptOrdinal int
-	Pending              runtimeregistration.PendingApply
-	HasPending           bool
+	BaseFingerprint             string
+	ExposureGenerationID        string
+	IntentID                    string
+	CallbackToken               string
+	CallbackURL                 string
+	SlotID                      string
+	ObservedAt                  time.Time
+	ExpiresAt                   time.Time
+	Authority                   runtimeeffects.Authority
+	CredentialObservationTokens map[string]string
+	Applied                     bool
+	Matched                     bool
+	EffectOperationID           string
+	EffectAttemptID             string
+	EffectAttemptOrdinal        int
+	Pending                     runtimeregistration.PendingApply
+	HasPending                  bool
 }
 
 type registrationAttempt struct {
@@ -156,7 +156,7 @@ func NewProviderRegistrationController(opts RegistrationControllerOptions) (*Pro
 	controller := &ProviderRegistrationController{opts: opts, snapshot: opts.Readiness.registration}
 	opts.Readiness.SetCurrentnessChecks(
 		controller.StartupCurrent,
-		controller.credentialEpochsCurrent,
+		controller.credentialObservationTokensCurrent,
 		opts.EffectsStore.IsExternalEffectAuthorityCurrent,
 	)
 	return controller, nil
@@ -177,16 +177,16 @@ func (c *ProviderRegistrationController) StartupCurrent(ctx context.Context, exp
 	return c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
-func (c *ProviderRegistrationController) credentialEpochsCurrent(ctx context.Context, epochs map[string]string) (bool, error) {
-	if len(epochs) == 0 {
+func (c *ProviderRegistrationController) credentialObservationTokensCurrent(ctx context.Context, observations map[string]string) (bool, error) {
+	if len(observations) == 0 {
 		return false, nil
 	}
-	for key, expected := range epochs {
+	for key, expected := range observations {
 		current, err := c.opts.CredentialOwner.Observe(ctx, key)
 		if err != nil {
 			return false, err
 		}
-		if current.Epoch() != expected {
+		if current.ObservationToken() != expected {
 			return false, nil
 		}
 	}
@@ -398,8 +398,8 @@ func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generati
 	return registrationIntent{
 		BaseFingerprint: candidate.base, ExposureGenerationID: exposure.ID,
 		IntentID: intentID, CallbackToken: token, CallbackURL: callbackURL, SlotID: candidate.slotID,
-		Authority:        serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now(), candidate.pair),
-		CredentialEpochs: candidateCredentialEpochs(candidate),
+		Authority:                   serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now(), candidate.pair),
+		CredentialObservationTokens: candidateCredentialObservationTokens(candidate),
 	}, nil
 }
 
@@ -574,7 +574,7 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		if current.Epoch() != admitted.Epoch() {
+		if current.ObservationToken() != admitted.ObservationToken() {
 			return fmt.Errorf("provider registration credential %q changed before launch", logical)
 		}
 	}
@@ -582,7 +582,7 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	if current.Epoch() != candidate.signing.Epoch() {
+	if current.ObservationToken() != candidate.signing.ObservationToken() {
 		return fmt.Errorf("provider registration signing credential changed before launch")
 	}
 	return nil
@@ -689,7 +689,7 @@ func cloneRegistrationState(source registrationState) registrationState {
 
 func cloneRegistrationIntent(source registrationIntent) registrationIntent {
 	out := source
-	out.CredentialEpochs = cloneStringMap(source.CredentialEpochs)
+	out.CredentialObservationTokens = cloneStringMap(source.CredentialObservationTokens)
 	return out
 }
 
@@ -789,7 +789,7 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 	sort.Strings(keys)
 	for _, logical := range keys {
 		snapshot := provider[logical]
-		providerEvidence[logical] = map[string]any{"key": snapshot.Key, "source": snapshot.Source, "epoch": snapshot.Epoch()}
+		providerEvidence[logical] = map[string]any{"key": snapshot.Key, "source": snapshot.Source, "observation_token": snapshot.ObservationToken()}
 	}
 	raw, err := canonicaljson.Bytes(map[string]any{
 		"exposure_generation": exposure.ID,
@@ -805,7 +805,7 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 		"onboarding_operation_id": strings.TrimSpace(pair.OnboardingOperationID),
 		"slot_id":                 slotID,
 		"provider_credentials":    providerEvidence,
-		"signing_credential":      map[string]any{"key": signing.Key, "source": signing.Source, "epoch": signing.Epoch()},
+		"signing_credential":      map[string]any{"key": signing.Key, "source": signing.Source, "observation_token": signing.ObservationToken()},
 	})
 	if err != nil {
 		return "", err
@@ -822,12 +822,12 @@ func candidateCredentials(candidate admittedPair) map[string]any {
 	return out
 }
 
-func candidateCredentialEpochs(candidate admittedPair) map[string]string {
+func candidateCredentialObservationTokens(candidate admittedPair) map[string]string {
 	out := make(map[string]string, len(candidate.provider)+1)
 	for _, snapshot := range candidate.provider {
-		out[snapshot.Key] = snapshot.Epoch()
+		out[snapshot.Key] = snapshot.ObservationToken()
 	}
-	out[candidate.signing.Key] = candidate.signing.Epoch()
+	out[candidate.signing.Key] = candidate.signing.ObservationToken()
 	return out
 }
 

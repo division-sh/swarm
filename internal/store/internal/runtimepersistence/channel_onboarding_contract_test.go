@@ -111,6 +111,63 @@ func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStore
 	}
 }
 
+func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := channelOnboardingStartRequest(principal.ID, now)
+			op, err := selected.ReserveChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admissions := []channelonboarding.CredentialAdmission{
+				{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "provider-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+				{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+			}
+			op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
+				CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseFailed,
+				FailureCode: "provider_rejected", FailureMessage: "provider rejected credential", Now: now.Add(2 * time.Second),
+			})
+			if err != nil || failed.Phase != channelonboarding.PhaseFailed {
+				t.Fatalf("terminal fence = %#v err=%v", failed, err)
+			}
+			if _, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: failed.OperationID, ExpectedRevision: failed.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, Now: now.Add(3 * time.Second),
+			}); !errors.Is(err, channelonboarding.ErrConflict) {
+				t.Fatalf("terminal credential readmission error = %v, want conflict", err)
+			}
+			replay := request
+			replay.OperationID = uuid.NewString()
+			replayed, err := selected.ReserveChannelOnboarding(ctx, replay)
+			if err != nil || replayed.OperationID != failed.OperationID || replayed.Phase != channelonboarding.PhaseFailed || replayed.Revision != failed.Revision {
+				t.Fatalf("terminal request replay = %#v err=%v", replayed, err)
+			}
+		})
+	}
+}
+
 type retiredOnboardingIdentities struct {
 	principal operatorchannel.Principal
 }
@@ -118,7 +175,7 @@ type retiredOnboardingIdentities struct {
 func (i retiredOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
 	return i.principal, nil
 }
-func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error) {
+func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) GetOperation(context.Context, string) (operatorchannel.Operation, error) {
@@ -129,6 +186,9 @@ func (retiredOnboardingIdentities) ExpireOperation(context.Context, string, int6
 }
 func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
+	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) Readback(context.Context) ([]operatorchannel.Readback, error) {
 	return nil, nil
@@ -228,7 +288,7 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 	for _, reservation := range request.CredentialReservations {
 		admissions = append(admissions, channelonboarding.CredentialAdmission{
 			Role: reservation.Role, StoreKey: reservation.StoreKey + "." + request.OperationID,
-			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, Epoch: "epoch-" + request.OperationID,
+			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, ValueSeal: operatorChannelProviderEvidence().Seal,
 		})
 	}
 	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
@@ -300,8 +360,8 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		t.Fatalf("concurrent slot operation = %v", err)
 	}
 	admissions := []channelonboarding.CredentialAdmission{
-		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", Epoch: "epoch-provider"},
-		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", Epoch: "epoch-signing"},
+		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", ValueSeal: operatorChannelProviderEvidence().Seal},
+		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", ValueSeal: operatorChannelProviderEvidence().Seal},
 	}
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseCredentialsAdmitted,

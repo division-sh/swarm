@@ -284,7 +284,7 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	}
 	identity := operatorChannelContractIdentity("inbound-atomic-generation")
 	begin := func(key string) operatorchannel.Operation {
-		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 			OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 			Interface: identity, ExpectedRevision: 0, RequestKeyHash: key, RequestHash: key + "-body",
 			RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),

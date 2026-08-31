@@ -180,7 +180,7 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
 }
 
-func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimecredentials.SnapshotOwner, coordinate channelonboarding.ChannelRuntimeContextCoordinate, binding packs.OutboundBindingPlan) ([]channelonboarding.CredentialAdmission, error) {
+func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimecredentials.SnapshotOwner, _ channelonboarding.ChannelRuntimeContextCoordinate, binding packs.OutboundBindingPlan) ([]channelonboarding.CredentialAdmission, error) {
 	keys := binding.CredentialStoreKeys()
 	if len(keys) == 0 {
 		return nil, nil
@@ -196,21 +196,12 @@ func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimec
 	admissions := make([]channelonboarding.CredentialAdmission, 0, len(roles))
 	for _, role := range roles {
 		key := strings.TrimSpace(keys[role])
-		bindingSnapshot, err := owner.ObserveSecretBinding(ctx, key)
+		evidence, err := owner.SealCurrentValue(ctx, key)
 		if err != nil {
 			return nil, fmt.Errorf("declared channel activation %q credential %q: %w", binding.BindingID(), role, err)
 		}
-		if !bindingSnapshot.Bound() {
-			return nil, fmt.Errorf("declared channel activation %q credential %q is not usable", binding.BindingID(), role)
-		}
-		epoch := bindingSnapshot.Epoch()
 		admissions = append(admissions, channelonboarding.CredentialAdmission{
-			Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved,
-			Receipt: operatorchannel.Hash(
-				"declared-channel-credential-observation-v1", coordinate.BundleHash,
-				coordinate.RuntimeInstanceID, fmt.Sprint(coordinate.ContextPublicationGeneration), binding.BindingID(), role, epoch,
-			),
-			Epoch: epoch,
+			Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: evidence.Seal,
 		})
 	}
 	return admissions, nil
@@ -428,7 +419,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
 	if bindingErr != nil {
-		if !errors.Is(bindingErr, operatorchannel.ErrNotFound) {
+		if !errors.Is(bindingErr, operatorchannel.ErrNotFound) && !errors.Is(bindingErr, operatorchannel.ErrCredentialStale) {
 			return channelonboarding.ConnectedChannelReadiness{}, false, bindingErr
 		}
 		facts.ExpectedBindingRevision = 0
@@ -440,8 +431,8 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 
 	facts.CredentialsCurrent = true
 	for _, admission := range activation.CredentialAdmissions {
-		observed, observeErr := o.credentials.Observe(ctx, admission.StoreKey)
-		if observeErr != nil || !observed.Present || observed.Epoch() != admission.Epoch {
+		current, currentErr := o.credentials.CurrentValueMatchesSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
+		if currentErr != nil || !current {
 			facts.CredentialsCurrent = false
 			break
 		}
@@ -671,12 +662,16 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		if !ok || storeKey == "" || admission.StoreKey != storeKey {
 			return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation credential role %q is not admitted by the current activation", logical)
 		}
-		observed, err := d.credentials.ObserveSecretBinding(ctx, storeKey)
+		current, err := d.credentials.CurrentValueMatchesSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 		if err != nil {
 			return channelonboarding.ConfirmationResult{}, err
 		}
-		if !observed.Bound() || observed.Epoch() != admission.Epoch {
+		if !current {
 			return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation credential role %q is no longer current", logical)
+		}
+		observed, err := d.credentials.ObserveSecretBinding(ctx, storeKey)
+		if err != nil || !observed.Bound() {
+			return channelonboarding.ConfirmationResult{}, errors.Join(fmt.Errorf("channel confirmation credential role %q is not usable", logical), err)
 		}
 		credentials[logical] = observed.CredentialValue()
 	}

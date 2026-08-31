@@ -51,7 +51,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		ChannelPackVersion: "1.0.0", ChannelManifestHash: "sha256:" + strings.Repeat("a", 64),
 		SemanticGeneration: "channel-onboarding-api-contract",
 	}.Normalized()
-	channels, err := operatorchannel.NewService(selected, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	channels, err := operatorchannel.NewService(selected, proofs, operatorChannelAPICredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}

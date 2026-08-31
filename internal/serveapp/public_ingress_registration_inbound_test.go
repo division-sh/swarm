@@ -179,8 +179,8 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		},
 		ActivationRevision: 1, Plan: learnedBinding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{
-			{Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "bot-observation", Epoch: "bot-epoch"},
-			{Role: "webhook_signing_secret", StoreKey: "channel.generated.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-write", Epoch: "signing-epoch"},
+			{Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: serveTestValueSeal('a')},
+			{Role: "webhook_signing_secret", StoreKey: "channel.generated.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-write", ValueSeal: serveTestValueSeal('b')},
 		},
 	}})
 	if err != nil {
@@ -394,7 +394,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		Plan: binding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{{
 			Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved,
-			Receipt: "test-receipt", Epoch: "test-epoch",
+			ValueSeal: serveTestValueSeal('c'),
 		}},
 	}
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{compiled})
@@ -414,6 +414,10 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "requires a signing credential role") || !strings.Contains(err.Error(), "UNAUTHENTICATED") {
 		t.Fatalf("resolveServeRegistrationPairs pairs=%#v err=%v, want unsigned signing-role contradiction", pairs, err)
 	}
+}
+
+func serveTestValueSeal(digit byte) runtimecredentials.ValueSeal {
+	return runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat(string(digit), 64))
 }
 
 func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {

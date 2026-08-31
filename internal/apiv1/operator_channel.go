@@ -41,42 +41,6 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	handlers := map[string]MethodHandler{}
-	for method, kind := range map[string]operatorchannel.OperationKind{
-		"channel.connect":   operatorchannel.OperationConnect,
-		"channel.reconnect": operatorchannel.OperationReconnect,
-		"channel.rebind":    operatorchannel.OperationRebind,
-	} {
-		method, kind := method, kind
-		handlers[method] = func(ctx context.Context, req Request) (any, error) {
-			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
-				return nil, err
-			}
-			selector, err := requiredStringParam(req.Params, "interface")
-			if err != nil {
-				return nil, err
-			}
-			revision, err := channelRevisionParam(req.Params, "expected_revision", kind == operatorchannel.OperationConnect)
-			if err != nil {
-				return nil, err
-			}
-			saveProof, err := optionalBoolParam(req.Params, "save_proof", true)
-			if err != nil {
-				return nil, err
-			}
-			idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-			if err != nil {
-				return nil, err
-			}
-			requestKey, requestHash := operatorchannel.RequestIdentity(method, req.OperatorPrincipalID, idempotencyKey, req.RequestHash)
-			return executeOperatorChannelIdempotent(ctx, req, opts, selector, idempotencyKey, now().UTC(), func(ctx context.Context) (any, error) {
-				op, err := opts.Channels.Begin(ctx, selector, kind, revision, requestKey, requestHash, saveProof, now().UTC())
-				if err != nil {
-					return nil, operatorChannelError(err)
-				}
-				return map[string]any{"operation": op}, nil
-			})
-		}
-	}
 	handlers["channel.confirm"] = func(ctx context.Context, req Request) (any, error) {
 		if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
 			return nil, err
