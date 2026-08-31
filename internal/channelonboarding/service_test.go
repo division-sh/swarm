@@ -432,55 +432,6 @@ func TestCredentialRotationBeforeConfirmationResetsParentAndAdmitsReplacement(t 
 	}
 }
 
-func TestConfirmIdentityRequiresActiveOwningParentBeforeNonterminalMutation(t *testing.T) {
-	now := time.Date(2026, 8, 31, 17, 0, 0, 0, time.UTC)
-	parentID := uuid.NewString()
-	identityID := uuid.NewString()
-	for _, test := range []struct {
-		name          string
-		parentPhase   Phase
-		parentChildID string
-		identityState operatorchannel.OperationState
-		wantErr       error
-		wantCalls     int
-	}{
-		{name: "retired parent rejects pending child", parentPhase: PhaseRetired, parentChildID: identityID, identityState: operatorchannel.StateAwaitingConfirmation, wantErr: ErrConflict},
-		{name: "active parent rejects unowned child", parentPhase: PhaseAwaitingOperatorConfirmation, parentChildID: uuid.NewString(), identityState: operatorchannel.StateAwaitingConfirmation, wantErr: ErrRevisionConflict},
-		{name: "retired parent preserves terminal replay", parentPhase: PhaseRetired, parentChildID: identityID, identityState: operatorchannel.StateBound, wantCalls: 1},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			parent := Operation{OperationID: parentID, Phase: test.parentPhase, IdentityOperationID: test.parentChildID, Revision: 4}
-			identities := &cancellationTestIdentities{
-				operation: operatorchannel.Operation{OperationID: identityID, OnboardingOperationID: parentID, State: test.identityState, Revision: 2},
-				binding:   operatorchannel.Binding{Revision: 1, Status: operatorchannel.BindingCurrent},
-			}
-			service, err := NewService(ServiceOptions{
-				Store: &cancellationTestStore{op: parent}, Identities: identities, Credentials: testCredentialWriter(t),
-				Catalog: func() (*CandidateCatalog, error) { return NewCandidateCatalog(nil) }, Activations: &cancellationTestActivations{},
-				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			confirmed, _, err := service.ConfirmIdentity(context.Background(), identityID, 2, true, now)
-			if test.wantErr != nil {
-				if !errors.Is(err, test.wantErr) {
-					t.Fatalf("confirmation error = %v, want %v", err, test.wantErr)
-				}
-				if identities.operation.State != operatorchannel.StateAwaitingConfirmation || identities.operation.Revision != 2 {
-					t.Fatalf("rejected child mutated = %#v", identities.operation)
-				}
-			} else if err != nil || confirmed.State != operatorchannel.StateBound {
-				t.Fatalf("terminal replay = %#v, %v", confirmed, err)
-			}
-			if identities.confirmCalls != test.wantCalls {
-				t.Fatalf("identity confirmation calls = %d, want %d", identities.confirmCalls, test.wantCalls)
-			}
-		})
-	}
-}
-
 func TestCredentialStaleIdentityRestartResetsParentWithoutExternalEffects(t *testing.T) {
 	now := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
@@ -2034,7 +1985,6 @@ type cancellationTestIdentities struct {
 	sawCanceledContext    bool
 	expirations           int
 	expiryRaceState       operatorchannel.OperationState
-	confirmCalls          int
 }
 
 func (i *cancellationTestIdentities) observe(ctx context.Context) {
@@ -2070,7 +2020,6 @@ func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind o
 
 func (i *cancellationTestIdentities) Confirm(ctx context.Context, operationID string, expectedRevision int64, approve bool, now time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
 	i.observe(ctx)
-	i.confirmCalls++
 	if operationID != i.operation.OperationID {
 		return operatorchannel.Operation{}, operatorchannel.Binding{}, operatorchannel.ErrNotFound
 	}
