@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -73,7 +74,7 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		return fanoutobligation.Intent{}, fmt.Errorf("decode fan-out lease time: %w", err)
 	}
 	var capsule fanoutobligation.Capsule
-	if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(capsuleRaw, &capsule); err != nil {
 		return fanoutobligation.Intent{}, fmt.Errorf("decode fan-out capsule: %w", err)
 	}
 	source := fanoutobligation.SourceRef{

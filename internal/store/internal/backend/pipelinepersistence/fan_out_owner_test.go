@@ -95,6 +95,45 @@ func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testin
 	}
 }
 
+func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := fanOutReadbackTestDB(t, backend)
+			command := seedFanOutReadbackClaim(t, db)
+
+			var capsuleRaw []byte
+			if err := db.QueryRow(`SELECT capsule FROM fan_out_intents WHERE run_id=$1`, command.Claim.Key.RunID).Scan(&capsuleRaw); err != nil {
+				t.Fatal(err)
+			}
+			var capsule fanoutobligation.Capsule
+			if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+				t.Fatal(err)
+			}
+			capsule.StateFields = map[string]any{
+				"integer": json.Number("75"),
+				"decimal": json.Number("75.0"),
+			}
+			capsuleRaw, err := json.Marshal(capsule)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE fan_out_intents SET capsule=$1 WHERE run_id=$2`, string(capsuleRaw), command.Claim.Key.RunID); err != nil {
+				t.Fatal(err)
+			}
+
+			intent, err := scanFanOutIntent(db.QueryRow(`SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1`, command.Claim.Key.RunID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			integer, integerOK := intent.Request.Capsule.StateFields["integer"].(json.Number)
+			decimal, decimalOK := intent.Request.Capsule.StateFields["decimal"].(json.Number)
+			if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
+				t.Fatalf("hydrated capsule numerics = integer:%#v decimal:%#v, want lexical json.Number carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
+			}
+		})
+	}
+}
+
 func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, outcome := range []string{"committed", "rolled_back", "contradictory"} {

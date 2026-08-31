@@ -60,6 +60,9 @@ func TestWorkflowCELProjectionJSONSourcesPreserveNumberLexemes(t *testing.T) {
 		{name: "ordinary event payload", path: filepath.Join(runtimeRoot, "engine", "executor.go"), function: "decodePayload", projects: true},
 		{name: "persisted workflow state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_store.go"), function: "decodeWorkflowInstanceJSONMap", projects: true},
 		{name: "deferred trigger payload", path: filepath.Join(runtimeRoot, "engine", "fan_out_evaluator.go"), function: "decodeFanOutPayload"},
+		{name: "persisted fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "scanFanOutIntent"},
+		{name: "run-fork fan-out capsule projection", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_projection.go"), function: "loadRunForkFanOutObligationsFromRevision"},
+		{name: "materialized fork fan-out capsule verification", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_materializer.go"), function: "requireExactMaterializedRunForkFanOut"},
 		{name: "exact entity revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSON", streaming: true},
 		{name: "pinned resource version", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSONL", streaming: true},
 	}

@@ -167,11 +167,28 @@ portfolio.notify.completed:
 `)
 	}
 	if opts.NumericRegistrationRows {
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
+  portfolio_id: text
+`, `portfolio.opened:
+  portfolio_id: text
+  threshold: integer
+`)
 		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
 `, `  account_ids: "[json]"
 `)
+		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
+`, `  portfolio_id: text
+  threshold: integer
+`)
 		applyClosedReplacement(t, ownerEntities, `  account_ids: "[text]"
 `, `  account_ids: "[json]"
+`)
+		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
+            target_field: portfolio_id
+`, `          - source_field: portfolio_id
+            target_field: portfolio_id
+          - source_field: threshold
+            target_field: threshold
 `)
 		applyClosedReplacement(t, ownerNodes, `        as: account_id
         max_items: 100
@@ -189,6 +206,7 @@ portfolio.notify.completed:
             account_id: account.account_id
             eng_roles: account.eng_roles
             gem_score: account.gem_score
+            eligible: entity.threshold >= 70
 `)
 		applyClosedReplacement(t, ownerNodes, `        as: account_id
         max_items: 100
@@ -213,6 +231,7 @@ portfolio.notify.completed:
   account_id: text
   eng_roles: integer
   gem_score: number
+  eligible: boolean
 `)
 		applyClosedReplacement(t, accountNodes, `    account.registered:
       data_accumulation:
@@ -228,6 +247,8 @@ portfolio.notify.completed:
             target_field: eng_roles
           - source_field: gem_score
             target_field: gem_score
+          - source_field: eligible
+            target_field: eligible
 `)
 		applyClosedReplacement(t, accountEntities, `account_state:
   account_id: text
@@ -236,6 +257,7 @@ portfolio.notify.completed:
   account_id: text
   eng_roles: integer
   gem_score: number
+  eligible: boolean
   last_command: text
 `)
 		if opts.NumericReporterSink {
