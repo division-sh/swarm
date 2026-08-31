@@ -73,7 +73,7 @@ func (e *EmitPayloadContractError) Attributes() map[string]any {
 		"path":       strings.TrimSpace(e.Path),
 		"constraint": strings.TrimSpace(e.Constraint),
 		"expected":   strings.TrimSpace(e.Expected),
-		"actual":     strings.TrimSpace(e.Actual),
+		"actual":     e.Actual,
 		"detail":     strings.TrimSpace(e.Detail),
 	}
 }

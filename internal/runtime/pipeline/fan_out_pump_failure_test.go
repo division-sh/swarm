@@ -282,6 +282,10 @@ func TestFanOutPrecommitFailureAdmissionIsClosedToEmitContractEvidence(t *testin
 	}{
 		{name: "typed emit contract", err: emitErr, want: fanOutFailureItemSemantic},
 		{name: "exact normalized emit envelope", err: normalizedEmit, want: fanOutFailureItemSemantic},
+		{name: "typed schema mismatch with empty actual", err: &runtimeengine.EmitPayloadContractError{
+			Event: "portfolio/account.registered", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+			Path: "$.external_id", Constraint: "format", Expected: "uuid", Actual: "", Detail: "$.external_id must be uuid",
+		}, want: fanOutFailureItemSemantic},
 		{name: "incomplete typed emit contract", err: &runtimeengine.EmitPayloadContractError{
 			Event: "portfolio/account.registered", Kind: runtimeengine.EmitPayloadSchemaMismatch,
 		}, want: fanOutFailureBlock},

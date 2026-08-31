@@ -36,7 +36,7 @@ func violation(path, constraint, expected, actual, detail string, args ...any) e
 		Path:       strings.TrimSpace(path),
 		Constraint: strings.TrimSpace(constraint),
 		Expected:   strings.TrimSpace(expected),
-		Actual:     strings.TrimSpace(actual),
+		Actual:     actual,
 		Detail:     fmt.Sprintf(detail, args...),
 	}
 }

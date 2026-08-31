@@ -3273,8 +3273,11 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 	root := &runtimecontracts.FlowContractView{Events: map[string]runtimecontracts.EventCatalogEntry{
 		"company.registered": {
 			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{"gem_score": {Type: "number"}},
-				Required:   []string{"gem_score"},
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"gem_score":   {Type: "number"},
+					"external_id": {Type: "uuid"},
+				},
+				Required: []string{"gem_score", "external_id"},
 			},
 		},
 		"company.unresolved": {
@@ -3309,7 +3312,14 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 			name: "schema mismatch", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.gem_score", constraint: "type", expected: "number", actual: "string",
 			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": "7.2"}, nil, runtimeengine.EmitSurfaceDeclarative)
+				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": "7.2", "external_id": uuid.NewString()}, nil, runtimeengine.EmitSurfaceDeclarative)
+			},
+		},
+		{
+			name: "schema mismatch empty value", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
+			path: "$.external_id", constraint: "format", expected: "uuid", actual: "",
+			run: func() error {
+				return validatePipelineEmitPayload(source, "", "company.registered", map[string]any{"gem_score": 7.2, "external_id": ""}, nil, runtimeengine.EmitSurfaceDeclarative)
 			},
 		},
 		{

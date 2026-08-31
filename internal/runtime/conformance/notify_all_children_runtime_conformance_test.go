@@ -512,7 +512,11 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db := tc.setup(t)
-			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericReporterSink: true})
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+				NumericRegistrationRows: true,
+				NumericReporterSink:     true,
+				RegistrationUUIDField:   true,
+			})
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
 				maintenanceInterval: 10 * time.Millisecond,
 			})
@@ -532,9 +536,10 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 				for row := 0; row < 25; row++ {
 					ordinal := batch*25 + row
 					rows = append(rows, map[string]any{
-						"account_id": fmt.Sprintf("numeric-%03d", ordinal),
-						"eng_roles":  ordinal,
-						"gem_score":  float64(ordinal) + 0.25,
+						"account_id":  fmt.Sprintf("numeric-%03d", ordinal),
+						"eng_roles":   ordinal,
+						"gem_score":   float64(ordinal) + 0.25,
+						"external_id": uuid.NewString(),
 					})
 				}
 				publishNotifyAllChildrenEventAsync(t, validCtx, runtime, source, validRunID, "portfolio.accounts.register.requested", map[string]any{
@@ -574,7 +579,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if err != nil {
 				t.Fatalf("load numeric registration operator event: %v", err)
 			}
-			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || view.Payload["eligible"] != true || len(view.Deliveries) != 0 || view.NoDelivery == nil {
+			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || strings.TrimSpace(fmt.Sprint(view.Payload["external_id"])) == "" || view.Payload["eligible"] != true || len(view.Deliveries) != 0 || view.NoDelivery == nil {
 				t.Fatalf("numeric registration operator readback = payload:%#v deliveries:%#v", view.Payload, view.Deliveries)
 			}
 
@@ -583,9 +588,10 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			publishNotifyAllChildrenEvent(t, mixedCtx, runtime, source, mixedRunID, "portfolio.accounts.register.requested", map[string]any{
 				"portfolio_id": "portfolio-numeric-valid",
 				"account_ids": []map[string]any{
-					{"account_id": "mixed-before", "eng_roles": 1, "gem_score": 1.25},
-					{"account_id": "mixed-rejected", "eng_roles": 2, "gem_score": "not-a-number"},
-					{"account_id": "mixed-after", "eng_roles": 3, "gem_score": 3.25},
+					{"account_id": "mixed-before", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString()},
+					{"account_id": "mixed-empty-uuid", "eng_roles": 2, "gem_score": 2.25, "external_id": ""},
+					{"account_id": "mixed-bad-number", "eng_roles": 3, "gem_score": "not-a-number", "external_id": uuid.NewString()},
+					{"account_id": "mixed-after", "eng_roles": 4, "gem_score": 4.25, "external_id": uuid.NewString()},
 				},
 			})
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, mixedRunID, 5*time.Minute)
@@ -593,7 +599,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if err != nil {
 				t.Fatalf("mixed FanOutRunSummary: %v", err)
 			}
-			if mixedSummary.Intents != 21 || mixedSummary.Cardinality != 503 || mixedSummary.Cursor != 503 || mixedSummary.Committed != 502 || mixedSummary.SemanticRejected != 1 || mixedSummary.Settled != 502 || mixedSummary.Unsettled != 0 || mixedSummary.Owed != 0 {
+			if mixedSummary.Intents != 21 || mixedSummary.Cardinality != 504 || mixedSummary.Cursor != 504 || mixedSummary.Committed != 502 || mixedSummary.SemanticRejected != 2 || mixedSummary.Settled != 502 || mixedSummary.Unsettled != 0 || mixedSummary.Owed != 0 {
 				t.Fatalf("mixed numeric reporter summary = %#v", mixedSummary)
 			}
 			sample := mixedSummary.SemanticRejectionSample
@@ -601,11 +607,31 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 				t.Fatalf("mixed semantic rejection sample = %#v", sample)
 			}
 			attrs := sample.Failure.Detail.Attributes
-			if attrs["event"] != "portfolio/account.registered" || attrs["kind"] != "schema_mismatch" || attrs["path"] != "$.gem_score" || attrs["constraint"] != "type" || attrs["expected"] != "number" || attrs["actual"] != "string" {
+			actual, actualPresent := attrs["actual"].(string)
+			if attrs["event"] != "portfolio/account.registered" || attrs["kind"] != "schema_mismatch" || attrs["path"] != "$.external_id" || attrs["constraint"] != "format" || attrs["expected"] != "uuid" || !actualPresent || actual != "" {
 				t.Fatalf("mixed semantic rejection evidence = %#v", attrs)
 			}
+			rejections := loadNotifyAllChildrenSemanticRejections(t, mixedCtx, selected, db, mixedRunID)
+			if len(rejections) != 2 {
+				t.Fatalf("durable semantic rejections = %#v, want ordinals 1 and 2", rejections)
+			}
+			for ordinal, want := range map[int]map[string]string{
+				1: {"path": "$.external_id", "constraint": "format", "expected": "uuid", "actual": ""},
+				2: {"path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+			} {
+				failure, present := rejections[ordinal]
+				if !present {
+					t.Fatalf("durable semantic rejection ordinal %d is missing: %#v", ordinal, rejections)
+				}
+				for name, value := range want {
+					actualValue, valuePresent := failure.Detail.Attributes[name].(string)
+					if !valuePresent || actualValue != value {
+						t.Fatalf("durable semantic rejection ordinal %d attribute %s = %#v, want present %q", ordinal, name, failure.Detail.Attributes[name], value)
+					}
+				}
+			}
 			mixedRegistrations := loadNotifyAllChildrenNumericRegistrations(t, mixedCtx, selected, db, mixedRunID)
-			if len(mixedRegistrations) != 502 || mixedRegistrations["mixed-before"].ID == "" || mixedRegistrations["mixed-after"].ID == "" || mixedRegistrations["mixed-rejected"].ID != "" {
+			if len(mixedRegistrations) != 502 || mixedRegistrations["mixed-before"].ID == "" || mixedRegistrations["mixed-after"].ID == "" || mixedRegistrations["mixed-empty-uuid"].ID != "" || mixedRegistrations["mixed-bad-number"].ID != "" {
 				t.Fatalf("mixed numeric registrations = %#v", mixedRegistrations)
 			}
 			for _, accountID := range []string{"mixed-before", "mixed-after"} {
@@ -798,7 +824,8 @@ func assertNotifyAllChildrenFanOutRunStatus(t *testing.T, ctx context.Context, s
 	failure, _ := sample["failure"].(map[string]any)
 	detail, _ := failure["detail"].(map[string]any)
 	attributes, _ := detail["attributes"].(map[string]any)
-	if fanOut["committed"] != float64(502) || fanOut["semantic_rejected"] != float64(1) || fanOut["rejected"] != nil || attributes["path"] != "$.gem_score" {
+	actual, actualPresent := attributes["actual"].(string)
+	if fanOut["committed"] != float64(502) || fanOut["semantic_rejected"] != float64(2) || fanOut["rejected"] != nil || attributes["path"] != "$.external_id" || !actualPresent || actual != "" {
 		t.Fatalf("numeric fan-out API/CLI JSON projection = %#v", fanOut)
 	}
 
@@ -808,7 +835,7 @@ func assertNotifyAllChildrenFanOutRunStatus(t *testing.T, ctx context.Context, s
 	}, &humanOut, &humanErr, nil); code != 0 {
 		t.Fatalf("numeric fan-out human run status code=%d stderr=%s stdout=%s", code, humanErr.String(), humanOut.String())
 	}
-	for _, want := range []string{"502 committed items", "1 semantic rejection", "$.gem_score", "emit_payload_contract_violation"} {
+	for _, want := range []string{"502 committed items", "2 semantic rejections", "$.external_id", `actual=""`, "emit_payload_contract_violation"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("numeric fan-out human run status missing %q:\n%s", want, humanOut.String())
 		}
@@ -819,6 +846,39 @@ type notifyAllChildrenNumericRegistration struct {
 	ID       string
 	EngRoles int
 	GemScore float64
+}
+
+func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[int]runtimefailures.Envelope {
+	t.Helper()
+	query := `SELECT ordinal,failure::text FROM fan_out_outcomes WHERE run_id=$1::uuid AND outcome_kind='semantic_rejected' ORDER BY ordinal`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT ordinal,failure FROM fan_out_outcomes WHERE run_id=? AND outcome_kind='semantic_rejected' ORDER BY ordinal`
+	}
+	rows, err := db.QueryContext(ctx, query, runID)
+	if err != nil {
+		t.Fatalf("query semantic rejection outcomes: %v", err)
+	}
+	defer rows.Close()
+	out := map[int]runtimefailures.Envelope{}
+	for rows.Next() {
+		var ordinal int
+		var raw string
+		if err := rows.Scan(&ordinal, &raw); err != nil {
+			t.Fatalf("scan semantic rejection outcome: %v", err)
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope([]byte(raw))
+		if err != nil {
+			t.Fatalf("decode semantic rejection outcome %d: %v", ordinal, err)
+		}
+		if _, duplicate := out[ordinal]; duplicate {
+			t.Fatalf("duplicate semantic rejection ordinal %d", ordinal)
+		}
+		out[ordinal] = failure
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate semantic rejection outcomes: %v", err)
+	}
+	return out
 }
 
 func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[string]notifyAllChildrenNumericRegistration {

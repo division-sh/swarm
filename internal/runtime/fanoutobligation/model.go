@@ -336,14 +336,25 @@ func ValidateSemanticRejection(raw json.RawMessage) error {
 		return errors.New("semantic rejection requires exact emit-contract failure evidence")
 	}
 	attributes := failure.Detail.Attributes
-	for _, name := range []string{"event", "kind", "path", "constraint", "expected", "actual", "detail"} {
+	for _, name := range []string{"event", "kind", "path", "constraint", "expected", "detail"} {
 		value, present := attributes[name].(string)
 		if !present || strings.TrimSpace(value) == "" {
 			return fmt.Errorf("semantic rejection emit-contract attribute %q is required", name)
 		}
 	}
+	actual, actualPresent := attributes["actual"].(string)
+	if !actualPresent {
+		return errors.New("semantic rejection emit-contract attribute \"actual\" is required")
+	}
 	switch attributes["kind"] {
-	case "schema_unresolved", "schema_mismatch", "authored_envelope_field":
+	case "schema_mismatch":
+		// Empty and whitespace-only strings are legitimate rejected values. The
+		// typed attribute's presence distinguishes them from missing evidence.
+		return nil
+	case "schema_unresolved", "authored_envelope_field":
+		if strings.TrimSpace(actual) == "" {
+			return errors.New("semantic rejection emit-contract attribute \"actual\" is required")
+		}
 		return nil
 	default:
 		return errors.New("semantic rejection requires a recognized emit-contract rejection kind")

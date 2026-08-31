@@ -254,9 +254,17 @@ func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *
 			}
 
 			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, now.Add(3*time.Second))); err != nil {
-				t.Fatalf("commit exact emit-contract rejection after hostile attempts: %v", err)
+				t.Fatalf("commit exact empty-value emit-contract rejection after hostile attempts: %v", err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+			summary, err := owner.FanOutRunSummary(ctx, fixture.runID, now.Add(4*time.Second))
+			if err != nil || summary.SemanticRejected != 1 || summary.SemanticRejectionSample == nil {
+				t.Fatalf("empty-value semantic rejection summary = %#v err=%v", summary, err)
+			}
+			actual, present := summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"].(string)
+			if !present || actual != "" {
+				t.Fatalf("persisted empty actual = %#v, want present empty string", summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"])
+			}
 		})
 	}
 }
@@ -2059,7 +2067,7 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 func rejectedFanOutChunk(claim fanoutobligation.Claim, start, count int, at time.Time) pipeline.FanOutChunkCommand {
 	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
 		Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
-		Path: "$.item", Constraint: "type", Expected: "declared item", Actual: "invalid item", Detail: "fan-out test item is invalid",
+		Path: "$.external_id", Constraint: "format", Expected: "uuid", Actual: "", Detail: "fan-out test external_id must be uuid",
 	}, "test", "commit_fan_out_chunk")
 	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {

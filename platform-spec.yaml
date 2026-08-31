@@ -3898,7 +3898,10 @@ handler_specification:
         semantic_rejection_evidence: >-
           Every semantic_rejected ordinal persists one deterministic non-retryable FailureEnvelope produced from a typed
           emit-contract error. The error retains event, rejection kind, path, constraint, expected, actual, and stable
-          detail. Schema validation selects the first violation by canonical field order, independent of map iteration.
+          detail. Every required emit-contract attribute is present and string-typed. A schema-mismatch actual is either a stable semantic
+          category or the exact rejected textual scalar; the latter may be empty or whitespace-only, and key presence
+          distinguishes that value from missing evidence. Other evidence attributes remain non-blank. Schema validation
+          selects the first violation by canonical field order, independent of map iteration.
           Run diagnostics expose the count as semantic_rejected and exactly one nullable sample selected by
           triggering_delivery_id, package_key, element_id, then ordinal. The sample is null exactly when the count is zero.
         lifecycle: >-

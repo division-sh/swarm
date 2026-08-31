@@ -271,8 +271,8 @@ func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
 	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
 		runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "runtime.engine", "fan_out.emit",
 		map[string]any{
-			"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
-			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+			"event": "company.registered", "kind": "schema_mismatch", "path": "$.external_id",
+			"constraint": "format", "expected": "uuid", "actual": "", "detail": "$.external_id must be uuid",
 		},
 	))
 	if !ok {
@@ -295,8 +295,8 @@ func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{name: "human", args: []string{"run", "status", runID}, want: []string{"1 semantic rejection", deliveryID, elementID, "emit_payload_contract_violation", "$.gem_score"}},
-		{name: "json", args: []string{"run", "status", runID, "--json"}, want: []string{`"semantic_rejected":1`, `"semantic_rejection_sample"`, `"path":"$.gem_score"`}},
+		{name: "human", args: []string{"run", "status", runID}, want: []string{"1 semantic rejection", deliveryID, elementID, "emit_payload_contract_violation", "$.external_id", `actual=""`}},
+		{name: "json", args: []string{"run", "status", runID, "--json"}, want: []string{`"semantic_rejected":1`, `"semantic_rejection_sample"`, `"path":"$.external_id"`, `"actual":""`}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
