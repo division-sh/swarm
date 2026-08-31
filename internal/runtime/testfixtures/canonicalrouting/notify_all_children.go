@@ -46,11 +46,15 @@ type NotifyAllChildrenOptions struct {
 	FanOutDeliveryBarrier       bool
 	NumericRegistrationRows     bool
 	NumericReporterSink         bool
+	NumericInternalSettlement   bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
 func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	t.Helper()
+	if opts.NumericReporterSink && opts.NumericInternalSettlement {
+		t.Fatal("numeric reporter and internal-settlement sinks are mutually exclusive")
+	}
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
 	packageFile := filepath.Join(root, "package.yaml")
@@ -239,27 +243,26 @@ portfolio.notify.completed:
     from: portfolio
     to: account
 `, "")
-			applyClosedReplacement(t, ownerEntities, `  account_ids: "[json]"
-`, `  account_ids: "[json]"
-  observed_account_id: text
-  observed_eng_roles: integer
-  observed_gem_score: number
+			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+  key: account_id
+`, `account.registered:
+  swarm:
+    consumer: external
+  key: account_id
 `)
+		}
+		if opts.NumericInternalSettlement {
+			applyClosedReplacement(t, packageFile, `  - event: account.registered
+    from: portfolio
+    to: account
+`, "")
 			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
   id: numeric-registration-observer
   execution_type: system_node
   subscribes_to:
     - account.registered
   event_handlers:
-    account.registered:
-      data_accumulation:
-        writes:
-          - source_field: account_id
-            target_field: observed_account_id
-          - source_field: eng_roles
-            target_field: observed_eng_roles
-          - source_field: gem_score
-            target_field: observed_gem_score
+    account.registered: {}
 portfolio-coordinator:
 `)
 		}

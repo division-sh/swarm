@@ -563,7 +563,6 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if last.ID == "" || last.EngRoles != 499 || last.GemScore != 499.25 {
 				t.Fatalf("last numeric registration = %#v", last)
 			}
-			assertNotifyAllChildrenObservedRegistration(t, validCtx, selected, db, registrations)
 			operatorStore, ok := selected.(interface {
 				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 			})
@@ -574,7 +573,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if err != nil {
 				t.Fatalf("load numeric registration operator event: %v", err)
 			}
-			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || len(view.Deliveries) != 1 || view.NoDelivery != nil {
+			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || len(view.Deliveries) != 0 || view.NoDelivery == nil {
 				t.Fatalf("numeric registration operator readback = payload:%#v deliveries:%#v", view.Payload, view.Deliveries)
 			}
 
@@ -608,14 +607,88 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if len(mixedRegistrations) != 502 || mixedRegistrations["mixed-before"].ID == "" || mixedRegistrations["mixed-after"].ID == "" || mixedRegistrations["mixed-rejected"].ID != "" {
 				t.Fatalf("mixed numeric registrations = %#v", mixedRegistrations)
 			}
-			assertNotifyAllChildrenObservedRegistration(t, mixedCtx, selected, db, mixedRegistrations)
 			for _, accountID := range []string{"mixed-before", "mixed-after"} {
 				accepted, err := operatorStore.LoadOperatorEvent(mixedCtx, mixedRegistrations[accountID].ID)
-				if err != nil || len(accepted.Deliveries) != 1 || accepted.NoDelivery != nil {
+				if err != nil || len(accepted.Deliveries) != 0 || accepted.NoDelivery == nil {
 					t.Fatalf("mixed accepted registration %s readback = %#v err=%v", accountID, accepted, err)
 				}
 			}
 			assertNotifyAllChildrenFanOutRunStatus(t, mixedCtx, selected, mixedRunID)
+		})
+	}
+}
+
+func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.DatabaseForTest(selected)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.setup(t)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+				NumericRegistrationRows:   true,
+				NumericInternalSettlement: true,
+			})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+				maintenanceInterval: 10 * time.Millisecond,
+			})
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.bundleSourceFact)); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
+				"portfolio_id": "portfolio-numeric-internal",
+			})
+			rows := make([]map[string]any, 0, 25)
+			for ordinal := 0; ordinal < 25; ordinal++ {
+				rows = append(rows, map[string]any{
+					"account_id": fmt.Sprintf("internal-%02d", ordinal),
+					"eng_roles":  ordinal,
+					"gem_score":  float64(ordinal) + 0.25,
+				})
+			}
+			publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+				"portfolio_id": "portfolio-numeric-internal",
+				"account_ids":  rows,
+			})
+			waitNotifyAllChildrenFanOutCursor(t, runtime, db, runID, len(rows))
+			waitNotifyAllChildrenRuntimeWithin(t, runtime, runID, time.Minute)
+
+			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil || summary.Cardinality != len(rows) || summary.Cursor != len(rows) || summary.Committed != len(rows) || summary.Settled != len(rows) || summary.Unsettled != 0 || summary.Owed != 0 {
+				t.Fatalf("internal-delivery fan-out summary = %#v err=%v", summary, err)
+			}
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runID)
+			if len(registrations) != len(rows) {
+				t.Fatalf("internal-delivery registrations = %d, want %d", len(registrations), len(rows))
+			}
+			operatorStore, ok := selected.(interface {
+				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+			})
+			if !ok {
+				t.Fatalf("numeric fan-out store %T lacks operator event readback", selected)
+			}
+			last, err := operatorStore.LoadOperatorEvent(ctx, registrations["internal-24"].ID)
+			if err != nil || len(last.Deliveries) != 1 || last.NoDelivery != nil {
+				t.Fatalf("internal-delivery operator readback = %#v err=%v", last, err)
+			}
 		})
 	}
 }
@@ -782,27 +855,6 @@ func loadNotifyAllChildrenNumericRegistrations(t *testing.T, ctx context.Context
 		t.Fatalf("read numeric registration events: %v", err)
 	}
 	return out
-}
-
-func assertNotifyAllChildrenObservedRegistration(
-	t *testing.T,
-	ctx context.Context,
-	backend notifyAllChildrenStore,
-	db *sql.DB,
-	registrations map[string]notifyAllChildrenNumericRegistration,
-) {
-	t.Helper()
-	fields := loadNotifyAllChildrenMetadata(t, ctx, backend, db, "portfolio")
-	accountID, _ := fields["observed_account_id"].(string)
-	registration, ok := registrations[accountID]
-	if !ok {
-		t.Fatalf("observed numeric registration %q is absent from %#v", accountID, registrations)
-	}
-	engRoles, engRolesOK := fields["observed_eng_roles"].(float64)
-	gemScore, gemScoreOK := fields["observed_gem_score"].(float64)
-	if !engRolesOK || !gemScoreOK || int(engRoles) != registration.EngRoles || gemScore != registration.GemScore {
-		t.Fatalf("observed numeric registration fields = %#v, want %#v", fields, registration)
-	}
 }
 
 func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, eventName string) string {
