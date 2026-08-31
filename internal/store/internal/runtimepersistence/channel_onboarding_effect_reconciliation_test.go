@@ -244,10 +244,14 @@ func selectedChannelConfirmationAuthorityFixture(
 		channelonboarding.PhaseAwaitingOperatorConfirmation,
 		channelonboarding.PhasePublishingActivation,
 	} {
-		op, err = selected.AdvanceChannelOnboarding(context.Background(), channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: identityID, BindingRevision: 1, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: identityID, Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = 1
+		}
+		op, err = selected.AdvanceChannelOnboarding(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
 		}

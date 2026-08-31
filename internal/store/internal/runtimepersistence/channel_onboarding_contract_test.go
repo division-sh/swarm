@@ -576,10 +576,14 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 		t.Fatal(err)
 	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: bindingRevision, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = bindingRevision
+		}
+		op, err = selected.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}
