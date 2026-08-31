@@ -26,9 +26,9 @@ func (s *EventSQLiteOwner) SetEventPayloadAdmitter(admitter runtimebus.PayloadAd
 	if s == nil {
 		return
 	}
-	s.validatorMu.Lock()
+	s.payloadAdmitterMu.Lock()
 	s.payloadAdmitter = admitter
-	s.validatorMu.Unlock()
+	s.payloadAdmitterMu.Unlock()
 }
 
 func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admitted events.AdmittedEvent) (events.AdmittedEvent, error) {
@@ -39,9 +39,9 @@ func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admi
 	if _, ok := event.PayloadAdmission(); ok {
 		return admitted, nil
 	}
-	s.validatorMu.RLock()
+	s.payloadAdmitterMu.RLock()
 	admitter := s.payloadAdmitter
-	s.validatorMu.RUnlock()
+	s.payloadAdmitterMu.RUnlock()
 	if admitter == nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
