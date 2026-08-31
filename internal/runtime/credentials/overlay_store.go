@@ -136,7 +136,7 @@ func (s *OverlayStore) Delete(ctx context.Context, key string) error {
 	return s.writable.Delete(ctx, key)
 }
 
-func (s *OverlayStore) DeleteWithReceipt(ctx context.Context, key, receipt, epoch string) (bool, error) {
+func (s *OverlayStore) DeleteWithReceipt(ctx context.Context, key, receipt string) (bool, error) {
 	if s == nil || s.writable == nil {
 		return false, ErrNotWritable
 	}
@@ -144,7 +144,52 @@ func (s *OverlayStore) DeleteWithReceipt(ctx context.Context, key, receipt, epoc
 	if !ok || deleter == nil {
 		return false, fmt.Errorf("writable credential store does not support receipt-fenced deletion")
 	}
-	return deleter.DeleteWithReceipt(ctx, key, receipt, epoch)
+	return deleter.DeleteWithReceipt(ctx, key, receipt)
+}
+
+func (s *OverlayStore) hasDurableValueSealKeyHome() bool {
+	if s == nil || s.writable == nil {
+		return false
+	}
+	owner, ok := s.writable.(valueSealStore)
+	return ok && owner != nil && owner.hasDurableValueSealKeyHome()
+}
+
+func (s *OverlayStore) sealCurrentValue(ctx context.Context, key string) (ValueEvidence, error) {
+	snapshot, err := s.Snapshot(ctx, key)
+	if err != nil {
+		return ValueEvidence{}, err
+	}
+	if !snapshot.Present {
+		return ValueEvidence{}, fmt.Errorf("credential %q is not present", strings.TrimSpace(key))
+	}
+	home, ok := s.writable.(valueSealKeyHome)
+	if !ok || home == nil {
+		return ValueEvidence{}, fmt.Errorf("%w: configure a writable credential file tier before admitting durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	seal, err := home.sealExactValue(ctx, snapshot.Key, snapshot.CredentialValue())
+	if err != nil {
+		return ValueEvidence{}, err
+	}
+	return ValueEvidence{Key: snapshot.Key, Seal: seal}, nil
+}
+
+func (s *OverlayStore) currentValueMatchesSeal(ctx context.Context, evidence ValueEvidence) (bool, error) {
+	if err := evidence.Validate(); err != nil {
+		return false, err
+	}
+	snapshot, err := s.Snapshot(ctx, evidence.Key)
+	if err != nil {
+		return false, err
+	}
+	home, ok := s.writable.(valueSealKeyHome)
+	if !ok || home == nil {
+		return false, fmt.Errorf("%w: configure a writable credential file tier before validating durable channel credentials", ErrValueSealKeyUnavailable)
+	}
+	if !snapshot.Present {
+		return false, nil
+	}
+	return home.matchExactValue(ctx, evidence.Key, snapshot.CredentialValue(), evidence.Seal)
 }
 
 func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error) {

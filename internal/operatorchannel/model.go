@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
 
 const (
-	ProofFormat                = "swarm-verified-account-proof-v1"
+	ProofFormat                = "swarm-verified-account-proof-v2"
 	ChallengePrefix            = "SWARM-"
 	DefaultChallengeTTL        = 10 * time.Minute
 	DefaultConnectWait         = 2 * time.Minute
@@ -32,6 +33,7 @@ var (
 	ErrOperationTerminal  = errors.New("operator channel operation is terminal")
 	ErrProofUnavailable   = errors.New("verified account proof is unavailable")
 	ErrBindingUnavailable = errors.New("operator channel binding is unavailable")
+	ErrCredentialStale    = errors.New("operator channel provider credential is stale")
 )
 
 var proofNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-verified-account-proof"))
@@ -233,18 +235,19 @@ func (c InboundClaim) Validate() error {
 }
 
 type BeginRequest struct {
-	OperationID          string            `json:"operation_id"`
-	Kind                 OperationKind     `json:"kind"`
-	PrincipalID          string            `json:"principal_id"`
-	Interface            InterfaceIdentity `json:"interface"`
-	ExpectedRevision     int64             `json:"expected_revision"`
-	RequestKeyHash       string            `json:"request_key_hash"`
-	RequestHash          string            `json:"request_hash"`
-	SaveProof            bool              `json:"save_proof"`
-	PlannedProofID       string            `json:"planned_proof_id,omitempty"`
-	PlannedProofRevision int64             `json:"planned_proof_revision,omitempty"`
-	RequestedAt          time.Time         `json:"requested_at"`
-	ExpiresAt            time.Time         `json:"expires_at"`
+	OperationID          string                           `json:"operation_id"`
+	Kind                 OperationKind                    `json:"kind"`
+	PrincipalID          string                           `json:"principal_id"`
+	Interface            InterfaceIdentity                `json:"interface"`
+	ExpectedRevision     int64                            `json:"expected_revision"`
+	RequestKeyHash       string                           `json:"request_key_hash"`
+	RequestHash          string                           `json:"request_hash"`
+	SaveProof            bool                             `json:"save_proof"`
+	PlannedProofID       string                           `json:"planned_proof_id,omitempty"`
+	PlannedProofRevision int64                            `json:"planned_proof_revision,omitempty"`
+	ProviderCredential   runtimecredentials.ValueEvidence `json:"-"`
+	RequestedAt          time.Time                        `json:"requested_at"`
+	ExpiresAt            time.Time                        `json:"expires_at"`
 }
 
 type ConfirmRequest struct {
@@ -280,67 +283,70 @@ type BootBindRequest struct {
 }
 
 type Operation struct {
-	OperationID             string            `json:"operation_id"`
-	Kind                    OperationKind     `json:"kind"`
-	PrincipalID             string            `json:"principal_id"`
-	Interface               InterfaceIdentity `json:"interface"`
-	Challenge               string            `json:"challenge,omitempty"`
-	State                   OperationState    `json:"state"`
-	Revision                int64             `json:"revision"`
-	BindingRevision         int64             `json:"binding_revision,omitempty"`
-	ExternalAccountRef      string            `json:"external_account_reference,omitempty"`
-	ConversationRef         string            `json:"conversation_reference,omitempty"`
-	ConversationScope       ConversationScope `json:"conversation_scope,omitempty"`
-	AccountPresentation     string            `json:"account_presentation,omitempty"`
-	SaveProof               bool              `json:"save_proof"`
-	ProofID                 string            `json:"proof_id,omitempty"`
-	ProofRevision           int64             `json:"proof_revision,omitempty"`
-	ProofStatus             ProofStatus       `json:"proof_status"`
-	ClaimDisposition        string            `json:"claim_disposition,omitempty"`
-	RequestedAt             time.Time         `json:"requested_at"`
-	ExpiresAt               time.Time         `json:"expires_at,omitzero"`
-	ClaimedAt               time.Time         `json:"claimed_at,omitzero"`
-	CompletedAt             time.Time         `json:"completed_at,omitzero"`
-	RequestHash             string            `json:"-"`
-	ExpectedBindingRevision int64             `json:"-"`
-	PlannedProofID          string            `json:"-"`
-	PlannedProofRevision    int64             `json:"-"`
+	OperationID             string                           `json:"operation_id"`
+	Kind                    OperationKind                    `json:"kind"`
+	PrincipalID             string                           `json:"principal_id"`
+	Interface               InterfaceIdentity                `json:"interface"`
+	Challenge               string                           `json:"challenge,omitempty"`
+	State                   OperationState                   `json:"state"`
+	Revision                int64                            `json:"revision"`
+	BindingRevision         int64                            `json:"binding_revision,omitempty"`
+	ExternalAccountRef      string                           `json:"external_account_reference,omitempty"`
+	ConversationRef         string                           `json:"conversation_reference,omitempty"`
+	ConversationScope       ConversationScope                `json:"conversation_scope,omitempty"`
+	AccountPresentation     string                           `json:"account_presentation,omitempty"`
+	SaveProof               bool                             `json:"save_proof"`
+	ProofID                 string                           `json:"proof_id,omitempty"`
+	ProofRevision           int64                            `json:"proof_revision,omitempty"`
+	ProofStatus             ProofStatus                      `json:"proof_status"`
+	ClaimDisposition        string                           `json:"claim_disposition,omitempty"`
+	RequestedAt             time.Time                        `json:"requested_at"`
+	ExpiresAt               time.Time                        `json:"expires_at,omitzero"`
+	ClaimedAt               time.Time                        `json:"claimed_at,omitzero"`
+	CompletedAt             time.Time                        `json:"completed_at,omitzero"`
+	RequestHash             string                           `json:"-"`
+	ExpectedBindingRevision int64                            `json:"-"`
+	PlannedProofID          string                           `json:"-"`
+	PlannedProofRevision    int64                            `json:"-"`
+	ProviderCredential      runtimecredentials.ValueEvidence `json:"-"`
 }
 
 type Binding struct {
-	PrincipalID         string            `json:"principal_id"`
-	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference,omitempty"`
-	ConversationRef     string            `json:"conversation_reference,omitempty"`
-	ConversationScope   ConversationScope `json:"conversation_scope,omitempty"`
-	AccountPresentation string            `json:"account_presentation,omitempty"`
-	Revision            int64             `json:"revision"`
-	Status              BindingStatus     `json:"status"`
-	Source              BindingSource     `json:"source,omitempty"`
-	ProofID             string            `json:"proof_id,omitempty"`
-	ProofRevision       int64             `json:"proof_revision,omitempty"`
-	OperationID         string            `json:"operation_id"`
-	UpdatedAt           time.Time         `json:"updated_at"`
+	PrincipalID         string                           `json:"principal_id"`
+	Interface           InterfaceIdentity                `json:"interface"`
+	ExternalAccountRef  string                           `json:"external_account_reference,omitempty"`
+	ConversationRef     string                           `json:"conversation_reference,omitempty"`
+	ConversationScope   ConversationScope                `json:"conversation_scope,omitempty"`
+	AccountPresentation string                           `json:"account_presentation,omitempty"`
+	Revision            int64                            `json:"revision"`
+	Status              BindingStatus                    `json:"status"`
+	Source              BindingSource                    `json:"source,omitempty"`
+	ProofID             string                           `json:"proof_id,omitempty"`
+	ProofRevision       int64                            `json:"proof_revision,omitempty"`
+	OperationID         string                           `json:"operation_id"`
+	UpdatedAt           time.Time                        `json:"updated_at"`
+	ProviderCredential  runtimecredentials.ValueEvidence `json:"-"`
 }
 
 type VerifiedProof struct {
-	Format              string            `json:"format"`
-	ProofID             string            `json:"proof_id"`
-	Revision            int64             `json:"revision"`
-	Status              ProofStatus       `json:"status"`
-	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference"`
-	ConversationRef     string            `json:"conversation_reference"`
-	ConversationScope   ConversationScope `json:"conversation_scope"`
-	AccountPresentation string            `json:"account_presentation,omitempty"`
-	Method              string            `json:"method"`
-	Challenge           string            `json:"challenge"`
-	OriginalOperationID string            `json:"original_operation_id"`
-	MintingStoreID      string            `json:"minting_store_id"`
-	MintingDeploymentID string            `json:"minting_deployment_id"`
-	VerifiedAt          time.Time         `json:"verified_at"`
-	OperatorConfirmed   bool              `json:"operator_confirmed"`
-	ConsentScopes       []ConsentScope    `json:"consent_scopes"`
+	Format              string                           `json:"format"`
+	ProofID             string                           `json:"proof_id"`
+	Revision            int64                            `json:"revision"`
+	Status              ProofStatus                      `json:"status"`
+	Interface           InterfaceIdentity                `json:"interface"`
+	ExternalAccountRef  string                           `json:"external_account_reference"`
+	ConversationRef     string                           `json:"conversation_reference"`
+	ConversationScope   ConversationScope                `json:"conversation_scope"`
+	AccountPresentation string                           `json:"account_presentation,omitempty"`
+	Method              string                           `json:"method"`
+	Challenge           string                           `json:"challenge"`
+	OriginalOperationID string                           `json:"original_operation_id"`
+	MintingStoreID      string                           `json:"minting_store_id"`
+	MintingDeploymentID string                           `json:"minting_deployment_id"`
+	VerifiedAt          time.Time                        `json:"verified_at"`
+	OperatorConfirmed   bool                             `json:"operator_confirmed"`
+	ConsentScopes       []ConsentScope                   `json:"consent_scopes"`
+	ProviderCredential  runtimecredentials.ValueEvidence `json:"-"`
 }
 
 func (p VerifiedProof) Validate() error {
@@ -361,6 +367,9 @@ func (p VerifiedProof) Validate() error {
 	}
 	if len(p.ConsentScopes) == 0 {
 		return fmt.Errorf("%w: proof consent scope is required", ErrProofUnavailable)
+	}
+	if err := p.ProviderCredential.Validate(); err != nil {
+		return fmt.Errorf("%w: provider credential evidence is invalid", ErrProofUnavailable)
 	}
 	for _, scope := range p.ConsentScopes {
 		if scope != ConsentNotify && scope != ConsentDecide {
