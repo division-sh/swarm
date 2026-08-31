@@ -2195,7 +2195,6 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"flow_required_agents_started": sortedNonEmptyStrings(report.FlowRequiredAgentsStarted),
 		"system_containers_started":    sortedNonEmptyStrings(report.SystemContainersStarted),
 		"self_check_required":          report.SelfCheckRequired,
-		"self_check_passed":            nil,
 	})
 	eventID := uuid.NewString()
 	evt, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{

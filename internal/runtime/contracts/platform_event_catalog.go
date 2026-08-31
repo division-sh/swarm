@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -115,12 +116,50 @@ func platformEventFieldSpec(node yaml.Node) EventFieldSpec {
 	case yaml.ScalarNode:
 		return EventFieldSpec{Type: normalizePlatformEventFieldType(node.Value)}
 	case yaml.MappingNode:
+		if platformEventMappingValue(node, "type") == nil {
+			properties := platformEventPayloadProperties(node)
+			rawProperties := make(map[string]any, len(properties))
+			for name, field := range properties {
+				rawProperties[name] = platformEventFieldJSONSchema(field)
+			}
+			raw := map[string]any{
+				"type":                 "object",
+				"properties":           rawProperties,
+				"required":             requiredPlatformEventFieldNames(properties),
+				"additionalProperties": false,
+			}
+			exact, err := AdmitToolInputSchemaMap(raw)
+			if err != nil {
+				panic(fmt.Sprintf("admit nested platform event schema: %v", err))
+			}
+			return EventFieldSpec{Type: "object", ExactSchema: &exact}
+		}
 		return EventFieldSpec{
 			Type:        normalizePlatformEventFieldType(platformEventScalarValue(node, "type")),
 			Description: platformEventScalarValue(node, "description"),
 		}
 	default:
 		return EventFieldSpec{Type: "object"}
+	}
+}
+
+func platformEventFieldJSONSchema(field EventFieldSpec) map[string]any {
+	if field.ExactSchema != nil {
+		return field.ExactSchema.Projection()
+	}
+	typeRef := strings.TrimSpace(field.Type)
+	if strings.HasPrefix(strings.ToLower(typeRef), "optional ") {
+		typeRef = strings.TrimSpace(typeRef[len("optional "):])
+	}
+	schema, _ := eventSchemaForTypeRef(typeRef, TypeCatalogDocument{}, map[string]struct{}{})
+	typeName, _ := schema["type"].(string)
+	switch strings.TrimSpace(typeName) {
+	case "", "string", "integer", "number", "boolean", "object", "array":
+		return schema
+	default:
+		// Opaque platform-owned snapshot types remain dynamic leaves; their
+		// containing field presence is still structurally authoritative.
+		return map[string]any{}
 	}
 }
 

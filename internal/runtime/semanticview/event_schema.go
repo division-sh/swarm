@@ -96,6 +96,36 @@ func bindCompiledEventSchema(source Source, bundle *runtimecontracts.WorkflowCon
 	if schema, ok, err := bundle.ResolveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
 		resolution.CompiledSchema = schema
 		resolution.HasCompiled = true
+		return
+	}
+	proof := ResolveFlowEventProof(source, flowID, eventType)
+	for _, candidate := range []string{proof.Local, proof.CatalogKey} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == strings.TrimSpace(eventType) {
+			continue
+		}
+		if schema, ok, err := bundle.ResolveCompiledFlowEventSchema(flowID, candidate); err == nil && ok {
+			resolution.CompiledSchema = schema
+			resolution.HasCompiled = true
+			return
+		}
+	}
+	var scoped runtimecontracts.CompiledEventSchema
+	found := false
+	for _, scope := range source.FlowScopes() {
+		schema, ok, err := bundle.ResolveCompiledFlowEventSchema(scope.ID, resolution.EventKey)
+		if err != nil || !ok {
+			continue
+		}
+		if found && (scoped.PackageKey() != schema.PackageKey() || scoped.EventName() != schema.EventName()) {
+			return
+		}
+		scoped = schema
+		found = true
+	}
+	if found {
+		resolution.CompiledSchema = scoped
+		resolution.HasCompiled = true
 	}
 }
 

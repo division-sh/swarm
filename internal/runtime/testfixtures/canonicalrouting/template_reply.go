@@ -59,8 +59,8 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 		"provider.replied:\n", "provider.replied:\n  key: provider_request_id\n  provider_request_id: text\n")
 	initiatorEvents := filepath.Join(root, "flows", "initiator", "events.yaml")
 	applyClosedReplacement(t, initiatorEvents,
-		"request.submitted:\n  account_id: text?\n",
-		"request.submitted:\n  account_id: text?\n  provider_request_id: text\n")
+		"request.submitted:\n  account_id: text\n",
+		"request.submitted:\n  account_id: text\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,
 		"requester.requested:\n  account_id: text\n",
 		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")

@@ -123,6 +123,43 @@ payload:
 	}
 }
 
+func TestPlatformEventCatalogPreservesNestedFieldPresence(t *testing.T) {
+	registry := EventSchemaRegistryFromBundle(&WorkflowContractBundle{
+		Platform: currentPlatformSpecForSchemaRegistryTest(t),
+	})
+	boot, ok := registry["platform.boot"]
+	if !ok {
+		t.Fatal("platform.boot schema is missing")
+	}
+	payload := map[string]any{
+		"recovery_decision": map[string]any{
+			"outcome":                      "allowed",
+			"reason_code":                  "clean_start",
+			"recovery_on_startup":          false,
+			"recovery_inspection_complete": true,
+			"schedule_replay_count":        0,
+			"schedule_skip_count":          0,
+			"schedule_drop_count":          0,
+			"manager_replay_count":         0,
+			"manager_skip_count":           0,
+			"manager_drop_count":           0,
+			"failure":                      nil,
+		},
+	}
+	normalized, err := eventschema.NormalizeOptionalFieldNulls(boot.Schema, payload)
+	if err != nil {
+		t.Fatalf("NormalizeOptionalFieldNulls: %v", err)
+	}
+	recovery := normalized["recovery_decision"].(map[string]any)
+	if _, present := recovery["failure"]; present {
+		t.Fatalf("optional nested failure survived normalization: %#v", recovery)
+	}
+	recovery["outcome"] = nil
+	if _, err := eventschema.NormalizeOptionalFieldNulls(boot.Schema, normalized); err == nil {
+		t.Fatal("required nested platform field accepted null")
+	}
+}
+
 func TestEventSchemaForNamedTypeRequiresOnlyRequiredFieldEdges(t *testing.T) {
 	types := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
 		"Contact": {Fields: map[string]TypeFieldSpec{

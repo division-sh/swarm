@@ -19518,9 +19518,10 @@ platform_events:
           reason_code: string
           recovery_on_startup: boolean
           recovery_inspection_complete: boolean
-          startup_blocking_timer_count: integer (present when recovery inspection completed)
-          standing_timer_obligation_count: integer (present when recovery inspection completed)
-          timer_obligations: TimerObligationSnapshot (present when recovery inspection completed)
+          startup_blocking_timer_count: integer (optional; present when recovery inspection completed)
+          standing_timer_obligation_count: integer (optional; present when recovery inspection completed)
+          timer_obligations: TimerObligationSnapshot (optional; present when recovery inspection completed)
+          delivery_recovery_inventory: object (optional; present when recovery inspection completed)
           schedule_replay_count: integer
           schedule_skip_count: integer
           schedule_drop_count: integer
@@ -19532,9 +19533,9 @@ platform_events:
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
         self_check_required: boolean
-        self_check_passed: boolean (nullable)
+        self_check_passed: boolean (optional; omitted until the post-publish self-check completes)
       notes:
-      - 'self_check_passed is nullable because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
+      - 'self_check_passed is omitted because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
       produced_by_type: platform
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source

@@ -117,6 +117,47 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 	}
 }
 
+func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		details := payload["details"].(map[string]any)
+		delete(details, "admission_only_field")
+		normalized, err := json.Marshal(payload)
+		if err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		fixture, err := eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		if err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		return events.NewPayloadAdmission(normalized, fixture.Binding())
+	})
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level: "info", Message: "normalized", Component: "runtime", Action: "proof",
+		Detail: map[string]any{"admission_only_field": "remove-me"},
+	}); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(capture.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(capture.records))
+	}
+	record := capture.records[0]
+	if string(record.Payload) != string(record.PayloadAdmission.Payload()) {
+		t.Fatalf("persisted payload = %s, admission = %s", record.Payload, record.PayloadAdmission.Payload())
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(record.Payload, &persisted); err != nil {
+		t.Fatalf("decode persisted payload: %v", err)
+	}
+	if _, present := persisted["details"].(map[string]any)["admission_only_field"]; present {
+		t.Fatalf("pre-admission detail survived persistence: %#v", persisted)
+	}
+}
+
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

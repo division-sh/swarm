@@ -31,6 +31,19 @@ func TestSemanticSourceEventProofConsumesEffectiveReceiverCarries(t *testing.T) 
 	}
 }
 
+func TestResolveEventSchemaBindsConcreteTemplateInstanceToAuthoredDeclaration(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	root := filepath.Join(repoRoot, "examples", "routing", "fan-in", "stream")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := ResolveEventSchema(Wrap(bundle), "operating/ti-proof", "operating/ti-proof/operating.reported")
+	if !resolution.HasCompiled || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaAuthored {
+		t.Fatalf("template-instance schema binding = %#v, want compiled authored declaration", resolution)
+	}
+}
+
 func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testing.T) {
 	root := &runtimecontracts.FlowContractView{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

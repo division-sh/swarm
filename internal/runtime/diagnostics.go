@@ -242,10 +242,6 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(encoded)
-	if err != nil {
-		return CanonicalRuntimeLogPayload{}, err
-	}
 	if payloadAdmitter == nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log payload admission owner is required")
 	}
@@ -260,12 +256,17 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("admit runtime log payload: %w", err)
 	}
+	admittedPayload := payloadAdmission.Payload()
+	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(admittedPayload)
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, err
+	}
 	mode := runtimeeffects.ExecutionMode(posture.RootMode())
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = contextualMode
 	}
 	record := RuntimeLogPersistenceRecord{
-		Payload:          encoded,
+		Payload:          admittedPayload,
 		PayloadAdmission: payloadAdmission,
 		ParentEventID:    parentEventID,
 		ExecutionMode:    executionmode.Mode(mode),
