@@ -560,6 +560,32 @@ func TestSelectedForkDiscardMissingRunIsIdempotentOnBothStores(t *testing.T) {
 	}
 }
 
+func TestSelectedForkDiscardDeletesUnretainedPausedRunOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
+
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, runID); err != nil {
+				t.Fatalf("discard unretained selected fork: %v", err)
+			}
+			query := `SELECT COUNT(*) FROM runs WHERE run_id=?`
+			if !sqlite {
+				query = `SELECT COUNT(*) FROM runs WHERE run_id=$1::uuid`
+			}
+			var count int
+			if err := db.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
+				t.Fatalf("count discarded selected fork: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("discarded selected fork rows = %d, want 0", count)
+			}
+		})
+	}
+}
+
 func selectedForkDiscardTestStore(t *testing.T, backend string) (selectedForkDiscardStore, *sql.DB, bool) {
 	t.Helper()
 	if backend == "sqlite" {

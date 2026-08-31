@@ -24,9 +24,9 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "operating-accumulator"))},
 	}}
 	rt.rebuildLocked()
-	delete(rt.routes, eventType)
+	delete(rt.routes, routeResolutionKey{eventType: eventType})
 
-	got := rt.Resolve(eventType)
+	got := rt.ResolveForRun(busInternalTestRunID, eventType)
 	if len(got) != 1 {
 		t.Fatalf("Resolve concrete child event = %#v, want one wildcard subscriber", got)
 	}
@@ -36,13 +36,13 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 	if got[0].MatchPattern != pattern {
 		t.Fatalf("matched pattern = %q, want %q", got[0].MatchPattern, pattern)
 	}
-	if got := rt.Resolve("component-scaffold/component-a/component.failed"); len(got) != 0 {
+	if got := rt.ResolveForRun(busInternalTestRunID, "component-scaffold/component-a/component.failed"); len(got) != 0 {
 		t.Fatalf("Resolve unrelated event = %#v, want none", got)
 	}
-	if got := rt.Resolve("component-scaffold/component-b/component.scaffolded"); len(got) != 0 {
+	if got := rt.ResolveForRun(busInternalTestRunID, "component-scaffold/component-b/component.scaffolded"); len(got) != 0 {
 		t.Fatalf("Resolve never-added instance event = %#v, want none", got)
 	}
-	if got := rt.Resolve("other-scaffold/component-a/component.scaffolded"); len(got) != 0 {
+	if got := rt.ResolveForRun(busInternalTestRunID, "other-scaffold/component-a/component.scaffolded"); len(got) != 0 {
 		t.Fatalf("Resolve unrelated path = %#v, want none", got)
 	}
 }
@@ -57,14 +57,14 @@ func TestRouteTableResolve_WildcardSubscriberDoesNotMatchRemovedConcreteChildEve
 		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "operating-accumulator"))},
 	}}
 	rt.rebuildLocked()
-	if got := rt.Resolve(eventType); len(got) != 1 {
+	if got := rt.ResolveForRun(busInternalTestRunID, eventType); len(got) != 1 {
 		t.Fatalf("Resolve active event = %#v, want one subscriber before removal", got)
 	}
 
 	delete(rt.eventPath, eventType)
 	rt.rebuildLocked()
 
-	if got := rt.Resolve(eventType); len(got) != 0 {
+	if got := rt.ResolveForRun(busInternalTestRunID, eventType); len(got) != 0 {
 		t.Fatalf("Resolve removed event = %#v, want none", got)
 	}
 }
@@ -96,7 +96,7 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 	}
 	rt.rebuildLocked()
 
-	got := rt.Resolve(exact)
+	got := rt.ResolveForRun(busInternalTestRunID, exact)
 	if len(got) != 3 {
 		t.Fatalf("Resolve exact child event = %#v, want three distinct subscribers", got)
 	}
@@ -105,6 +105,52 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 		if ids[want] != 1 {
 			t.Fatalf("subscriber %q count = %d in %#v, want 1", want, ids[want], got)
 		}
+	}
+}
+
+func TestRouteTableResolveForRunRejectsSiblingExactAndWildcardOwnersAcrossReplacement(t *testing.T) {
+	const (
+		runA      = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		runB      = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+		eventType = "worker/one/work.ready"
+		wildcard  = "worker/*/work.ready"
+	)
+	rt := newRouteTable(nil)
+	rt.eventPath[eventType] = struct{}{}
+	global := Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "global-listener"))}
+	exact := Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "exact-listener"))}
+	wild := Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "wildcard-listener"))}
+	rt.patterns = []routePattern{
+		{EventPattern: eventType, Subscriber: global},
+		{RunID: runA, EventPattern: eventType, Subscriber: exact},
+		{RunID: runA, EventPattern: wildcard, Subscriber: wild},
+	}
+	rt.rebuildLocked()
+
+	if got := subscriberIDsForTest(rt.ResolveForRun(runA, eventType)); len(got) != 3 || got["global-listener"] != 1 || got["exact-listener"] != 1 || got["wildcard-listener"] != 1 {
+		t.Fatalf("run A routes = %#v, want global plus exact A owners", got)
+	}
+	if got := subscriberIDsForTest(rt.ResolveForRun(runB, eventType)); len(got) != 1 || got["global-listener"] != 1 {
+		t.Fatalf("run B routes = %#v, want only authored global owner", got)
+	}
+
+	rt.patterns = []routePattern{
+		{EventPattern: eventType, Subscriber: global},
+		{RunID: runB, EventPattern: eventType, Subscriber: exact},
+		{RunID: runB, EventPattern: wildcard, Subscriber: wild},
+	}
+	rt.rebuildLocked()
+	if got := subscriberIDsForTest(rt.ResolveForRun(runA, eventType)); len(got) != 1 || got["global-listener"] != 1 {
+		t.Fatalf("retired run A routes = %#v, want only authored global owner", got)
+	}
+	if got := subscriberIDsForTest(rt.ResolveForRun(runB, eventType)); len(got) != 3 {
+		t.Fatalf("replacement run B routes = %#v, want three", got)
+	}
+
+	rt.patterns = []routePattern{{EventPattern: eventType, Subscriber: global}}
+	rt.rebuildLocked()
+	if got := subscriberIDsForTest(rt.ResolveForRun(runB, eventType)); len(got) != 1 || got["global-listener"] != 1 {
+		t.Fatalf("removed run B routes = %#v, want only authored global owner", got)
 	}
 }
 
@@ -192,7 +238,7 @@ func TestRouteTableMixedRolesExactWildcardConstruction(t *testing.T) {
 				{EventPattern: tc.last, Subscriber: base},
 			}
 			rt.rebuildLocked()
-			resolved := rt.Resolve(exact)
+			resolved := rt.ResolveForRun(busInternalTestRunID, exact)
 			if len(resolved) != 1 || resolved[0].MatchPattern != exact {
 				t.Fatalf("Resolve(%s) = %#v, want one role with exact evidence", exact, resolved)
 			}
@@ -266,7 +312,7 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 				rt.materializeTemplateSourceObserverLocked(observer, owner)
 			}
 			rt.rebuildLocked()
-			resolved := rt.Resolve(instancePath + "/" + localEvent)
+			resolved := rt.ResolveForRun(busInternalTestRunID, instancePath+"/"+localEvent)
 			if len(resolved) != 2 {
 				t.Fatalf("remove/reinstall/rebuild roles = %#v, want 2", resolved)
 			}
@@ -333,7 +379,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 		Subscriber:   Subscriber{Recipient: events.MustAgentDeliveryRecipient("operating-observer"), AgentPlan: plan, routeSource: subscriberRouteSourceSubscription},
 	}}
 	rt.rebuildLocked()
-	delete(rt.routes, eventType)
+	delete(rt.routes, routeResolutionKey{runID: busInternalTestRunID, eventType: eventType})
 	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{RouteTable: rt})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)

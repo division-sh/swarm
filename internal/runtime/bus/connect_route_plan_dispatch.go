@@ -214,7 +214,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			for _, route := range routes {
 				targets = append(targets, route.Target)
 			}
-			if err := r.appendMaterializedPlanEvaluation(ctx, &out, plan, targets); err != nil {
+			if err := r.appendMaterializedPlanEvaluation(ctx, evt.RunID(), &out, plan, targets); err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
 			routes, err = stampConnectExecutionClaims(plan, routes)
@@ -289,7 +289,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			})
 		}
 		_, routeCreatedInPlan := createdRoutes[decision.Route()]
-		routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision, routeCreatedInPlan)
+		routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, evt.RunID(), plan, materialized, decision, routeCreatedInPlan)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -436,7 +436,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 	}
 	target := record.Origin.Normalized()
-	subscribers, err := r.resolveSelectedReceiverCarriers(ctx, plan, target)
+	subscribers, err := r.resolveSelectedReceiverCarriers(ctx, evt.RunID(), plan, target)
 	if err != nil {
 		return nil, nil, nil, 0, nil, err
 	}
@@ -617,13 +617,13 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 	return r.loadDescriptors(ctx)
 }
 
-func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
+func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
 	targets := connectMaterializedTargets(materialized)
 	if plan.ReceiverEndpoint().IsRoot() && len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
 	}
 	if len(targets) == 0 {
-		evaluation := r.evaluateSelectedReceiverCarriers(ctx, plan, nil)
+		evaluation := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, nil)
 		ledger, err := evaluation.Ledger()
 		return nil, nil, nil, ledger, err
 	}
@@ -635,7 +635,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 		}
 		selectionTargets = append(selectionTargets, selectionTarget)
 	}
-	evaluation := r.evaluateSelectedReceiverCarriers(ctx, plan, selectionTargets)
+	evaluation := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, selectionTargets)
 	ledger, err := evaluation.Ledger()
 	if err != nil {
 		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
@@ -656,7 +656,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 			// the registered root carrier through its entity-bearing pin target.
 			selectionTarget = events.RouteIdentity{EntityID: target.EntityID}
 		}
-		matchedSubscribers, err := r.resolveSelectedReceiverCarriers(ctx, plan, selectionTarget)
+		matchedSubscribers, err := r.resolveSelectedReceiverCarriers(ctx, runID, plan, selectionTarget)
 		if err != nil {
 			return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 		}
@@ -825,8 +825,8 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 	return projection, nil
 }
 
-func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) ([]Subscriber, error) {
-	subscribers := connectRecipientSubscribers(r.evaluateSelectedReceiverCarriers(ctx, plan, []events.RouteIdentity{target}))
+func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) ([]Subscriber, error) {
+	subscribers := connectRecipientSubscribers(r.evaluateSelectedReceiverCarriers(ctx, runID, plan, []events.RouteIdentity{target}))
 	for index := range subscribers {
 		subscriber := &subscribers[index]
 		if !subscriber.Recipient.IsNode() {
@@ -843,7 +843,11 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 	return subscribers, nil
 }
 
-func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
+func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return runtimepinrouting.ConnectRecipientEvaluation{}
+	}
 	tables := []*RouteTable{r.routeTable}
 	if ctx != nil {
 		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
@@ -858,13 +862,13 @@ func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.C
 		if routeTable == nil {
 			continue
 		}
-		registrations = append(registrations, routeTable.connectRecipientAdmissions()...)
+		registrations = append(registrations, routeTable.connectRecipientAdmissionsForRun(runID)...)
 	}
 	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations)
 }
 
-func (r connectRoutePlanResolver) appendMaterializedPlanEvaluation(ctx context.Context, out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
-	ledger, err := r.evaluateSelectedReceiverCarriers(ctx, plan, targets).Ledger()
+func (r connectRoutePlanResolver) appendMaterializedPlanEvaluation(ctx context.Context, runID string, out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
+	ledger, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, targets).Ledger()
 	if err != nil {
 		return err
 	}

@@ -706,6 +706,20 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.entityStateReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
 }
 
+// LoadDynamicFlowRuntimeReadiness returns the exact durable readiness owner for
+// one run-scoped flow. Recovery consumers use this instead of reconstructing
+// topology authority from current process state.
+func (p WorkflowPersistence) LoadDynamicFlowRuntimeReadiness(
+	ctx context.Context,
+	runID string,
+	route runtimeflowidentity.Route,
+) (DynamicFlowRuntimeReadiness, bool, error) {
+	if p.empty() || p.store.readiness == nil {
+		return DynamicFlowRuntimeReadiness{}, false, errors.New("workflow persistence has no dynamic flow readiness owner")
+	}
+	return p.store.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
+}
+
 func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
 	if s == nil || s.entityStateReader == nil {
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")

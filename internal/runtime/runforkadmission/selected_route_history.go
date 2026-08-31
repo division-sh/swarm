@@ -53,7 +53,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances, err := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
@@ -172,7 +172,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, runID string, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
@@ -184,7 +184,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 			})
 			continue
 		}
-		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, event.eventName, event.routingSource)
+		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, runID, event.eventName, event.routingSource)
 		eventIncomplete := evaluation.requiresRuntimeResolution
 		incomplete = incomplete || eventIncomplete
 		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
@@ -193,7 +193,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 		}
 		recipients := evaluation.recipients
 		if !evaluation.connectMatched {
-			recipients = contractFrontierRecipients(routeTable.Resolve(event.eventName))
+			recipients = contractFrontierRecipients(routeTable.ResolveForRun(runID, event.eventName))
 		}
 		out = append(out, runfork.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,

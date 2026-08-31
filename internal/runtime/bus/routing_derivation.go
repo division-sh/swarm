@@ -96,7 +96,7 @@ type RouteTable struct {
 	generationMu      sync.RWMutex
 	generation        uint64
 	source            semanticview.Source
-	routes            map[string][]Subscriber
+	routes            map[routeResolutionKey][]Subscriber
 	rootInputRoutes   map[string][]Subscriber
 	patterns          []routePattern
 	eventPath         map[string]struct{}
@@ -114,6 +114,11 @@ type routeConnectRecipientRegistration struct {
 	registration runtimepinrouting.ConnectRecipientRegistration
 	runID        string
 	instancePath string
+}
+
+type routeResolutionKey struct {
+	runID     string
+	eventType string
 }
 
 type routePattern struct {
@@ -360,7 +365,12 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	out := cloneSubscribers(rt.routes[eventType])
+	out := cloneSubscribers(rt.routes[routeResolutionKey{runID: runID, eventType: eventType}])
+	if runID != "" {
+		for _, subscriber := range rt.routes[routeResolutionKey{eventType: eventType}] {
+			out = appendUniqueSubscriber(out, subscriber)
+		}
+	}
 	for _, subscriber := range rt.rootInputRoutes[eventType] {
 		out = appendUniqueRootInputSubscriber(out, subscriber)
 	}
@@ -368,7 +378,7 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		return out
 	}
 	for _, pattern := range rt.patterns {
-		if pattern.RunID != runID {
+		if pattern.RunID != "" && pattern.RunID != runID {
 			continue
 		}
 		eventPattern := strings.Trim(strings.TrimSpace(pattern.EventPattern), "/")
@@ -385,39 +395,46 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 	return out
 }
 
-func (rt *RouteTable) EvaluateConnectSource(sourceEvent runtimepinrouting.SourceEvent) runtimepinrouting.ConnectRecipientEvaluation {
-	if rt == nil {
+func (rt *RouteTable) EvaluateConnectSource(runID string, sourceEvent runtimepinrouting.SourceEvent) runtimepinrouting.ConnectRecipientEvaluation {
+	if rt == nil || strings.TrimSpace(runID) == "" {
 		return runtimepinrouting.ConnectRecipientEvaluation{}
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.connectGraph.EvaluateSourceRecipients(sourceEvent, rt.connectRecipientAdmissionsLocked())
+	return rt.connectGraph.EvaluateSourceRecipients(sourceEvent, rt.connectRecipientAdmissionsForRunLocked(runID))
 }
 
-func (rt *RouteTable) evaluateConnectPlan(plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
-	if rt == nil {
+func (rt *RouteTable) evaluateConnectPlan(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
+	if rt == nil || strings.TrimSpace(runID) == "" {
 		return runtimepinrouting.ConnectRecipientEvaluation{}
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.connectGraph.EvaluateMaterializedRecipients(plan, targets, rt.connectRecipientAdmissionsLocked())
+	return rt.connectGraph.EvaluateMaterializedRecipients(plan, targets, rt.connectRecipientAdmissionsForRunLocked(runID))
 }
 
-func (rt *RouteTable) connectRecipientAdmissionsLocked() []runtimepinrouting.ConnectRecipientRegistration {
+func (rt *RouteTable) connectRecipientAdmissionsForRunLocked(runID string) []runtimepinrouting.ConnectRecipientRegistration {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
 	out := make([]runtimepinrouting.ConnectRecipientRegistration, 0, len(rt.connectRecipients))
 	for _, registration := range rt.connectRecipients {
+		if registration.runID != "" && registration.runID != runID {
+			continue
+		}
 		out = append(out, registration.registration)
 	}
 	return out
 }
 
-func (rt *RouteTable) connectRecipientAdmissions() []runtimepinrouting.ConnectRecipientRegistration {
-	if rt == nil {
+func (rt *RouteTable) connectRecipientAdmissionsForRun(runID string) []runtimepinrouting.ConnectRecipientRegistration {
+	if rt == nil || strings.TrimSpace(runID) == "" {
 		return nil
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.connectRecipientAdmissionsLocked()
+	return rt.connectRecipientAdmissionsForRunLocked(runID)
 }
 
 func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
@@ -701,7 +718,7 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 	return &RouteTable{
 		generation:        1,
 		source:            source,
-		routes:            make(map[string][]Subscriber),
+		routes:            make(map[routeResolutionKey][]Subscriber),
 		rootInputRoutes:   make(map[string][]Subscriber),
 		eventPath:         make(map[string]struct{}),
 		authoredEventPath: make(map[string]struct{}),
@@ -1375,9 +1392,10 @@ func routeStaticPrefixBeforeWildcard(pattern string) string {
 }
 
 func (rt *RouteTable) rebuildLocked() {
-	rt.routes = make(map[string][]Subscriber)
+	rt.routes = make(map[routeResolutionKey][]Subscriber)
 	eventTypes := sortedStringKeys(rt.eventPath)
 	for _, pattern := range rt.patterns {
+		runID := strings.TrimSpace(pattern.RunID)
 		if strings.Contains(pattern.EventPattern, "*") {
 			for _, eventType := range eventTypes {
 				if RouteMatches(pattern.EventPattern, eventType) {
@@ -1385,7 +1403,8 @@ func (rt *RouteTable) rebuildLocked() {
 					if strings.TrimSpace(subscriber.MatchPattern) == "" {
 						subscriber.MatchPattern = pattern.EventPattern
 					}
-					rt.routes[eventType] = appendUniqueSubscriber(rt.routes[eventType], subscriber)
+					key := routeResolutionKey{runID: runID, eventType: eventType}
+					rt.routes[key] = appendUniqueSubscriber(rt.routes[key], subscriber)
 				}
 			}
 			continue
@@ -1394,7 +1413,8 @@ func (rt *RouteTable) rebuildLocked() {
 		if strings.TrimSpace(subscriber.MatchPattern) == "" {
 			subscriber.MatchPattern = pattern.EventPattern
 		}
-		rt.routes[pattern.EventPattern] = appendUniqueSubscriber(rt.routes[pattern.EventPattern], subscriber)
+		key := routeResolutionKey{runID: runID, eventType: pattern.EventPattern}
+		rt.routes[key] = appendUniqueSubscriber(rt.routes[key], subscriber)
 	}
 }
 

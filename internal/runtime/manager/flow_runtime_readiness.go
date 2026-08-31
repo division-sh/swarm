@@ -368,7 +368,7 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return err
 	}
-	topologyAuthority, err := dynamicFlowAgentTopologyAuthority(plan)
+	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
 	if err != nil {
 		return err
 	}
@@ -1046,7 +1046,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
-	topologyAuthority, err := dynamicFlowAgentTopologyAuthority(plan)
+	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
 	if err != nil {
 		return fmt.Errorf("authorize dynamic flow agent topology for %s: %w", readiness.InstancePath, err)
 	}
@@ -1496,7 +1496,9 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
 }
 
-func dynamicFlowAgentTopologyAuthority(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (runtimeagenttopology.Admission, error) {
+// DynamicFlowAgentTopologyAdmission derives the one topology admission owned by
+// an exact durable readiness plan.
+func DynamicFlowAgentTopologyAdmission(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (runtimeagenttopology.Admission, error) {
 	fingerprint, err := canonicaljson.Hash(plan)
 	if err != nil {
 		return runtimeagenttopology.Admission{}, err

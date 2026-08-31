@@ -143,6 +143,57 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 	}
 }
 
+func TestExternalEffectRecoveryRejectsPersistedAgentRunConflictWithoutMutationSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) completionSettlementFixture
+	}{
+		{name: "sqlite", open: func(t *testing.T) completionSettlementFixture {
+			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			return newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true)
+		}},
+		{name: "postgres", open: func(t *testing.T) completionSettlementFixture {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)
+		}},
+	} {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := providerDrainContext(t, fixture, "persisted-agent-run-conflict")
+			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "persisted-agent-run-conflict")
+			attempt := recoveryPostureAttempt{
+				AttemptID: handle.Attempt().AttemptID,
+				RunID:     fixture.authority.Target.RunID,
+				Initial:   runtimeeffects.StateResponseObserved,
+				Expected:  runtimeeffects.StateResponseObserved,
+			}
+			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, []recoveryPostureAttempt{attempt})
+			query := `UPDATE runtime_external_effect_operations SET agent_run_id=? WHERE operation_id=?`
+			args := []any{uuid.NewString(), handle.Attempt().OperationID}
+			if !fixture.sqlite {
+				query = `UPDATE runtime_external_effect_operations SET agent_run_id=$1::uuid WHERE operation_id=$2::uuid`
+			}
+			if _, err := fixture.db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
+				t.Fatalf("install persisted agent run conflict: %v", err)
+			}
+
+			_, err := fixture.store.ReconcileExternalEffectAttempts(
+				testAuthorActivityContext(),
+				liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)),
+			)
+			if err == nil || !strings.Contains(err.Error(), "external_effect_run_identity_conflict") {
+				t.Fatalf("recover persisted agent run conflict = %v, want exact run-axis rejection", err)
+			}
+			after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, []recoveryPostureAttempt{attempt})
+			if after != before {
+				t.Fatalf("rejected persisted agent run conflict mutated recovery state:\nbefore=%s\nafter=%s", before, after)
+			}
+		})
+	}
+}
+
 func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixture, runID string) neutralEffectParityFixture {
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(

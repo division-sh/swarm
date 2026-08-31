@@ -603,6 +603,8 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		t.Fatalf("encode recovery identity: %v", err)
 	}
 	recovered.AgentID = identityFields.AgentID
+	recovered.AgentRunID = targetA.RunID
+	recovered.LineageRunID = targetA.RunID
 	recovered.AgentNameOwner = identityFields.NameOwner
 	recovered.AgentNameSource = identityFields.NameSource
 	recovered.AgentRoutePresence = identityFields.RoutePresence

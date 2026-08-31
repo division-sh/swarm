@@ -285,7 +285,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	routeTable := newRouteTable(nil)
 	routeTable.eventPath[eventType] = struct{}{}
-	routeTable.routes[eventType] = []Subscriber{{
+	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
 		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
 		Path:           "worker",
 		LocalizedEvent: "work.started",

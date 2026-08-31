@@ -25,8 +25,8 @@ func TestRouteFlowInputHarnessSourceSuppressesProducerFallbackWithoutAddingRoute
 		t.Fatalf("DeriveRouteTable(without source): %v", err)
 	}
 	for _, eventType := range []string{"work.requested", "worker/work.requested"} {
-		got := harnessRoutes.Resolve(eventType)
-		want := plainRoutes.Resolve(eventType)
+		got := harnessRoutes.ResolveForRun(busInternalTestRunID, eventType)
+		want := plainRoutes.ResolveForRun(busInternalTestRunID, eventType)
 		if subscriberSignature(got) != subscriberSignature(want) {
 			t.Fatalf("routes for %s changed by harness source: got %#v want %#v", eventType, got, want)
 		}

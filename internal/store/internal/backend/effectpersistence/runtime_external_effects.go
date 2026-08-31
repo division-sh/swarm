@@ -785,16 +785,19 @@ func loadExternalEffectStorySettlement(ctx context.Context, tx *sql.Tx, attemptI
 }
 
 type externalEffectRecoveryCandidate struct {
-	OperationID       string
-	AttemptID         string
-	OperationMode     string
-	AttemptMode       string
-	AuthorityEvidence string
-	LineageRunID      string
-	AuthorityRunID    string
-	EffectKind        string
-	HasUsageTarget    bool
-	State             string
+	OperationID        string
+	AttemptID          string
+	OperationMode      string
+	AttemptMode        string
+	AuthorityEvidence  string
+	LineageRunID       string
+	AuthorityRunID     string
+	ConcreteAgentRunID string
+	AgentRunID         string
+	AuthorityKind      string
+	EffectKind         string
+	HasUsageTarget     bool
+	State              string
 }
 
 type externalEffectRecoveryAuthorityEvidence struct {
@@ -828,7 +831,16 @@ func admitExternalEffectRecoveryCandidates(request runtimeeffects.RecoveryReques
 func (c externalEffectRecoveryCandidate) runID() (string, error) {
 	lineageRunID := strings.TrimSpace(c.LineageRunID)
 	authorityRunID := strings.TrimSpace(c.AuthorityRunID)
-	if lineageRunID != "" && authorityRunID != "" && lineageRunID != authorityRunID {
+	concreteAgentRunID := strings.TrimSpace(c.ConcreteAgentRunID)
+	agentRunID := strings.TrimSpace(c.AgentRunID)
+	conflict := lineageRunID != "" && authorityRunID != "" && lineageRunID != authorityRunID
+	if c.AuthorityKind == string(runtimeeffects.AuthorityNormalAgent) {
+		conflict = conflict || lineageRunID == "" || authorityRunID == "" || concreteAgentRunID == "" || agentRunID == "" ||
+			lineageRunID != agentRunID || authorityRunID != agentRunID || concreteAgentRunID != agentRunID
+	} else if agentRunID != "" {
+		conflict = true
+	}
+	if conflict {
 		return "", runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"external_effect_run_identity_conflict",
@@ -840,13 +852,16 @@ func (c externalEffectRecoveryCandidate) runID() (string, error) {
 	if lineageRunID != "" {
 		return lineageRunID, nil
 	}
+	if agentRunID != "" {
+		return agentRunID, nil
+	}
 	return authorityRunID, nil
 }
 
 func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool) ([]externalEffectRecoveryCandidate, error) {
-	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), ''), o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id`
+	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.agent_identity.run_id'), ''), COALESCE(o.agent_run_id,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id`
 	if postgres {
-		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', ''), o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
+		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', ''), COALESCE(o.authority_evidence #>> '{usage_target,agent_identity,run_id}', ''), COALESCE(o.agent_run_id::text,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
 	}
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
@@ -856,7 +871,7 @@ func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postg
 	var candidates []externalEffectRecoveryCandidate
 	for rows.Next() {
 		var candidate externalEffectRecoveryCandidate
-		if err := rows.Scan(&candidate.OperationID, &candidate.AttemptID, &candidate.OperationMode, &candidate.AttemptMode, &candidate.AuthorityEvidence, &candidate.LineageRunID, &candidate.AuthorityRunID, &candidate.EffectKind, &candidate.HasUsageTarget, &candidate.State); err != nil {
+		if err := rows.Scan(&candidate.OperationID, &candidate.AttemptID, &candidate.OperationMode, &candidate.AttemptMode, &candidate.AuthorityEvidence, &candidate.LineageRunID, &candidate.AuthorityRunID, &candidate.ConcreteAgentRunID, &candidate.AgentRunID, &candidate.AuthorityKind, &candidate.EffectKind, &candidate.HasUsageTarget, &candidate.State); err != nil {
 			return nil, err
 		}
 		if _, err := candidate.runID(); err != nil {

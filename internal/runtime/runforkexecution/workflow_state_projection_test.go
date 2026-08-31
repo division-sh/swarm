@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestSelectedContractWorkflowStateProjectionMaterializesTemplateAgentOwner(t *testing.T) {
@@ -172,6 +173,22 @@ func selectedContractActivityFrontierPlanning(eventID string) runfork.RunForkSel
 		SourceEventID: eventID,
 		EventName:     runfork.RunForkSelectedContractPlatformActivityEvent,
 	}}}
+}
+
+func selectedContractWorkflowStateProjection(
+	plan runfork.RunForkPlan,
+	source semanticview.Source,
+	planning runfork.RunForkSelectedContractRecipientPlanning,
+) ([]runfork.RunForkSelectedContractWorkflowState, error) {
+	sourceModes := make(map[string]executionmode.Mode, len(planning.RecipientPlanEvents))
+	for _, event := range planning.RecipientPlanEvents {
+		sourceModes[strings.TrimSpace(event.SourceEventID)] = executionmode.Mock
+	}
+	blueprints, err := selectedContractAgentBlueprints(source, planning, plan)
+	if err != nil {
+		return nil, err
+	}
+	return selectedContractWorkflowStateProjectionWithReadiness(plan, source, planning, sourceModes, blueprints)
 }
 
 func TestSelectedContractWorkflowStateProjectionIgnoresNonFrontierPlatformActivityHistory(t *testing.T) {

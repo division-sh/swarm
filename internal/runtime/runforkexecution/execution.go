@@ -15,7 +15,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -168,38 +167,15 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	agentRuntime, err := prepareSelectedContractAgentRuntimeMaterialization(ctx, loadedSource, *model.RecipientPlanning, plan, req.AgentRuntime)
+	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
+	agentRuntime, workflowStates, err := prepareSelectedContractWorkflowReadiness(
+		ctx, ports.replay, loadedSource, *model.RecipientPlanning, plan, sourceEventIDs, req.AgentRuntime,
+	)
 	if err != nil {
 		return SelectedContractExecutionResult{
 			Owner:                       runfork.RunForkSelectedContractExecutionOwner,
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
 		}, err
-	}
-	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
-	if !req.AgentRuntime.ExecutionPosture.Valid() {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution posture is invalid")
-	}
-	sourceModes, err := ports.replay.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, sourceEventIDs)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	for _, mode := range sourceModes {
-		if err := req.AgentRuntime.ExecutionPosture.Admit(mode, "selected-contract source event admission"); err != nil {
-			return SelectedContractExecutionResult{}, err
-		}
-	}
-	sourceModeByEvent := make(map[string]executionmode.Mode, len(sourceEventIDs))
-	for i, eventID := range sourceEventIDs {
-		if i >= len(sourceModes) {
-			return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source event mode projection is incomplete")
-		}
-		sourceModeByEvent[strings.TrimSpace(eventID)] = sourceModes[i]
-	}
-	workflowStates, err := selectedContractWorkflowStateProjectionWithReadiness(
-		plan, loadedSource.Source, *model.RecipientPlanning, sourceModeByEvent, agentRuntime.Blueprints,
-	)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
 	}
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:             plan.SourceRunID,

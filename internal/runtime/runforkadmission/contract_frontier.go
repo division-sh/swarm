@@ -83,7 +83,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			continue
 		}
 		source := contractFrontierRoutingSource(req.Plan.PendingWork, frontier[i].SourceEventID)
-		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, eventName, source)
+		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, req.Plan.SourceRunID, eventName, source)
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
 		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
 		if evaluation.connectMatched {
@@ -91,7 +91,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			frontier[i].DerivedRecipients = evaluation.recipients
 		} else {
 			frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, eventName)
-			frontier[i].DerivedRecipients = contractFrontierRecipients(routeTable.Resolve(eventName))
+			frontier[i].DerivedRecipients = contractFrontierRecipients(routeTable.ResolveForRun(req.Plan.SourceRunID, eventName))
 		}
 	}
 	sort.Slice(frontier, func(i, j int) bool {
@@ -463,16 +463,17 @@ type contractFrontierEvaluatedRoute struct {
 	nodeIDs                   []string
 }
 
-func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, eventName string, source events.RoutingSource) contractFrontierEvaluatedRoute {
+func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource) contractFrontierEvaluatedRoute {
+	runID = strings.TrimSpace(runID)
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
-	if routeTable == nil || eventName == "" {
+	if routeTable == nil || runID == "" || eventName == "" {
 		return contractFrontierEvaluatedRoute{}
 	}
 	sourceEvent, err := runtimepinrouting.AdmitSourceEvent(events.EventType(eventName), source)
 	if err != nil {
 		return contractFrontierEvaluatedRoute{}
 	}
-	evaluation := routeTable.EvaluateConnectSource(sourceEvent)
+	evaluation := routeTable.EvaluateConnectSource(runID, sourceEvent)
 	if !evaluation.Matched() {
 		return contractFrontierEvaluatedRoute{}
 	}
@@ -509,7 +510,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectG
 		if receiverEvent == "" {
 			continue
 		}
-		additional := contractFrontierConnectRecipients(routeTable.Resolve(receiverEvent))
+		additional := contractFrontierConnectRecipients(routeTable.ResolveForRun(runID, receiverEvent))
 		if plan.RequiresRuntimeResolution() && len(additional) == 0 {
 			out.requiresRuntimeResolution = true
 		}

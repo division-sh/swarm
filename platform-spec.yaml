@@ -12129,11 +12129,15 @@ flow_model:
             authored static scope, or overlaps a non-instance event identity; canonical namespace collision is a hard invalidity
             and MUST leave existing event paths, observers, and sibling instance routes unchanged. A declared nested template
             scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof.
-            RouteTable is the canonical lifecycle identity owner and stores one complete normalized `(scope_key, instance_id,
-            instance_path)` route per instance path. Normal template creation, recovery, and ad hoc fallback use the same
-            admission function. Exact replay of the complete identity is idempotent. A different identity at an owned path is a
-            hard conflict; presence requires the complete identity; removal must match the complete stored owner before either
-            persisted or in-memory authority is changed. All identity and authored-namespace collisions are validated before
+            Authored/template subscription law remains runless and is not live flow-instance ownership. For a materialized
+            flow instance, RouteTable consumes the canonical `flowidentity.RunScopedFlowInstance` and stores one complete
+            normalized `(run_id, scope_key, instance_id, instance_path)` owner per concrete route. Normal template creation,
+            recovery, and ad hoc fallback use the same admission function. Exact replay of the complete run-scoped identity is
+            idempotent. A different run or route identity at an owned path is a hard conflict; presence requires the complete
+            identity; removal must match the complete stored owner before either persisted or in-memory authority is changed.
+            Derived route caches and connect-recipient evaluation preserve the exact admitted run and may return only exact-run
+            materialized routes plus explicitly runless authored/static law. A runless cache key, cross-run live route, or
+            discarded source run cannot authorize delivery. All identity and authored-namespace collisions are validated before
             event paths, observers, or routes mutate. The static
             witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
             event or static flow.
@@ -13188,7 +13192,7 @@ flow_model:
           consumes:
           - implementation_slice_1472 typed ConnectRoutePlan artifacts
           - supported descriptor materialization targets from implementation_slice_1472
-          - RouteTable concrete receiver subscribers only after target route identity selection
+          - RouteTable concrete receiver subscribers only after target route identity selection and exact admitted-run filtering
           produces:
           - persisted event_deliveries delivery_target_route rows for supported connected outputs
           - pipeline receipt settlement through normal EventBus delivery consumers
@@ -14758,8 +14762,8 @@ platform_tables:
         agent_id is the authored/runtime-created display name, agent_name_owner
         plus agent_name_source preserve exact declaration/name provenance, and
         agent_route_presence plus the three flow-route fields preserve either a
-        present concrete flow route or the explicit root fact. The seven
-        eight identity columns form the physical primary key. No concatenated key,
+        present concrete flow route or the explicit root fact. The eight
+        identity columns form the physical primary key. No concatenated key,
         nullable route authority, fallback selector, legacy store reader, or
         migration is supported. Duplicate authored slugs across live loaded
         bundles remain unsupported by #977, while repeated instances of one
@@ -14983,7 +14987,13 @@ platform_tables:
         kind and authority_id are closed execution coordinates; selected-fork and forkchat work
         never require a synthetic agents row. A normal-agent coordinate is immutable execution
         evidence, not a live foreign-key selector, so terminal outcome/no-redispatch authority can
-        survive destructive release of its run-scoped agent.
+        survive destructive release of its run-scoped agent. Normal-agent completion and generic
+        recovery must decode and compare the persisted agent_run_id, lineage run, usage-target
+        agent-identity run, concrete capability/effect agent-identity run, and delivery-origin run
+        when that origin is present. Every present run coordinate must equal the operation owner
+        before mutation. A non-agent authority must not carry agent_run_id. Missing, malformed, or
+        conflicting authority fails closed without settling, reclaiming, or otherwise mutating the
+        operation.
       ddl: |
         CREATE TABLE runtime_external_effect_operations (
             operation_id       UUID PRIMARY KEY,
@@ -17597,13 +17607,18 @@ run_model:
       static contract-agent materialization semantics for ID rendering, subscriptions, emit events, permissions, native
       tools, flow path, role/model/memory plan, immutable resolved intent, and runtime descriptor normalization, and constructs
       ephemeral fork-local handlers through the normal AgentManager/static materialization/factory execution
-      path before selected fork publish. It may register only fork-local in-memory handler channels and runtime-active
+      path before selected fork publish. Initial activation and staged activation recovery MUST regenerate the same exact
+      blueprints, load each fork-run template agent''s persisted flow_instance_runtime_readiness, verify the run, route,
+      template/flow, entity, workflow version, execution mode, bundle hash/source, concrete agent identity, and config revision,
+      derive the canonical dynamic topology, and bind that topology to the fork-local AgentManager before container construction
+      or publication. Missing, stale, duplicate-owner, or mismatched readiness fails closed. It may register only fork-local
+      in-memory handler channels and runtime-active
       descriptors for the selected-fork EventBus; it MUST NOT persist those handlers into ordinary current-runtime
       agents, read source event_deliveries or source outcomes as executable truth, synthesize delivered/processed
       receipts, or let live subscriptions/active descriptors alone become recipient truth. Fresh event_deliveries,
       receipts, dead letters, sessions, turns, audits, idempotency state, and emitted follow-ups may appear only as
       fork-local outputs of actual selected-fork handler execution under the fork run_id. Flow-instance-scoped agent
-      materialization, restart recovery of fork-local handlers, session/turn/audit reconstruction, timers, non-agent
+      materialization, broader process restart recovery beyond the staged activation owner above, session/turn/audit reconstruction, timers, non-agent
       replay, retry/idempotency/follow-up policy beyond normal execution, and UI/API behavior remain split unless this
       owner has explicit fork-local proof for that subcase.'
     selected_contract_fork_local_runtime_container: 'Selected-contract fork-local live runtime container ownership is
@@ -17615,7 +17630,10 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy plus
       runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage before any live
       selected-fork publish path is authoritative. The container constructs the fork-run durable EventBus with the exact
-      loaded BundleSourceFact plus recipient-plan guards, registers only ephemeral fork-local runtime active-agent descriptors, starts selected handlers through
+      loaded BundleSourceFact plus recipient-plan guards. A staged activation/recovery container consumes only the regenerated
+      blueprints and exact persisted readiness topology verified and bound by the fork-local agent runtime owner; nil-blueprint,
+      readiness-JSON-only, inferred-current, or source-run fallback construction is forbidden. The container registers only
+      ephemeral fork-local runtime active-agent descriptors, starts selected handlers through
       AgentManager under the fork run_id, binds RuntimeLogger/platform diagnostics to the selected-fork lineage policy,
       carries typed runtime lineage until it is compiled to persisted ParentEventID/source_event_id truth, waits for
       runtime quiescence, and owns cleanup obligations for failed selected-fork execution attempts. Selected-fork agent
@@ -17766,7 +17784,9 @@ run_model:
       runtime.run_fork.selected_contract_execution_admission, selected route topology, selected recipient planning, and
       fork-local selected route recovery before any fork-local event, delivery, handler, receipt, dead-letter,
       retry/idempotency, or follow-up mutation. Its first-slice closure level is selected-contract execution of
-      owner-authorized delivery_event_replay_ready work only. It MUST map historical source delivery identities to
+      owner-authorized delivery_event_replay_ready work only. Before publication it MUST consume the same regenerated
+      selected-contract agent blueprints and exact persisted fork-run readiness binding as initial selected-contract activation;
+      historical/source rows, nil blueprints, or current-runtime descriptors cannot reconstruct that topology. It MUST map historical source delivery identities to
       selected recipient-plan work by source event, mint fresh fork-local event IDs under the fork run_id, publish
       through EventBus with selected recipient-plan guards, run selected handlers through the normal runtime pipeline,
       and record fork-local lineage without copying source event IDs or source delivery rows. Source delivery

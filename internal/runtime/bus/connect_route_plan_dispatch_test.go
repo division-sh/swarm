@@ -279,7 +279,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 								}
 							}
 							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], subscriber)
-							if err := routeTable.addConnectRecipientLocked("", nil, localEvent, subscriber, busInternalTestRunID, ""); err != nil {
+							if err := routeTable.addConnectRecipientLocked("", nil, localEvent, subscriber, runID, ""); err != nil {
 								t.Fatalf("admit root receiver: %v", err)
 							}
 						}
@@ -1434,7 +1434,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 	if len(plans) != 1 {
 		t.Fatalf("matching connect plans = %#v, want one child-to-root plan", plans)
 	}
-	evaluation := routeTable.evaluateConnectPlan(plans[0], []events.RouteIdentity{{
+	evaluation := routeTable.evaluateConnectPlan(evt.RunID(), plans[0], []events.RouteIdentity{{
 		EntityID: eventtest.UUID("selected-root-owner"),
 	}})
 	if !evaluation.Matched() || evaluation.RequiresRuntimeResolution() {
@@ -1446,9 +1446,75 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 		t.Fatalf("connect recipients = %#v, want only exact root parent-listener", recipients)
 	}
 
-	local := routeTable.Resolve("worker/work.completed")
+	local := routeTable.ResolveForRun(busInternalTestRunID, "worker/work.completed")
 	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowID() != "worker" {
 		t.Fatalf("same-flow recipients = %#v, want only exact child observer", local)
+	}
+}
+
+func TestConnectRecipientEvaluationRejectsSiblingRunAcrossCommittedPreviewAndRemoval(t *testing.T) {
+	const (
+		runA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		runB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	)
+	for _, tc := range []struct {
+		name   string
+		source func(testing.TB) semanticview.Source
+		flowID string
+	}{
+		{name: "select", source: func(t testing.TB) semanticview.Source {
+			return connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
+		}, flowID: "account"},
+		{name: "select_or_create", source: func(t testing.TB) semanticview.Source {
+			return connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
+		}, flowID: "account"},
+		{name: "create", source: func(t testing.TB) semanticview.Source {
+			return connectRoutePlanPayloadCreateResolutionSource(t)
+		}, flowID: "validator"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := tc.source(t)
+			plan := mustInstanceKeyConnectRoutePlan(t, source)
+			target := events.RouteIdentity{FlowID: tc.flowID, FlowInstance: tc.flowID + "/one", EntityID: eventtest.UUID(tc.name + "-entity")}
+			identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runA, runtimeflowidentity.DeriveRoute(tc.flowID, "one"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			install := func(t *testing.T) *RouteTable {
+				t.Helper()
+				table, err := DeriveRouteTable(source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+					t.Fatal(err)
+				}
+				return table
+			}
+			assertEvaluation := func(t *testing.T, resolver connectRoutePlanResolver, ctx context.Context) {
+				t.Helper()
+				if got := resolver.evaluateSelectedReceiverCarriers(ctx, runA, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 1 {
+					t.Fatalf("run A recipients = %#v, want one exact owner", got)
+				}
+				if got := resolver.evaluateSelectedReceiverCarriers(ctx, runB, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 0 {
+					t.Fatalf("run B recipients = %#v, want no run A owner", got)
+				}
+			}
+
+			committed := install(t)
+			resolver := connectRoutePlanResolver{routeTable: committed, graph: runtimepinrouting.CompileConnectGraph(source)}
+			assertEvaluation(t, resolver, context.Background())
+			if err := committed.RemoveFlowInstanceRoute(identity); err != nil {
+				t.Fatal(err)
+			}
+			if got := resolver.evaluateSelectedReceiverCarriers(context.Background(), runA, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 0 {
+				t.Fatalf("removed run A recipients = %#v, want none", got)
+			}
+
+			preview := install(t)
+			previewCtx := context.WithValue(context.Background(), connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{table: preview})
+			assertEvaluation(t, connectRoutePlanResolver{graph: runtimepinrouting.CompileConnectGraph(source)}, previewCtx)
+		})
 	}
 }
 
@@ -2260,7 +2326,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -2373,7 +2439,7 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	}
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -2409,7 +2475,7 @@ func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t
 	}
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	err = eb.Publish(context.Background(), evt)
 	failure, ok := runtimefailures.As(err)
@@ -2528,7 +2594,7 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
-		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -2813,7 +2879,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
-				events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 			if err := eb.Publish(context.Background(), evt); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -2850,7 +2916,7 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 			}
 			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"cannot-satisfy-authored-source"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"cannot-satisfy-authored-source"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
@@ -2915,7 +2981,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	}
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
-		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")})}
 
@@ -3645,7 +3711,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 	}
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish initial: %v", err)
@@ -3823,7 +3889,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	consumerTwo := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-two")
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	wantOne := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
 
@@ -4435,7 +4501,7 @@ func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(
 				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
-				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			if err := eventBus.PublishPublicInputAcknowledged(ctx, evt, endpoint); err != nil {
 				t.Fatalf("PublishPublicInputAcknowledged: %v", err)
@@ -4507,7 +4573,7 @@ func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(
 				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
-				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &apiEndpoint, apiidempotency.Request{
@@ -4581,7 +4647,7 @@ func TestPublicInputAdmissionFailsClosedNegativeMatrix(t *testing.T) {
 				}
 				evt := eventtest.RunCreatingRootIngress(
 					uuid.NewString(), events.EventType(endpoint.Event.Canonical), "operator-api", "",
-					json.RawMessage(`{"vertical_id":"missing"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+					json.RawMessage(`{"vertical_id":"missing"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 				)
 				return eventBus.PublishPublicInputAcknowledged(testAuthorActivityContext(context.Background()), evt, endpoint)
 			},

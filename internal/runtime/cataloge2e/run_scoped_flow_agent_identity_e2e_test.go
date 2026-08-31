@@ -22,9 +22,11 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -37,7 +39,8 @@ const catalogSecondRunID = "99999999-9999-4999-8999-999999999999"
 
 type runScopedCatalogSelectedStore interface {
 	runtimeruncontrol.Store
-	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	runtimerunforkexecution.SelectedContractActivationStore
+	MaterializeRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error)
 	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error)
 	ListOperatorAgents(context.Context, operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error)
 	LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error)
@@ -174,7 +177,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			flowPath := "worker-flow/worker-001"
 			sourceRunID := catalogRuntimeRunID
 			flowEntityID := materializeCatalogSelectedForkSourceFlow(t, h, sourceRunID, flowPath)
-			resolvedWorkerRoutes := h.rt.Bus.RouteTable().Resolve(flowPath + "/worker.ready")
+			resolvedWorkerRoutes := h.rt.Bus.RouteTable().ResolveForRun(sourceRunID, flowPath+"/worker.ready")
 			hasWorkerAgentPlan := false
 			for _, route := range resolvedWorkerRoutes {
 				if route.AgentPlan.AgentID() == "worker-agent" {
@@ -250,19 +253,23 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
+			agentRuntime := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
 			executionCtx := worklifetime.WithOccurrence(catalogRunContext(h, sourceRunID), h.rt.WorkOccurrence())
-			result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceEvent.ID(), ConfirmSourceFreeze: true,
-				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection,
-				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
+			materialization := materializeCatalogSelectedForkForBootResume(
+				t, executionCtx, selected, selectedSource, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
+			)
+			result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractActivationGateRequest{
+				ForkRunID: materialization.ForkRunID, ConfirmSourceFreeze: true, Store: selected,
+				ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader,
+				AgentRuntime: agentRuntime,
 			})
 			if err != nil {
-				t.Fatalf("execute selected-contract flow fork: %v; pending=%#v", err, sourcePlan.PendingWork)
+				t.Fatalf("resume materialized selected-contract flow fork: %v; pending=%#v", err, sourcePlan.PendingWork)
 			}
-			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+			if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner || !result.Activated || result.ExecutedEventCount == 0 {
 				t.Fatalf("selected-contract flow fork result = %#v", result)
 			}
-			forkRunID := result.Materialization.ForkRunID
+			forkRunID := materialization.ForkRunID
 			assertCatalogRunScopedFlowOwner(t, h, selected, forkRunID, flowPath, "complete", false)
 			forkAgent := catalogRunScopedAgentDeliveryIdentity(t, h, forkRunID, flowPath, "delivered")
 			if sourceAgent.RunID == forkAgent.RunID || sourceAgent.Name != forkAgent.Name || sourceAgent.Route != forkAgent.Route {
@@ -284,6 +291,126 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			_ = catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, "pending")
 		})
 	}
+}
+
+func materializeCatalogSelectedForkForBootResume(
+	t testing.TB,
+	ctx context.Context,
+	selected runScopedCatalogSelectedStore,
+	loaded runtimerunforkexecution.LoadedSelectedContractSource,
+	selection runfork.RunForkContractSelection,
+	plan runfork.RunForkPlan,
+	agentRuntime runtimerunforkexecution.SelectedContractAgentRuntimeOptions,
+	sourceEventID, flowPath, entityID string,
+) runfork.RunForkMaterialization {
+	t.Helper()
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
+		Plan: plan, Source: loaded.Source, ContractSelection: selection,
+	})
+	if err != nil {
+		t.Fatalf("admit selected-contract boot-resume frontier: %v", err)
+	}
+	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
+		Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("admit selected-contract boot-resume route history: %v", err)
+	}
+	topology, err := runtimerunforkexecution.BuildSelectedContractRouteTopology(runtimerunforkexecution.SelectedContractRouteTopologyRequest{
+		Admission: frontier, RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		t.Fatalf("build selected-contract boot-resume route topology: %v", err)
+	}
+	model, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
+		Admission: frontier, RouteAdmission: routeAdmission, RouteTopology: topology,
+	})
+	if err != nil || model.RecipientPlanning == nil {
+		t.Fatalf("build selected-contract boot-resume execution model: model=%#v err=%v", model, err)
+	}
+	blueprints, err := runtimemanager.TemplateFlowAgentMaterializationBlueprints(
+		loaded.Source, "worker-flow", flowPath, entityID,
+	)
+	if err != nil || len(blueprints) == 0 {
+		t.Fatalf("derive selected-contract boot-resume agent blueprints: count=%d err=%v", len(blueprints), err)
+	}
+	managerOptions := agentRuntime.AgentManagerOptions
+	managerOptions.ExecutionPosture = agentRuntime.ExecutionPosture
+	if agentRuntime.Config != nil {
+		profile, err := agentRuntime.Config.LLMBackendProfile()
+		if err != nil {
+			t.Fatalf("resolve selected-contract boot-resume backend profile: %v", err)
+		}
+		managerOptions.LLMBackend = profile.ID
+	}
+	var workflowConfig map[string]any
+	expectations := make([]runfork.RunForkSelectedContractAgentExpectation, 0, len(blueprints))
+	for _, unresolved := range blueprints {
+		blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(managerOptions, unresolved)
+		if err != nil {
+			t.Fatalf("resolve selected-contract boot-resume agent blueprint: %v", err)
+		}
+		plan := blueprint.Identity.Normalize()
+		if plan.FlowInstance() != flowPath {
+			continue
+		}
+		candidateConfig := map[string]any{}
+		if len(blueprint.Config.Config) > 0 {
+			if err := json.Unmarshal(blueprint.Config.Config, &candidateConfig); err != nil {
+				t.Fatalf("decode selected-contract boot-resume workflow config: %v", err)
+			}
+		}
+		if workflowConfig == nil {
+			workflowConfig = candidateConfig
+		} else if !reflect.DeepEqual(workflowConfig, candidateConfig) {
+			t.Fatalf("selected-contract boot-resume agent configs disagree: %#v and %#v", workflowConfig, candidateConfig)
+		}
+		revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, plan)
+		if err != nil {
+			t.Fatalf("derive selected-contract boot-resume agent revision: %v", err)
+		}
+		expectations = append(expectations, runfork.RunForkSelectedContractAgentExpectation{
+			Plan: plan, ConfigRevision: revision,
+		})
+	}
+	if len(expectations) == 0 || workflowConfig == nil {
+		t.Fatal("selected-contract boot-resume workflow has no declaration-owned agent readiness")
+	}
+	workflowState := runfork.RunForkSelectedContractWorkflowState{
+		SourceEventID:   sourceEventID,
+		EntityID:        entityID,
+		FlowID:          "worker-flow",
+		WorkflowVersion: loaded.Source.WorkflowVersion(),
+		ExecutionMode:   executionmode.Live,
+		Mode:            "template",
+		AddressKind:     runfork.RunForkSelectedContractWorkflowStateExact,
+		Route: runtimeflowidentity.StoredRoute(
+			expectations[0].Plan.Route.ScopeKey,
+			expectations[0].Plan.Route.InstanceID,
+			expectations[0].Plan.Route.InstancePath,
+		),
+		Config: workflowConfig,
+		Agents: expectations,
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loaded.BundleSourceFact)
+	materialization, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID:             plan.SourceRunID,
+		At:                      sourceEventID,
+		ContractSelection:       selection,
+		BundleSourceFact:        loaded.BundleSourceFact,
+		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
+		FrontierAdmission:       frontier,
+		RouteTopology:           topology,
+		RecipientPlanning:       *model.RecipientPlanning,
+		WorkflowStates:          []runfork.RunForkSelectedContractWorkflowState{workflowState},
+	})
+	if err != nil {
+		t.Fatalf("materialize selected-contract boot-resume crash boundary: %v", err)
+	}
+	if materialization.ForkRunID == "" || len(materialization.AgentTopologies) == 0 {
+		t.Fatalf("selected-contract boot-resume materialization lacks exact agent topology: %#v", materialization)
+	}
+	return materialization
 }
 
 func waitForCatalogRunScopedPublication(t testing.TB, h *runtimeHarness, signal <-chan struct{}, runID string) {

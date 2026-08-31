@@ -2413,7 +2413,7 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 	if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.Pending() {
 		t.Fatalf("load sibling-addition readiness: found=%v err=%v readiness=%#v", found, err, readiness)
 	}
-	expectedTopology, err := dynamicFlowAgentTopologyAuthority(readiness.Plan)
+	expectedTopology, err := DynamicFlowAgentTopologyAdmission(readiness.Plan)
 	if err != nil {
 		t.Fatalf("derive revised topology admission: %v", err)
 	}
@@ -2524,12 +2524,15 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	newEvent := "review/inst-1/task.revised"
 	routeObserver := identitytest.FlowNode(t, "review", "route-observer").Key()
 	ownerA := testActivationFlowIdentity(reqA)
+	resolveA := func(eventType string) []runtimebus.Subscriber {
+		return processA.ResolveForRun(reqA.TriggerEvent.RunID(), eventType)
+	}
 	if !hasRecord(durableRoutes[ownerA.Key()], oldEvent, routeObserver) ||
-		!hasSubscriber(processA.Resolve(oldEvent), routeObserver) {
+		!hasSubscriber(resolveA(oldEvent), routeObserver) {
 		t.Fatalf(
 			"source A route-only facts missing: durable=%#v process=%#v",
 			durableRoutes[ownerA.Key()],
-			processA.Resolve(oldEvent),
+			resolveA(oldEvent),
 		)
 	}
 
@@ -2578,20 +2581,23 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		t.Fatalf("route-only revision changed wrong plan facts: before=%#v after=%#v", initial.Plan, revised.Plan)
 	}
 	revisedRecords := durableRoutes[testActivationFlowIdentity(reqB).Key()]
+	resolveB := func(eventType string) []runtimebus.Subscriber {
+		return processB.ResolveForRun(reqB.TriggerEvent.RunID(), eventType)
+	}
 	if hasRecord(revisedRecords, oldEvent, routeObserver) ||
-		hasSubscriber(processB.Resolve(oldEvent), routeObserver) {
+		hasSubscriber(resolveB(oldEvent), routeObserver) {
 		t.Fatalf(
 			"source B retained stale route-only facts: durable=%#v process=%#v",
 			revisedRecords,
-			processB.Resolve(oldEvent),
+			resolveB(oldEvent),
 		)
 	}
 	if !hasRecord(revisedRecords, newEvent, routeObserver) ||
-		!hasSubscriber(processB.Resolve(newEvent), routeObserver) {
+		!hasSubscriber(resolveB(newEvent), routeObserver) {
 		t.Fatalf(
 			"source B route-only facts missing: durable=%#v process=%#v",
 			revisedRecords,
-			processB.Resolve(newEvent),
+			resolveB(newEvent),
 		)
 	}
 }

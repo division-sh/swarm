@@ -982,7 +982,7 @@ func TestEventBusDeclaredKeyAcquisitionSettlesBeforePersistence(t *testing.T) {
 				t.Fatal(err)
 			}
 			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 			err = eb.Publish(context.Background(), evt)
 			if test.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantError) {
@@ -1089,7 +1089,7 @@ func TestEventBusSelectOrCreateTargetIsImmutableAfterPrepublicationLinearization
 		return eb
 	}
 	newEvent := func(eventID string) events.Event {
-		return eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		return eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	}
 	instanceForRoute := func(route events.RouteIdentity, accountID string) runtimepipeline.WorkflowInstance {
 		return runtimepipeline.WorkflowInstance{
@@ -1181,7 +1181,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 		Handler: targetHandler.ForEvent("work.started")}
 	rt := newRouteTable(nil)
 	rt.eventPath[eventType] = struct{}{}
-	rt.routes[eventType] = []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(targetNode), Path: "worker",
+	rt.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(targetNode), Path: "worker",
 		LocalizedEvent: "work.started", handlerNode: targetNode, targetHandler: targetHandler,
 		routeSource: subscriberRouteSourceSubscription,
 	}}
@@ -1827,7 +1827,7 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
 			{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerOneID},
@@ -1880,7 +1880,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerID}),
 		time.Now().UTC(),
@@ -1913,7 +1913,7 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")}),
 		time.Now().UTC(),
@@ -1974,10 +1974,10 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if !hasRoute("worker/w-001/work.assign") {
 		t.Fatalf("materialized routes = %#v, want task-handler instance-scoped work.assign route; node entries=%v", materialized, semanticview.Wrap(bundle).ExecutableNodeRecords())
 	}
-	if subscriberListContainsRouteSource(eb.RouteTable().Resolve("worker/w-001/work.assign"), "task-handler", "worker/w-001", "receiver_carrier") {
-		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", eb.RouteTable().Resolve("worker/w-001/work.assign"))
+	if subscriberListContainsRouteSource(eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"), "task-handler", "worker/w-001", "receiver_carrier") {
+		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"))
 	}
-	if resolved := eb.RouteTable().Resolve("worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
+	if resolved := eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
 		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)
 	}
 	target := events.RouteIdentity{
@@ -1992,7 +1992,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		"",
 		[]byte(`{"task_label":"route-me"}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
 		time.Now().UTC(),
@@ -2044,7 +2044,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-operating")), "operating/inst-1"),
 		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", eventtest.UUID("ent-operating")),
@@ -2113,7 +2113,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-operating")), "operating/inst-1"),
 		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", eventtest.UUID("ent-operating")),
@@ -2188,7 +2188,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 				"",
 				[]byte(`{}`),
 				0,
-				"",
+				busInternalTestRunID,
 				"",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-repo")), "repo-scaffold/inst-1"),
 				eventtest.ConcreteTemplateRoutingSource("repo-scaffold", "repo-scaffold/inst-1", eventtest.UUID("ent-repo")),
@@ -2356,7 +2356,7 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-child")),
 		time.Now().UTC(),
@@ -2510,7 +2510,7 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 	}
 	routes := newRouteTable(source)
 	routes.eventPath["child/grandchild/micro.start"] = struct{}{}
-	routes.routes["child/grandchild/micro.start"] = []Subscriber{{
+	routes.routes[routeResolutionKey{eventType: "child/grandchild/micro.start"}] = []Subscriber{{
 		Recipient: events.MustNodeDeliveryRecipient(handlerNode), Path: "child/grandchild",
 		MatchPattern: "child/grandchild/micro.start", routeSource: subscriberRouteSourceSubscription,
 		LocalizedEvent: "micro.start", handlerNode: handlerNode, targetHandler: handler,
@@ -2554,7 +2554,7 @@ func TestRouteTableRootInputFlowNodeResolvesRootInputRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("thing.created")
+	got := rt.ResolveForRun(busInternalTestRunID, "thing.created")
 	if len(got) != 1 {
 		t.Fatalf("Resolve(thing.created) = %#v, want one root-input flow node route", got)
 	}
@@ -2579,7 +2579,7 @@ func TestRouteTableExactRootInputFlowUsesSemanticLocalizationOwner(t *testing.T)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("task.assigned")
+	got := rt.ResolveForRun(busInternalTestRunID, "task.assigned")
 	if len(got) != 2 {
 		t.Fatalf("Resolve(task.assigned) = %#v, want exact subscription and root-input roles", got)
 	}
@@ -2601,7 +2601,7 @@ func TestRouteTableExactRootInputFlowUsesSemanticLocalizationOwner(t *testing.T)
 			t.Fatalf("missing %s role in %#v", source, got)
 		}
 	}
-	qualified := rt.Resolve("worker/task.assigned")
+	qualified := rt.ResolveForRun(busInternalTestRunID, "worker/task.assigned")
 	if len(qualified) != 1 || qualified[0].RouteSourceCode() != "subscription" || qualified[0].LocalizedEvent != "task.assigned" {
 		t.Fatalf("Resolve(worker/task.assigned) = %#v, want one localized subscription role", qualified)
 	}
@@ -2633,7 +2633,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-root-input")),
 		time.Now().UTC(),
@@ -2694,7 +2694,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		busInternalTestRunID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-root-input")),
 		time.Now().UTC(),
@@ -2930,7 +2930,7 @@ func TestEventBusRootInputAPIExplicitTargetPersistsOnlySelectedSameIDScopedRoute
 
 func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *testing.T) {
 	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
-	ordinary := routes.routes["thing.created"][0]
+	ordinary := routes.routes[routeResolutionKey{eventType: "thing.created"}][0]
 	rootInput := routes.rootInputRoutes["thing.created"][0]
 	event := eventtest.OperatorInjected(
 		uuid.NewString(), events.EventType("thing.created"), "operator", "", nil, 0,
@@ -3122,8 +3122,8 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 		t.Fatalf("admit root-input duplicate-ID handler: %v", err)
 	}
 	routes := newRouteTable(source)
-	routes.routes = map[string][]Subscriber{
-		"thing.created": {{
+	routes.routes = map[routeResolutionKey][]Subscriber{
+		{eventType: "thing.created"}: {{
 			Recipient: events.MustNodeDeliveryRecipient(ordinaryNode), Path: "ordinary", MatchPattern: "thing.created",
 			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "thing.created", handlerNode: ordinaryNode,
 			targetHandler: ordinaryHandler,
@@ -3161,7 +3161,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	resolved := rt.Resolve("item.received")
+	resolved := rt.ResolveForRun(busInternalTestRunID, "item.received")
 	if len(resolved) != 2 {
 		t.Fatalf("resolved subscribers = %#v, want independent subscription and root-input-project roles", resolved)
 	}
@@ -3273,7 +3273,7 @@ func TestRouteTableIntrinsicExternalFlowInputsCarryTypedIngressAuthority(t *test
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
-			resolved := routes.Resolve(tc.eventType)
+			resolved := routes.ResolveForRun(busInternalTestRunID, tc.eventType)
 			wantCount := 1
 			if tc.wantRouteCode == "root_input_flow" {
 				wantCount = 2
@@ -3599,7 +3599,7 @@ func TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute(t *test
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("thing.created")
+	got := rt.ResolveForRun(busInternalTestRunID, "thing.created")
 	rootInput := 0
 	for _, subscriber := range got {
 		if subscriber.Recipient.LocalID() == "reviewer" && subscriber.Recipient.IsNode() && subscriber.Path == "" && subscriber.MatchPattern == "thing.created" && subscriber.RouteSourceCode() == "root_input_project" {
