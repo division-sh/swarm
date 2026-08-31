@@ -21886,10 +21886,14 @@ test_specification:
       ci_owner: hitl-releasee2e-full
       process_boundary: >
         The executor builds the current swarm binary and uses only public readiness and
-        /v1/rpc behavior against the authored source. It runs with mock_only execution,
-        no provider credential and a fixture-private empty executable search path, so
-        Claude, Docker, and Podman cannot be discovered. SQL is permitted only to
-        provision and remove an isolated host-PostgreSQL database.
+        /v1/rpc behavior against the authored source. Every workload runs from an authored
+        YAML-only child project with no project-local `go.mod`, beneath one hostile ancestor
+        `go.mod` that acts only as an upward-search canary. Verify, initial serve, and every
+        restart use that exact child working directory and relative `swarm.yaml`, `contracts`,
+        and `api-token` operands. It runs with mock_only execution, no provider credential
+        and a fixture-private empty executable search path, so Claude, Docker, and Podman
+        cannot be discovered. SQL is permitted only to provision and remove an isolated
+        host-PostgreSQL database.
       pr_profile: >
         pr-common and pr-escalated execute the complete N=2 SQLite composition shape.
         Forced restart and contention rows are skipped explicitly by the canonical proof
@@ -21906,6 +21910,7 @@ test_specification:
       - fixture-local routing, lifecycle, replay, or settlement interpretation
       - SQL or logs as behavioral proof
       - provider credentials or discovery of Claude, Docker, or Podman executables
+      - project-local Go-module authority or absolute config, contracts, or token operands
       - reduced payload assertions, deadline-as-success, or a non-race burst substitute
     replay_clean:
       promoted_by: '#2143'
