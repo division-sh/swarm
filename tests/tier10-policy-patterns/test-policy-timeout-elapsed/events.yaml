@@ -1,4 +1,4 @@
 task.done: {}
 timer.check:
-  elapsed_hours: number?
+  elapsed_hours: number
 task.timed_out: {}

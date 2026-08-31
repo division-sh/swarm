@@ -184,13 +184,6 @@ func validateJoinOutcome(location, flowID, nodeID, eventType, label string, rule
 }
 
 func validateJoinExpression(location, flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType runtimecontracts.CatalogTypeReference, fanOutDelivery ...bool) []Finding {
-	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}
-	if len(fanOutDelivery) > 0 && fanOutDelivery[0] {
-		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
-	}
-	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, options); err != nil {
-		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
-	}
 	for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
 		if workflowexpr.ExpressionReferencesRoot(expression, root) {
 			return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may not reference %s.*", label, root))}
@@ -198,6 +191,13 @@ func validateJoinExpression(location, flowID, nodeID, eventType, label, expressi
 	}
 	if joinOnly && workflowexpr.ExpressionReferencesRoot(expression, "entity") {
 		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may reference only join.*", label))}
+	}
+	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}
+	if len(fanOutDelivery) > 0 && fanOutDelivery[0] {
+		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
+	}
+	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, options); err != nil {
+		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
 	}
 	return nil
 }

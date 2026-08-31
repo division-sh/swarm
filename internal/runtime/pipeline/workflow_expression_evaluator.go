@@ -6,10 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
@@ -37,43 +35,18 @@ type workflowExpressionContext struct {
 }
 
 type workflowExpressionEvaluator struct {
-	env      *cel.Env
-	mu       sync.RWMutex
-	programs map[string]cel.Program
 }
 
 func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
-	env, err := cel.NewEnv(
-		cel.Variable("entity", cel.DynType),
-		cel.Variable("_entity", cel.DynType),
-		cel.Variable("event", cel.DynType),
-		cel.Variable("payload", cel.DynType),
-		cel.Variable("policy", cel.DynType),
-		cel.Variable("computed", cel.DynType),
-		cel.Variable("accumulated", cel.DynType),
-		cel.Variable("fan_out", cel.DynType),
-		cel.Variable("join", cel.DynType),
-		cel.Variable("_loop", cel.DynType),
-		cel.Function("count_ge",
-			cel.Overload(
-				"count_ge_dyn_dyn",
-				[]*cel.Type{cel.DynType, cel.DynType},
-				cel.IntType,
-				cel.FunctionBinding(workflowExpressionCountGE),
-			),
-		),
-	)
-	if err != nil {
-		return &workflowExpressionEvaluator{}
-	}
-	return &workflowExpressionEvaluator{
-		env:      env,
-		programs: map[string]cel.Program{},
-	}
+	return &workflowExpressionEvaluator{}
 }
 
 func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowExpressionContext) (bool, error) {
-	if e == nil || e.env == nil {
+	return e.EvalBoolWithOptions(expression, ctx, workflowexpr.ValueExpressionOptions{})
+}
+
+func (e *workflowExpressionEvaluator) EvalBoolWithOptions(expression string, ctx workflowExpressionContext, opts workflowexpr.ValueExpressionOptions) (bool, error) {
+	if e == nil {
 		return false, fmt.Errorf("workflow expression evaluator is not initialized")
 	}
 	normalized, normalizedCtx, err := normalizeWorkflowExpression(expression, ctx)
@@ -84,35 +57,25 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		return false, fmt.Errorf("workflow expression is empty")
 	}
 	if workflowexpr.ExpressionReferencesRoot(normalized, "join") {
-		if err := workflowexpr.ValidateValueExpressionWithOptions(normalized, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: true}); err != nil {
-			return false, fmt.Errorf("join expression: %w", err)
-		}
+		opts.AllowJoin = true
 	}
 	if missing := missingEntityReferences(normalized, normalizedCtx.Entity); len(missing) > 0 {
 		return false, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
-	program, err := e.program(normalized)
-	if err != nil {
-		return false, err
-	}
-	out, _, err := program.Eval(map[string]any{
-		"entity":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Entity)),
-		"_entity":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.PlatformEntity)),
-		"event":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Event)),
-		"payload":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Payload)),
-		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
-		"computed":    workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Computed)),
-		"accumulated": normalizedCtx.Accumulated,
-		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
-		"join":        workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Join)),
-		"_loop":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Loop)),
-	})
+	opts.RequireBool = true
+	opts.AllowAccumulated = true
+	out, err := workflowexpr.EvalValueExpressionWithOptions(normalized, workflowexpr.ValueContext{
+		Entity: normalizedCtx.Entity, PlatformEntity: normalizedCtx.PlatformEntity,
+		Event: normalizedCtx.Event, Payload: normalizedCtx.Payload, Policy: normalizedCtx.Policy,
+		Computed: normalizedCtx.Computed, Accumulated: normalizedCtx.Accumulated,
+		FanOut: normalizedCtx.FanOut, Join: normalizedCtx.Join, Loop: normalizedCtx.Loop,
+	}, opts)
 	if err != nil {
 		return false, err
 	}
 	switch typed := out.(type) {
-	case types.Bool:
-		return bool(typed), nil
+	case bool:
+		return typed, nil
 	default:
 		return false, fmt.Errorf("workflow expression returned non-bool %T", out)
 	}
@@ -135,32 +98,6 @@ func missingEntityReferences(expression string, entity map[string]any) []string 
 		out = append(out, "entity."+ref)
 	}
 	return out
-}
-
-func (e *workflowExpressionEvaluator) program(expression string) (cel.Program, error) {
-	e.mu.RLock()
-	if program, ok := e.programs[expression]; ok {
-		e.mu.RUnlock()
-		return program, nil
-	}
-	e.mu.RUnlock()
-
-	ast, issues := e.env.Compile(expression)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	program, err := e.env.Program(ast)
-	if err != nil {
-		return nil, err
-	}
-
-	e.mu.Lock()
-	if e.programs == nil {
-		e.programs = map[string]cel.Program{}
-	}
-	e.programs[expression] = program
-	e.mu.Unlock()
-	return program, nil
 }
 
 func normalizeWorkflowExpression(expression string, ctx workflowExpressionContext) (string, workflowExpressionContext, error) {

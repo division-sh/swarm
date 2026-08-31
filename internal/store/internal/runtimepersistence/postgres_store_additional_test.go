@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -837,17 +838,17 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 	}
 }
 
-func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
+func TestPostgresStore_AppendEvent_RejectsPayloadAdmissionFailureBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	pg.SetEventPayloadValidator(func(_ context.Context, eventType string, payload []byte) error {
-		if strings.TrimSpace(eventType) != "task.completed" {
-			t.Fatalf("unexpected event type %q", eventType)
+	pg.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+		if strings.TrimSpace(string(event.Type())) != "task.completed" {
+			t.Fatalf("unexpected event type %q", event.Type())
 		}
-		if string(payload) != `{"ok":"bad"}` {
-			t.Fatalf("unexpected payload %s", string(payload))
+		if string(event.Payload()) != `{"ok":"bad"}` {
+			t.Fatalf("unexpected payload %s", string(event.Payload()))
 		}
-		return runtimetools.ValidatePayloadAgainstSchema(map[string]any{
+		err := runtimetools.ValidatePayloadAgainstSchema(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"ok": map[string]any{"type": "boolean"},
@@ -855,17 +856,23 @@ func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersisten
 			"required":             []any{"ok"},
 			"additionalProperties": false,
 		}, map[string]any{"ok": "bad"})
+		return events.PayloadAdmission{}, err
 	})
 	ctx := testAuthorActivityContext()
 	eventID := uuid.NewString()
 
-	err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(eventID,
+	event := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("task.completed"),
-		"control-plane", "", []byte(`{"ok":"bad"}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC()))
+		"control-plane", "", []byte(`{"ok":"bad"}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC())
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("admit event envelope: %v", err)
+	}
+	_, err = commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, nil, runtimepipelineobligation.ScopeDirect)
 	if err == nil {
 		t.Fatal("expected AppendEvent to fail on payload validator rejection")
 	}
-	if !strings.Contains(err.Error(), "validate event payload") {
+	if !strings.Contains(err.Error(), "schema validation failed") {
 		t.Fatalf("AppendEvent payload validator error = %v", err)
 	}
 
@@ -878,20 +885,24 @@ func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersisten
 	}
 }
 
-func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValidator {
+func currentPlatformPayloadAdmitterForStoreTest(t testing.TB) runtimebus.PayloadAdmitter {
 	t.Helper()
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
-	return func(_ context.Context, eventType string, payload []byte) error {
-		schema, ok := registry[strings.TrimSpace(eventType)]
+	return func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		eventType := strings.TrimSpace(string(event.Type()))
+		schema, ok := registry[eventType]
 		if !ok {
-			return nil
+			return eventtest.PayloadAdmission(event, flowID, eventType)
 		}
 		var decoded map[string]any
-		if err := json.Unmarshal(payload, &decoded); err != nil {
-			return err
+		if err := json.Unmarshal(event.Payload(), &decoded); err != nil {
+			return events.PayloadAdmission{}, err
 		}
-		return runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, decoded)
+		if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, decoded); err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		return eventtest.PayloadAdmission(event, flowID, eventType)
 	}
 }
 

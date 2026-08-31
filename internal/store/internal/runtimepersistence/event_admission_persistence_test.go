@@ -492,7 +492,12 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runt
 			if err != nil {
 				t.Fatalf("marshal runtime log payload: %v", err)
 			}
-			if err := harness.persistLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
+			admissionEvent := eventtest.DiagnosticDirect("", events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, runID, "", events.EventEnvelope{}, time.Time{})
+			payloadAdmission, err := currentPlatformPayloadAdmitterForStoreTest(t)(ctx, admissionEvent, "")
+			if err != nil {
+				t.Fatalf("admit runtime log payload: %v", err)
+			}
+			if err := harness.persistLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, PayloadAdmission: payloadAdmission, ExecutionMode: executionmode.Live}); err != nil {
 				t.Fatalf("persist runtime log for %s: %v", status, err)
 			}
 			after, err := harness.loadState(ctx, runID)
@@ -979,7 +984,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 	pg := admitTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
-	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     diaglog.LevelWarn,
 		Message:   "admitted global runtime log",
@@ -1006,7 +1011,7 @@ func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     diaglog.LevelWarn,
 		Message:   "admitted sqlite global runtime log",

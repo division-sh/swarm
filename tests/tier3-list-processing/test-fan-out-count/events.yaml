@@ -1,5 +1,5 @@
 batch.received:
-  items: array?
+  items: "[FanOutItem]"
 task.dispatched:
   item: FanOutItem?
   item_id: text?

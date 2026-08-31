@@ -367,18 +367,21 @@ func executableNodeEventPayloadFields(source semanticview.Source, node runtimeid
 	if source == nil || !node.Valid() {
 		return nil, false
 	}
-	proof := semanticview.ResolveExecutableNodeEventProof(source, node, strings.TrimSpace(eventType))
-	if !proof.HasSchema {
+	structural, err := executablePayloadStructuralType(source, node, strings.TrimSpace(eventType))
+	if err != nil || structural == nil {
 		return nil, false
 	}
 	out := map[string]struct{}{}
-	collectPayloadFields("", proof.Entry.Payload.Properties, out)
+	collectStructuralPayloadFields("", *structural, out)
 	return out, true
 }
 
-func collectPayloadFields(prefix string, fields map[string]runtimecontracts.EventFieldSpec, out map[string]struct{}) {
-	for name := range fields {
-		name = strings.TrimSpace(name)
+func collectStructuralPayloadFields(prefix string, value runtimecontracts.ResolvedCatalogType, out map[string]struct{}) {
+	if value.Kind != runtimecontracts.CatalogTypeObject {
+		return
+	}
+	for _, field := range value.Fields {
+		name := strings.TrimSpace(field.Name)
 		if name == "" {
 			continue
 		}
@@ -387,6 +390,7 @@ func collectPayloadFields(prefix string, fields map[string]runtimecontracts.Even
 			full = prefix + "." + name
 		}
 		out[full] = struct{}{}
+		collectStructuralPayloadFields(full, field.Type, out)
 	}
 }
 

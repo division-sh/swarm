@@ -1,3 +1,3 @@
 values.submitted:
-  values: array?
+  values: array
 values.reduced: {}

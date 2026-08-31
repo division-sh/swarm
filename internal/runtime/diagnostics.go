@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -48,8 +49,9 @@ func (e *RuntimeLogEntry) NormalizeEntityID() {
 }
 
 type RuntimeLogger struct {
-	persistence RuntimeLogPersistence
-	posture     executionposture.Posture
+	persistence     RuntimeLogPersistence
+	posture         executionposture.Posture
+	payloadAdmitter runtimebus.PayloadAdmitter
 }
 
 // RuntimeLogPersistence owns backend-specific platform.runtime_log persistence
@@ -61,14 +63,15 @@ type RuntimeLogPersistence interface {
 }
 
 type RuntimeLogPersistenceRecord struct {
-	RunID         string
-	Payload       []byte
-	ParentEventID string
-	ExecutionMode executionmode.Mode
+	RunID            string
+	Payload          []byte
+	PayloadAdmission events.PayloadAdmission
+	ParentEventID    string
+	ExecutionMode    executionmode.Mode
 }
 
-func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture) *RuntimeLogger {
-	return &RuntimeLogger{persistence: persistence, posture: posture}
+func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture, payloadAdmitter runtimebus.PayloadAdmitter) *RuntimeLogger {
+	return &RuntimeLogger{persistence: persistence, posture: posture, payloadAdmitter: payloadAdmitter}
 }
 
 // EncodeLifecycleDiagnosticLog is the canonical lifecycle diagnostic payload
@@ -149,7 +152,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		return nil
 	}
 	detail := marshalJSONOrEmpty(e.Detail)
-	payload, err := logRuntimeEventSpec(ctx, l.persistence, l.posture, true, level.String(), component, action, e, detail)
+	payload, err := logRuntimeEventSpec(ctx, l.persistence, l.payloadAdmitter, l.posture, true, level.String(), component, action, e, detail)
 	if err != nil {
 		return err
 	}
@@ -255,7 +258,7 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, posture executionposture.Posture, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
+func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, payloadAdmitter runtimebus.PayloadAdmitter, posture executionposture.Posture, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
 	if persistence == nil {
 		return CanonicalRuntimeLogPayload{}, nil
 	}
@@ -299,14 +302,29 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
+	if payloadAdmitter == nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log payload admission owner is required")
+	}
+	admissionEvent, err := events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
+		Type: events.EventTypePlatformRuntimeLog, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: encoded, ExecutionMode: executionmode.Mode(runtimeeffects.ExecutionMode(posture.RootMode())),
+	}})
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("construct runtime log payload admission event: %w", err)
+	}
+	payloadAdmission, err := payloadAdmitter(ctx, admissionEvent, "")
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("admit runtime log payload: %w", err)
+	}
 	mode := runtimeeffects.ExecutionMode(posture.RootMode())
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = contextualMode
 	}
 	record := RuntimeLogPersistenceRecord{
-		Payload:       encoded,
-		ParentEventID: parentEventID,
-		ExecutionMode: executionmode.Mode(mode),
+		Payload:          encoded,
+		PayloadAdmission: payloadAdmission,
+		ParentEventID:    parentEventID,
+		ExecutionMode:    executionmode.Mode(mode),
 	}
 	if hasRunID {
 		record.RunID = runID

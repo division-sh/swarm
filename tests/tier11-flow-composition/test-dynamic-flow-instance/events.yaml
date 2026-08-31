@@ -1,9 +1,9 @@
 spawn.requested:
-  worker_id: string?
-  task_label: string?
+  worker_id: string
+  task_label: string
 assign.requested:
-  worker_id: string?
-  task_label: string?
+  worker_id: string
+  task_label: string
 work.assign:
   worker_id: string
   task_label: string?
