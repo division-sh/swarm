@@ -58,6 +58,38 @@ func TestValidatePayloadAgainstSchemaReturnsStructuredViolation(t *testing.T) {
 	}
 }
 
+func TestSchemaViolationActualUsesStableSemanticCategories(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "native float", value: float64(7), want: "number"},
+		{name: "native integer", value: int64(7), want: "number"},
+		{name: "lexical integer", value: json.Number("7"), want: "number"},
+		{name: "lexical decimal", value: json.Number("7.0"), want: "number"},
+		{name: "boolean", value: true, want: "boolean"},
+		{name: "array", value: []any{1}, want: "array"},
+		{name: "object", value: map[string]any{"value": 1}, want: "object"},
+		{name: "null", value: nil, want: "null"},
+	}
+	schema := map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePayloadAgainstSchema(schema, map[string]any{"value": test.value})
+			var violation *Violation
+			if !errors.As(err, &violation) || violation.Actual != test.want {
+				t.Fatalf("violation = %#v, want actual=%q", violation, test.want)
+			}
+			for _, carrier := range []string{"float64", "int64", "json.Number", "[]interface", "map[string]interface"} {
+				if strings.Contains(violation.Actual, carrier) {
+					t.Fatalf("actual leaked Go carrier %q: %#v", carrier, violation)
+				}
+			}
+		})
+	}
+}
+
 func TestCanonicalAcceptanceSchemaRetainsSemanticsAndDropsPresentation(t *testing.T) {
 	t.Parallel()
 

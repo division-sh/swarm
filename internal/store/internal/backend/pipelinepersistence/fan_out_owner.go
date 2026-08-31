@@ -604,7 +604,7 @@ func commitFanOutChunk(
 				}
 				committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
 				if err != nil {
-					return fanOutPublicationSemanticError(outcome.Ordinal, err)
+					return fmt.Errorf("commit fan-out publication ordinal %d: %w", outcome.Ordinal, err)
 				}
 				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 				if err != nil {
@@ -843,14 +843,6 @@ func semanticJSONEqual(actual any, expected json.RawMessage) bool {
 	rightDecoder := json.NewDecoder(bytes.NewReader(expected))
 	rightDecoder.UseNumber()
 	return leftDecoder.Decode(&left) == nil && rightDecoder.Decode(&right) == nil && reflect.DeepEqual(left, right)
-}
-
-func fanOutPublicationSemanticError(ordinal int, err error) error {
-	failure, ok := runtimefailures.EnvelopeFromError(err)
-	if !ok || failure.Retryable || !failure.Deterministic || failure.Class == runtimefailures.ClassInternalFailure || failure.Class == runtimefailures.ClassOutcomeUncertain {
-		return fmt.Errorf("commit fan-out publication ordinal %d: %w", ordinal, err)
-	}
-	return runtimepipeline.NewFanOutItemSemanticError(ordinal, failure, err)
 }
 
 func nullableText(raw string) any {

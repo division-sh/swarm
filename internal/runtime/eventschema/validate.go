@@ -2,6 +2,7 @@ package eventschema
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -42,10 +43,24 @@ func violation(path, constraint, expected, actual, detail string, args ...any) e
 }
 
 func schemaValueType(value any) string {
-	if value == nil {
+	switch value.(type) {
+	case nil:
 		return "null"
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64, json.Number:
+		return "number"
+	case []any, []string:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return "unsupported"
 	}
-	return fmt.Sprintf("%T", value)
 }
 
 func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any) error {

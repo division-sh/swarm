@@ -36,6 +36,47 @@ func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
 	}
 }
 
+func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	instance, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
+		CurrentState: "active", Revision: 1, EnteredStageAt: now,
+		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("decode persisted workflow state: %v", err)
+	}
+	if got := instance.Fields["integer"]; got != int64(75) {
+		t.Fatalf("persisted integer = %#v, want admitted integer", got)
+	}
+	if instance.Fields["decimal"] != float64(75) || instance.Fields["exponent"] != float64(75) {
+		t.Fatalf("persisted decimal carriers = %#v, want doubles", instance.Fields)
+	}
+	matched, err := newWorkflowExpressionEvaluator().EvalBool(
+		"entity.integer + 1 == 76 && entity.decimal + 1.0 == 76.0 && entity.exponent + 1.0 == 76.0",
+		workflowExpressionContext{Entity: instance.Fields},
+	)
+	if err != nil || !matched {
+		t.Fatalf("persisted workflow-state integer arithmetic = %v err=%v", matched, err)
+	}
+}
+
+func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	_, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
+		CurrentState: "active", Revision: 1, EnteredStageAt: now,
+		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+	})
+	if err == nil || !strings.Contains(err.Error(), "$.score") || !strings.Contains(err.Error(), "declare the field as string") {
+		t.Fatalf("unsafe persisted workflow-state error = %v, want typed $.score remediation", err)
+	}
+}
+
 func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -298,7 +339,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("Fields business_brief = %#v, want first", got)
 	}
 	gotScore, ok := workflowStateBucketObject(loaded, "score")
-	if !ok || gotScore["value"] != float64(1) {
+	if !ok || gotScore["value"] != int64(1) {
 		t.Fatalf("StateBuckets score = %#v ok=%v, want 1", gotScore, ok)
 	}
 

@@ -632,7 +632,10 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	if state.StateCarrier.StateBuckets == nil {
 		state.StateCarrier.StateBuckets = map[string]map[string]any{}
 	}
-	payload := decodePayload(req.Event.Payload())
+	payload, err := decodePayload(req.Event.Payload())
+	if err != nil {
+		return executionFrame{}, fmt.Errorf("decode execution event payload: %w", err)
+	}
 	if len(payload) == 0 {
 		payload = map[string]any{}
 	}
@@ -2744,15 +2747,22 @@ func emitPersistenceFieldTarget(target string) (string, paths.Path, bool) {
 	return field, parsed, true
 }
 
-func decodePayload(raw json.RawMessage) map[string]any {
+func decodePayload(raw json.RawMessage) (map[string]any, error) {
 	if len(raw) == 0 {
-		return map[string]any{}
+		return map[string]any{}, nil
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return map[string]any{}
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &payload); err != nil {
+		return nil, err
 	}
-	return payload
+	if payload == nil {
+		return map[string]any{}, nil
+	}
+	projected, err := workflowexpr.ProjectCELValue(payload)
+	if err != nil {
+		return nil, err
+	}
+	return projected.(map[string]any), nil
 }
 
 func encodePayload(payload map[string]any) (json.RawMessage, error) {

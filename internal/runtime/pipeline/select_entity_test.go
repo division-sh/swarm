@@ -47,7 +47,7 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != int64(42) {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
 	if got := FlowInstanceEntityID(instance.StorageRef); got != budgetEntityID {
@@ -140,7 +140,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Fields["spent_usd"]; got != float64(99) && got != 99 {
+	if got := instance.Fields["spent_usd"]; got != int64(99) {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
 	}
 }
@@ -205,7 +205,7 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != int64(42) {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
 	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "pending" {
@@ -239,7 +239,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	if got := instance.Fields["vertical_id"]; got != "vertical-1" {
 		t.Fatalf("vertical_id = %#v, want vertical-1", got)
 	}
-	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != int64(42) {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
 	if got := strings.TrimSpace(instance.EntityType); got != "opco_budget" {
@@ -271,7 +271,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 	}
 
 	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
-	if got := instance.Fields["spent_usd"]; got != float64(99) && got != 99 {
+	if got := instance.Fields["spent_usd"]; got != int64(99) {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
 	}
 }
@@ -445,7 +445,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected active budget entity to exist")
 	}
-	if got := active.Fields["spent_usd"]; got != float64(42) && got != 42 {
+	if got := active.Fields["spent_usd"]; got != int64(42) {
 		t.Fatalf("active spent_usd = %#v, want 42", got)
 	}
 	terminal, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-archived").Route())
@@ -455,7 +455,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected terminal budget entity to exist")
 	}
-	if got := terminal.Fields["spent_usd"]; got != float64(10) && got != 10 {
+	if got := terminal.Fields["spent_usd"]; got != int64(10) {
 		t.Fatalf("terminal spent_usd = %#v, want unchanged 10", got)
 	}
 	reloadedTerminated, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route())
@@ -465,7 +465,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected terminated budget entity to exist")
 	}
-	if got := reloadedTerminated.Fields["spent_usd"]; got != float64(20) && got != 20 {
+	if got := reloadedTerminated.Fields["spent_usd"]; got != int64(20) {
 		t.Fatalf("terminated spent_usd = %#v, want unchanged 20", got)
 	}
 	assertEntityStateRowCount(t, db, 3)
