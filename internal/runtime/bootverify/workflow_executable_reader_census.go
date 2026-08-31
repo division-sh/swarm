@@ -402,7 +402,6 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleGuard
 	appendExecutableReader(out, kind+".source", query.Source, phase)
-	appendExecutableReader(out, kind+".entities", query.Entities, phase)
 	beforeFilter := len(*out)
 	appendConditionExecutableReader(out, kind+".filter", query.Filter, phase, runtimepipeline.WorkflowConditionContextQueryFilter)
 	if len(*out) > beforeFilter {
@@ -410,8 +409,8 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 		ref.RequireScalarEntityLeaf = true
 		ref.ConditionCollectionSource = firstExecutableCollectionSource(query.Source, query.Entities)
 	}
-	appendExecutableReader(out, kind+".group_by", query.GroupBy, phase)
-	// Select entries are literal object field names, not executable expressions.
+	// entities, group_by, and select are declarations admitted by the exact
+	// collection plan, not executable value expressions.
 	// Sequence rows in Queries are retained source data that stepQuery does not execute.
 }
 
@@ -444,7 +443,7 @@ func appendGroupByExecutableReaders(out *[]expressionReference, groupBy *runtime
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleGroupBy
 	appendExecutableReader(out, "group_by.items_from", groupBy.ItemsFrom, phase)
-	appendExecutableReader(out, "group_by.key", groupBy.Key, phase)
+	// key is a schema-bound item selector, not an executable expression.
 }
 
 func appendFilterExecutableReaders(out *[]expressionReference, filter *runtimecontracts.FilterSpec) {

@@ -3401,6 +3401,29 @@ func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCan
 	}
 }
 
+func TestPipelineEngineEntityCollectionReaderReturnsOnlyExactEntityType(t *testing.T) {
+	instances := []WorkflowInstance{
+		{WorkflowName: "work", EntityType: "items", Fields: map[string]any{"id": "a", "status": "queued"}},
+		{WorkflowName: "work", EntityType: "other", Fields: map[string]any{"id": "ignored"}},
+		{WorkflowName: "other", EntityType: "items", Fields: map[string]any{"id": "wrong-flow"}},
+		{WorkflowName: "work", EntityType: "items", Fields: map[string]any{"id": "b", "status": "done"}},
+	}
+	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
+		workflowStore: &workflowInstanceStore{instanceReader: deliveryTargetWorkflowReader{selected: instances}},
+	}}
+	rows, err := reader.QueryEntityCollection(context.Background(), "work", "items")
+	if err != nil {
+		t.Fatalf("QueryEntityCollection: %v", err)
+	}
+	if len(rows) != 2 || rows[0]["id"] != "a" || rows[1]["id"] != "b" {
+		t.Fatalf("rows = %#v", rows)
+	}
+	rows[0]["status"] = "mutated"
+	if instances[0].Fields["status"] != "queued" {
+		t.Fatalf("query result aliases persisted fields: %#v", instances[0].Fields)
+	}
+}
+
 func TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions(t *testing.T) {
 	registry := pipelineEngineActionRegistry{}
 	for _, builtin := range []string{"create_flow_instance", "mailbox_write"} {

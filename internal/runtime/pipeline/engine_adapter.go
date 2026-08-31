@@ -495,6 +495,30 @@ type pipelineEngineStateRepo struct {
 	coordinator *PipelineCoordinator
 }
 
+type pipelineEngineEntityCollectionReader struct {
+	coordinator *PipelineCoordinator
+}
+
+func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.Context, flowID, entityType string) ([]map[string]any, error) {
+	flowID = strings.TrimSpace(flowID)
+	entityType = strings.TrimSpace(entityType)
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
+		return nil, fmt.Errorf("workflow entity collection reader is required")
+	}
+	instances, err := r.coordinator.workflowStore.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]map[string]any, 0, len(instances))
+	for _, instance := range instances {
+		if strings.TrimSpace(instance.WorkflowName) != flowID || strings.TrimSpace(instance.EntityType) != entityType {
+			continue
+		}
+		rows = append(rows, cloneStringAnyMap(instance.Fields))
+	}
+	return rows, nil
+}
+
 func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
 	instance.Config = cloneStringAnyMap(instance.Config)
 	instance.Fields = cloneStringAnyMap(instance.Fields)
@@ -926,6 +950,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
 		StateRepo:           stateRepo,
+		EntityCollections:   pipelineEngineEntityCollectionReader{coordinator: pc},
 		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		WorkflowLifecycle:   lifecycleOwner,

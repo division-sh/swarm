@@ -984,18 +984,19 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.SourcePath, spec.Source)
-	items := executionItems(sourceValue)
-	if len(items) == 0 {
-		entityValue, _ := resolveContractPath(current, frame.state, spec.EntitiesPath, spec.Entities)
-		items = executionItems(entityValue)
+	plan, err := e.queryCollectionPlan(frame)
+	if err != nil {
+		return err
 	}
+	items, err := e.collectionItems(frame, plan.Source)
+	if err != nil {
+		return err
+	}
+	current := e.currentContext(frame)
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
-		options, err := e.collectionConditionExpressionOptions(frame, spec.SourcePath, firstNonEmpty(spec.Source, spec.Entities), filter)
-		if err != nil {
-			return err
-		}
+		options := frameExpressionOptions(frame)
+		itemType := plan.Source.ItemType.Clone()
+		options.ItemType = &itemType
 		compiled, err := compileExecutionCondition(filter, options)
 		if err != nil {
 			return err
@@ -1015,11 +1016,10 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	}
 	var value any = items
 	switch {
-	case strings.TrimSpace(spec.GroupBy) != "":
+	case plan.GroupBy != nil:
 		grouped := map[string]any{}
 		for _, item := range items {
-			scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
-			resolved, err := scope.resolveOperand(strings.TrimSpace(spec.GroupBy), executionOperandDefaultItem)
+			resolved, err := collectionFieldValue(item, *plan.GroupBy)
 			if err != nil {
 				return err
 			}
@@ -1032,28 +1032,18 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		value = grouped
 	case spec.Count:
 		value = len(items)
-	case len(spec.Select) > 0:
+	case len(plan.Select) > 0:
 		selected := make([]any, 0, len(items))
 		for _, item := range items {
-			obj, ok := asObject(item)
-			if !ok {
-				continue
-			}
-			projected := map[string]any{}
-			for _, field := range spec.Select {
-				field = strings.TrimSpace(field)
-				if field == "" {
-					continue
-				}
-				if fieldValue, ok := obj[field]; ok {
-					projected[field] = fieldValue
-				}
+			projected, err := projectCollectionItem(item, plan.Select)
+			if err != nil {
+				return err
 			}
 			selected = append(selected, projected)
 		}
 		value = selected
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value); err != nil {
+	if err := e.writeStepValue(frame, plan.StoreAs, value); err != nil {
 		return err
 	}
 	return nil
@@ -1145,14 +1135,19 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
-	condition := strings.TrimSpace(spec.Condition)
-	options, err := e.collectionConditionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source), condition)
+	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	if err != nil {
 		return err
 	}
+	items, err := e.collectionItems(frame, resolution)
+	if err != nil {
+		return err
+	}
+	current := e.currentContext(frame)
+	condition := strings.TrimSpace(spec.Condition)
+	options := frameExpressionOptions(frame)
+	itemType := resolution.ItemType.Clone()
+	options.ItemType = &itemType
 	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
@@ -1179,9 +1174,14 @@ func (e *Executor) stepReduce(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
+	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	if err != nil {
+		return err
+	}
+	items, err := e.collectionItems(frame, resolution)
+	if err != nil {
+		return err
+	}
 	value := executionReduceValue(items, strings.TrimSpace(spec.Operation))
 	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value); err != nil {
 		return err
@@ -1194,14 +1194,19 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
-	condition := strings.TrimSpace(spec.Condition)
-	options, err := e.collectionConditionExpressionOptions(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source), condition)
+	resolution, err := e.handlerCollectionResolution(frame, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	if err != nil {
 		return err
 	}
+	items, err := e.collectionItems(frame, resolution)
+	if err != nil {
+		return err
+	}
+	current := e.currentContext(frame)
+	condition := strings.TrimSpace(spec.Condition)
+	options := frameExpressionOptions(frame)
+	itemType := resolution.ItemType.Clone()
+	options.ItemType = &itemType
 	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
@@ -1919,13 +1924,17 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	itemsValue, _ := resolveContractPath(frame.base, frame.state, spec.ItemsPath, spec.ItemsFrom)
-	items := sliceFromAny(itemsValue)
-	current := e.currentContext(frame)
+	plan, err := e.groupByCollectionPlan(frame)
+	if err != nil {
+		return err
+	}
+	items, err := e.collectionItems(frame, plan.Source)
+	if err != nil {
+		return err
+	}
 	grouped := make(map[string]any)
 	for _, item := range items {
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
-		resolved, err := scope.resolveOperand(strings.TrimSpace(spec.Key), executionOperandDefaultItem)
+		resolved, err := collectionFieldValue(item, plan.Key)
 		if err != nil {
 			return err
 		}
@@ -1936,7 +1945,7 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 		existing, _ := grouped[key].([]any)
 		grouped[key] = append(existing, item)
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped); err != nil {
+	if err := e.writeStepValue(frame, plan.StoreAs, grouped); err != nil {
 		return err
 	}
 	return nil
@@ -2092,36 +2101,114 @@ func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionO
 	return workflowexpr.ValueExpressionOptions{PayloadType: &value}
 }
 
-func (e *Executor) collectionConditionExpressionOptions(frame *executionFrame, parsed paths.Path, authored, expression string) (workflowexpr.ValueExpressionOptions, error) {
-	if !workflowexpr.ExpressionReferencesRoot(expression, "item") {
-		return frameExpressionOptions(frame), nil
+func (e *Executor) handlerCollectionResolution(frame *executionFrame, parsed paths.Path, authored string) (runtimecontracts.WorkflowCollectionItemResolution, error) {
+	if frame == nil {
+		return runtimecontracts.WorkflowCollectionItemResolution{}, fmt.Errorf("collection source requires an execution frame")
 	}
-	return e.collectionExpressionOptions(frame, parsed, authored)
-}
-
-func (e *Executor) collectionExpressionOptions(frame *executionFrame, parsed paths.Path, authored string) (workflowexpr.ValueExpressionOptions, error) {
-	options := frameExpressionOptions(frame)
 	if parsed.IsZero() {
 		parsed = paths.Parse(strings.TrimSpace(authored))
 	}
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return runtimecontracts.WorkflowCollectionItemResolution{}, fmt.Errorf("collection source requires a loaded contract bundle")
+	}
+	return bundle.ResolveHandlerCollectionItemType(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler, parsed.String())
+}
+
+func (e *Executor) queryCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowQueryCollectionPlan, error) {
 	if frame == nil {
-		return options, fmt.Errorf("collection expression requires an execution frame")
+		return runtimecontracts.WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires an execution frame")
 	}
 	bundle, ok := semanticview.Bundle(e.deps.Source)
 	if !ok || bundle == nil {
-		return options, fmt.Errorf("collection expression requires a loaded contract bundle")
+		return runtimecontracts.WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires a loaded contract bundle")
 	}
-	eventType := strings.TrimSpace(frame.req.HandlerEventKey)
-	if eventType == "" {
-		eventType = strings.TrimSpace(string(frame.req.Event.Type()))
+	return bundle.ResolveHandlerQueryCollectionPlan(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler)
+}
+
+func (e *Executor) groupByCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowGroupByCollectionPlan, error) {
+	if frame == nil {
+		return runtimecontracts.WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires an execution frame")
 	}
-	resolution, err := bundle.ResolveHandlerCollectionItemType(frame.req.Node, eventType, frame.req.Handler, parsed.String())
-	if err != nil {
-		return options, err
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return runtimecontracts.WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires a loaded contract bundle")
 	}
-	item := resolution.ItemType.Clone()
-	options.ItemType = &item
-	return options, nil
+	return bundle.ResolveHandlerGroupByCollectionPlan(frame.req.Node, executionHandlerEventType(frame), frame.req.Handler)
+}
+
+func executionHandlerEventType(frame *executionFrame) string {
+	if frame == nil {
+		return ""
+	}
+	if eventType := strings.TrimSpace(frame.req.HandlerEventKey); eventType != "" {
+		return eventType
+	}
+	return strings.TrimSpace(string(frame.req.Event.Type()))
+}
+
+func (e *Executor) collectionItems(frame *executionFrame, source runtimecontracts.WorkflowCollectionItemResolution) ([]any, error) {
+	switch source.Kind {
+	case runtimecontracts.WorkflowCollectionSourcePath:
+		value, ok := resolveContractPath(e.currentContext(frame), frame.state, source.Path, source.Source)
+		if !ok {
+			return nil, fmt.Errorf("collection source %q is unavailable at runtime", source.Source)
+		}
+		return executionItems(value), nil
+	case runtimecontracts.WorkflowCollectionSourceEntityTable:
+		if e.deps.EntityCollections == nil {
+			return nil, fmt.Errorf("query entities %q requires the runtime entity collection reader", source.EntityType)
+		}
+		flowID := strings.TrimSpace(source.FlowID)
+		if flowID == "" {
+			flowID = strings.TrimSpace(frame.req.ExecutionFlowID.String())
+		}
+		if flowID == "" {
+			flowID = strings.TrimSpace(frame.state.State.WorkflowName)
+		}
+		rows, err := e.deps.EntityCollections.QueryEntityCollection(frame.ctx, flowID, source.EntityType)
+		if err != nil {
+			return nil, fmt.Errorf("query entities %q: %w", source.EntityType, err)
+		}
+		items := make([]any, len(rows))
+		for index, row := range rows {
+			items[index] = cloneStringAnyMap(row)
+		}
+		return items, nil
+	default:
+		return nil, fmt.Errorf("collection source %q has unsupported runtime kind %q", source.Source, source.Kind)
+	}
+}
+
+func collectionFieldValue(item any, field runtimecontracts.WorkflowCollectionFieldResolution) (any, error) {
+	object, ok := asObject(item)
+	if !ok {
+		return nil, fmt.Errorf("collection item for field %s must be an object", field.Name)
+	}
+	value, present := object[field.Name]
+	if !present || value == nil {
+		return nil, fmt.Errorf("collection item missing required field %s", field.Name)
+	}
+	return value, nil
+}
+
+func projectCollectionItem(item any, fields []runtimecontracts.WorkflowCollectionFieldResolution) (map[string]any, error) {
+	object, ok := asObject(item)
+	if !ok {
+		return nil, fmt.Errorf("query select requires object collection items")
+	}
+	projected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		value, present := object[field.Name]
+		if !present || value == nil {
+			if field.IsOptional {
+				continue
+			}
+			return nil, fmt.Errorf("query select item missing required field %s", field.Name)
+		}
+		projected[field.Name] = value
+	}
+	return projected, nil
 }
 
 func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.ResolvedCatalogType {

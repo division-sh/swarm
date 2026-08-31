@@ -436,8 +436,11 @@ func sourceWithPolicy(values map[string]any) semanticview.Source {
 		Policy: policy,
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
-				"score":  {Type: "integer"},
-				"active": {Type: "boolean"},
+				"score":    {Type: "integer"},
+				"active":   {Type: "boolean"},
+				"status":   {Type: "text"},
+				"name":     {Type: "text"},
+				"category": {Type: "text"},
 			}},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -510,6 +513,21 @@ type stubStateRepo struct{}
 type recordingStateRepo struct {
 	saves int
 }
+type stubEntityCollectionReader struct {
+	entityType string
+	flowID     string
+	rows       []map[string]any
+	calls      int
+	err        error
+}
+
+func (r *stubEntityCollectionReader) QueryEntityCollection(_ context.Context, flowID, entityType string) ([]map[string]any, error) {
+	r.calls++
+	r.flowID = flowID
+	r.entityType = entityType
+	return r.rows, r.err
+}
+
 type testPublicationCommitter interface {
 	CommitPublications(context.Context, []EmitIntent) error
 }
@@ -3448,7 +3466,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        sourceWithPolicy(nil),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3481,6 +3499,123 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	if grouped["queued"] != 2 || grouped["done"] != 1 {
 		t.Fatalf("grouped counts = %#v", grouped)
 	}
+}
+
+func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
+	reader := &stubEntityCollectionReader{rows: []map[string]any{
+		{"id": "a", "status": "queued"},
+		{"id": "b", "status": "queued"},
+		{"id": "c", "status": "done"},
+	}}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), EntityCollections: reader,
+		StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("root"), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event: eventtest.RunCreatingRootIngress("evt-query-entities", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+			Entities: "items", Filter: `item.status != "done"`, GroupBy: "status", Count: true,
+		}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if reader.calls != 1 || reader.flowID != "root" || reader.entityType != "items" {
+		t.Fatalf("entity reader = calls %d flow %q type %q", reader.calls, reader.flowID, reader.entityType)
+	}
+	grouped, ok := result.Computed["query"].(map[string]any)
+	if !ok || grouped["queued"] != 2 || len(grouped) != 1 {
+		t.Fatalf("computed.query = %#v", result.Computed["query"])
+	}
+}
+
+func TestExecutor_QueryRejectsDualSourceBeforeReading(t *testing.T) {
+	reader := &stubEntityCollectionReader{rows: []map[string]any{{"id": "a", "status": "queued"}}}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), EntityCollections: reader,
+		StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event:   eventtest.RunCreatingRootIngress("evt-query-dual", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Entities: "items"}},
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "exactly one collection source") {
+		t.Fatalf("Execute error = %v", err)
+	}
+	if reader.calls != 0 {
+		t.Fatalf("entity reader calls = %d, want zero", reader.calls)
+	}
+}
+
+func TestExecutor_QuerySelectionPreservesOptionalOmission(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event:   eventtest.RunCreatingRootIngress("evt-query-select", "work.received", "", "", json.RawMessage(`{"items":[{"id":"a","status":"queued"},{"id":"b","status":"done","note":"kept"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Select: []string{"id", "note"}}},
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rows, ok := result.Computed["query"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("computed.query = %#v", result.Computed["query"])
+	}
+	first, _ := rows[0].(map[string]any)
+	second, _ := rows[1].(map[string]any)
+	if _, present := first["note"]; present || second["note"] != "kept" {
+		t.Fatalf("selected rows = %#v", rows)
+	}
+}
+
+func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: collectionExecutionSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event:   eventtest.RunCreatingRootIngress("evt-query-select-missing", "work.received", "", "", json.RawMessage(`{"items":[{"status":"queued"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Select: []string{"id"}}},
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing required field id") {
+		t.Fatalf("Execute error = %v", err)
+	}
+}
+
+func collectionExecutionSource() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"id": {Type: "text"}, "status": {Type: "text"}, "note": {Type: "text", IsOptional: true},
+			}},
+		}},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.received": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[WorkItem]"}}),
+		},
+	})
 }
 
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
@@ -6695,7 +6830,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 
 func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        sourceWithPolicy(nil),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},

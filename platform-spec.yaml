@@ -4060,12 +4060,17 @@ handler_specification:
       type: object or list of objects
       purpose: Cross-entity read and aggregation.
       sub_fields:
+        source: exact payload/entity or prior query/filter collection path
         entities: string — entity table name
         filter: string — optional CEL condition compiled during boot and runtime against the exact query collection item type when it reads `item`
         group_by: string — field to group by
         count: boolean — count per group
         select: list — literal object field names to include; entries are not expressions or lifecycle entity reads
         store_as: string — where to put results (in emit payload)
+      source_rule: Exactly one of source or entities is required. source is always selected when authored and entities is always a table declaration; authoring both is invalid. Runtime data cardinality never changes source identity.
+      selector_rule: group_by is a required top-level scalar item field. select entries are exact top-level object fields; optional selected fields preserve omission. Neither surface is an executable expression.
+      entity_table_runtime: The runtime reads the exact admitted entity type from the current run through the selected workflow persistence owner. A missing runtime reader fails closed; entity-table input never falls back to a path or current-entity map.
+      intermediate_outputs: Omitted query.store_as and filter.store_as mean computed.query and computed.filter respectively in both type resolution and runtime storage. No consumer may infer a different default.
       execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.
     reduce:
@@ -4527,7 +4532,8 @@ handler_specification:
         query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
           when a supported scoped operand is unavailable in the handler context.
-        executable_collection_rule: Every query.filter, filter.condition, and count.condition that reads `item` is compiled at boot against the exact item type from one compiled handler collection-source resolution. The same resolution is consumed at runtime for direct payload/entity sources and supported query/filter intermediates. Missing, dynamic, cyclic, aggregate, or unsupported source ancestry is hard invalidity; runtime must not restore a dyn item fallback.
+        executable_collection_rule: Every executable query, filter, reduce, count, and standalone group_by collection source is admitted at boot through one typed effective collection-source owner, whether or not a condition reads `item`. The owner distinguishes direct payload/entity paths, query entity-table inputs, and explicit or canonical-default query/filter intermediate outputs; preserves exact recursive item type through selection; and rejects missing, dynamic, cyclic, aggregate, unsupported, or temporally selected ancestry. Boot and runtime consume the same resolution and runtime must not restore a dyn item fallback.
+        collection_selector_rule: query.group_by, query.select, and standalone group_by.key are schema-bound item-field selectors, not executable expressions. Group keys must be required top-level scalar fields. Selection fields must exist; optional selections preserve omission per item, while a missing required selected field fails closed. Unknown, nested, wrong-kind, or undecided optional group keys are hard invalidity.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
         presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
         relevant for business meaning, but not for raw field readability.'
