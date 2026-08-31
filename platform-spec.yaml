@@ -21948,7 +21948,7 @@ test_specification:
       purpose: >
         Own one production-shaped compiled-process conformance profile that crosses cold authored source admission,
         standing activation, provider ingress, template routing, mock agent execution, workflow timer and decision-card
-        progression, mock connector settlement, graceful restart, forced death, recovery admission, and post-restart
+        progression, mock connector settlement, graceful restart, forced death, default-config intrinsic standing recovery, and post-restart
         public convergence without interpreting any production semantic inside the harness.
       invocation_boundary: >
         Every journey builds the current swarm binary once per test group and runs real verify and Cobra serve from an
@@ -21958,13 +21958,13 @@ test_specification:
       journeys:
         J1_sqlite_graceful: Plain serve with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
         J2_postgres_graceful: J1 against an isolated host-PostgreSQL database.
-        J3_sqlite_refuse_then_recover: >
-          Plain SQLite serve is publicly paused at one exact pending normal-authority delivery and killed. Omitted-recovery
-          restart must refuse before readiness and fully exit. Changing only recovery_on_startup to true then admits the
-          same store/source, retains exact identities, observes the active standing declaration normalize to running with
+        J3_sqlite_crash_intrinsic_recover: >
+          Plain SQLite serve is publicly paused at one exact pending normal-authority delivery and killed. One restart with
+          the same store/source and unchanged omitted recovery configuration reaches readiness because the active exact-current
+          standing generation is active_intrinsic. It retains exact identities, normalizes the same N to running with
           standing_reconcile, automatically converges the interrupted chain once, and converges one fresh transport identity
           using the same conversation and downstream entity/route once. Generic run.pause does not persist standing suspension.
-        J4_postgres_refuse_then_recover: J3 against an isolated host-PostgreSQL database.
+        J4_postgres_crash_intrinsic_recover: J3 against an isolated host-PostgreSQL database.
         J5_sqlite_dev_fresh_epoch: >
           Project-local serve --dev reaches the same public paused/pending checkpoint and is killed. Its next invocation
           uses a fresh SQLite scratch epoch. The same authored package/flow may rederive identical service, generation-one
@@ -21992,9 +21992,9 @@ test_specification:
         M11: Graceful SQLite restart retains standing service, run, generation, bundle, and exact standing receipt entity identity across pre/post-restart ingress.
         M12: Graceful PostgreSQL restart retains the same identity set and exact standing receipt entity comparison.
         M13: The forced-death checkpoint contains exactly the receipt's normalized event, one pending normal-authority delivery, and one active diagnosis obligation.
-        M14: Omitted-recovery restart refuses before readiness on SQLite and PostgreSQL.
-        M15: The refusing process is observed exiting nonzero, rather than timing out, and releases selected-store possession before config changes.
-        M16: Changing only recovery_on_startup to true admits the same store and source.
+        M14: The omitted/default recovery configuration admits exact-current active_intrinsic standing restart on SQLite and PostgreSQL.
+        M15: The crash journeys perform no configuration mutation or second restart; the sole post-crash process reaches readiness through intrinsic standing ownership.
+        M16: Standing-scoped intrinsic recovery remains distinct from ordinary executable recovery-disabled denial, which retains its separate canonical dual-store proof outside this profile.
         M17: Active standing reconciliation exposes running plus standing_reconcile and automatically converges the interrupted delivery exactly once on both stores.
         M18: A new transport and idempotency identity with the same conversation selects the same downstream entity, flow instance, subscriber, and existing-entity route.
         M19: Every old public event and delivery fact remains byte-for-byte unchanged after exactly one fresh post-recovery chain.
@@ -22022,6 +22022,7 @@ test_specification:
       - fixture-local lifecycle, recovery, routing, timer, card, mock, effect, or settlement interpretation
       - child go.mod files or absolute config, contracts, or token operands
       - fresh-dev ID inequality, identity salting, PostgreSQL dev, custom-store dev, borrowed-project dev, or direct abandon claims
+      - an omitted-recovery refusal/config-toggle path, a second post-crash restart, or an ordinary-run fixture added to retain generic recovery-policy evidence
       - sleeps, deadline-as-success, SQL/log behavioral proof, weakened rows, or hidden backend skips
       - a scenario DSL, alternate recovery engine, compatibility path, migration, or second process/fixture framework
     replay_clean:
