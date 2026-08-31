@@ -64,6 +64,13 @@ func canonicalTimerObligationSnapshot(snapshot runtimetimerobligation.Snapshot) 
 	return snapshot
 }
 
+func canonicalDeliveryRecoveryInventory(inventory runtimedelivery.RecoveryInventory) runtimedelivery.RecoveryInventory {
+	if inventory.Runs == nil {
+		inventory.Runs = []runtimedelivery.RecoveryRunInventory{}
+	}
+	return inventory
+}
+
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
 	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 || s.StandingDeliveryObligations > 0 ||
 		s.Manager.HasRecoverableWork() || s.Delivery.HasWork()
@@ -111,7 +118,7 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
 		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
 		detail["manager_recoverable_work_present"] = s.Manager.HasRecoverableWork()
-		detail["delivery_recovery_inventory"] = s.Delivery
+		detail["delivery_recovery_inventory"] = canonicalDeliveryRecoveryInventory(s.Delivery)
 		detail["delivery_recoverable_work_present"] = s.Delivery.HasWork()
 		detail["recoverable_work_classes"] = s.WorkClasses()
 		detail["startup_blocking_recoverable_work_classes"] = s.StartupBlockingWorkClasses()
@@ -264,7 +271,7 @@ func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
 		payload["startup_blocking_timer_count"] = r.Snapshot.StartupBlockingTimers
 		payload["standing_timer_obligation_count"] = r.Snapshot.StandingTimerObligations
 		payload["timer_obligations"] = canonicalTimerObligationSnapshot(r.Snapshot.TimerObligations)
-		payload["delivery_recovery_inventory"] = r.Snapshot.Delivery
+		payload["delivery_recovery_inventory"] = canonicalDeliveryRecoveryInventory(r.Snapshot.Delivery)
 	}
 	return payload
 }
