@@ -87,11 +87,7 @@ func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
 	}
 }
 
-type fullLifecycleProject struct {
-	process releaseProcessSpec
-}
-
-func prepareFullLifecycleProject(t *testing.T, binary, root string, store goldenStoreSelection, dev bool) fullLifecycleProject {
+func prepareFullLifecycleProject(t *testing.T, binary, root string, store goldenStoreSelection, dev bool) releaseProcessSpec {
 	t.Helper()
 	ancestor := filepath.Join(root, "hostile-go-checkout")
 	projectRoot := filepath.Join(ancestor, "yaml-project")
@@ -120,20 +116,18 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 			t.Fatalf("set lifecycle secret %s: %v\n%s", key, result.err, result.output)
 		}
 	}
-	return fullLifecycleProject{
-		process: releaseProcessSpec{
-			BinaryPath: binary,
-			WorkingDir: projectRoot,
-			ConfigPath: "swarm.yaml",
-			Contracts:  "contracts",
-			Store:      store.name,
-			Dev:        dev,
-			APIPort:    freeReleaseTCPPort(t),
-			MCPPort:    freeReleaseTCPPort(t),
-			TokenFile:  "api-token",
-			Token:      fullLifecycleAPIToken,
-			Env:        env,
-		},
+	return releaseProcessSpec{
+		BinaryPath: binary,
+		WorkingDir: projectRoot,
+		ConfigPath: "swarm.yaml",
+		Contracts:  "contracts",
+		Store:      store.name,
+		Dev:        dev,
+		APIPort:    freeReleaseTCPPort(t),
+		MCPPort:    freeReleaseTCPPort(t),
+		TokenFile:  "api-token",
+		Token:      fullLifecycleAPIToken,
+		Env:        env,
 	}
 }
 
@@ -201,9 +195,9 @@ func assertFullLifecycleVerifySuccess(t *testing.T, result releaseCommandResult)
 func runFullLifecycleJourney(t *testing.T, binary, root string, store goldenStoreSelection, journey fullLifecycleJourney) {
 	t.Helper()
 	started := time.Now()
-	project := prepareFullLifecycleProject(t, binary, root, store, journey.kind == fullLifecycleDevFresh)
+	processSpec := prepareFullLifecycleProject(t, binary, root, store, journey.kind == fullLifecycleDevFresh)
 	startReady := func() *releaseServeProcess {
-		process := startReleaseServe(t, project.process)
+		process := startReleaseServe(t, processSpec)
 		ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleStartupLimit)
 		err := process.waitReady(ctx)
 		cancel()
