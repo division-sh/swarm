@@ -209,9 +209,9 @@ func (c SourceCoordinate) Key() string {
 }
 
 type DesiredAgent struct {
-	Identity       runtimeagentidentity.Identity `json:"identity"`
-	Source         SourceCoordinate              `json:"source"`
-	ConfigRevision string                        `json:"config_revision"`
+	Identity       runtimeagentidentity.Plan `json:"identity"`
+	Source         SourceCoordinate          `json:"source"`
+	ConfigRevision string                    `json:"config_revision"`
 }
 
 func (a DesiredAgent) Validate() error {
@@ -315,7 +315,7 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 		left, _ := p.Agents[i-1].Key()
 		right, _ := p.Agents[i].Key()
 		if left == right {
-			return fmt.Errorf("source set repeats concrete agent identity %q", p.Agents[i].Identity.Description())
+			return fmt.Errorf("source set repeats agent declaration plan %q", p.Agents[i].Identity.Description())
 		}
 	}
 	if requireRevision {

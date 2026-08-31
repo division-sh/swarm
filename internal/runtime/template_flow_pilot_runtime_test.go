@@ -141,7 +141,10 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}), accountNodeID)
-	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RouteForInstancePath(flowInstance))
+	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: templateInstanceDeliveryRunID,
+		Route: runtimeflowidentity.RouteForInstancePath(flowInstance),
+	})
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}
@@ -173,8 +176,8 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			name:    "ambiguous receiver key",
 			payload: json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: "11111111-1111-4111-8111-111111111111", FlowInstance: "account/one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: "22222222-2222-4222-8222-222222222222", FlowInstance: "account/two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{RunID: templateInstanceDeliveryRunID, InstanceID: "one", EntityID: "11111111-1111-4111-8111-111111111111", FlowInstance: "account/one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{RunID: templateInstanceDeliveryRunID, InstanceID: "two", EntityID: "22222222-2222-4222-8222-222222222222", FlowInstance: "account/two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
 			},
 			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
@@ -235,7 +238,7 @@ type templateFlowPilotMemoryStore struct {
 	deliveryRoutes map[string][]events.DeliveryRoute
 }
 
-func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 	for i := range descriptors {

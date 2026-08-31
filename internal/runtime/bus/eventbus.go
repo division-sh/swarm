@@ -76,6 +76,7 @@ type EventBus struct {
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	flowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
+	agentReadinessFinalizer     CommittedAgentReadinessFinalizer
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -250,6 +251,22 @@ type ExactDirectRouteStatus struct {
 type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
 type PublishRecipientPlanMaterializer func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error)
 type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
+
+// CommittedAgentReadinessFinalizer consumes durable event and delivery-route
+// evidence before local dispatch. Implementations may materialize only the
+// exact run-scoped agents named by those committed routes.
+type CommittedAgentReadinessFinalizer interface {
+	FinalizeCommittedAgentReadiness(context.Context, events.Event, []events.DeliveryRoute) error
+}
+
+type CommittedAgentReadinessFinalizerFunc func(context.Context, events.Event, []events.DeliveryRoute) error
+
+func (fn CommittedAgentReadinessFinalizerFunc) FinalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
+	if fn == nil {
+		return errors.New("committed agent readiness finalizer is required")
+	}
+	return fn(ctx, event, routes)
+}
 
 type RuntimeIngressDispatchGate interface {
 	QueueableIngressPaused(context.Context) (bool, error)
@@ -567,6 +584,15 @@ func (eb *EventBus) SetProviderOutputAuthorizationVerifier(verifier ProviderOutp
 	eb.mu.Unlock()
 }
 
+func (eb *EventBus) SetCommittedAgentReadinessFinalizer(finalizer CommittedAgentReadinessFinalizer) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.agentReadinessFinalizer = finalizer
+	eb.mu.Unlock()
+}
+
 func (eb *EventBus) providerOutputAuthorizationVerifier() ProviderOutputAuthorizationVerifier {
 	if eb == nil {
 		return nil
@@ -661,12 +687,12 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	return eb.routeTable
 }
 
-func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	table := eb.RouteTable()
 	return table != nil && table.HasFlowInstanceRoute(identity)
 }
 
-func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
+func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	if eb == nil || eb.store == nil {
 		return nil, errors.New("event bus store is required")
 	}
@@ -677,13 +703,13 @@ func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowid
 	return store.ListFlowInstanceRoutes(ctx)
 }
 
-func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if eb == nil || eb.store == nil {
 		return errors.New("event bus store is required")
 	}
 	table := eb.RouteTable()
 	if table == nil || !table.HasFlowInstanceRoute(identity) {
-		return fmt.Errorf("flow-instance route %s is not process-ready", identity.InstancePath)
+		return fmt.Errorf("flow-instance route %s is not process-ready", identity.Key())
 	}
 	expected := table.MaterializedRoutes(identity)
 	reader := eb.durable.FlowRouteRecords
@@ -695,7 +721,7 @@ func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtim
 		return err
 	}
 	if !slices.Equal(flowInstanceRouteRecordKeys(actual), flowInstanceRouteRecordKeys(expected)) {
-		return fmt.Errorf("flow-instance route %s persisted topology does not match process topology", identity.InstancePath)
+		return fmt.Errorf("flow-instance route %s persisted topology does not match process topology", identity.Key())
 	}
 	return nil
 }
@@ -712,7 +738,7 @@ func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []flowInstan
 	keys := make([]flowInstanceRouteRecordIdentity, 0, len(records))
 	for _, record := range records {
 		keys = append(keys, flowInstanceRouteRecordIdentity{
-			instancePath:   strings.Trim(record.Identity.InstancePath, "/"),
+			instancePath:   strings.Trim(record.Identity.Route.InstancePath, "/"),
 			eventPattern:   strings.TrimSpace(record.EventPattern),
 			subscriberType: strings.TrimSpace(record.SubscriberType),
 			subscriberID:   strings.TrimSpace(record.SubscriberID),
@@ -740,11 +766,16 @@ func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []flowInstan
 func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 	ctx context.Context,
 	lister ActiveFlowInstanceDescriptorLister,
+	runID string,
 ) ([]ActiveFlowInstanceDescriptor, error) {
 	if eb == nil || lister == nil {
 		return nil, errors.New("event bus and active flow-instance descriptor owner are required")
 	}
-	descriptors, err := lister.ListActiveFlowInstanceDescriptors(ctx)
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, errors.New("active flow-instance descriptors require exact run_id")
+	}
+	descriptors, err := lister.ListActiveFlowInstanceDescriptors(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -763,6 +794,9 @@ func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 	out := make([]ActiveFlowInstanceDescriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
 		descriptor = descriptor.Normalized()
+		if descriptor.RunID != runID {
+			return nil, fmt.Errorf("active flow-instance descriptor %s for run %s escaped selected run %s", descriptor.FlowInstance, descriptor.RunID, runID)
+		}
 		if !descriptor.HasSemanticSource() {
 			return nil, fmt.Errorf("active flow-instance descriptor %s is missing exact semantic source", descriptor.FlowInstance)
 		}
@@ -783,66 +817,71 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	ctx context.Context,
 	table *RouteTable,
 	lister ActiveFlowInstanceDescriptorLister,
+	runID string,
 	include *FlowInstanceRouteMaterializationRequest,
-	exclude runtimeflowidentity.Route,
-) (*RouteTable, []runtimeflowidentity.Route, error) {
+	exclude runtimeflowidentity.RunScopedFlowInstance,
+) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
 	staged, err := DeriveRouteTable(table.source)
 	if err != nil {
 		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
 	}
-	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)
+	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list active flow-instance route topology: %w", err)
 	}
-	identities := make(map[string]runtimeflowidentity.Route, len(descriptors)+1)
-	exclude = runtimeflowidentity.StoredRoute(exclude.ScopeKey, exclude.InstanceID, exclude.InstancePath)
-	if exclude.Valid() {
+	identities := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(descriptors)+1)
+	exclude = exclude.Normalize()
+	if exclude.Validate() == nil {
 		if err := staged.removeFlowInstanceRouteForContext(ctx, exclude); err != nil {
-			return nil, nil, fmt.Errorf("exclude terminal flow-instance route %s: %w", exclude.InstancePath, err)
+			return nil, nil, fmt.Errorf("exclude terminal flow-instance route %s: %w", exclude.Key(), err)
 		}
 	}
 	for _, descriptor := range descriptors {
-		identity := runtimeflowidentity.StoredRoute("", descriptor.InstanceID, descriptor.FlowInstance)
+		route := runtimeflowidentity.StoredRoute("", descriptor.InstanceID, descriptor.FlowInstance)
+		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(descriptor.RunID, route)
+		if err != nil {
+			return nil, nil, fmt.Errorf("compose active flow-instance descriptor identity: %w", err)
+		}
 		if identity == exclude || (include != nil && identity == include.Identity) {
 			continue
 		}
-		templateID, found := staged.flowInstanceTemplateID(identity)
+		templateID, found := staged.flowInstanceTemplateID(identity.Route)
 		if !found {
 			continue
 		}
 		if descriptor.FlowTemplate != templateID {
 			return nil, nil, fmt.Errorf(
 				"active flow-instance descriptor %s template %s does not match route template %s for scope %s",
-				identity.InstancePath,
+				identity.Route.InstancePath,
 				descriptor.FlowTemplate,
 				templateID,
-				identity.ScopeKey,
+				identity.Route.ScopeKey,
 			)
 		}
 		if err := staged.addFlowInstanceRouteForContext(ctx, FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
 			ActivationVariables: descriptor.AddressFields,
 		}); err != nil {
-			return nil, nil, fmt.Errorf("derive active flow-instance route %s: %w", identity.InstancePath, err)
+			return nil, nil, fmt.Errorf("derive active flow-instance route %s: %w", identity.Key(), err)
 		}
-		identities[identity.InstancePath] = identity
+		identities[identity] = struct{}{}
 	}
 	if include != nil {
 		req := include.Normalized()
 		if err := staged.addFlowInstanceRouteForContext(ctx, req); err != nil {
 			return nil, nil, err
 		}
-		identities[req.Identity.InstancePath] = req.Identity
+		identities[req.Identity] = struct{}{}
 	}
-	out := make([]runtimeflowidentity.Route, 0, len(identities))
-	for _, identity := range identities {
+	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(identities))
+	for identity := range identities {
 		out = append(out, identity)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].InstancePath < out[j].InstancePath })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return staged, out, nil
 }
 
-func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtimeflowidentity.Route) []FlowInstanceRouteRecordSet {
+func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtimeflowidentity.RunScopedFlowInstance) []FlowInstanceRouteRecordSet {
 	sets := make([]FlowInstanceRouteRecordSet, 0, len(identities))
 	for _, identity := range identities {
 		sets = append(sets, FlowInstanceRouteRecordSet{
@@ -877,7 +916,7 @@ func (eb *EventBus) PublishPersistedFlowInstanceRoute(req FlowInstanceRouteMater
 
 // RetirePublishedFlowInstanceRoute removes process-visible route truth without
 // changing its durable lifecycle.
-func (eb *EventBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (eb *EventBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -920,8 +959,9 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 		ctx,
 		table,
 		descriptorLister,
+		req.Identity.RunID,
 		&req,
-		runtimeflowidentity.Route{},
+		runtimeflowidentity.RunScopedFlowInstance{},
 	)
 	if err != nil {
 		return err
@@ -936,13 +976,13 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	return eb.PublishPersistedFlowInstanceRoute(req)
 }
 
-func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
 }
 
 // RetireCommittedFlowInstanceRoute applies selected-store commit evidence to
 // process-local routing. Durable route retirement has already committed.
-func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -955,7 +995,7 @@ func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentit
 	return table.removeFlowInstanceRouteForContext(context.Background(), identity)
 }
 
-func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
+func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -975,8 +1015,8 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 		return err
 	}
 	if !exists {
-		owner = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-		if !owner.Valid() {
+		owner = identity.Normalize()
+		if owner.Validate() != nil {
 			return fmt.Errorf("flow-instance route removal requires exact identity")
 		}
 	}
@@ -991,12 +1031,12 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	if descriptorLister == nil {
 		return errors.New("flow-instance route removal requires active flow-instance descriptors")
 	}
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(ctx, table, descriptorLister, nil, owner)
+	staged, identities, err := eb.deriveFlowInstanceRouteTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
 	if err != nil {
 		return err
 	}
 	identities = append(identities, owner)
-	sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
+	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
 	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
 	if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
 		return err

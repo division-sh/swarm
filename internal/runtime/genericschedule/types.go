@@ -213,7 +213,9 @@ func (c AdmissionCommand) Validate() error {
 		if err := c.AgentIdentity.Validate(); err != nil {
 			return fmt.Errorf("agent-owned generic schedule requires concrete identity: %w", err)
 		}
-		if c.AgentIdentity.AgentID() != c.OwnerID || c.AgentIdentity.FlowInstance() != c.FlowInstance {
+		if c.AgentIdentity.RunID != c.RunID ||
+			c.AgentIdentity.AgentID() != c.OwnerID ||
+			c.AgentIdentity.FlowInstance() != c.FlowInstance {
 			return errors.New("generic schedule owner does not match concrete agent identity")
 		}
 	case OwnerSystem:

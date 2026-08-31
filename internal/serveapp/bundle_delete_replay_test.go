@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -11,11 +12,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepreservationcleanup "github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -187,6 +191,9 @@ func TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication(t *test
 	}
 	if err := third.runtime.Start(ctx); err != nil {
 		t.Fatalf("start third runtime: %v", err)
+	}
+	for _, fixture := range []runtimeFixture{first, second, third} {
+		publishBundleDeleteReplayAgentReadiness(t, fixture.runtime)
 	}
 	contexts, err = runtimepkg.NewRuntimeContextManager(nil,
 		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: first.runtime.Options.BundleSourceFact, Source: first.source, Runtime: first.runtime, WorkOwner: first.runtime.WorkOccurrence()}),
@@ -446,6 +453,37 @@ func TestPostgresBundleDeleteSameProcessReplayRestoresProcessPublication(t *test
 		if afterGrants != survivor.grants || afterRebinds != survivor.rebinds {
 			t.Fatalf("serialized replay mutated survivor %s: grants %d->%d rebinds %d->%d", survivor.bundleHash, survivor.grants, afterGrants, survivor.rebinds, afterRebinds)
 		}
+	}
+}
+
+func publishBundleDeleteReplayAgentReadiness(t testing.TB, rt *runtimepkg.Runtime) {
+	t.Helper()
+	if rt == nil || rt.Bus == nil || rt.Manager == nil {
+		t.Fatal("bundle-delete replay readiness requires a running runtime")
+	}
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash()))
+	ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+	evt := eventtest.RunCreatingRootIngress(
+		eventID,
+		events.EventType("agent.requested"),
+		"bundle-delete-replay-test",
+		"",
+		json.RawMessage(`{}`),
+		0,
+		runID,
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	if err := rt.Bus.Publish(ctx, evt); err != nil {
+		t.Fatalf("publish bundle-delete replay readiness for %s: %v", rt.Options.BundleSourceFact.BundleHash(), err)
+	}
+	if configs := rt.Manager.ListAgentConfigs(); len(configs) != 1 {
+		t.Fatalf("bundle-delete replay live agents for %s = %d, want 1", rt.Options.BundleSourceFact.BundleHash(), len(configs))
 	}
 }
 

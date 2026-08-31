@@ -126,16 +126,17 @@ func (s *AgentPostgres) ensureAgentUsageAgentExists(ctx context.Context, identit
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
-			WHERE agent_id = $1
-			  AND agent_name_owner = $2
-			  AND agent_name_source = $3
-			  AND agent_route_presence = $4
-			  AND flow_scope_key = $5
-			  AND flow_instance_id = $6
-			  AND flow_instance = $7
+			WHERE run_id = $1::uuid
+			  AND agent_id = $2
+			  AND agent_name_owner = $3
+			  AND agent_name_source = $4
+			  AND agent_route_presence = $5
+			  AND flow_scope_key = $6
+			  AND flow_instance_id = $7
+			  AND flow_instance = $8
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
@@ -154,7 +155,8 @@ func (s *AgentSQLite) ensureAgentUsageAgentExists(ctx context.Context, identity 
 	if err := s.backend.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM agents
-		WHERE agent_id = ?
+		WHERE run_id = ?
+		  AND agent_id = ?
 		  AND agent_name_owner = ?
 		  AND agent_name_source = ?
 		  AND agent_route_presence = ?
@@ -162,7 +164,7 @@ func (s *AgentSQLite) ensureAgentUsageAgentExists(ctx context.Context, identity 
 		  AND flow_instance_id = ?
 		  AND flow_instance = ?
 		  AND status NOT IN ('terminated', 'ephemeral')
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&count); err != nil {
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
@@ -177,7 +179,7 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 	if err != nil {
 		return nil, err
 	}
-	args := []any{fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
+	args := []any{fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
 	windowClause := strings.Builder{}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
@@ -203,13 +205,14 @@ func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity ag
 				output_tokens,
 				cost_usd
 			FROM spend_ledger
-			WHERE agent_id = $1
-			  AND agent_name_owner = $2
-			  AND agent_name_source = $3
-			  AND agent_route_presence = $4
-			  AND agent_flow_scope_key = $5
-			  AND agent_flow_instance_id = $6
-			  AND flow_instance = $7
+			WHERE run_id = $1::uuid
+			  AND agent_id = $2
+			  AND agent_name_owner = $3
+			  AND agent_name_source = $4
+			  AND agent_route_presence = $5
+			  AND agent_flow_scope_key = $6
+			  AND agent_flow_instance_id = $7
+			  AND flow_instance = $8
 			  %s
 		)
 		SELECT
@@ -281,7 +284,7 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 	if err != nil {
 		return nil, err
 	}
-	args := []any{fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
+	args := []any{fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
 	windowClause := strings.Builder{}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
@@ -307,7 +310,8 @@ func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agen
 				output_tokens,
 				cost_usd
 			FROM spend_ledger
-			WHERE agent_id = ?
+			WHERE run_id = ?
+			  AND agent_id = ?
 			  AND agent_name_owner = ?
 			  AND agent_name_source = ?
 			  AND agent_route_presence = ?

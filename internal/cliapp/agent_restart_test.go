@@ -32,6 +32,7 @@ func TestAgentRestartUsesV1RPCWithIdempotencyKey(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"agent", "restart", "agent-1",
+		"--run-id", "run-1",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
@@ -40,7 +41,7 @@ func TestAgentRestartUsesV1RPCWithIdempotencyKey(t *testing.T) {
 	if captured.JSONRPC != "2.0" || captured.Method != agentRestartMethod {
 		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/%s", captured.JSONRPC, captured.Method, agentRestartMethod)
 	}
-	wantParams := map[string]any{"agent_id": "agent-1", "idempotency_key": "idem-1"}
+	wantParams := map[string]any{"agent_id": "agent-1", "run_id": "run-1", "idempotency_key": "idem-1"}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
@@ -64,11 +65,11 @@ func TestAgentRestartOmitsIdempotencyKeyWhenNotProvided(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	wantParams := map[string]any{"agent_id": "agent-1"}
+	wantParams := map[string]any{"agent_id": "agent-1", "run_id": "run-1"}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
@@ -89,9 +90,10 @@ func TestAgentRestartRejectsInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "missing id", args: []string{"agent", "restart"}, wantStderr: "requires <agent-id>"},
-		{name: "blank id", args: []string{"agent", "restart", "  "}, wantStderr: "agent id is required"},
+		{name: "blank id", args: []string{"agent", "restart", "  ", "--run-id", "run-1"}, wantStderr: "agent id is required"},
 		{name: "extra arg", args: []string{"agent", "restart", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "restart", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
+		{name: "missing run", args: []string{"agent", "restart", "agent-1"}, wantStderr: "required flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -120,7 +122,7 @@ func TestAgentRestartFailClosedWithoutToken(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -202,7 +204,7 @@ func TestAgentRestartMapsFailureExitCodes(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "restart", "agent-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}

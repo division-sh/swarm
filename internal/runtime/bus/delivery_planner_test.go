@@ -317,6 +317,48 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 	}
 }
 
+func TestDeliveryRecipientPolicy_AdmitsMissingStaticDeclarationThroughExactRunOwner(t *testing.T) {
+	runID := eventtest.UUID("pending-static-run")
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, "reviewer", "root")
+	target := events.RouteIdentity{
+		FlowID: "root", FlowInstance: runID, EntityID: eventtest.UUID("pending-static-owner"),
+	}.Normalized()
+	policy := deliveryRecipientPolicy{
+		semanticSource: deliveryPlannerHandlerSource(false),
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
+		},
+		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			return []ActiveTargetDescriptor{{ID: runID, FlowInstance: runID, EntityID: target.EntityID}}, true, nil
+		},
+		requireTargetOwners: true,
+	}
+	evt := eventtest.RunCreatingRootIngress(
+		"", "task.completed", "", "", nil, 0, runID, "",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Time{},
+	)
+	manifest, err := policy.Evaluate(context.Background(), evt, []deliveryRecipientCandidate{{
+		ID: "reviewer", AgentIdentity: identity, PersistAsDelivery: true,
+		AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
+	}})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if len(manifest.DeliveryRoutes) != 1 || manifest.DeliveryRoutes[0].AgentIdentity != identity {
+		t.Fatalf("delivery routes = %#v, want exact pending static agent", manifest.DeliveryRoutes)
+	}
+	if owner := manifest.DeliveryRoutes[0].Target; !owner.ExistingEntity() || owner.Route() != target {
+		t.Fatalf("delivery target = %#v, want exact existing owner %#v", owner, target)
+	}
+	if got := manifest.AgentLifecycles[identity]; got != agentLifecycleAdmissionStaticDeclaration {
+		t.Fatalf("lifecycle admission = %d, want static declaration", got)
+	}
+	plan := routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy)
+	if err := plan.ValidatePersistentDeliveries(); err != nil {
+		t.Fatalf("validate pending static route plan: %v", err)
+	}
+}
+
 func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *testing.T) {
 	policy := deliveryRecipientPolicy{
 		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {

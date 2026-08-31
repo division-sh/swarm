@@ -24,7 +24,7 @@ func TestAgentFrameCLIUsesExactAPISelectorsOnly(t *testing.T) {
 		scope      agentframe.InspectionScope
 	}{
 		{name: "static", args: []string{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--json"}, wantParams: map[string]any{"scope": "static", "agent_id": "reviewer", "bundle_hash": "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "flow": "review"}, scope: agentframe.InspectionStatic},
-		{name: "effective", args: []string{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "review/one", "--json"}, wantParams: map[string]any{"scope": "effective", "agent_id": "reviewer", "flow_instance": "review/one"}, scope: agentframe.InspectionEffective},
+		{name: "effective", args: []string{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--flow-instance", "review/one", "--json"}, wantParams: map[string]any{"scope": "effective", "agent_id": "reviewer", "run_id": "run-1", "flow_instance": "review/one"}, scope: agentframe.InspectionEffective},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var captured jsonRPCRequest
@@ -61,18 +61,20 @@ func TestAgentFrameCLIRejectsSelectorConflictsBeforeAPIRequest(t *testing.T) {
 	defer server.Close()
 	for _, args := range [][]string{
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--root"},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--flow-instance", "review/one"},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--root", "--flow-instance", "review/one"},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "/review/"},
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", " review "},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "/review/one/"},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "review/one/"},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--flow-instance", "/review/one/"},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--flow-instance", "review/one/"},
 		{"agent", "frame", " reviewer ", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
 		{"agent", "frame", "reviewer", "--scope", " static ", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", " bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--bundle-hash", " "},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--flow", " "},
-		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", " review/one "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--root", "--bundle-hash", " "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--root", "--flow", " "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--run-id", "run-1", "--flow-instance", " review/one "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--root"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--run-id", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code != 2 {

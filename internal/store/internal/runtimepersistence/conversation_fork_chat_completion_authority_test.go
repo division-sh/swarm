@@ -348,10 +348,11 @@ func forkChatCompletionAuthority(prepared runfork.ConversationForkChatPrepared, 
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, SourceRunID: prepared.Snapshot.SourceRunID,
+			BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
-		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
+		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal, RunID: prepared.Snapshot.SourceRunID},
 	}
 }
 
@@ -580,10 +581,10 @@ func markConversationForkDeleted(t *testing.T, fixture forkChatCompletionAuthori
 
 func seedForkChatRetainedSpend(t *testing.T, fixture forkChatCompletionAuthorityFixture, cost float64) {
 	t.Helper()
-	args := []any{uuid.NewString(), fixture.source.agentID, cost, fixture.now}
-	query := `INSERT INTO spend_ledger (execution_mode,ledger_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,created_at) VALUES ('live',?,'global',?,'regular','regular','test','test','http','test',0,0,?,'test','exact',?)`
+	args := []any{uuid.NewString(), fixture.source.runID, fixture.source.agentID, cost, fixture.now}
+	query := `INSERT INTO spend_ledger (execution_mode,ledger_id,run_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,created_at) VALUES ('live',?,?,'global',?,'regular','regular','test','test','http','test',0,0,?,'test','exact',?)`
 	if !fixture.sqlite {
-		query = `INSERT INTO spend_ledger (execution_mode,ledger_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,created_at) VALUES ('live',$1::uuid,'global',$2,'regular','regular','test','test','http','test',0,0,$3,'test','exact',$4)`
+		query = `INSERT INTO spend_ledger (execution_mode,ledger_id,run_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,created_at) VALUES ('live',$1::uuid,$2::uuid,'global',$3,'regular','regular','test','test','http','test',0,0,$4,'test','exact',$5)`
 	}
 	if _, err := fixture.db.Exec(query, args...); err != nil {
 		t.Fatalf("seed retained completion spend: %v", err)

@@ -39,6 +39,23 @@ type runtimeShutdownTestAgent struct {
 	onEvent       func(context.Context, events.Event) ([]events.Event, error)
 }
 
+func bindRuntimeShutdownAgentReadinessFinalizer(bus *runtimebus.EventBus) {
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			if err := route.AgentIdentity.Validate(); err != nil {
+				return err
+			}
+			if route.AgentIdentity.RunID != event.RunID() {
+				return errors.New("shutdown test agent readiness route escaped the event run")
+			}
+		}
+		return nil
+	}))
+}
+
 func (a runtimeShutdownTestAgent) ID() string { return a.id }
 func (runtimeShutdownTestAgent) Type() string { return "test" }
 func (a runtimeShutdownTestAgent) Subscriptions() []events.EventType {
@@ -404,6 +421,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
 	rt.Manager = am
+	bindRuntimeShutdownAgentReadinessFinalizer(bus)
 
 	inboundStore := &runtimeShutdownInboundStore{}
 	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
@@ -420,9 +438,9 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, eventtest.UUID("runtime-shutdown-run-1"), "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -513,6 +531,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	rt.Manager = am
+	bindRuntimeShutdownAgentReadinessFinalizer(bus)
 
 	if err := registerRuntimeTestAgent(am, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
@@ -525,9 +544,9 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", nil, 0, eventtest.UUID("runtime-shutdown-grace-run-1"), "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 

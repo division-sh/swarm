@@ -1,0 +1,8 @@
+worker-agent:
+  id: worker-agent
+  model: regular
+  intent: prompts/worker-agent.md
+  subscriptions:
+    - worker.ready
+  emit_events:
+    - worker.observed

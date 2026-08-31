@@ -1064,15 +1064,15 @@ func (m sqliteRunLifecycleMutation) SyncCounters(ctx context.Context, runID stri
 	return nil
 }
 
-func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
+func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) error {
 	if tx == nil || strings.TrimSpace(runID) == "" {
 		return errors.New("materialized fork lifecycle deletion requires transaction and run_id")
 	}
-	result, err := tx.ExecContext(ctx, `
-		DELETE FROM runs
-		WHERE run_id = $1::uuid
-		  AND status = $2
-	`, strings.TrimSpace(runID), string(runtimerunlifecycle.StatePaused))
+	query := `DELETE FROM runs WHERE run_id = ? AND status = ?`
+	if postgres {
+		query = `DELETE FROM runs WHERE run_id = $1::uuid AND status = $2`
+	}
+	result, err := tx.ExecContext(ctx, query, strings.TrimSpace(runID), string(runtimerunlifecycle.StatePaused))
 	if err != nil {
 		return fmt.Errorf("delete materialized fork run lifecycle: %w", err)
 	}
@@ -1083,9 +1083,9 @@ func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) 
 }
 
 func (s *RunLifecyclePostgresOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	return deleteMaterializedForkRunTx(ctx, tx, runID)
+	return deleteMaterializedForkRunTx(ctx, tx, runID, true)
 }
 
 func (s *RunLifecycleSQLiteOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	return deleteMaterializedForkRunTx(ctx, tx, runID)
+	return deleteMaterializedForkRunTx(ctx, tx, runID, false)
 }

@@ -31,7 +31,7 @@ type postgresScalarTemplateInstanceStore struct {
 	descriptorErr   error
 }
 
-func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	s.descriptorCalls++
 	if s.descriptorErr != nil {
 		return nil, s.descriptorErr
@@ -46,7 +46,7 @@ type sqliteScalarTemplateInstanceStore struct {
 	descriptorErr   error
 }
 
-func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	s.descriptorCalls++
 	if s.descriptorErr != nil {
 		return nil, s.descriptorErr
@@ -105,6 +105,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
 			seedCompleteEventDispatchRun(t, ctx, db, backend, runID, time.Now().UTC().Add(-time.Minute))
+			seedScalarTemplateFlowInstance(t, ctx, db, backend, runID)
 
 			repo := canonicalrouting.RepoRoot(t)
 			root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
@@ -115,6 +116,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			source := semanticview.Wrap(bundle)
 			entityID := uuid.NewString()
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
+				RunID:           runID,
 				InstanceID:      "one",
 				EntityID:        entityID,
 				FlowInstance:    "account/one",
@@ -128,7 +130,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			if err := eventBus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-				Identity: runtimeflowidentity.DeriveRoute("account", "one"),
+				Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")),
 			}); err != nil {
 				t.Fatalf("AddFlowInstanceRouteContext: %v", err)
 			}
@@ -195,6 +197,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 
 			replayed := subscribeInternalDeliveriesForTest(t, eventBus, persistedRoutes[0].Recipient.ID())
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
+				RunID:           runID,
 				InstanceID:      "drift",
 				EntityID:        uuid.NewString(),
 				FlowInstance:    "account/drift",
@@ -224,6 +227,17 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatalf("replay descriptor calls = %d, want persisted route authority", calls)
 			}
 		})
+	}
+}
+
+func seedScalarTemplateFlowInstance(t *testing.T, ctx context.Context, db *sql.DB, backend, runID string) {
+	t.Helper()
+	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, 'account/one', 'account', 'template', '{}', 'active', ?)`
+	if backend == "postgres" {
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, 'account/one', 'account', 'template', '{}'::jsonb, 'active', $2)`
+	}
+	if _, err := db.ExecContext(ctx, query, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed scalar template flow instance: %v", err)
 	}
 }
 

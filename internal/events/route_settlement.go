@@ -97,11 +97,11 @@ type ConnectCandidateEvidence struct {
 	receiver  ConnectReceiverIdentity
 	recipient DeliveryRecipient
 	path      string
-	agent     agentidentity.Identity
+	agent     agentidentity.Plan
 	outcome   ConnectCandidateOutcome
 }
 
-func NewConnectCandidateEvidence(receiver ConnectReceiverIdentity, recipient DeliveryRecipient, path string, agent agentidentity.Identity, outcome ConnectCandidateOutcome) (ConnectCandidateEvidence, error) {
+func NewConnectCandidateEvidence(receiver ConnectReceiverIdentity, recipient DeliveryRecipient, path string, agent agentidentity.Plan, outcome ConnectCandidateOutcome) (ConnectCandidateEvidence, error) {
 	path = strings.Trim(strings.TrimSpace(path), "/")
 	agent = agent.Normalize()
 	if receiver.Empty() || recipient.Empty() || outcome.Code() == "" {
@@ -109,10 +109,10 @@ func NewConnectCandidateEvidence(receiver ConnectReceiverIdentity, recipient Del
 	}
 	if recipient.IsAgent() {
 		if err := agent.Validate(); err != nil || agent.AgentID() != recipient.ID() {
-			return ConnectCandidateEvidence{}, fmt.Errorf("connect agent candidate requires its exact concrete identity")
+			return ConnectCandidateEvidence{}, fmt.Errorf("connect agent candidate requires its exact declaration route plan")
 		}
 	} else if !agent.IsZero() {
-		return ConnectCandidateEvidence{}, fmt.Errorf("connect node candidate cannot carry agent identity")
+		return ConnectCandidateEvidence{}, fmt.Errorf("connect node candidate cannot carry agent plan")
 	}
 	return ConnectCandidateEvidence{receiver: receiver, recipient: recipient, path: path, agent: agent, outcome: outcome}, nil
 }
@@ -120,7 +120,7 @@ func NewConnectCandidateEvidence(receiver ConnectReceiverIdentity, recipient Del
 func (e ConnectCandidateEvidence) Receiver() ConnectReceiverIdentity { return e.receiver }
 func (e ConnectCandidateEvidence) Recipient() DeliveryRecipient      { return e.recipient }
 func (e ConnectCandidateEvidence) Path() string                      { return e.path }
-func (e ConnectCandidateEvidence) AgentIdentity() agentidentity.Identity {
+func (e ConnectCandidateEvidence) AgentPlan() agentidentity.Plan {
 	return e.agent
 }
 func (e ConnectCandidateEvidence) Outcome() ConnectCandidateOutcome { return e.outcome }
@@ -320,12 +320,12 @@ func (s RouteSettlement) Validate(routes []DeliveryRoute) error {
 }
 
 type settlementCandidateWire struct {
-	Receiver      string                 `json:"receiver_sha256"`
-	RecipientKind string                 `json:"recipient_kind"`
-	RecipientID   string                 `json:"recipient_id"`
-	Path          string                 `json:"path,omitempty"`
-	AgentIdentity agentidentity.Identity `json:"agent_identity,omitempty"`
-	Outcome       string                 `json:"outcome"`
+	Receiver      string             `json:"receiver_sha256"`
+	RecipientKind string             `json:"recipient_kind"`
+	RecipientID   string             `json:"recipient_id"`
+	Path          string             `json:"path,omitempty"`
+	AgentPlan     agentidentity.Plan `json:"agent_plan,omitempty"`
+	Outcome       string             `json:"outcome"`
 }
 
 type settlementPlanWire struct {
@@ -412,7 +412,7 @@ func (s RouteSettlement) MarshalJSON() ([]byte, error) {
 			for _, candidate := range plan.candidates {
 				candidates = append(candidates, settlementCandidateWire{
 					Receiver: candidate.receiver.String(), RecipientKind: candidate.recipient.Code(), RecipientID: candidate.recipient.ID(),
-					Path: candidate.path, AgentIdentity: candidate.agent, Outcome: candidate.outcome.Code(),
+					Path: candidate.path, AgentPlan: candidate.agent, Outcome: candidate.outcome.Code(),
 				})
 			}
 			plans = append(plans, settlementPlanWire{
@@ -472,7 +472,7 @@ func (s *RouteSettlement) UnmarshalJSON(raw []byte) error {
 				if !ok {
 					return fmt.Errorf("route settlement candidate outcome %q is invalid", candidate.Outcome)
 				}
-				evidence, err := NewConnectCandidateEvidence(AdmitConnectReceiverIdentity(receiverDigest), recipient, candidate.Path, candidate.AgentIdentity, outcome)
+				evidence, err := NewConnectCandidateEvidence(AdmitConnectReceiverIdentity(receiverDigest), recipient, candidate.Path, candidate.AgentPlan, outcome)
 				if err != nil {
 					return err
 				}

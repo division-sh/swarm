@@ -4,8 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
@@ -23,7 +28,37 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	fixtureRoot := fixtures[0].Root
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
-	cfg, err := h.rt.Manager.ResolveAgentConfig("reference-agent", "support")
+	bundleHash, bundleSource := h.rt.Options.BundleSourceFact.StorageValues()
+	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(h.rt.Options.WorkflowModule.SemanticSource(), runtimeagenttopology.SourceCoordinate{
+		BundleHash: bundleHash, BundleSource: bundleSource,
+	})
+	if err != nil {
+		t.Fatalf("compile flow-data agent topology: %v", err)
+	}
+	var identity runtimeagentidentity.Identity
+	for _, candidate := range desired {
+		if candidate.Identity.AgentID() != "reference-agent" {
+			continue
+		}
+		identity, err = candidate.Identity.Live(catalogRuntimeRunID)
+		if err != nil {
+			t.Fatalf("materialize flow-data agent identity: %v", err)
+		}
+		break
+	}
+	if err := identity.Validate(); err != nil {
+		t.Fatalf("flow-data fixture has no reference-agent declaration: %v", err)
+	}
+	readinessEvent := eventtest.ExistingRunRootIngress(
+		eventtest.UUID("flow-data-readiness"), "support.requested", "cataloge2e", "", []byte(`{}`), 0,
+		catalogRuntimeRunID, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := h.rt.Manager.FinalizeCommittedAgentReadiness(h.ctx, readinessEvent, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient("reference-agent"), AgentIdentity: identity,
+	}}); err != nil {
+		t.Fatalf("finalize flow-data agent readiness: %v", err)
+	}
+	cfg, err := h.rt.Manager.ResolveAgentConfig(catalogRuntimeRunID, "reference-agent", "support")
 	if err != nil {
 		t.Fatalf("resolve reference-agent config: %v", err)
 	}

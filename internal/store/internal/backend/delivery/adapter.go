@@ -1867,12 +1867,7 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 	if err := page.AgentIdentity.Validate(); err != nil {
 		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page agent identity: %w", err)
 	}
-	runID := strings.TrimSpace(page.RunID)
-	if runID != "" {
-		if _, err := uuid.Parse(runID); err != nil {
-			return SnapshotPage{}, fmt.Errorf("delivery lifecycle page run id: %w", err)
-		}
-	}
+	runID := page.AgentIdentity.RunID
 	if err := validateSnapshotPagePosition(page.BeforeCreatedAt, page.BeforeDeliveryID, page.Limit); err != nil {
 		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page: %w", err)
 	}
@@ -1905,13 +1900,13 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 		SELECT d.delivery_id::text
 		FROM event_deliveries d
 		WHERE d.subscriber_type = 'agent' AND (%s)
-		  AND ($8::text = '' OR d.run_id = NULLIF($8::text, '')::uuid)
-		  AND (($9 AND d.status = 'pending') OR ($10 AND d.status = 'in_progress') OR
-		       ($11 AND d.status = 'delivered') OR ($12 AND d.status = 'failed') OR
-		       ($13 AND d.status = 'dead_letter'))
-		  AND ($14::timestamptz IS NULL OR d.created_at < $14 OR (d.created_at = $14 AND d.delivery_id < $15::uuid))
+		  AND ($9::text = '' OR d.run_id = NULLIF($9::text, '')::uuid)
+		  AND (($10 AND d.status = 'pending') OR ($11 AND d.status = 'in_progress') OR
+		       ($12 AND d.status = 'delivered') OR ($13 AND d.status = 'failed') OR
+		       ($14 AND d.status = 'dead_letter'))
+		  AND ($15::timestamptz IS NULL OR d.created_at < $15 OR (d.created_at = $15 AND d.delivery_id < $16::uuid))
 		ORDER BY d.created_at DESC, d.delivery_id DESC
-		LIMIT $16`, identityPredicate)
+		LIMIT $17`, identityPredicate)
 	args := append(identityArgs,
 		runID,
 		statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
@@ -1968,11 +1963,11 @@ func (a *Adapter) DiagnosticSnapshotPageForAgent(ctx context.Context, q queryer,
 	query := fmt.Sprintf(`
 		SELECT d.delivery_id::text
 		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent' AND (%[2]s) AND d.status = $8
-		  AND ($9::timestamptz IS NULL OR %[1]s < $9 OR
-		       (%[1]s = $9 AND d.delivery_id < $10::uuid))
+		WHERE d.subscriber_type = 'agent' AND (%[2]s) AND d.status = $9
+		  AND ($10::timestamptz IS NULL OR %[1]s < $10 OR
+		       (%[1]s = $10 AND d.delivery_id < $11::uuid))
 		ORDER BY %[1]s DESC, d.delivery_id DESC
-		LIMIT $11`, occurredColumn, identityPredicate)
+		LIMIT $12`, occurredColumn, identityPredicate)
 	args := append(identityArgs, string(page.Status), cursorAt, cursorID, page.Limit+1)
 	if a.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
@@ -2005,8 +2000,8 @@ func (a *Adapter) DiagnosticCountsForAgentSince(ctx context.Context, q queryer, 
 		FROM event_deliveries d
 		WHERE d.subscriber_type = 'agent' AND (%s)
 		  AND d.status IN ('failed', 'dead_letter')
-		  AND ((d.status = 'failed' AND d.updated_at >= $8) OR
-		       (d.status = 'dead_letter' AND d.settled_at >= $8))`, identityPredicate)
+		  AND ((d.status = 'failed' AND d.updated_at >= $9) OR
+		       (d.status = 'dead_letter' AND d.settled_at >= $9))`, identityPredicate)
 	if a.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
 			SELECT COALESCE(SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END), 0),
@@ -2631,6 +2626,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		class,
 		record.SubscriberID,
 		agentidentity.StorageFields{
+			RunID:            record.RunID,
 			AgentID:          record.SubscriberID,
 			NameOwner:        agentNameOwner,
 			NameSource:       agentNameSource,

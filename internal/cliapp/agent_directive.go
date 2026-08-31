@@ -39,9 +39,7 @@ type agentDirectiveResult struct {
 }
 
 var agentDirectiveValidRunIDResolutions = map[string]struct{}{
-	"specified":                    {},
-	"inferred_from_active_session": {},
-	"new_run_allocated":            {},
+	"specified": {},
 }
 
 func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
@@ -55,7 +53,8 @@ func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
-	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Optional explicit nonterminal run target")
+	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Exact nonterminal run target")
+	_ = cmd.MarkFlagRequired("run-id")
 	cmd.Flags().StringVar(&directiveOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -107,9 +106,7 @@ func (opts agentDirectiveCommandOptions) params(agentID, directive string) map[s
 	params := map[string]any{
 		"agent_id":  agentID,
 		"directive": directive,
-	}
-	if runID := strings.TrimSpace(opts.runID); runID != "" {
-		params["run_id"] = runID
+		"run_id":    strings.TrimSpace(opts.runID),
 	}
 	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
 		params["flow_instance"] = flowInstance
@@ -174,7 +171,6 @@ func agentDirectiveErrorExitCode(err error) int {
 		conflictCodes: []string{
 			"AGENT_NOT_RUNNING",
 			"RUN_ALREADY_TERMINAL",
-			"AMBIGUOUS_RUN_TARGET",
 			"IDEMPOTENCY_CONFLICT",
 			"AGENT_DIRECTIVE_IN_PROGRESS",
 			"AGENT_DIRECTIVE_COMPLETION_PENDING",

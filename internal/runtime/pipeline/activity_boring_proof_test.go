@@ -80,9 +80,12 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), sourceEvent.RunID())
 			ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(sourceEvent, "scanner"))
-			handled, _, err := fixture.pc.handleEventResult(ctx, sourceEvent)
+			handled, outcome, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 			if err != nil {
 				t.Fatalf("hand-authored source handleEventResult: %v", err)
+			}
+			if disposition, ok := outcome.Disposition(); ok {
+				t.Fatalf("hand-authored source disposition = %s/%s failure=%#v", disposition.Kind(), disposition.ReasonCode(), disposition.Failure())
 			}
 			if !handled {
 				t.Fatal("hand-authored source handleEventResult handled = false, want true")
@@ -840,7 +843,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 		Fields:          map[string]any{},
 		EntityType:      "test_entity",
 	})
-	target, err := fixture.pc.workflowStore.LoadTargetPersistence(ctx, testWorkflowInstanceRoute(instance.StorageRef), identity.NormalizeEntityID(entityID))
+	target, err := fixture.pc.workflowStore.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), identity.NormalizeEntityID(entityID))
 	if err != nil {
 		t.Fatalf("load activity boring workflow persistence: %v", err)
 	}

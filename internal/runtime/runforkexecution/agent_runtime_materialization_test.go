@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -37,16 +35,24 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
-const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const (
+	selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	selectedContractAgentTestRunID      = "00000000-0000-0000-0000-000000000001"
+)
 
 func selectedContractTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
 	return selectedContractTestAgentIdentity(t, agentID, "")
 }
 
 func selectedContractTestAgentIdentity(t testing.TB, agentID, flowInstance string) agentidentity.Identity {
+	return selectedContractTestAgentIdentityForRun(t, selectedContractAgentTestRunID, agentID, flowInstance)
+}
+
+func selectedContractTestAgentIdentityForRun(t testing.TB, runID, agentID, flowInstance string) agentidentity.Identity {
 	t.Helper()
 	name, err := agentidentity.DeclaredName(agentID, "test://selected-contract/agents/"+agentID)
 	if err != nil {
@@ -59,7 +65,7 @@ func selectedContractTestAgentIdentity(t testing.TB, agentID, flowInstance strin
 			t.Fatalf("construct selected-contract agent route: %v", err)
 		}
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New(runID, name, route)
 	if err != nil {
 		t.Fatalf("construct selected-contract agent identity: %v", err)
 	}
@@ -103,6 +109,7 @@ func selectedContractTestProcessCapability(
 	ctx context.Context,
 	selected runtimestartupownership.Store,
 	loaded LoadedSelectedContractSource,
+	backend ...string,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil {
@@ -110,35 +117,22 @@ func selectedContractTestProcessCapability(
 	}
 	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
-	records, err := selectedContractStaticAgentRecords(loaded.Source)
+	configuredBackend := ""
+	if len(backend) > 0 {
+		configuredBackend = backend[0]
+	}
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
+		SemanticSource:    loaded.Source,
+		LLMBackend:        configuredBackend,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	desired, err := manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
-		t.Fatalf("compile selected-contract declaration records: %v", err)
+		t.Fatalf("compile selected-contract declaration topology: %v", err)
 	}
-	desiredByIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(records))
-	for _, record := range records {
-		identity, identityErr := record.Config.ConcreteIdentity()
-		if identityErr != nil {
-			t.Fatalf("selected-contract declaration identity: %v", identityErr)
-		}
-		revision, revisionErr := canonicaljson.Hash(record.Config)
-		if revisionErr != nil {
-			t.Fatalf("selected-contract declaration revision: %v", revisionErr)
-		}
-		candidate := runtimeagenttopology.DesiredAgent{
-			Identity: identity, Source: coordinate, ConfigRevision: revision,
-		}
-		key, keyErr := candidate.Key()
-		if keyErr != nil {
-			t.Fatalf("selected-contract declaration key: %v", keyErr)
-		}
-		if previous, exists := desiredByIdentity[key]; exists && previous != candidate {
-			t.Fatalf("selected-contract declaration %s compiles inconsistently", identity.Description())
-		}
-		desiredByIdentity[key] = candidate
-	}
-	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(desiredByIdentity))
-	for _, candidate := range desiredByIdentity {
-		desired = append(desired, candidate)
+	if err := manager.Shutdown(); err != nil {
+		t.Fatalf("close selected-contract declaration compiler: %v", err)
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
 	if err != nil {
@@ -181,6 +175,9 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(
+		func(context.Context, events.Event, []events.DeliveryRoute) error { return nil },
+	))
 	forkIdentity := selectedContractTestRootAgentIdentity(t, "fork-agent")
 	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: forkIdentity, AgentID: "fork-agent", Generation: 1}
 	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: forkIdentity, AgentID: "fork-agent", Generation: 2}
@@ -257,54 +254,6 @@ func selectedContractAgentRouteAdmission(t *testing.T, agentID string, subscript
 	return admission
 }
 
-type selectedContractSelfReleaseScopeProbe struct {
-	want    runtimeauthoractivity.Scope
-	seen    chan runtimeauthoractivity.Scope
-	binding runtimemanager.ProcessExecutionBinding
-}
-
-func (p *selectedContractSelfReleaseScopeProbe) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
-	if p == nil {
-		return runtimemanager.ProcessExecutionBinding{}, fmt.Errorf("selected-contract self-release probe is required")
-	}
-	if err := p.binding.Validate(); err != nil {
-		return runtimemanager.ProcessExecutionBinding{}, err
-	}
-	return p.binding, nil
-}
-
-func (p *selectedContractSelfReleaseScopeProbe) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	if req.OperationKind == "self_release" {
-		if err := ctx.Err(); err != nil {
-			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("self-release context is canceled: %w", err)
-		}
-		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-		if !ok {
-			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("self-release author activity scope is required")
-		}
-		if scope != p.want {
-			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("self-release author activity scope = %#v, want %#v", scope, p.want)
-		}
-		p.seen <- scope
-	}
-	return runtimemanager.AgentLifecycleTransitionResult{
-		OperationID:        req.OperationID,
-		TransitionID:       req.OperationID + "-transition",
-		AgentID:            req.AgentID,
-		Identity:           req.Identity,
-		PreviousEpoch:      req.ExpectedEpoch,
-		RuntimeEpoch:       req.TargetEpoch,
-		PreviousGeneration: req.ExpectedGeneration,
-		Generation:         req.TargetGeneration,
-		PreviousPhase:      req.ExpectedPhase,
-		Phase:              req.TargetPhase,
-		ConfigRevision:     req.ConfigRevision,
-		RunMode:            req.RunMode,
-		Topology:           req.Topology,
-		ProcessBinding:     p.binding,
-	}, nil
-}
-
 type selectedContractSelfReleaseAgent struct {
 	id string
 }
@@ -345,7 +294,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 				},
 			},
 		},
-	}, eventBus, &runtimepipeline.PipelineCoordinator{})
+	}, nil, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("build selected-contract mock runtime: %v", err)
 	}
@@ -390,12 +339,12 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("shared-agent", "review/inst-1", "", first),
-				testAgentFrontierRecipient("shared-agent", "review/inst-2", "", second),
+				testAgentFrontierRecipient("shared-agent", "review/inst-1", "", mustTestAgentPlan(first)),
+				testAgentFrontierRecipient("shared-agent", "review/inst-2", "", mustTestAgentPlan(second)),
 			},
 		}},
 	}
-	recipients, err := selectedContractPlannedAgentRecipients(planning)
+	recipients, err := selectedContractPlannedAgentRecipients(selectedContractAgentTestRunID, planning)
 	if err != nil {
 		t.Fatalf("selectedContractPlannedAgentRecipients: %v", err)
 	}
@@ -418,10 +367,48 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 	}
 }
 
-func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
+func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMutatingSourcePlan(t *testing.T) {
+	sourceIdentity := selectedContractTestAgentIdentity(t, "shared-agent", "review/inst-1")
+	declarationPlan := mustTestAgentPlan(sourceIdentity)
+	forkRunID := "00000000-0000-0000-0000-000000000002"
+	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
+		ID: "shared-agent", Identity: sourceIdentity, FlowPath: sourceIdentity.FlowInstance(), Role: "worker", ExecutionMode: "live",
+	})
+	config.Identity = agentidentity.Identity{}
+	plan := selectedContractAgentRuntimePlan{
+		Proof: SelectedContractAgentRuntimeMaterialization{
+			AgentRecipientPlans:  []agentidentity.Plan{declarationPlan},
+			ConfiguredAgentPlans: []agentidentity.Plan{declarationPlan},
+		},
+		ConfiguredPlans: []agentidentity.Plan{declarationPlan},
+		Blueprints: []runtimemanager.AgentMaterializationBlueprint{{
+			Config: config, Identity: declarationPlan, Topology: selectedContractTestDeclarationTopology(t),
+		}},
+	}
+
+	bound, err := plan.bindRun(forkRunID, nil)
+	if err != nil {
+		t.Fatalf("bindRun: %v", err)
+	}
+	if got := bound.Proof.AgentRecipients[0].RunID; got != forkRunID {
+		t.Fatalf("fork recipient run_id = %q, want %q", got, forkRunID)
+	}
+	if got := bound.Records[0].Config.Identity.RunID; got != forkRunID {
+		t.Fatalf("fork record run_id = %q, want %q", got, forkRunID)
+	}
+	if !plan.Proof.AgentRecipientPlans[0].IsZero() && plan.Proof.AgentRecipientPlans[0] != declarationPlan {
+		t.Fatalf("source declaration plan mutated to %#v", plan.Proof.AgentRecipientPlans[0])
+	}
+	if !plan.Blueprints[0].Config.Identity.IsZero() {
+		t.Fatalf("source blueprint acquired concrete identity %#v", plan.Blueprints[0].Config.Identity)
+	}
+}
+
+func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerationGrant(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
+	sourceFact := selectedContractAgentTestSourceFact(t)
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthoritySelectedContractFork, ID: "00000000-0000-0000-0000-000000000311",
 		SelectedFork: runtimeeffects.SelectedContractForkAuthority{
@@ -431,13 +418,14 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 		ExecutionOwner: "self-release-scope-test", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 	}
-	wantScope := runtimeauthoractivity.BundleScope(
-		"00000000-0000-0000-0000-000000000313",
-		"bundle-v1:sha256:3131313131313131313131313131313131313131313131313131313131313131",
-	)
+	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
 	initiatingCtx, cancel := context.WithCancel(context.Background())
 	ctx := selectedForkExecutionTestContext(t, initiatingCtx, authority)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: authority.SelectedFork.ForkRunID, Source: sourceFact,
+	})
 	admission, ok := managedexecution.FromContext(ctx)
 	if !ok {
 		t.Fatal("selected-contract test admission is missing")
@@ -460,35 +448,66 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	probe := &selectedContractSelfReleaseScopeProbe{
-		want: wantScope,
-		seen: make(chan runtimeauthoractivity.Scope, 1),
-		binding: runtimemanager.ProcessExecutionBinding{
-			ProcessAuthorityID: "00000000-0000-0000-0000-000000000314",
-			ProcessOwnerID:     "selected-contract-self-release-test",
-			ProcessBootID:      "00000000-0000-0000-0000-000000000315",
-			GenerationGrantID:  "00000000-0000-0000-0000-000000000316",
-			BundleHash:         wantScope.BundleHash,
-			BundleSource:       "ephemeral",
-			RuntimeInstanceID:  wantScope.RuntimeInstanceID,
-			RuntimeGeneration:  1,
-		},
+	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
+	declaration, err := identity.Plan()
+	if err != nil {
+		t.Fatalf("selected-contract declaration plan: %v", err)
+	}
+	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
+		ID: "fork-agent", Identity: identity, Role: "worker", Model: llmselection.ModelAliasRegular,
+		ExecutionMode: "live", Subscriptions: []string{"item.received"},
+	})
+	config.Identity = agentidentity.Identity{}
+	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
+		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentMaterializationBlueprint{Config: config, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
+	)
+	if err != nil {
+		t.Fatalf("resolve selected-contract declaration blueprint: %v", err)
+	}
+	record, err := blueprint.Materialize(authority.SelectedFork.ForkRunID)
+	if err != nil {
+		t.Fatalf("materialize selected-contract declaration: %v", err)
+	}
+	revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, declaration)
+	if err != nil {
+		t.Fatalf("selected-contract declaration revision: %v", err)
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: sourceFact.BundleHash(), BundleSource: "ephemeral"}
+	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, []runtimeagenttopology.DesiredAgent{{
+		Identity: declaration, Source: coordinate, ConfigRevision: revision,
+	}})
+	if err != nil {
+		t.Fatalf("selected-contract source set: %v", err)
+	}
+	processCapability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "selected-contract-cancellation-test", BootID: uuid.NewString(), RuntimeInstanceID: wantScope.RuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire selected-contract process capability: %v", err)
+	}
+	t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+	if _, err := processCapability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sourceSet}); err != nil {
+		t.Fatalf("install selected-contract source set: %v", err)
+	}
+	topology, err := runtimeagenttopology.StaticAdmission(sourceSet.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatalf("construct selected-contract static topology: %v", err)
 	}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner: selectedContractExecutionOwnerForTest(t, selected),
+		Owner:        selectedContractExecutionOwnerForTest(t, selected),
+		LoadedSource: LoadedSelectedContractSource{BundleSourceFact: sourceFact},
 		AgentRuntime: selectedContractAgentRuntimePlan{
-			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
-				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
-				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
-			}), Topology: selectedContractTestDeclarationTopology(t), ProcessBinding: probe.binding}},
+			Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
 			Options: SelectedContractAgentRuntimeOptions{
-				ExecutionPosture: executionposture.Live,
+				ExecutionPosture:  executionposture.Live,
+				ProcessCapability: processCapability,
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
 				},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					LifecycleStore: probe, WorkOwner: owner, ReceiverExecution: receiverExecution,
+					WorkOwner: owner, ReceiverExecution: receiverExecution,
 				},
 			},
 		},
@@ -496,17 +515,15 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
 	}
+	grantDone := runtime.generationGrant.Done()
 	cancel()
 	if err := runtime.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	select {
-	case got := <-probe.seen:
-		if got != wantScope {
-			t.Fatalf("self-release scope = %#v, want %#v", got, wantScope)
-		}
+	case <-grantDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for selected-contract self-release transition")
+		t.Fatal("timed out waiting for selected-contract generation retirement")
 	}
 }
 
@@ -560,7 +577,7 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
 
-	records, err := selectedContractStaticAgentRecords(semanticview.Wrap(bundle))
+	records, err := selectedContractStaticAgentRecords(selectedContractAgentTestRunID, semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("selectedContractStaticAgentRecords: %v", err)
 	}

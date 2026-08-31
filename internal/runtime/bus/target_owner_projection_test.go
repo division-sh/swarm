@@ -478,7 +478,7 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 	}
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
-		TargetBlueprint: target, PendingAgentLifecycle: true, Persist: true,
+		TargetBlueprint: target, AgentLifecycle: agentLifecycleAdmissionMaterializingFlow, Persist: true,
 	}}}.Normalized()
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
@@ -501,6 +501,30 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 	projection.descriptors[0].Materializing = false
 	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
 		t.Fatalf("existing owner for pending lifecycle error = %v, want materializing ownership rejection", err)
+	}
+}
+
+func TestStaticAgentLifecycleConsumesExistingOwnerButConnectLifecycleDoesNot(t *testing.T) {
+	identity := agentidentitytest.Declared(t, "reviewer", "static-owner", "review", "one", "review/one")
+	target := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-owner"),
+	}
+	owner := events.MustExistingEntityTarget(target)
+	base := RoutePlanDeliveryIntent{
+		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+		TargetBlueprint: target, TargetOwnership: owner, Persist: true,
+	}
+
+	static := base
+	static.AgentLifecycle = agentLifecycleAdmissionStaticDeclaration
+	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{static}}); err != nil {
+		t.Fatalf("resolve static lifecycle against existing owner: %v", err)
+	}
+
+	connect := base
+	connect.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
+	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{connect}}); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
+		t.Fatalf("connect lifecycle existing-owner error = %v, want materializing owner rejection", err)
 	}
 }
 

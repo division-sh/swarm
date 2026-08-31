@@ -278,37 +278,54 @@ func ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, 
 			if err := identity.Validate(); err != nil {
 				return fmt.Errorf("check selected-contract delivery agent identity: %w", err)
 			}
+			if identity.RunID != strings.TrimSpace(forkRunID) {
+				return fmt.Errorf("check selected-contract delivery agent identity: run %q conflicts with fork run %q", identity.RunID, forkRunID)
+			}
 			if identity.AgentID() != strings.TrimSpace(snapshot.SubscriberID) {
 				return fmt.Errorf("check selected-contract delivery agent identity: subscriber %q conflicts with %s", snapshot.SubscriberID, identity.Description())
 			}
-			selectedAgents = append(selectedAgents, map[string]string{"agent_id": identity.AgentID(), "flow_instance": identity.FlowInstance()})
+			selectedAgents = append(selectedAgents, map[string]string{"run_id": identity.RunID, "agent_id": identity.AgentID(), "flow_instance": identity.FlowInstance()})
 		}
 	}
 	allowedJSON, _ := json.Marshal(allowedEvents)
 	platformJSON, _ := json.Marshal(runForkSelectedContractForkLocalRuntimePlatformEventNames())
 	agentsJSON, _ := json.Marshal(selectedAgents)
 	var strayEvents int
+	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
-		WITH RECURSIVE selected_agents(agent_id, flow_instance) AS (
-			SELECT json_extract(value, '$.agent_id'), json_extract(value, '$.flow_instance') FROM json_each($4)
+		WITH RECURSIVE selected_agents(run_id, agent_id, flow_instance) AS (
+			SELECT json_extract(value, '$.run_id'), json_extract(value, '$.agent_id'), json_extract(value, '$.flow_instance') FROM json_each($4)
 		), selected_tree(event_id) AS (
 			SELECT e.event_id FROM events e
 			JOIN run_fork_selected_contract_executions x ON x.fork_event_id = e.event_id AND x.fork_run_id = $1
 			WHERE e.run_id = $1 AND x.source_event_id IN (SELECT value FROM json_each($2))
 			UNION
 			SELECT e.event_id FROM events e JOIN selected_agents a
-			  ON a.agent_id = e.produced_by AND a.flow_instance = COALESCE(json_extract(e.source_route, '$.flow_instance'), '')
+			  ON a.run_id = e.run_id AND a.agent_id = e.produced_by AND a.flow_instance = COALESCE(json_extract(e.source_route, '$.flow_instance'), '')
 			WHERE e.run_id = $1 AND e.produced_by_type = 'agent'
+			UNION
+			SELECT e.event_id FROM events e
+			WHERE e.run_id = $1
+			  AND e.event_name = 'platform.runtime_log'
+			  AND e.source_event_id IS NULL
+			  AND json_extract(e.payload, '$.details.runtime_lineage_owner') = $5
+			  AND json_extract(e.payload, '$.details.runtime_lineage_run_id') = $1
+			  AND json_extract(e.payload, '$.details.runtime_lineage_row_category') = 'diagnostic'
+			  AND json_extract(e.payload, '$.details.runtime_lineage_selected_fork_owner') = $6
+			  AND json_extract(e.payload, '$.details.runtime_lineage_classification') = 'fork_local'
+			  AND json_extract(e.payload, '$.details.runtime_lineage_selected_fork_context') = 1
 			UNION
 			SELECT child.event_id FROM events child JOIN selected_tree parent ON child.source_event_id = parent.event_id
 			WHERE child.run_id = $1 AND (child.event_name NOT LIKE 'platform.%' OR child.event_name IN (SELECT value FROM json_each($3)))
 		)
-		SELECT COUNT(*) FROM events e WHERE e.run_id = $1 AND NOT EXISTS (SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id)
-	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON)).Scan(&strayEvents); err != nil {
+		SELECT COUNT(*), COALESCE(group_concat(e.event_name || ':' || e.event_id, ','), '')
+		FROM events e
+		WHERE e.run_id = $1 AND NOT EXISTS (SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id)
+	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
-		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", runfork.RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_events_not_selected_contract_lineage")
+		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", runfork.RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: fork_events_not_selected_contract_lineage: %s", strayEventEvidence))
 	}
 	for _, snapshot := range deliverySnapshots {
 		var belongs bool

@@ -130,12 +130,18 @@ func (i Identity) Validate() error {
 		if err := i.AgentIdentity.Validate(); err != nil {
 			return fmt.Errorf("agent container identity requires complete concrete identity: %w", err)
 		}
+		if i.RunID != i.AgentIdentity.RunID {
+			return fmt.Errorf("agent container run_id does not match concrete agent identity")
+		}
 	case KindFlow:
 		if i.FlowInstance == "" {
 			return fmt.Errorf("flow container identity requires flow_instance")
 		}
 		if err := i.AgentIdentity.Validate(); err != nil {
 			return fmt.Errorf("flow container identity requires complete concrete agent identity: %w", err)
+		}
+		if i.RunID != i.AgentIdentity.RunID {
+			return fmt.Errorf("flow container run_id does not match concrete agent identity")
 		}
 	}
 	if i.Kind != KindAgent && i.Kind != KindFlow && !i.AgentIdentity.IsZero() {
@@ -193,6 +199,7 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 	}.Normalized()
 	if hasAnyAgentIdentityLabel(labels) {
 		agentIdentity, err := runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{
+			RunID:            identity.RunID,
 			AgentID:          labels[LabelAgentID],
 			NameOwner:        labels[LabelAgentNameOwner],
 			NameSource:       labels[LabelAgentNameSource],

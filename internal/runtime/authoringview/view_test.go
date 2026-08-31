@@ -204,6 +204,9 @@ func TestBuildShowsTemplateInstanceRouteIdentityAndProjection(t *testing.T) {
 	if got := account.TemplateInstance.Field; got != "account_id" {
 		t.Fatalf("account instance field = %q, want account_id", got)
 	}
+	if got := account.TemplateInstance.Identity; got != "run + flow + instance_key" {
+		t.Fatalf("account instance identity = %q, want run + flow + instance_key", got)
+	}
 
 	producer := flowByID(t, view, "producer")
 	output := outputPinByName(t, producer, "account.ready")

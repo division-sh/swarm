@@ -338,10 +338,6 @@ func (s *PostgresStore) CreateRun(ctx context.Context, request runlifecycle.Crea
 	return s.runLifecyclePostgresOwner.CreateRun(ctx, request)
 }
 
-func (s *PostgresStore) DeactivateRoutingRulesByEntity(ctx context.Context, entityID string) error {
-	return s.routingPostgresOwner.DeactivateRoutingRulesByEntity(ctx, entityID)
-}
-
 func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
 	return s.decisionPostgresOwner.DecideDecisionCard(ctx, req)
 }
@@ -350,7 +346,7 @@ func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.
 	return s.decisionPostgresOwner.DeferDecisionCard(ctx, req)
 }
 
-func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.Route) error {
+func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
 	return s.pipelinePostgresOwner.DeleteFlowInstanceRoute(ctx, identity)
 }
 
@@ -510,12 +506,12 @@ func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context
 	return s.runForkPostgresOwner.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
 }
 
-func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]bus.ActiveAgentDescriptor, error) {
-	return s.operatorAgentPostgres.ListActiveAgentDescriptors(ctx)
+func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context, runID string) ([]bus.ActiveAgentDescriptor, error) {
+	return s.operatorAgentPostgres.ListActiveAgentDescriptors(ctx, runID)
 }
 
-func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx)
+func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
@@ -578,11 +574,11 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	return s.eventPostgresOwner.ListEventDeliveryRoutes(ctx, eventID)
 }
 
-func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route) ([]bus.FlowInstanceRouteRecord, error) {
+func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
 	return s.pipelinePostgresOwner.ListFlowInstanceRouteRecords(ctx, identity)
 }
 
-func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.Route, error) {
+func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
 	return s.pipelinePostgresOwner.ListFlowInstanceRoutes(ctx)
 }
 
@@ -658,8 +654,8 @@ func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Con
 	return s.runForkPostgresOwner.ListSelectedContractRouteRecoveryRecords(ctx)
 }
 
-func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx)
+func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
 
 func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
@@ -674,8 +670,8 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1L
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
 }
 
-func (s *PostgresStore) ListWorkflowInstances(ctx context.Context) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelinePostgresOwner.ListWorkflowInstances(ctx)
+func (s *PostgresStore) ListWorkflowInstances(ctx context.Context, runID string) ([]pipeline.WorkflowInstance, error) {
+	return s.pipelinePostgresOwner.ListWorkflowInstances(ctx, runID)
 }
 
 func (s *PostgresStore) ListWorkflowTimerActivations(ctx context.Context, runID string, entityID string, activeOnly bool) ([]pipeline.WorkflowTimerActivation, error) {
@@ -686,8 +682,8 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, identity age
 	return s.lLMPostgresOwner.LoadActiveConversation(ctx, identity)
 }
 
-func (s *PostgresStore) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (workflowroute.RecoveryRecord, error) {
-	return s.pipelinePostgresOwner.LoadActiveWorkflowRoute(ctx, instancePath)
+func (s *PostgresStore) LoadActiveWorkflowRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (workflowroute.RecoveryRecord, error) {
+	return s.pipelinePostgresOwner.LoadActiveWorkflowRoute(ctx, identity)
 }
 
 func (s *PostgresStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -862,16 +858,16 @@ func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.St
 	return s.runtimeIngressPostgresOwner.LoadRuntimeIngressState(ctx)
 }
 
-func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelinePostgresOwner.LoadWorkflowEntityState(ctx, route, entityID)
+func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	return s.pipelinePostgresOwner.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
-func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, route flowidentity.Route) (pipeline.WorkflowInstance, bool, error) {
-	return s.pipelinePostgresOwner.LoadWorkflowInstance(ctx, route)
+func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
+	return s.pipelinePostgresOwner.LoadWorkflowInstance(ctx, identity)
 }
 
-func (s *PostgresStore) LoadWorkflowTargetPersistence(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
-	return s.pipelinePostgresOwner.LoadWorkflowTargetPersistence(ctx, route, entityID)
+func (s *PostgresStore) LoadWorkflowTargetPersistence(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
+	return s.pipelinePostgresOwner.LoadWorkflowTargetPersistence(ctx, identity, entityID)
 }
 
 func (s *PostgresStore) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (pipeline.WorkflowTimerActivation, bool, error) {
@@ -1078,7 +1074,7 @@ func (s *PostgresStore) RepairAuthority(ctx context.Context, req startupownershi
 	return s.startupPostgresOwner.RepairAuthority(ctx, req)
 }
 
-func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route, routes []bus.FlowInstanceRouteRecord) error {
+func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {
 	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
@@ -1138,8 +1134,8 @@ func (s *PostgresStore) ResetStandingService(ctx context.Context, operation pipe
 	return s.pipelinePostgresOwner.ResetStandingService(ctx, operation)
 }
 
-func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity, explicitRunID string) (agentcontrol.RunTargetResolution, error) {
-	return s.agentPostgresOwner.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity) (agentcontrol.RunTargetResolution, error) {
+	return s.agentPostgresOwner.ResolveAgentDirectiveRunTarget(ctx, identity)
 }
 
 func (s *PostgresStore) ResolveAuthorActivityEventDescriptor(scope authoractivity.Scope, name string) (authoractivity.EventDescriptor, bool) {
@@ -1158,8 +1154,8 @@ func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string,
 	return s.operatorRunPostgres.ResolveLatestRunDebugRunID(ctx)
 }
 
-func (s *PostgresStore) ResolveOperatorAgentIdentity(ctx context.Context, agentID string, flowInstance string) (agentidentity.Identity, error) {
-	return s.agentPostgresOwner.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
+func (s *PostgresStore) ResolveOperatorAgentIdentity(ctx context.Context, runID string, agentID string, flowInstance string) (agentidentity.Identity, error) {
+	return s.agentPostgresOwner.ResolveOperatorAgentIdentity(ctx, runID, agentID, flowInstance)
 }
 
 func (s *PostgresStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
@@ -1178,7 +1174,7 @@ func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runlifecycl
 	return s.runLifecyclePostgresOwner.ReviseRunSource(ctx, request)
 }
 
-func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.Route) error {
+func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
 	return s.pipelinePostgresOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
@@ -1206,12 +1202,12 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, owner, selectors, excludedStates)
+func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
 }
 
-func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, scopeKey, selectors, excludedStates)
+func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
+	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
 func (s *PostgresStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
@@ -1590,7 +1586,7 @@ func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decision
 	return s.decisionSQLiteOwner.DeferDecisionCard(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.Route) error {
+func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
 	return s.pipelineSQLiteOwner.DeleteFlowInstanceRoute(ctx, identity)
 }
 
@@ -1754,12 +1750,12 @@ func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx co
 	return s.runForkSQLiteOwner.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]bus.ActiveAgentDescriptor, error) {
-	return s.operatorAgentSQLite.ListActiveAgentDescriptors(ctx)
+func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context, runID string) ([]bus.ActiveAgentDescriptor, error) {
+	return s.operatorAgentSQLite.ListActiveAgentDescriptors(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx)
+func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
@@ -1814,11 +1810,11 @@ func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context
 	return s.agentSQLiteOwner.ListDurableAgentLifecycleStates(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route) ([]bus.FlowInstanceRouteRecord, error) {
+func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
 	return s.pipelineSQLiteOwner.ListFlowInstanceRouteRecords(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.Route, error) {
+func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
 	return s.pipelineSQLiteOwner.ListFlowInstanceRoutes(ctx)
 }
 
@@ -1882,8 +1878,8 @@ func (s *SQLiteRuntimeStore) ListSelectedContractRouteRecoveryRecords(ctx contex
 	return s.runForkSQLiteOwner.ListSelectedContractRouteRecoveryRecords(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx)
+func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
@@ -1898,8 +1894,8 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbo
 	return s.mailboxSQLiteOwner.ListV1MailboxItems(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListWorkflowInstances(ctx context.Context) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelineSQLiteOwner.ListWorkflowInstances(ctx)
+func (s *SQLiteRuntimeStore) ListWorkflowInstances(ctx context.Context, runID string) ([]pipeline.WorkflowInstance, error) {
+	return s.pipelineSQLiteOwner.ListWorkflowInstances(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) ListWorkflowTimerActivations(ctx context.Context, runID string, entityID string, activeOnly bool) ([]pipeline.WorkflowTimerActivation, error) {
@@ -1910,8 +1906,8 @@ func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, identit
 	return s.lLMSQLiteOwner.LoadActiveConversation(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (workflowroute.RecoveryRecord, error) {
-	return s.pipelineSQLiteOwner.LoadActiveWorkflowRoute(ctx, instancePath)
+func (s *SQLiteRuntimeStore) LoadActiveWorkflowRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (workflowroute.RecoveryRecord, error) {
+	return s.pipelineSQLiteOwner.LoadActiveWorkflowRoute(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -2070,16 +2066,16 @@ func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingre
 	return s.runtimeIngressSQLiteOwner.LoadRuntimeIngressState(ctx)
 }
 
-func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelineSQLiteOwner.LoadWorkflowEntityState(ctx, route, entityID)
+func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	return s.pipelineSQLiteOwner.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
-func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, route flowidentity.Route) (pipeline.WorkflowInstance, bool, error) {
-	return s.pipelineSQLiteOwner.LoadWorkflowInstance(ctx, route)
+func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
+	return s.pipelineSQLiteOwner.LoadWorkflowInstance(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadWorkflowTargetPersistence(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.LoadWorkflowTargetPersistence(ctx, route, entityID)
+func (s *SQLiteRuntimeStore) LoadWorkflowTargetPersistence(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.LoadWorkflowTargetPersistence(ctx, identity, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (pipeline.WorkflowTimerActivation, bool, error) {
@@ -2282,7 +2278,7 @@ func (s *SQLiteRuntimeStore) RepairAuthority(ctx context.Context, req startupown
 	return s.startupSQLiteOwner.RepairAuthority(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route, routes []bus.FlowInstanceRouteRecord) error {
+func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {
 	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
@@ -2342,8 +2338,8 @@ func (s *SQLiteRuntimeStore) ResetStandingService(ctx context.Context, operation
 	return s.pipelineSQLiteOwner.ResetStandingService(ctx, operation)
 }
 
-func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity, explicitRunID string) (agentcontrol.RunTargetResolution, error) {
-	return s.agentSQLiteOwner.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity agentidentity.Identity) (agentcontrol.RunTargetResolution, error) {
+	return s.agentSQLiteOwner.ResolveAgentDirectiveRunTarget(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) ResolveAuthorActivityEventDescriptor(scope authoractivity.Scope, name string) (authoractivity.EventDescriptor, bool) {
@@ -2358,8 +2354,8 @@ func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID stri
 	return s.budgetSQLiteOwner.ResolveFlowInstance(ctx, runID, entityID)
 }
 
-func (s *SQLiteRuntimeStore) ResolveOperatorAgentIdentity(ctx context.Context, agentID string, flowInstance string) (agentidentity.Identity, error) {
-	return s.agentSQLiteOwner.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
+func (s *SQLiteRuntimeStore) ResolveOperatorAgentIdentity(ctx context.Context, runID string, agentID string, flowInstance string) (agentidentity.Identity, error) {
+	return s.agentSQLiteOwner.ResolveOperatorAgentIdentity(ctx, runID, agentID, flowInstance)
 }
 
 func (s *SQLiteRuntimeStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
@@ -2378,7 +2374,7 @@ func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runlif
 	return s.runLifecycleSQLiteOwner.ReviseRunSource(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.Route) error {
+func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
 	return s.pipelineSQLiteOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
@@ -2406,12 +2402,12 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 	return s.deliverySQLiteOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, owner, selectors, excludedStates)
+func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
 }
 
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowInstances(ctx, scopeKey, selectors, excludedStates)
+func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
+	return s.pipelineSQLiteOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {

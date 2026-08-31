@@ -387,7 +387,8 @@ func completeConversationForkTurn(
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, SourceRunID: prepared.Snapshot.SourceRunID,
+			BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 	}
@@ -589,6 +590,7 @@ func loadConversationForkSnapshot(ctx context.Context, owner conversationForkSto
 	); err != nil {
 		return runtimerunfork.ConversationForkSnapshot{}, err
 	}
+	identityFields.RunID = out.SourceRunID
 	var err error
 	out.SourceIdentity, err = runtimeagentidentity.FromStorageFields(identityFields)
 	if err != nil {
@@ -622,20 +624,20 @@ func loadConversationForkSourceAgent(ctx context.Context, owner conversationFork
 		return runtimeactors.AgentConfig{}, err
 	}
 	row := owner.queryRow(ctx, q, `
-		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		SELECT CAST(run_id AS TEXT), agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
 		       role, model, llm_backend, memory_enabled, memory_source,
 		       COALESCE(parent_agent_id,''), COALESCE(CAST(entity_id AS TEXT),''), config,
 		       runtime_descriptor, subscriptions, emit_events, tools, permissions
 		FROM agents
-		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+		WHERE run_id = ? AND agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
 		  AND flow_instance_id = ? AND flow_instance = ?
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 	var persisted persistedAgentProjection
 	if err := row.Scan(
-		&persisted.AgentID, &persisted.Identity.NameOwner, &persisted.Identity.NameSource,
+		&persisted.Identity.RunID, &persisted.AgentID, &persisted.Identity.NameOwner, &persisted.Identity.NameSource,
 		&persisted.Identity.RoutePresence, &persisted.Identity.FlowScopeKey,
 		&persisted.Identity.FlowInstanceID, &persisted.Identity.FlowInstancePath,
 		&persisted.Role, &persisted.Model, &persisted.LLMBackend,

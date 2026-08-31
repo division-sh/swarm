@@ -161,7 +161,7 @@ func TestEntitylessDeclarativeEmissionDoesNotMaterializeWorkflowStateOnSQLiteAnd
 				}
 			}
 			assertCount("entity_state", "SELECT COUNT(*) FROM entity_state WHERE run_id = ?", "SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid", runID)
-			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE instance_id = ?", "SELECT COUNT(*) FROM flow_instances WHERE instance_id = $1", instancePath)
+			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
 		})
 	}
 }
@@ -245,7 +245,7 @@ func executeExistingOwnerBehavior(
 	if err != nil {
 		t.Fatalf("execute %s %s handler: %v", engine, name, err)
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(flowInstance))
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, flowInstance))
 	if err != nil || !ok {
 		t.Fatalf("load %s workflow instance: found=%t err=%v", name, ok, err)
 	}

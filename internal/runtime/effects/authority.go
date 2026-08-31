@@ -64,7 +64,9 @@ func (t UsageTarget) Valid() bool {
 			return false
 		}
 		identity := t.AgentIdentity.Normalize()
-		if err := identity.Validate(); err != nil || identity.AgentID() != strings.TrimSpace(t.AgentID) {
+		if err := identity.Validate(); err != nil ||
+			identity.RunID != strings.TrimSpace(t.RunID) ||
+			identity.AgentID() != strings.TrimSpace(t.AgentID) {
 			return false
 		}
 		memory, err := t.Memory.Normalize()
@@ -72,7 +74,7 @@ func (t UsageTarget) Valid() bool {
 			(!memory.Enabled || strings.TrimSpace(t.FlowInstance) != "") &&
 			identity.FlowInstance() == strings.Trim(strings.TrimSpace(t.FlowInstance), "/")
 	case UsageTargetConversationForkCompletion:
-		return t.Ordinal > 0
+		return t.Ordinal > 0 && validUUIDs(t.RunID)
 	default:
 		return false
 	}
@@ -154,6 +156,7 @@ type SelectedContractForkAuthority struct {
 type ConversationForkChatAuthority struct {
 	ForkTurnID          string
 	ForkID              string
+	SourceRunID         string
 	BundleHash          string
 	ActorTokenID        string
 	RequestOccurrenceID string
@@ -251,7 +254,7 @@ func (a Authority) Valid() bool {
 			a.ID == strings.TrimSpace(a.SelectedFork.ExecutionID) && a.SelectedFork.Generation > 0 &&
 			nonEmpty(a.SelectedFork.AdmissionFingerprint, a.SelectedFork.ContainerPlanFingerprint, a.SelectedFork.ActorCensusFingerprint, a.SelectedFork.EffectiveConfigFingerprint)
 	case AuthorityConversationForkChat:
-		return validUUIDs(a.ForkChat.ForkTurnID, a.ForkChat.ForkID, a.ForkChat.RequestOccurrenceID) &&
+		return validUUIDs(a.ForkChat.ForkTurnID, a.ForkChat.ForkID, a.ForkChat.SourceRunID, a.ForkChat.RequestOccurrenceID) &&
 			a.ID == strings.TrimSpace(a.ForkChat.ForkTurnID) && nonEmpty(a.ForkChat.BundleHash, a.ForkChat.ActorTokenID, a.ForkChat.RequestHash)
 	case AuthorityStartupProbe:
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
@@ -341,6 +344,7 @@ func (a Authority) Evidence() map[string]any {
 	case AuthorityConversationForkChat:
 		evidence["fork_turn_id"] = a.ForkChat.ForkTurnID
 		evidence["fork_id"] = a.ForkChat.ForkID
+		evidence["source_run_id"] = a.ForkChat.SourceRunID
 		evidence["bundle_hash"] = a.ForkChat.BundleHash
 		evidence["actor_token_id"] = a.ForkChat.ActorTokenID
 		evidence["request_occurrence_id"] = a.ForkChat.RequestOccurrenceID
@@ -399,6 +403,9 @@ func (a Authority) ValidateCompletionAdapter(adapter string) error {
 	}
 	if !a.Target.Valid() {
 		return fmt.Errorf("completion execution authority requires a valid preallocated usage target")
+	}
+	if a.Kind == AuthorityConversationForkChat && strings.TrimSpace(a.Target.RunID) != strings.TrimSpace(a.ForkChat.SourceRunID) {
+		return fmt.Errorf("conversation fork completion target run_id does not match source run authority")
 	}
 	seen := map[string]struct{}{}
 	for _, scope := range a.BudgetScopes {

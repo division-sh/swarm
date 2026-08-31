@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
@@ -41,7 +42,11 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 	if s.engineMutations == nil {
 		return fmt.Errorf("gate decision requires the selected workflow engine mutation owner")
 	}
-	instance, found, err := s.Load(ctx, anchor.Route)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, anchor.Route)
+	if err != nil {
+		return err
+	}
+	instance, found, err := s.Load(ctx, flowIdentity)
 	if err != nil {
 		return err
 	}
@@ -66,7 +71,7 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 		return err
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
-	record, err := workflowEngineStateRecord(card.RunID, anchor.Route, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, now.UTC())
+	record, err := workflowEngineStateRecord(runtimeflowidentity.RunScopedFlowInstance{RunID: card.RunID, Route: anchor.Route}, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, now.UTC())
 	if err != nil {
 		return err
 	}

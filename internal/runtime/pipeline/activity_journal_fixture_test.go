@@ -48,7 +48,7 @@ func (j pipelineTestActivityJournal) ClaimActivityAttemptForLoopGeneration(ctx c
 		if err := j.requireActiveRun(txctx, record.RunID); err != nil {
 			return err
 		}
-		instance, found, err := j.store.Load(txctx, testWorkflowInstanceRoute(record.FlowInstance))
+		instance, found, err := j.store.Load(txctx, testRunScopedWorkflowInstanceForRun(record.RunID, record.FlowInstance))
 		if err != nil {
 			return err
 		}

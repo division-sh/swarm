@@ -364,12 +364,12 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	accountBEntityID := runtimeflowidentity.EntityID("account/acct-b")
 	store := &fanOutPinRouteMemoryStore{
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			{InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
+			{RunID: parent.RunID(), InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+			{RunID: parent.RunID(), InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
 		},
 		activeAgents: []runtimebus.ActiveAgentDescriptor{
-			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
-			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
+			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
+			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
 		},
 	}
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
@@ -387,9 +387,34 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	eb.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			identity := route.AgentIdentity.Normalize()
+			if identity.RunID != event.RunID() {
+				return fmt.Errorf("fan-out agent route run %q does not match event run %q", identity.RunID, event.RunID())
+			}
+			admitted := false
+			for _, descriptor := range store.activeAgents {
+				if identity == descriptor.Identity.Normalize() {
+					admitted = true
+					break
+				}
+			}
+			if !admitted {
+				return fmt.Errorf("fan-out agent route %s has no committed active descriptor", identity.Description())
+			}
+		}
+		return nil
+	}))
 	for _, instanceID := range []string{"acct-a", "acct-b"} {
 		if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{
+				RunID: parent.RunID(),
+				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
+			},
 		}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
@@ -439,8 +464,9 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		if !ok {
 			t.Fatalf("unexpected account_id in fan_out payload: %#v", payload)
 		}
-		expectedAgent := agentidentitytest.Declared(
+		expectedAgent := agentidentitytest.DeclaredForRun(
 			t,
+			parent.RunID(),
 			"account-worker",
 			"notify-all-children/account",
 			"account",
@@ -491,8 +517,8 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 			name:    "ambiguous account key",
 			payload: json.RawMessage(`{"portfolio_id":"portfolio","account_id":"acct-a","command":"refresh"}`),
 			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-				{InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			},
 			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
@@ -595,14 +621,14 @@ type fanOutPinRouteMemoryStore struct {
 
 func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) error {
 	for _, set := range sets {
-		if !set.Identity.Valid() {
+		if err := set.Identity.Validate(); err != nil {
 			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
 		}
 	}
 	return nil
 }
 
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 	for i := range descriptors {
@@ -619,7 +645,7 @@ func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Co
 	return descriptors, nil
 }
 
-func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.activeAgents...), nil
 }
 

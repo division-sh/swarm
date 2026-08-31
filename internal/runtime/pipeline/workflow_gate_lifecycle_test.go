@@ -390,7 +390,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			if len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("card create transaction evidence = %#v, want active transaction", cards.createTx)
 			}
-			loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("gate-test"))
+			loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "gate-test"))
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
@@ -434,7 +434,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("created cards/transaction = %#v/%#v", cards.created, cards.createTx)
 			}
-			loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(runID))
+			loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
@@ -671,7 +671,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
-			if err := pc.MarkTerminated(ctx, testWorkflowInstanceRoute(runID), identity.NormalizeEntityID(entityID), time.Now().UTC()); err != nil {
+			if err := pc.MarkTerminated(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID), time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if len(cards.supersededFor) != 1 || cards.supersededFor[0] != entityID {
@@ -742,7 +742,7 @@ func mustStageGateAnchor(t *testing.T, card decisioncard.Card) decisioncard.Stag
 
 func assertGateLifecycleState(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
-	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(runtimeRunID(ctx)))
+	loaded, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runtimeRunID(ctx)))
 	if err != nil || !ok {
 		t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 	}

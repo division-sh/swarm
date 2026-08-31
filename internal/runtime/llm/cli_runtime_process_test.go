@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -62,7 +61,7 @@ func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness
 		t.Fatal("managed capability surface is missing from Claude completion context")
 	}
 	turn := AgentTurnRecord{
-		AgentID: target.AgentID, Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+		AgentID: target.AgentID, Identity: target.AgentIdentity,
 		Memory: target.Memory, SessionID: target.SessionID, RunID: target.RunID, EntityID: target.EntityID,
 		FlowInstance: target.FlowInstance, CapabilitySurface: &surface, Failure: &failure.Failure,
 	}

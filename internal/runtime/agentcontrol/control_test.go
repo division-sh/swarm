@@ -18,6 +18,7 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	evt, err := NewDirectiveEvent(SendDirectiveRequest{
 		AgentID:   "agent-1",
 		Directive: "run corpus",
+		RunID:     "00000000-0000-0000-0000-000000000701",
 		Source:    DirectiveSourceV1RPC,
 	}, RunTargetResolution{
 		RunID: "00000000-0000-0000-0000-000000000701",
@@ -48,40 +49,29 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	validateCurrentPlatformEventPayloadForAgentControlTest(t, string(evt.Type()), evt.Payload())
 }
 
-func TestNewDirectiveEventEncodesExactRunResolutionAuthority(t *testing.T) {
-	for _, test := range []struct {
-		name            string
-		resolution      string
-		wantDisposition events.AdmittedRunDisposition
-	}{
-		{name: "specified", resolution: RunResolutionSpecified, wantDisposition: events.AdmittedRunRequireActive},
-		{name: "active_session", resolution: RunResolutionActiveSession, wantDisposition: events.AdmittedRunRequireActive},
-		{name: "new_run", resolution: RunResolutionNewRunAllocated, wantDisposition: events.AdmittedRunCreateAuthorized},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			event, err := NewDirectiveEvent(
-				SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", Source: DirectiveSourceV1RPC},
-				RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000711", Mode: test.resolution},
-				"00000000-0000-0000-0000-000000000712",
-				"00000000-0000-0000-0000-000000000713",
-				time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
-				executionposture.Live,
-			)
-			if err != nil {
-				t.Fatalf("NewDirectiveEvent: %v", err)
-			}
-			admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-			if err != nil {
-				t.Fatalf("AdmitForPersistence: %v", err)
-			}
-			if admitted.RunDisposition() != test.wantDisposition {
-				t.Fatalf("run disposition = %q, want %q", admitted.RunDisposition(), test.wantDisposition)
-			}
-		})
+func TestNewDirectiveEventRequiresExactSpecifiedRunAuthority(t *testing.T) {
+	runID := "00000000-0000-0000-0000-000000000711"
+	event, err := NewDirectiveEvent(
+		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: DirectiveSourceV1RPC},
+		RunTargetResolution{RunID: runID, Mode: RunResolutionSpecified},
+		"00000000-0000-0000-0000-000000000712",
+		"00000000-0000-0000-0000-000000000713",
+		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
+		executionposture.Live,
+	)
+	if err != nil {
+		t.Fatalf("NewDirectiveEvent: %v", err)
+	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("AdmitForPersistence: %v", err)
+	}
+	if admitted.RunDisposition() != events.AdmittedRunRequireActive {
+		t.Fatalf("run disposition = %q, want %q", admitted.RunDisposition(), events.AdmittedRunRequireActive)
 	}
 
 	if _, err := NewDirectiveEvent(
-		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", Source: DirectiveSourceV1RPC},
+		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: "00000000-0000-0000-0000-000000000721", Source: DirectiveSourceV1RPC},
 		RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: "unknown"},
 		"00000000-0000-0000-0000-000000000722",
 		"00000000-0000-0000-0000-000000000723",
@@ -89,6 +79,16 @@ func TestNewDirectiveEventEncodesExactRunResolutionAuthority(t *testing.T) {
 		executionposture.Live,
 	); err == nil {
 		t.Fatal("NewDirectiveEvent unknown resolution error = nil")
+	}
+	if _, err := NewDirectiveEvent(
+		SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: DirectiveSourceV1RPC},
+		RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000721", Mode: RunResolutionSpecified},
+		"00000000-0000-0000-0000-000000000722",
+		"00000000-0000-0000-0000-000000000723",
+		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
+		executionposture.Live,
+	); err == nil {
+		t.Fatal("NewDirectiveEvent mismatched run error = nil")
 	}
 }
 

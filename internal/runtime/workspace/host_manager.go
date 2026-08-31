@@ -150,8 +150,31 @@ func (m *HostManager) ResolveWorkspace(ctx context.Context, actor models.AgentCo
 	return m.resolveWorkspace(ctx, actor, true)
 }
 
-func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error) {
-	return m.resolveWorkspace(ctx, actor, false)
+func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, actor models.AgentConfig) (*Target, error) {
+	if m == nil {
+		return nil, fmt.Errorf("host workspace manager is required")
+	}
+	class, err := workspaceClassForSource(m.source, actor)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceRouteClass(class) == "" {
+		if _, err := workspaceScopeForCapabilityAdmission(m.source, actor); err != nil {
+			return nil, err
+		}
+	}
+	if err := m.validateSharedMounts(); err != nil {
+		return nil, err
+	}
+	root, err := m.hostRoot()
+	if err != nil {
+		return nil, err
+	}
+	return &Target{
+		Workdir: root,
+		Backend: BackendHost,
+		Mounts:  m.hostExecutionMounts(root, ""),
+	}, nil
 }
 
 func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {

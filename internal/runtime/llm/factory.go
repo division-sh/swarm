@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -147,10 +146,14 @@ func NewNoopRuntime(contract ProviderContract) NoopRuntime {
 
 func (r NoopRuntime) ProviderContract() ProviderContract { return r.contract }
 
-func (NoopRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+func (NoopRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+	resolved, err := resolveMemoryExecution(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
 	return &Session{
-		ID: "noop", AgentID: agentID, SystemPrompt: systemPrompt,
-		Tools: append([]ToolDefinition(nil), tools...), Memory: agentmemory.PlatformDefault(),
+		ID: ensurePlatformSessionID(""), AgentID: agentID, SystemPrompt: systemPrompt,
+		Tools: append([]ToolDefinition(nil), tools...), Memory: resolved.Plan, MemoryIdentity: resolved.Identity,
 	}, nil
 }
 

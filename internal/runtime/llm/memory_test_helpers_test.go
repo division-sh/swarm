@@ -27,27 +27,26 @@ func testMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
 	}
 	return agentmemory.Identity{
 		RunID: testMemoryRunID,
-		Agent: agentidentity.Identity{
-			Name: agentidentity.Name{
-				AgentID: agentID,
-				Owner:   "test-fixture",
-				Source:  agentidentity.NameSourceRuntimeCreated,
-			},
-			Route: agentidentity.Route{
-				Presence:     agentidentity.RoutePresent,
-				ScopeKey:     scopeKey,
-				InstanceID:   instanceID,
-				InstancePath: strings.Trim(flowInstance, "/"),
-			},
+		Name: agentidentity.Name{
+			AgentID: agentID,
+			Owner:   "test-fixture",
+			Source:  agentidentity.NameSourceRuntimeCreated,
+		},
+		Route: agentidentity.Route{
+			Presence:     agentidentity.RoutePresent,
+			ScopeKey:     scopeKey,
+			InstanceID:   instanceID,
+			InstancePath: strings.Trim(flowInstance, "/"),
 		},
 	}
 }
 
 func testAgentIdentity(agentID, flowInstance string) agentidentity.Identity {
 	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
-		return testMemoryIdentity(agentID, flowInstance).Agent
+		return testMemoryIdentity(agentID, flowInstance)
 	}
 	return agentidentity.Identity{
+		RunID: testMemoryRunID,
 		Name:  agentidentity.Name{AgentID: agentID, Owner: "llm-test-fixture", Source: agentidentity.NameSourceRuntimeCreated},
 		Route: agentidentity.RootRoute(),
 	}
@@ -66,7 +65,7 @@ func withTestActorConcreteIdentity(ctx context.Context, identity agentidentity.I
 
 func withTestMemory(ctx context.Context, agentID, flowInstance string) context.Context {
 	identity := testMemoryIdentity(agentID, flowInstance)
-	ctx = withTestActorConcreteIdentity(ctx, identity.Agent)
+	ctx = withTestActorConcreteIdentity(ctx, identity)
 	ctx = agentmemory.WithExecution(ctx, testMemory(), identity)
 	return withTestOriginDeliveryClaim(ctx, identity.RunID, identity.AgentID())
 }
@@ -74,15 +73,12 @@ func withTestMemory(ctx context.Context, agentID, flowInstance string) context.C
 func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowInstance string) context.Context {
 	t.Helper()
 	ctx = runtimecorrelation.WithRunID(ctx, testMemoryRunID)
-	identity := agentidentitytest.RootRuntime(t, agentID, "llm-stateless-test")
+	identity := agentidentitytest.RootRuntimeForRun(t, testMemoryRunID, agentID, "llm-stateless-test")
 	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
-		identity = testMemoryIdentity(agentID, flowInstance).Agent
+		identity = testMemoryIdentity(agentID, flowInstance)
 	}
 	ctx = withTestActorConcreteIdentity(ctx, identity)
-	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{
-		RunID: testMemoryRunID,
-		Agent: identity,
-	})
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), identity)
 	return withTestOriginDeliveryClaim(ctx, testMemoryRunID, identity.AgentID())
 }
 
@@ -107,9 +103,9 @@ func setEffectHarnessAgent(t testing.TB, harness *effecttest.Harness, agentID, f
 	if harness == nil {
 		t.Fatal("effect harness is nil")
 	}
-	identity := agentidentitytest.RootRuntime(t, agentID, "llm-effect-test")
+	identity := agentidentitytest.RootRuntimeForRun(t, testMemoryRunID, agentID, "llm-effect-test")
 	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
-		identity = testMemoryIdentity(agentID, flowInstance).Agent
+		identity = testMemoryIdentity(agentID, flowInstance)
 	}
 	harness.Token.AgentID = agentID
 	harness.Token.Identity = identity

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -72,6 +73,21 @@ func TestAdmissionCommandRequiresHashBearingExecutionMode(t *testing.T) {
 	}
 	if liveHash == mockHash {
 		t.Fatalf("live and mock commands shared immutable hash %q", liveHash)
+	}
+}
+
+func TestAgentScheduleRejectsRunThatDisagreesWithConcreteIdentity(t *testing.T) {
+	runID := uuid.NewString()
+	command := AdmissionCommand{
+		ScheduleKey: "agent-proof", RunID: runID, EntityID: uuid.NewString(),
+		OwnerKind: OwnerAgent, OwnerID: "agent-a",
+		AgentIdentity: agentidentitytest.RootDeclaredForRun(t, uuid.NewString(), "agent-a", "test/agents.yaml"),
+		EventType:     "platform.generic_schedule_proof", Payload: semanticvalue.EmptyObject(),
+		ExecutionMode: executionmode.Live, Due: AbsoluteDue(time.Now().UTC().Add(time.Hour)),
+	}
+	command.RoutingSource, _ = events.NewRootRoutingSource(command.EntityID)
+	if err := command.Validate(); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched schedule identity error = %v, want exact run rejection", err)
 	}
 }
 

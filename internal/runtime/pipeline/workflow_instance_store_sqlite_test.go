@@ -140,7 +140,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
+	loaded, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef))
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 	atomic.StoreInt32(&runner.calls, 0)
 
-	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), identity.NormalizeEntityID(entityID), terminatedAt); err != nil {
+	if err := store.MarkTerminated(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef), identity.NormalizeEntityID(entityID), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
@@ -190,8 +190,8 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	if err := db.QueryRow(`
 		SELECT COALESCE(status, ''), terminated_at IS NOT NULL
 		FROM flow_instances
-		WHERE instance_id = ?
-	`, storageRef).Scan(&status, &hasTerminatedAt); err != nil {
+		WHERE run_id = ? AND instance_path = ?
+	`, runID, storageRef).Scan(&status, &hasTerminatedAt); err != nil {
 		t.Fatalf("load terminated flow instance: %v", err)
 	}
 	if status != "terminated" || hasTerminatedAt != 1 {
@@ -254,13 +254,13 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 		t.Fatalf("seed: %v", err)
 	}
 	sentinel := errors.New("supersession failed")
-	if err := store.mutateE(ctx, testWorkflowInstanceRoute(instance.StorageRef), func(item *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), func(item *WorkflowInstance) error {
 		item.CurrentState = "must_not_commit"
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("MutateE error = %v, want sentinel", err)
 	}
-	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
+	loaded, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef))
 	if err != nil || !ok {
 		t.Fatalf("Load = found %v err %v", ok, err)
 	}
@@ -541,23 +541,26 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 				ended_at TIMESTAMP
 		)`,
 		`CREATE TABLE flow_instances (
-			instance_id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+			instance_path TEXT NOT NULL,
 			flow_template TEXT,
 			mode TEXT,
 			config TEXT,
 			status TEXT,
 			terminated_at TIMESTAMP,
-			created_at TIMESTAMP
+			created_at TIMESTAMP,
+			PRIMARY KEY (run_id, instance_path)
 		)`,
 		`CREATE TABLE flow_instance_runtime_readiness (
-			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-			instance_id TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+			run_id TEXT NOT NULL,
+			instance_path TEXT NOT NULL,
 			plan TEXT NOT NULL,
 			topology_ready_at TIMESTAMP,
 			creation_event_emitted_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (run_id, instance_id)
+			PRIMARY KEY (run_id, instance_path),
+			FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE entity_state (
 			run_id TEXT,
@@ -580,14 +583,15 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE workflow_instance_initial_materializations (
 			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
 			entity_id TEXT NOT NULL,
-			instance_id TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+			instance_path TEXT NOT NULL,
 			projection_version INTEGER NOT NULL CHECK (projection_version = 2),
 			projection TEXT NOT NULL,
 			occurred_at TIMESTAMP NOT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (run_id, entity_id),
-			UNIQUE (run_id, instance_id),
-			FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE
+			UNIQUE (run_id, instance_path),
+			FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE,
+			FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE timers (
 			timer_id TEXT PRIMARY KEY,

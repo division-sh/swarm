@@ -30,7 +30,7 @@ func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
 	} else {
 		requireRunningSQLiteRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	}
-	seedTestAgentRow(t, ctx, db, postgres, testAgentIdentity(t, "agent-1", "directive/instance-1"), "active")
+	seedTestAgentRow(t, ctx, db, postgres, mustTestAgentIdentityForRun(directiveOperationTestRunID, "agent-1", "directive/instance-1"), "active")
 }
 
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
@@ -641,13 +641,17 @@ func directiveOperationReservationForPostureTest(t *testing.T, operationID, even
 
 func directiveOperationReservationForIdentityTest(t *testing.T, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
-	return directiveOperationReservationForIdentityAndPostureTest(t, agentID, flowInstance, operationID, eventID, key, hash, now, executionposture.Live)
+	return directiveOperationReservationForRunIdentityAndPostureTest(t, directiveOperationTestRunID, agentID, flowInstance, operationID, eventID, key, hash, now, executionposture.Live)
 }
 
 func directiveOperationReservationForIdentityAndPostureTest(t *testing.T, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time, posture executionposture.Posture) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
-	runID := directiveOperationTestRunID
-	identity := testAgentIdentity(t, agentID, flowInstance)
+	return directiveOperationReservationForRunIdentityAndPostureTest(t, directiveOperationTestRunID, agentID, flowInstance, operationID, eventID, key, hash, now, posture)
+}
+
+func directiveOperationReservationForRunIdentityAndPostureTest(t *testing.T, runID, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time, posture executionposture.Posture) runtimeagentcontrol.ReserveDirectiveOperationRequest {
+	t.Helper()
+	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 	req := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(),
 		Directive: "continue", RunID: runID, Source: runtimeagentcontrol.DirectiveSourceV1RPC, OperatorID: "actor-1",

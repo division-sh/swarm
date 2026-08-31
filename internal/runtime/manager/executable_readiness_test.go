@@ -399,10 +399,10 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	if err := restarted.lifecycle.registerExecutionWithTopology(ctx, rec, false, agent, admission, rec.Topology); err != nil {
 		t.Fatalf("seed registered/stopped projection: %v", err)
 	}
-	if err := restarted.verifyDynamicFlowAgents(ctx, req.Instance.InstancePath, persisted, rec.Topology); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {
+	if err := restarted.verifyDynamicFlowAgents(ctx, testActivationFlowIdentity(req), persisted, rec.Topology); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {
 		t.Fatalf("partial readiness error = %v", err)
 	}
-	if restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("partial executable projection published a process flow route")
 	}
 }
@@ -434,14 +434,14 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
-	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+	if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 		t.Fatal("completed topology did not publish its persisted process route")
 	}
 	if len(instances.armedEntries) != armedBefore || len(restartBus.published) != 0 {
 		t.Fatalf("topology-only reconstruction replayed durable work: timers=%d/%d events=%d", len(instances.armedEntries), armedBefore, len(restartBus.published))
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
-		cfg, ok := testAgentConfig(t, restarted, agentID, req.Instance.InstancePath)
+		cfg, ok := testAgentConfigForRun(t, restarted, req.TriggerEvent.RunID(), agentID, req.Instance.InstancePath)
 		if !ok {
 			t.Fatalf("restored agent %s missing", agentID)
 		}
@@ -510,11 +510,11 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 			t.Fatalf("first startup finalizer observed %d timer arms after baseline %d", len(instances.armedEntries), armsBefore)
 		}
 		for _, req := range requests {
-			if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+			if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
 				t.Fatalf("flow route %s was absent before the first pending finalizer", req.Instance.InstancePath)
 			}
 			for _, agentID := range []string{"reviewer", "writer"} {
-				cfg, ok := testAgentConfig(t, restarted, agentID, req.Instance.InstancePath)
+				cfg, ok := testAgentConfigForRun(t, restarted, req.TriggerEvent.RunID(), agentID, req.Instance.InstancePath)
 				if !ok {
 					t.Fatalf("agent %s@%s was absent before the first pending finalizer", agentID, req.Instance.InstancePath)
 				}

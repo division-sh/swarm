@@ -80,7 +80,7 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 	return ""
 }
 
-func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
+func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, runID string, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
 		return decisioncard.Card{}, fmt.Errorf("validate stage-gate owner: %w", err)
 	}
@@ -92,7 +92,10 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ro
 		}
 		contextSnapshot[name] = value
 	}
-	runID := runtimecorrelation.RunIDFromContext(ctx)
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return decisioncard.Card{}, fmt.Errorf("stage-gate owner requires exact run identity")
+	}
 	snapshot, err := decisioncard.FreezeSnapshot(plan.Decision, plan.Title, contextSnapshot, frozenOutcomes)
 	if err != nil {
 		return decisioncard.Card{}, err

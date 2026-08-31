@@ -15,6 +15,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -132,7 +133,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			startedAt := time.Now().UTC().Add(-time.Second)
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			rootRoute := runID
-			if _, err := rt.Pipeline.MaterializeInitialEntry(testLiveExecutionContext(materializeCtx), runtimepipeline.WorkflowInstance{
+			if _, err := rt.Pipeline.MaterializeInitialEntry(testLiveExecutionContext(materializeCtx), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(rootRoute)}, runtimepipeline.WorkflowInstance{
 				InstanceID: rootRoute, StorageRef: rootRoute,
 				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,

@@ -110,6 +110,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
+		workflowStates, err := selectedContractWorkflowStates(plan, forkRunID, selection, req.RecipientPlanning, req.WorkflowStates)
+		if err != nil {
+			return err
+		}
 		existing, found, err := loadExactRunForkMaterialization(txctx, port.loadSnapshot, tx, forkRunID, plan, identity, &selection)
 		if err != nil {
 			return err
@@ -120,6 +124,19 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			if err := port.requireProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 				return err
+			}
+			existing.AgentTopologies = nil
+			for _, state := range workflowStates {
+				_, topologies, encoded, err := selectedContractWorkflowReadiness(identity.BundleSourceFact, state)
+				if err != nil {
+					return err
+				}
+				if encoded != nil {
+					if err := requireSelectedContractWorkflowReadiness(txctx, tx, port.postgres, state, encoded); err != nil {
+						return err
+					}
+				}
+				existing.AgentTopologies = append(existing.AgentTopologies, topologies...)
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
 			if err != nil {
@@ -148,10 +165,6 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 
 		metadata, err := loadRunForkEntityMetadata(plan)
-		if err != nil {
-			return err
-		}
-		workflowStates, err := selectedContractWorkflowStates(plan, forkRunID, selection, req.RecipientPlanning, req.WorkflowStates)
 		if err != nil {
 			return err
 		}
@@ -188,9 +201,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		for _, state := range workflowStates {
-			if err := materializeSelectedContractWorkflowState(txctx, tx, state, now); err != nil {
+			topologies, err := materializeSelectedContractWorkflowState(txctx, tx, port.postgres, identity.BundleSourceFact, state, now)
+			if err != nil {
 				return err
 			}
+			materialization.AgentTopologies = append(materialization.AgentTopologies, topologies...)
 		}
 		binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
 			ForkRunID: forkRunID, SourceRunID: plan.SourceRunID, ForkEventID: plan.ForkPoint.EventID, ContractSelection: selection,
@@ -209,6 +224,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			ReplayResumeAdmission: replayAdmission, SelectedContractBinding: &binding,
 			UnsupportedBlockers:   runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil),
 			DeliveryResumeBlocked: true, SourceRunStatusUnchanged: true, DataPins: pins,
+			AgentTopologies: append([]runfork.RunForkSelectedContractAgentTopology(nil), materialization.AgentTopologies...),
 		}
 		return nil
 	})

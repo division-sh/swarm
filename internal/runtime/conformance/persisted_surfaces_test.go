@@ -25,6 +25,7 @@ import (
 	runtimeagentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -33,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -121,10 +123,9 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
-
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -191,11 +192,12 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
-	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
+	runID := uuid.NewString()
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, runID, "agent-1")
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
-	identity := agentmemory.Identity{RunID: uuid.NewString(), Agent: lifecycleToken.Identity}
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
+	identity := lifecycleToken.Identity
 	sessionID := acquireLiveConversationSession(t, ctx, db, identity)
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: sessionID,
@@ -262,10 +264,9 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
-	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
-
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, runID, "agent-1")
 
 	event1 := eventtest.PersistedProjection(uuid.NewString(),
 
@@ -328,7 +329,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
+		base = agentmemory.WithExecution(base, agentmemory.Authored(true), lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if claim, ok := claims[evt.ID()]; ok {
@@ -448,10 +449,9 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
-	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
-
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, runID, "agent-1")
 
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID,
@@ -530,7 +530,7 @@ printf '{"result":"ok"}'
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
+		base = agentmemory.WithExecution(base, agentmemory.Authored(true), lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if deliveryClaim.DeliveryID() != "" {
@@ -616,14 +616,14 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 
 	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: uuid.NewString(),
 		AgentID:   "agent-1",
-		Identity:  agentmemory.Identity{RunID: runID, Agent: conformanceAgentIdentity(t, "agent-1")},
+		Identity:  conformanceAgentIdentity(t, runID, "agent-1"),
 		Memory:    agentmemory.Authored(true),
 		Messages:  []runtimellm.Message{{Role: "assistant", Content: "should fail"}},
 		Summary:   "should fail",
@@ -1195,7 +1195,9 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
+	runID := uuid.NewString()
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
@@ -1209,8 +1211,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	pg.SetSessionLockTTL(30 * time.Second)
 	registry := runtimesessions.Registry(pg)
 	leaseCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
-	identity := agentmemory.Identity{RunID: uuid.NewString(), Agent: conformanceAgentIdentity(t, "agent-1")}
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
+	identity := conformanceAgentIdentity(t, runID, "agent-1")
 	lease, err := registry.Acquire(leaseCtx, identity, "conformance")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
@@ -1327,39 +1328,10 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
-	module := loadConformanceRuntimeWorkflowModule(t)
-	managerStore := &conformanceManagerReplayStore{
-		agents: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{
-				ExecutionMode: "live",
-				ID:            "agent-a",
-				Identity:      agentidentitytest.RootDeclared(t, "agent-a", "conformance-manager-replay"),
-			},
-			StartedAt: time.Now().UTC(),
-		}},
-	}
-	managerReplayIdentity := managerStore.agents[0].Config.Identity
+	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("..", "..", "..", "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
 	runID := uuid.NewString()
+	managerStore := &conformanceManagerReplayStore{}
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	eventIDs := map[string]string{
-		"support.replay.ok":     uuid.NewString(),
-		"support.replay.skip":   uuid.NewString(),
-		"support.replay.leased": uuid.NewString(),
-		"support.replay.drop":   uuid.NewString(),
-	}
-	for index, eventType := range []string{
-		"support.replay.ok",
-		"support.replay.skip",
-		"support.replay.leased",
-		"support.replay.drop",
-	} {
-		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
-			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
-			[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: managerReplayIdentity}},
-			runtimepipelineobligation.ScopeSubscribed,
-		)
-		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
-	}
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1391,6 +1363,46 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	desiredAgents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), runtimeagenttopology.SourceCoordinate{
+		BundleHash: bundleHash, BundleSource: bundleSource,
+	})
+	if err != nil {
+		t.Fatalf("compile manager replay agent identity: %v", err)
+	}
+	var managerReplayIdentity agentidentity.Identity
+	for _, desired := range desiredAgents {
+		if desired.Identity.AgentID() != "test-agent" {
+			continue
+		}
+		managerReplayIdentity, err = desired.Identity.Live(runID)
+		if err != nil {
+			t.Fatalf("materialize manager replay agent identity: %v", err)
+		}
+		break
+	}
+	if err := managerReplayIdentity.Validate(); err != nil {
+		t.Fatalf("manager replay fixture has no declared test-agent: %v", err)
+	}
+	eventIDs := map[string]string{
+		"support.replay.ok":     uuid.NewString(),
+		"support.replay.skip":   uuid.NewString(),
+		"support.replay.leased": uuid.NewString(),
+		"support.replay.drop":   uuid.NewString(),
+	}
+	for index, eventType := range []string{
+		"support.replay.ok",
+		"support.replay.skip",
+		"support.replay.leased",
+		"support.replay.drop",
+	} {
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
+			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
+			[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("test-agent"), AgentIdentity: managerReplayIdentity}},
+			runtimepipelineobligation.ScopeSubscribed,
+		)
+		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
+	}
 	if err := rt.Manager.Shutdown(); err != nil {
 		t.Fatalf("retire constructed manager before test replacement: %v", err)
 	}
@@ -1398,17 +1410,15 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		BundleSourceFact: authorActivityTestBundleSourceFact,
+		SemanticSource:   module.SemanticSource(),
 		WorkOwner:        rt.WorkOccurrence(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
-	_, startupGrant := installConformanceRuntimeStartupGeneration(t, ctx, pg, rt)
-	processBinding, err := startupGrant.ProcessExecutionBinding()
-	if err != nil {
-		t.Fatalf("load manager replay process execution binding: %v", err)
-	}
-	managerStore.agents[0].ProcessBinding = processBinding
+	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(rt.Manager.FinalizeCommittedAgentReadiness))
+	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1448,12 +1458,22 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	replayRecipient := "agent-replay"
-	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
-	replayIdentity := runtimebustest.Identity(t, replayRecipient, "")
-
 	replayRunID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: replayRunID})
+	replayRecipient := "agent-replay"
+	replayDeliveries := runtimebustest.SubscribeForRun(t, bus, replayRunID, replayRecipient)
+	replayIdentity := runtimebustest.IdentityForRun(t, replayRunID, replayRecipient, "")
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if route.AgentIdentity.RunID != event.RunID() {
+				return fmt.Errorf("test replay route run %q does not match event run %q", route.AgentIdentity.RunID, event.RunID())
+			}
+			if err := route.AgentIdentity.Validate(); err != nil {
+				return fmt.Errorf("test replay route identity: %w", err)
+			}
+		}
+		return nil
+	}))
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
 	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(replayRecipient), AgentIdentity: replayIdentity}
@@ -1624,10 +1644,9 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
-	seedConformanceAgent(t, ctx, pg, "agent-1")
-
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -1717,7 +1736,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
+	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
 		InstanceID:      "mutation-flow",
 		StorageRef:      "mutation-flow",
 		EntityID:        entityID,
@@ -1848,9 +1867,9 @@ func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableNam
 	}
 }
 
-func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
+func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, agentID string) {
 	t.Helper()
-	identity := conformanceAgentIdentity(t, agentID)
+	identity := conformanceAgentIdentity(t, runID, agentID)
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+agentID+".intent", "Exercise the conformance surface.")
 	if err != nil {
 		t.Fatalf("resolve conformance agent intent: %v", err)
@@ -1919,10 +1938,10 @@ func newConformanceManagedConversation(t *testing.T, agentID string, identity ag
 	return conversation
 }
 
-func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) runtimeeffects.LifecycleToken {
+func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, agentID string) runtimeeffects.LifecycleToken {
 	t.Helper()
-	seedConformanceAgent(t, ctx, pg, agentID)
-	identity := conformanceAgentIdentity(t, agentID)
+	seedConformanceAgent(t, ctx, pg, runID, agentID)
+	identity := conformanceAgentIdentity(t, runID, agentID)
 	result, found, err := pg.LoadAgentLifecycleState(ctx, identity)
 	if err != nil {
 		t.Fatalf("load running agent lifecycle %s: %v", agentID, err)
@@ -1938,17 +1957,14 @@ func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.Po
 	}
 }
 
-func conformanceAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
+func conformanceAgentIdentity(t testing.TB, runID, agentID string) agentidentity.Identity {
 	t.Helper()
-	return agentidentitytest.Declared(t, agentID, "conformance-test", "support", "inst-1", "support/inst-1")
+	return agentidentitytest.DeclaredForRun(t, runID, agentID, "conformance-test", "support", "inst-1", "support/inst-1")
 }
 
 func conformanceAgentMemoryIdentity(t testing.TB, runID, agentID string) agentmemory.Identity {
 	t.Helper()
-	return agentmemory.Identity{
-		RunID: strings.TrimSpace(runID),
-		Agent: conformanceAgentIdentity(t, agentID),
-	}
+	return conformanceAgentIdentity(t, strings.TrimSpace(runID), agentID)
 }
 
 func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) error {

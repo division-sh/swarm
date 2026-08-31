@@ -192,16 +192,19 @@ type runtimeHarness struct {
 }
 
 type catalogWorkflowPersistence interface {
-	Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
-	ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error)
-	MaterializeInitialEntry(context.Context, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	Load(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
+	ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error)
+	MaterializeInitialEntry(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
 }
 
-func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.Route {
-	return runtimeflowidentity.RouteForInstancePath(instancePath)
+func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.RunScopedFlowInstance {
+	return runtimeflowidentity.RunScopedFlowInstance{
+		RunID: catalogRuntimeRunID,
+		Route: runtimeflowidentity.RouteForInstancePath(instancePath),
+	}
 }
 
-func catalogRootWorkflowRoute() runtimeflowidentity.Route {
+func catalogRootWorkflowRoute() runtimeflowidentity.RunScopedFlowInstance {
 	return catalogExactWorkflowRoute(catalogRuntimeRunID)
 }
 
@@ -1270,7 +1273,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	entityType := h.requireRootEntityType()
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := h.workflow.MaterializeInitialEntry(ctx, catalogRootWorkflowRoute(), runtimepipeline.WorkflowInstance{
 		InstanceID:      catalogRuntimeRunID,
 		StorageRef:      catalogRuntimeRunID,
 		EntityID:        entityID,
@@ -1408,7 +1411,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	}
 	materializeCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	materializeCtx = runtimeeffects.WithExecutionMode(materializeCtx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, instance, h.startedAt); err != nil {
+	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, catalogExactWorkflowRoute(instance.StorageRef), instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
 }

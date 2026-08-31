@@ -116,12 +116,13 @@ func TestConfigureWorkspaceDataProjectionMountsCanonicalEmptyDataInDocker(t *tes
 	if err := configureWorkspaceDataProjection(manager, source, serveRuntimePersistence{}); err != nil {
 		t.Fatalf("configureWorkspaceDataProjection: %v", err)
 	}
+	const runID = "82828282-8282-8282-8282-828282828282"
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "docker-data-free-reader",
-		Identity:      runtimeagentidentitytest.RootDeclared(t, "docker-data-free-reader", "test/agents.yaml"),
+		Identity:      runtimeagentidentitytest.RootDeclaredForRun(t, runID, "docker-data-free-reader", "test/agents.yaml"),
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), "82828282-8282-8282-8282-828282828282")
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	if _, err := manager.ResolveWorkspace(ctx, actor); err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}

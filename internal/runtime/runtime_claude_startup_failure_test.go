@@ -98,8 +98,13 @@ func startupFailureTestBinding(t *testing.T, serverURL string) (context.Context,
 	ctx := runtimeactors.WithActor(testAuthorActivityContext(context.Background()), runtimeactors.AgentConfig{
 		ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 	})
+	actorPlan, err := identity.Plan()
+	if err != nil {
+		t.Fatalf("startup actor plan: %v", err)
+	}
 	surface, err := llm.ManagedCapabilitySurfaceForStartup(
 		ctx,
+		actorPlan,
 		&llm.ClaudeCLIRuntime{},
 		[]llm.ToolDefinition{{Name: "health_check"}},
 		toolcapabilities.NewSet([]toolcapabilities.Capability{{Name: "health_check", Visible: true, Callable: true}}),

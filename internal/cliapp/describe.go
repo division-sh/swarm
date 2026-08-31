@@ -253,7 +253,7 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 				fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
 			}
 			if flow.TemplateInstance != nil {
-				fmt.Fprintf(out, "    instance: field=%s\n", flow.TemplateInstance.Field)
+				fmt.Fprintf(out, "    instance: field=%s identity=%s\n", flow.TemplateInstance.Field, flow.TemplateInstance.Identity)
 			}
 			if flow.SingletonCoordinator != nil {
 				fmt.Fprintf(out, "    singleton coordinator: primary_entity=%s contained_fields=%d\n", flow.SingletonCoordinator.PrimaryEntity, len(flow.SingletonCoordinator.ContainedState))

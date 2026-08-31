@@ -123,7 +123,7 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
-    pattern: '\bRouteTable\.Resolve\b|\brouteTable\.Resolve\b'
+    pattern: '\bRouteTable\.Resolve(?:ForRun)?\b|\brouteTable\.Resolve(?:ForRun)?\b'
     minimum_matching_files: 4
     required_paths:
       - internal/runtime/runforkadmission/contract_frontier.go
@@ -827,10 +827,11 @@ seam_families:
       - internal/runtime/runstart/root_inputs.go
     search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, typed_connect_recipient_evaluation]
     notes: >
-      RouteTable.Resolve is limited to direct typed pub/sub consumers in
-      runstart and selected-fork admission. EventBus lowered-connect planning
-      and template lifecycle do not call it; they consume the compiled typed
-      recipient evaluator instead.
+      RouteTable.Resolve is limited to runless authored direct typed pub/sub
+      consumers in runstart. Selected-fork admission uses ResolveForRun with
+      the exact source run. EventBus lowered-connect planning and template
+      lifecycle do not use either API as connect authority; they consume the
+      compiled typed recipient evaluator instead.
   - id: compiled_connect_recipient_evaluation
     layer: route_plan_authority
     classification: canonical_owner
@@ -1195,7 +1196,7 @@ seam_families:
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
       - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
-    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority]
+    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority, descriptor_evidence]
     notes: >
       Catalog and fixture proofs are broader behavior consumers. Required PR
       smoke must cite focused rows; full route behavior stays in named full

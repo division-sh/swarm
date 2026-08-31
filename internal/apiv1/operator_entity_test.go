@@ -293,7 +293,7 @@ func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
 		{
 			name:     "entity list bad cursor",
 			method:   "entity.list",
-			body:     `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"cursor":"bad"}}`,
+			body:     `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-4111-8111-111111111111","cursor":"bad"}}`,
 			store:    &fakeEntityReadStore{listErr: operatorread.ErrInvalidEntityCursor},
 			wantCode: codeInvalidParams,
 		},

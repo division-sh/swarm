@@ -239,7 +239,7 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 				Persistence: workflowPersistenceForTest(store),
 			})
 			mockCtx := runtimeeffects.WithExecutionMode(liveCtx, executionmode.Mock)
-			result, err := pcA.MaterializeInitialEntry(mockCtx, workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
+			result, err := pcA.MaterializeInitialEntry(mockCtx, testRunScopedWorkflowRoute(mockCtx, route), workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-first-revision", WorkflowVersion: "1.0.0",
 				RuntimeReadiness: &readiness, CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
@@ -247,7 +247,7 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize timer-free dynamic instance: result=%v err=%v", result, err)
 			}
-			if err := pcA.ArmInitialEntryTimers(mockCtx, route); err != nil {
+			if err := pcA.ArmInitialEntryTimers(mockCtx, testRunScopedWorkflowRoute(mockCtx, route)); err != nil {
 				t.Fatalf("arm timer-free source: %v", err)
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true); len(active) != 0 {
@@ -260,7 +260,7 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 				Module:      &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence: workflowPersistenceForTest(store),
 			})
-			if err := pcB.ReconcileInitialEntryTimers(liveCtx, route); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(liveCtx, testRunScopedWorkflowRoute(liveCtx, route)); err != nil {
 				t.Fatalf("reconcile first initial timer with live administrative context: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true)
@@ -294,7 +294,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				WorkOwner:      ownerA,
 				TimerScheduler: schedulerA,
 			})
-			result, err := pcA.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			result, err := pcA.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
@@ -302,7 +302,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
 			}
-			if err := pcA.ArmInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcA.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm source A: %v", err)
 			}
 			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
@@ -331,16 +331,16 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			})
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
-			if err := pcB.ReconcileInitialEntryTimers(cancelledCtx, rootRoute); err == nil {
+			if err := pcB.ReconcileInitialEntryTimers(cancelledCtx, testRunScopedWorkflowRoute(cancelledCtx, rootRoute)); err == nil {
 				t.Fatal("cancelled source revision unexpectedly committed")
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
 				t.Fatalf("cancelled source revision changed active timers: %#v", active)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("reconcile source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("replay source B reconciliation: %v", err)
 			}
 
@@ -442,7 +442,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				WorkOwner:      ownerA,
 				TimerScheduler: schedulerA,
 			})
-			result, err := pcA.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			result, err := pcA.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-progressed-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
@@ -450,7 +450,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
 			}
-			if err := pcA.ArmInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcA.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm source A: %v", err)
 			}
 			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
@@ -460,7 +460,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			sourceAByDeclaration := workflowTimerActivationsByDeclaration(sourceARows)
 			transitionAt := createdAt.Add(time.Minute)
 			route := rootRoute
-			progressed, found, err := store.Load(ctx, route)
+			progressed, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 			if err != nil || !found {
 				t.Fatalf("load workflow instance before progress: found=%v err=%v", found, err)
 			}
@@ -496,10 +496,10 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				WorkOwner:      ownerB,
 				TimerScheduler: schedulerB,
 			})
-			if err := pcB.ReconcileInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("reconcile progressed source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("replay progressed source B: %v", err)
 			}
 
@@ -551,7 +551,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			entityID := uuid.NewString()
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-			result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-initial-event", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
@@ -559,7 +559,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize initial/event timers: result=%v err=%v", result, err)
 			}
-			if err := pc.ArmInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm initial timer: %v", err)
 			}
 			if err := reconcileWorkflowTimerForTest(ctx, pc, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
@@ -586,7 +586,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				t.Fatal("event-caused timer activation is missing")
 			}
 
-			if err := pc.RetireInitialEntryTimerWakeups(ctx, rootRoute); err != nil {
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("retire initial wakeups: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -600,7 +600,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				t.Fatalf("initial cleanup changed durable activations: %#v", active)
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("rearm initial wakeup after cleanup: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -632,7 +632,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				}
 				route := testWorkflowInstanceRoute(instancePath)
 				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-				result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
+				result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath), workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
 					WorkflowName: instanceFlow, WorkflowVersion: "1.0.0",
 					CurrentState: "waiting", CreatedAt: createdAt,
 					EntityType: "test_entity",
@@ -1179,7 +1179,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				AdvancesTo: "waiting",
 			}
 			execute(uuid.NewString(), "loop.repeat", firstGeneration.RevisionID, repeatHandler)
-			persistedInstance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(runID))
+			persistedInstance, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !ok {
 				t.Fatalf("load repeated workflow instance found=%v err=%v", ok, err)
 			}
@@ -1526,7 +1526,7 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 							t.Fatalf("cancel: %v", err)
 						}
 					case "unrelated":
-						if err := store.mutateE(ctx, workflowTimerRootRoute(ctx), func(instance *WorkflowInstance) error {
+						if err := store.mutateE(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)), func(instance *WorkflowInstance) error {
 							if instance.Fields == nil {
 								instance.Fields = map[string]any{}
 							}
@@ -1546,7 +1546,7 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 					t.Fatalf("converged timer = status:%s publishes:%d, want %s/%d", persisted.Status, bus.publishedCount(), test.wantStatus, test.wantPublishes)
 				}
 				if unrelatedApplied {
-					instance, found, err := store.Load(ctx, workflowTimerRootRoute(ctx))
+					instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx)))
 					if err != nil || !found || instance.Fields["unrelated_timer_order_proof"] != test.name {
 						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Fields["unrelated_timer_order_proof"], err)
 					}
@@ -2021,7 +2021,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			entityID := uuid.NewString()
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-time.Second))
-			result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting",
 				EntityType: "test_entity",
@@ -2045,7 +2045,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			default:
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, rootRoute); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("ArmInitialEntryTimers: %v", err)
 			}
 			var event events.Event
@@ -2085,7 +2085,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
-			if err := pc.ArmInitialEntryTimers(ctx, workflowTimerRootRoute(ctx)); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx))); err != nil {
 				t.Fatalf("arm initial workflow timer: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -2093,7 +2093,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 				return active == 1 && draining == 0
 			}, "initial workflow timer wakeup")
 
-			if err := pc.RetireInitialEntryTimerWakeups(ctx, workflowTimerRootRoute(ctx)); err != nil {
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx))); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
 			waitForWorkflowTimerSchedulerEmpty(t, pc.workflowTimers.scheduler)
@@ -2102,7 +2102,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 				t.Fatalf("retired wakeup durable status = %q, want active", persisted.Status)
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, workflowTimerRootRoute(ctx)); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx))); err != nil {
 				t.Fatalf("rearm initial workflow timer: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {

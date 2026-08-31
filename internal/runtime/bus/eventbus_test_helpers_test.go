@@ -139,6 +139,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	); err != nil {
 		return nil, err
 	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(context.Context, events.Event, []events.DeliveryRoute) error {
+		return nil
+	}))
 	return bus, nil
 }
 

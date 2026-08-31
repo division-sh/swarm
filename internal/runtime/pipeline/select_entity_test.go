@@ -40,7 +40,7 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 		t.Fatal("expected selected handler to run")
 	}
 
-	instance, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route())
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 		assertEntityStateRowCount(t, db, 1)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route())
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 		t.Fatal("expected selected handler to run")
 	}
 
-	instance, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route())
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-1").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-active", "vertical-1", 0, "active")
 	seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-archived", "vertical-1", 10, "archived")
 	seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-terminated", "vertical-1", 20, "active")
-	_, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route())
+	_, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load terminated: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 		t.Fatal("expected terminated budget entity to exist")
 	}
 	terminatedIdentity := DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated")
-	if err := pc.workflowStore.MarkTerminated(ctx, terminatedIdentity.Route(), identity.NormalizeEntityID(terminatedIdentity.EntityID), time.Now().UTC()); err != nil {
+	if err := pc.workflowStore.MarkTerminated(ctx, testRunScopedWorkflowRoute(ctx, terminatedIdentity.Route()), identity.NormalizeEntityID(terminatedIdentity.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 
@@ -438,7 +438,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 		t.Fatal("expected selected handler to run")
 	}
 
-	active, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-active").Route())
+	active, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-active").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load active: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if got := active.Fields["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("active spent_usd = %#v, want 42", got)
 	}
-	terminal, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-archived").Route())
+	terminal, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-archived").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load terminal: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if got := terminal.Fields["spent_usd"]; got != float64(10) && got != 10 {
 		t.Fatalf("terminal spent_usd = %#v, want unchanged 10", got)
 	}
-	reloadedTerminated, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route())
+	reloadedTerminated, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load terminated after select: %v", err)
 	}
@@ -798,7 +798,7 @@ func loadSelectOrCreateBudgetByKey(t *testing.T, store *workflowInstanceStore, c
 		t.Fatalf("selectOrCreateEntityInstanceID: %v", err)
 	}
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
-	instance, ok, err := store.Load(ctx, identity.Route())
+	instance, ok, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, identity.Route()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -879,10 +879,10 @@ func assertFlowInstanceControlConfig(t *testing.T, db *sql.DB, storageRef, field
 	t.Helper()
 	var gotRaw []byte
 	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT config -> $2
+		SELECT config -> $3
 		FROM flow_instances
-		WHERE instance_id = $1
-	`, storageRef, field).Scan(&gotRaw); err != nil {
+		WHERE run_id = $1::uuid AND instance_path = $2
+	`, testPipelineRunID, storageRef, field).Scan(&gotRaw); err != nil {
 		t.Fatalf("load flow_instances config for %s: %v", storageRef, err)
 	}
 	wantRaw, err := json.Marshal(want)

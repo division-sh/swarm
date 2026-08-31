@@ -73,7 +73,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
-			Identity:      testAgentIdentity(t, "agent-1", ""),
+			Identity:      mustTestAgentIdentityForRun(runID, "agent-1", ""),
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -294,7 +294,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		runID, "", events.EventEnvelope{}, now,
 	)
 	routes := []events.DeliveryRoute{
-		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
+		testAgentDeliveryRoute(t, runID, "agent-pending", "fixture/agent-pending"),
 		testEntitylessNodeDeliveryRoute("node-pending"),
 	}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, routes); err != nil {
@@ -446,7 +446,10 @@ func (o sqliteFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
 		Plan: plan,
 		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
-			Identity: plan.Identity.Route(),
+			Identity: runtimeflowidentity.RunScopedFlowInstance{
+				RunID: plan.Readiness.RunID,
+				Route: plan.Identity.Route(),
+			},
 		}},
 	})
 }
@@ -484,7 +487,10 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
 	}
 
-	loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
+	loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.RouteForInstancePath("review/inst-1"),
+	})
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -556,7 +562,10 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	}
 
 	for _, storageRef := range []string{"review/component-a", "review/component-b"} {
-		loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
+		loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+			RunID: runID,
+			Route: runtimeflowidentity.RouteForInstancePath(storageRef),
+		})
 		if err != nil {
 			t.Fatalf("Load workflow instance %s: %v", storageRef, err)
 		}
@@ -768,7 +777,7 @@ func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimeb
 	return nil
 }
 
-func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	filtered := b.routeRequests[:0]
@@ -788,7 +797,7 @@ func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context,
 	return b.PublishPersistedFlowInstanceRoute(req)
 }
 
-func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, req := range b.routeRequests {
@@ -799,7 +808,7 @@ func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowident
 	return false
 }
 
-func (b *sqliteFlowActivationBus) VerifyFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+func (b *sqliteFlowActivationBus) VerifyFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if !b.HasFlowInstanceRoute(identity) {
 		return errors.New("flow-instance route is not installed")
 	}
@@ -819,7 +828,7 @@ func (b *sqliteFlowActivationBus) routePaths() []string {
 	defer b.mu.Unlock()
 	out := make([]string, 0, len(b.routeRequests))
 	for _, req := range b.routeRequests {
-		out = append(out, strings.TrimSpace(req.Identity.InstancePath))
+		out = append(out, strings.TrimSpace(req.Identity.Route.InstancePath))
 	}
 	return out
 }
@@ -969,7 +978,7 @@ func assertSQLiteAddedRoutes(t *testing.T, bus *sqliteFlowActivationBus, wantPat
 func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivationBus, wantPath string, wantVars map[string]string) {
 	t.Helper()
 	for _, req := range bus.materializationRequests() {
-		if strings.TrimSpace(req.Identity.InstancePath) != wantPath {
+		if strings.TrimSpace(req.Identity.Route.InstancePath) != wantPath {
 			continue
 		}
 		for key, want := range wantVars {
@@ -1371,7 +1380,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	owner := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
-	if _, err := owner.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := owner.MaterializeInitialEntry(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("root/acme")}, runtimepipeline.WorkflowInstance{
 		InstanceID:      "acme",
 		StorageRef:      "root/acme",
 		EntityID:        entityID,
@@ -1387,7 +1396,10 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	}, createdAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
-	loaded, ok, err := owner.Load(ctx, runtimeflowidentity.RouteForInstancePath("root/acme"))
+	loaded, ok, err := owner.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.RouteForInstancePath("root/acme"),
+	})
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -1415,7 +1427,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
-			Identity:      testAgentIdentity(t, "agent-1", "global"),
+			Identity:      mustTestAgentIdentityForRun(runID, "agent-1", "global"),
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -1499,7 +1511,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity.Agent}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}
@@ -1564,7 +1576,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", "")
+	seedManagedTurnFixtureAgent(t, ctx, store, runID, "task-agent", "")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1624,7 +1636,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", "")
+	seedManagedTurnFixtureAgent(t, ctx, store, runID, "task-agent", "")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1681,7 +1693,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", flowInstance)
+	seedManagedTurnFixtureAgent(t, ctx, store, runID, "task-agent", flowInstance)
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1738,11 +1750,12 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	identity := testAgentMemoryIdentity(t, runID, "agent-cleanup-1", "global")
 
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-cleanup-1",
-			Identity:      testAgentIdentity(t, "agent-cleanup-1", "global"),
+			Identity:      identity,
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -1757,7 +1770,6 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	identity := testAgentMemoryIdentity(t, runID, "agent-cleanup-1", "global")
 	lease, err := store.Acquire(ctx, identity, "owner-1")
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
@@ -1788,13 +1800,13 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		t.Fatalf("seed stateless audit: %v", err)
 	}
 
-	state, found, err := store.LoadAgentLifecycleState(ctx, identity.Agent)
+	state, found, err := store.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found {
 		t.Fatalf("load lifecycle state before termination: found=%v err=%v", found, err)
 	}
 	if _, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "sqlite-test-terminate-agent-cleanup-1",
-		Identity: identity.Agent, AgentID: "agent-cleanup-1", Trigger: "test",
+		Identity: identity, AgentID: "agent-cleanup-1", Trigger: "test",
 		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
 		ConfigRevision: state.ConfigRevision, RunMode: runtimemanager.AgentRunModeStopped,

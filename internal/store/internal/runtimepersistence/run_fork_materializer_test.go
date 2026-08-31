@@ -1073,7 +1073,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity, Target: events.RouteIdentity{EntityID: entityID}},
 		at.Add(time.Second),
 	)
-	agentIdentity := runtimebustest.Identity(t, "safe-agent", "")
+	agentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
 	sourceRoute := events.DeliveryRoute{
 		Recipient: events.MustAgentDeliveryRecipient(agentIdentity.AgentID()), AgentIdentity: agentIdentity,
 	}
@@ -1244,9 +1244,9 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	sourceEvent = sourceAdmitted.Event()
 
-	safeAgentIdentity := runtimebustest.Identity(t, "safe-agent", "")
-	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
-	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, replayRoute, runtimedelivery.StateQueued, nil)
+	safeAgentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
+	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
 	sourceDeliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1261,6 +1261,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
+	forkAgentIdentity := runtimebustest.IdentityForRun(t, materialized.ForkRunID, "safe-agent", "")
+	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(forkAgentIdentity.AgentID()), AgentIdentity: forkAgentIdentity}
 	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayExecutionOwner) {
 		t.Fatalf("ActivateRunFork without historical replay owner error = %v, want %s", err, runfork.RunForkHistoricalReplayExecutionOwner)
@@ -1436,8 +1438,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err := eb.SetDeliveryContinuationOwner(continuationOwner); err != nil {
 		t.Fatalf("install fork replay delivery continuation owner: %v", err)
 	}
-	ch := runtimebustest.Subscribe(t, eb, "safe-agent", events.EventType("fork.ready"))
-	currentOnly := runtimebustest.Subscribe(t, eb, "current-only-agent", events.EventType("fork.ready"))
+	ch := runtimebustest.SubscribeForRun(t, eb, materialized.ForkRunID, "safe-agent", events.EventType("fork.ready"))
+	currentOnly := runtimebustest.SubscribeForRun(t, eb, materialized.ForkRunID, "current-only-agent", events.EventType("fork.ready"))
 	eventtestsql.CorruptEventStore(t, ctx, db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "prove historical replay refuses a malformed durable route object",
@@ -1879,7 +1881,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		{
 			name: "fork session",
 			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
-				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "fork-state"))
+				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(forkRunID, "agent-a", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1897,7 +1899,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		{
 			name: "fork conversation audit",
 			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
-				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-state"))
+				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(forkRunID, "agent-task", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1918,11 +1920,12 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
 				originRunID := uuid.NewString()
-				identity := testAgentIdentity(t, "agent-a", "fork-state")
+				identity := mustTestAgentIdentityForRun(originRunID, "agent-a", "fork-state")
 				fields := testAgentIdentityStorageFields(t, identity)
 				requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: originRunID, StartedAt: at.Add(-time.Minute),
 				})
+				seedTestAgentRow(t, ctx, db, true, identity, "active")
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1938,7 +1941,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 					originRunID, events.EventEnvelope{}, at,
 				)
 				if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
-					AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: originRunID, Agent: identity},
+					AgentID: identity.AgentID(), Identity: identity,
 					RunID: originRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
 					TriggerEventID: event.ID(), TriggerEventType: string(event.Type()), ParseOK: true,
 				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
@@ -1973,7 +1976,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
-			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "agent-a", "fork-state"), "active")
+			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "fork-state"), "active")
 			if err := tc.seed(ctx, pg, db, sourceRunID, eventID, materialized.ForkRunID, at.Add(time.Second)); err != nil {
 				t.Fatalf("seed %s: %v", tc.name, err)
 			}

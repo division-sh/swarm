@@ -158,8 +158,8 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	mixedFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "mixed_failure", nil))
 	malformedBlocks := `[{"kind":"tool_use","input":{"secret":"private-malformed-input"}}]`
 	validMalformedSeedBlocks := `[{"kind":"tool_use","tool_name":"inspect","input":{"secret":"private-malformed-input"},"data":{"tool_use_id":"tool-use-malformed"}}]`
-	identity := testAgentIdentity(t, agentID, "conversation")
-	malformedIdentity := testAgentIdentity(t, malformedAgentID, "conversation-malformed")
+	identity := mustTestAgentIdentityForRun(runID, agentID, "conversation")
+	malformedIdentity := mustTestAgentIdentityForRun(runID, malformedAgentID, "conversation-malformed")
 	requireRunFixtureForTest(t, context.Background(), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: base,
 	})
@@ -316,7 +316,7 @@ func seedOperatorConversationProjectionTurn(
 		}
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, backend.settlement, runtimellm.AgentTurnRecord{
-		AgentID: seed.identity.AgentID(), Identity: agentmemory.Identity{RunID: seed.runID, Agent: seed.identity},
+		AgentID: seed.identity.AgentID(), Identity: seed.identity,
 		Memory: agentmemory.Authored(true), SessionID: seed.sessionID, RunID: seed.runID,
 		FlowInstance: seed.identity.FlowInstance(), EntityID: seed.entityID,
 		TriggerEventID: seed.triggerEventID, TriggerEventType: seed.triggerType, TaskID: seed.taskID,

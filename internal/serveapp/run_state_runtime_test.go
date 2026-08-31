@@ -112,6 +112,25 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 	return eventID
 }
 
+func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
+	t.Helper()
+	eventID := uuid.NewString()
+	if err := bus.Publish(runStatusAuthorActivityContext(), eventtest.ExistingRunRootIngress(
+		eventID,
+		events.EventType("scan.requested"),
+		"api.v1",
+		"",
+		[]byte(`{"topic":"sample"}`),
+		0,
+		runID,
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)); err != nil {
+		t.Fatalf("publish existing-run root event: %v", err)
+	}
+	return eventID
+}
+
 func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, runID, entityID string) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -260,19 +279,20 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
-		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		Identity:      servedRuntimeRootIdentityForRun(t, runID, testAgent.id),
 		Role:          "worker",
 		Type:          "stub",
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	}))
+	}), mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash))
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
+	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := uuid.NewString()
-	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
+	eventID := publishRunStatusExistingRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, pg, runID, entityID)
 
 	select {
@@ -385,19 +405,20 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
-		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		Identity:      servedRuntimeRootIdentityForRun(t, runID, testAgent.id),
 		Role:          "worker",
 		Type:          "stub",
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	}))
+	}), mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash))
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
+	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := uuid.NewString()
-	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
+	eventID := publishRunStatusExistingRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, pg, runID, entityID)
 
 	select {

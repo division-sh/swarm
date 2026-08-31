@@ -328,8 +328,8 @@ func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.R
 		candidates := make([]operatorread.OperatorConnectCandidateEvidence, 0, len(plan.Candidates()))
 		for _, candidate := range plan.Candidates() {
 			agent := ""
-			if !candidate.AgentIdentity().IsZero() {
-				agent = candidate.AgentIdentity().Description()
+			if !candidate.AgentPlan().IsZero() {
+				agent = candidate.AgentPlan().Description()
 			}
 			candidates = append(candidates, operatorread.OperatorConnectCandidateEvidence{
 				ReceiverSHA256: candidate.Receiver().String(), RecipientKind: candidate.Recipient().Code(),

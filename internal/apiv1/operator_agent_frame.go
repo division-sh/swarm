@@ -15,7 +15,7 @@ import (
 )
 
 type AgentFrameEffectiveResolver interface {
-	ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error)
+	ResolveAgentFrameConfig(runID, agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error)
 }
 
 type AgentFrameHandlerOptions struct {
@@ -147,6 +147,10 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
+	runID, err := requiredExactAgentFrameScalarParam(params, "run_id")
+	if err != nil {
+		return agentframe.Inspection{}, err
+	}
 	root, err := optionalBoolParam(params, "root", false)
 	if err != nil {
 		return agentframe.Inspection{}, err
@@ -166,7 +170,7 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	if bundleHash != "" || flow != "" || root == (flowInstance != "") {
 		return agentframe.Inspection{}, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "effective inspection requires exactly one of root or flow_instance and forbids bundle_hash and flow"})
 	}
-	resolved, err := resolver.ResolveAgentFrameConfig(agentID, flowInstance, root)
+	resolved, err := resolver.ResolveAgentFrameConfig(runID, agentID, flowInstance, root)
 	if errors.Is(err, runtimemanager.ErrAgentNotFound) {
 		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 	}

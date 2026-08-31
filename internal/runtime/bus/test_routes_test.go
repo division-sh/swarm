@@ -9,22 +9,41 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 var testAgentRouteGeneration atomic.Uint64
 
+const busInternalTestRunID = "99999999-9999-9999-9999-999999999999"
+
+func testRunScopedFlowRoute(route runtimeflowidentity.Route) runtimeflowidentity.RunScopedFlowInstance {
+	return testRunScopedFlowRouteForRun(busInternalTestRunID, route)
+}
+
+func testRunScopedFlowRouteForRun(runID string, route runtimeflowidentity.Route) runtimeflowidentity.RunScopedFlowInstance {
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	if err != nil {
+		panic(err)
+	}
+	return identity
+}
+
 func testAgentRouteIdentity(t testing.TB, agentID, flowPath string) agentidentity.Identity {
+	return testAgentRouteIdentityForRun(t, busInternalTestRunID, agentID, flowPath)
+}
+
+func testAgentRouteIdentityForRun(t testing.TB, runID, agentID, flowPath string) agentidentity.Identity {
 	t.Helper()
 	if flowPath == "" {
-		return agentidentitytest.RootRuntime(t, agentID, "bus-test-route")
+		return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "bus-test-route")
 	}
 	scopeKey, instanceID := flowPath, flowPath
 	if slash := strings.IndexByte(flowPath, '/'); slash >= 0 {
 		scopeKey, instanceID = flowPath[:slash], flowPath[slash+1:]
 	}
-	return agentidentitytest.Runtime(t, agentID, "bus-test-route", scopeKey, instanceID, flowPath)
+	return agentidentitytest.RuntimeForRun(t, runID, agentID, "bus-test-route", scopeKey, instanceID, flowPath)
 }
 
 func testAgentLifecycleToken(t testing.TB, agentID, flowPath string, epoch int64, generation uint64) runtimeeffects.LifecycleToken {

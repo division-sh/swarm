@@ -22,6 +22,21 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	if err := validateReleaseDockerCommand(root, validExecutionAgent); err != nil {
 		t.Fatalf("valid run-bound agent create rejected: %v", err)
 	}
+	t.Run("run-scoped agent fingerprint owns its workspace volume", func(t *testing.T) {
+		fingerprint := strings.Repeat("d", 64)
+		containerName := "swarm-agent-" + fingerprint
+		args := append([]string(nil), validExecutionAgent...)
+		replaceReleaseArgValue(args, "--name", containerName)
+		replaceReleaseArgValuePrefix(args, "--label", "dev.swarm.container.name=", "dev.swarm.container.name="+containerName)
+		args = replaceReleaseCreateMount(args, releaseE2EAgentWorkdir, "workspaces_agent_"+fingerprint+":"+releaseE2EAgentWorkdir)
+		if err := validateReleaseDockerCommand(root, args); err != nil {
+			t.Fatalf("valid dynamic run-scoped agent create rejected: %v", err)
+		}
+		args = replaceReleaseCreateMount(args, releaseE2EAgentWorkdir, releaseE2EAgentVolume+":"+releaseE2EAgentWorkdir)
+		if err := validateReleaseDockerCommand(root, args); err == nil {
+			t.Fatal("run-scoped agent create accepted a workspace volume owned by another fingerprint")
+		}
+	})
 	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-scaffold"}); err != nil {
 		t.Fatalf("runtime identity label inspection rejected: %v", err)
 	}
@@ -126,10 +141,20 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 }
 
 func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *testing.T) {
-	valid := validReleaseClaudeDockerExecArgs(t, releaseE2ERawMCPURL)
+	validStartup := validReleaseClaudeDockerExecArgs(t, releaseE2ERawMCPURL, true)
+	validLive := validReleaseClaudeDockerExecArgs(t, releaseE2ERawMCPURL, false)
 	startupPrompt := []byte("Startup validation probe. Do not call any tools. Reply with the exact text ok.")
-	if _, err := validateReleaseDockerExec(valid, startupPrompt); err != nil {
+	if _, err := validateReleaseDockerExec(validStartup, startupPrompt); err != nil {
 		t.Fatalf("valid fixture invocation rejected: %v", err)
+	}
+	if _, err := validateReleaseDockerExec(validLive, []byte("complete the authored work")); err != nil {
+		t.Fatalf("valid live fixture invocation rejected: %v", err)
+	}
+	if _, err := validateReleaseDockerExec(validLive, startupPrompt); err == nil {
+		t.Fatal("startup probe accepted a live run-scoped workspace")
+	}
+	if _, err := validateReleaseDockerExec(validStartup, []byte("complete the authored work")); err == nil {
+		t.Fatal("live turn accepted runless startup infrastructure")
 	}
 
 	credentialCases := map[string]func([]string) []string{
@@ -141,14 +166,17 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 			return args
 		},
 	}
-	for phase, prompt := range map[string][]byte{
-		"startup": startupPrompt,
-		"live":    []byte("complete the authored work"),
+	for phase, tc := range map[string]struct {
+		args   []string
+		prompt []byte
+	}{
+		"startup": {args: validStartup, prompt: startupPrompt},
+		"live":    {args: validLive, prompt: []byte("complete the authored work")},
 	} {
 		for mutation, mutate := range credentialCases {
 			t.Run(phase+" "+mutation+" oauth", func(t *testing.T) {
-				args := mutate(append([]string(nil), valid...))
-				if _, err := validateReleaseDockerExec(args, prompt); err == nil {
+				args := mutate(append([]string(nil), tc.args...))
+				if _, err := validateReleaseDockerExec(args, tc.prompt); err == nil {
 					t.Fatalf("%s invocation with %s OAuth was accepted", phase, mutation)
 				}
 			})
@@ -162,7 +190,7 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 		},
 		"wrong container": func(args []string) []string {
 			for index, arg := range args {
-				if arg == releaseE2EAgentContainer {
+				if arg == "swarm-system" {
 					args[index] = "totally-wrong-container"
 					break
 				}
@@ -194,7 +222,7 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			args := mutate(append([]string(nil), valid...))
+			args := mutate(append([]string(nil), validStartup...))
 			if _, err := validateReleaseDockerExec(args, startupPrompt); err == nil {
 				t.Fatalf("mutated Docker exec was accepted: %q", args)
 			}
@@ -210,7 +238,7 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			args := mutate(append([]string(nil), valid...))
+			args := mutate(append([]string(nil), validLive...))
 			if _, err := validateReleaseDockerExec(args, []byte("complete the authored work")); err == nil {
 				t.Fatalf("live invocation with %s was accepted: %q", name, args)
 			}
@@ -233,7 +261,7 @@ func TestReleaseContainerMCPAdmissionRejectsRawEndpointMutations(t *testing.T) {
 		})
 	}
 
-	args := validReleaseClaudeDockerExecArgs(t, "http://127.0.0.1:8082/mcp")
+	args := validReleaseClaudeDockerExecArgs(t, "http://127.0.0.1:8082/mcp", false)
 	if _, err := validateReleaseDockerExec(args, []byte("live turn")); err == nil {
 		t.Fatal("loopback raw MCP config was accepted")
 	}
@@ -258,6 +286,12 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 			}
 		})
 	}
+	t.Run("workspace replacement", func(t *testing.T) {
+		records := append(append([]fakeDockerRecord(nil), base...), fakeDockerRecord{Class: "container_remove"})
+		if err := validateReleaseDockerEvidence(records); err == nil || !strings.Contains(err.Error(), "replaced a workspace container") {
+			t.Fatalf("workspace replacement validation error = %v, want startup/live ownership rejection", err)
+		}
+	})
 	for name, mutate := range map[string]func(*fakeDockerRecord){
 		"wrong notice status": func(record *fakeDockerRecord) { record.ToolStatus = "ok" },
 		"missing mailbox id":  func(record *fakeDockerRecord) { record.MailboxID = "" },
@@ -288,7 +322,7 @@ func TestReleaseEmulatorRejectsDuplicateAttemptBeforeRecording(t *testing.T) {
 	}
 }
 
-func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
+func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string, startup bool) []string {
 	t.Helper()
 	config := map[string]any{
 		"mcpServers": map[string]any{
@@ -306,12 +340,22 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	container := releaseE2EAgentContainer
+	workdir := releaseE2EAgentWorkdir
+	if startup {
+		container = "swarm-system"
+		workdir = releaseE2ESystemWorkdir
+	}
+	allowedTools := releaseE2ELiveAllowedTools()
+	if startup {
+		allowedTools = releaseE2EStartupAllowedTools()
+	}
 	return []string{
 		"exec", "-i",
 		"-e", "SWARM_TOOL_GATEWAY_URL=" + releaseE2ERawMCPURL,
 		"-e", "CLAUDE_CODE_OAUTH_TOKEN=" + releaseE2EOAuthToken,
-		"-w", releaseE2EAgentWorkdir,
-		releaseE2EAgentContainer, "claude",
+		"-w", workdir,
+		container, "claude",
 		"-p",
 		"--session-id", "11111111-1111-1111-1111-111111111111",
 		"--output-format", "stream-json",
@@ -319,7 +363,7 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 		"--verbose",
 		"--system-prompt", "release worker",
 		"--tools", strings.Join(releaseE2EBuiltinTools(), ","),
-		"--allowedTools", strings.Join(releaseE2EStartupAllowedTools(), ","),
+		"--allowedTools", strings.Join(allowedTools, ","),
 		"--mcp-config", string(rawConfig),
 		"--strict-mcp-config",
 		"--model", releaseE2EManagedModel,
@@ -401,7 +445,6 @@ func validReleaseEvidence() []fakeDockerRecord {
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,
 		},
-		{Class: "container_remove"},
 		{
 			Class:     "claude_live",
 			Args:      []string{"claude", "--tools", strings.Join(releaseE2EBuiltinTools(), ","), "--allowedTools", strings.Join(releaseE2ELiveAllowedTools(), ","), "--model", releaseE2EManagedModel},

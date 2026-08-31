@@ -334,14 +334,14 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 	later := time.Unix(1700007200, 0).UTC().Format(time.RFC3339Nano)
 	return map[string]mutatingHTTPRuntimeFixture{
 		"agent.replay": {
-			Params:         map[string]any{"event_id": "evt-1", "agent_id": "agent-a"},
-			ConflictParams: map[string]any{"event_id": "evt-1", "agent_id": "agent-b"},
+			Params:         map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-a"},
+			ConflictParams: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-b"},
 			ResultKeys:     []string{"event_id", "agent_id", "replay_event_id", "audit_event_id", "original_deliveries", "new_deliveries"},
 			SuccessEffects: 2,
 		},
 		"agent.restart": {
-			Params:         map[string]any{"agent_id": "agent-a"},
-			ConflictParams: map[string]any{"agent_id": "agent-b"},
+			Params:         map[string]any{"run_id": runID, "agent_id": "agent-a"},
+			ConflictParams: map[string]any{"run_id": runID, "agent_id": "agent-b"},
 			ResultKeys:     []string{"ok"},
 			SuccessEffects: 1,
 		},
@@ -601,16 +601,16 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		}}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
-		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent(t, "evt-empty", nil, runtimedelivery.StatusDelivered)
 		}}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent(t, "evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
 		}}},
-		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "run_id": runID, "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.createErr = operatorread.ErrSessionNotFound
@@ -697,10 +697,10 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "mailbox.defer", Params: map[string]any{"card_id": "card-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrAlreadyTerminal }}},
 		{Method: "mailbox.defer", Params: map[string]any{"card_id": "card-1", "until": time.Unix(1699999999, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: InvalidDeferUntilCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrInvalidDeferUntil }}},
 
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "missing", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "missing", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
 		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentNotRunningCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentNotRunningCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotRunning, AgentID: "agent-a", CurrentStatus: runtimeagentcontrol.StatusTerminated}
 		}}},
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": missingRunID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
@@ -709,22 +709,19 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrRunAlreadyTerminal, AgentID: "agent-a", RunID: runID, CurrentStatus: "completed"}
 		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AmbiguousRunTargetCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAmbiguousRunTarget, AgentID: "agent-a", ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{SessionID: "sess-1", RunID: runID}}}
-		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveInProgressCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveInProgressCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveInProgress, runtimeagentcontrol.DirectiveOperationExecuting, runID)
 		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveCompletionPendingCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveCompletionPendingCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveCompletionPending, runtimeagentcontrol.DirectiveOperationExecuted, runID)
 		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveExecutionFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveExecutionFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveOperationFailed, runID)
 		}}},
-		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveOutcomeIndeterminateCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: AgentDirectiveOutcomeIndeterminateCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveOperationIndeterminate, runID)
 		}}},
-		{Method: "agent.restart", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "agent.restart", Params: map[string]any{"run_id": runID, "agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
 		}}},
 		{Method: "runtime.pause", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
@@ -1512,7 +1509,7 @@ func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []stri
 	t.Helper()
 	deliveries := make([]operatorread.OperatorEventDelivery, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		identity := agentidentitytest.Declared(t, subscriber, "test-bundle", "research", "inst-1", "research/inst-1")
+		identity := agentidentitytest.DeclaredForRun(t, "00000000-0000-0000-0000-000000000101", subscriber, "test-bundle", "research", "inst-1", "research/inst-1")
 		route := events.DeliveryRoute{
 			Recipient:     events.MustAgentDeliveryRecipient(subscriber),
 			AgentIdentity: identity,
@@ -1628,7 +1625,7 @@ func directiveOperationProbeError(t testing.TB, err error, state runtimeagentcon
 	t.Helper()
 	op := runtimeagentcontrol.DirectiveOperation{
 		OperationID:      "00000000-0000-0000-0000-000000000203",
-		AgentIdentity:    agentidentitytest.Declared(t, "agent-a", "test-bundle", "research", "inst-1", "research/inst-1"),
+		AgentIdentity:    agentidentitytest.DeclaredForRun(t, runID, "agent-a", "test-bundle", "research", "inst-1", "research/inst-1"),
 		DirectiveEventID: "00000000-0000-0000-0000-000000000202",
 		ResolvedRunID:    runID,
 		State:            state,

@@ -31,7 +31,7 @@ func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agent
 	if strings.TrimSpace(rec.SessionID) == "" {
 		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("session_id is required")
 	}
-	if err := identity.ValidateOwner(); err != nil {
+	if err := agentmemory.ValidateIdentity(identity, false); err != nil {
 		return agentmemory.Plan{}, agentmemory.Identity{}, err
 	}
 	if plan.Enabled {
@@ -48,7 +48,7 @@ func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agent
 }
 
 func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity) error {
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx 
 		}
 		return effects.Add(identity.RunID, runforkrevision.FamilyAgentConversationAudits)
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	if err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 		if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "upsert_conversation", false); err != nil {
+		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "upsert_conversation", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(ctx, `
@@ -167,14 +167,14 @@ func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "project_completion_conversation", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "project_completion_conversation", false); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -239,7 +239,7 @@ func (s *LLMPostgresOwner) LoadActiveConversation(ctx context.Context, identity 
 	if err := identity.Validate(); err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
@@ -278,7 +278,7 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 	if update.Watchdog == nil {
 		return fmt.Errorf("watchdog is required")
 	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
 	}
@@ -294,7 +294,7 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "update_watchdog", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "update_watchdog", false); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `

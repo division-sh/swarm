@@ -103,7 +103,7 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 	source := loadPackageBackedStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
-	records, err := manager.resolvedStaticTopologyRecords(source)
+	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology fixture: count=%d err=%v", len(records), err)
 	}
@@ -173,7 +173,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 
-	records, err := manager.resolvedStaticTopologyRecords(source)
+	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil {
 		t.Fatalf("resolve static topology records: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	source := loadPackageBackedStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
-	records, err := manager.resolvedStaticTopologyRecords(source)
+	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
@@ -405,7 +405,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	source := loadPackageBackedStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
-	records, err := manager.resolvedStaticTopologyRecords(source)
+	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
@@ -760,7 +760,7 @@ func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T)
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
 	manager.semanticSource = source
-	records, err := manager.resolvedStaticTopologyRecords(source)
+	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static records: count=%d err=%v", len(records), err)
 	}

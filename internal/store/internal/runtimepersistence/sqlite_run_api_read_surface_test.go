@@ -53,8 +53,8 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.backend.ConstructionHandle(), snapshot)
 	}
 	deliveryRoutesByEvent := map[string][]events.DeliveryRoute{
-		newerEvent:       {testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")},
-		newerMiddleEvent: {testAgentDeliveryRoute(t, "agent-failed", "fixture/agent-failed"), testEntitylessNodeDeliveryRoute("node-success")},
+		newerEvent:       {testAgentDeliveryRoute(t, newer, "agent-1", "fixture/agent-1")},
+		newerMiddleEvent: {testAgentDeliveryRoute(t, newer, "agent-failed", "fixture/agent-failed"), testEntitylessNodeDeliveryRoute("node-success")},
 		newerLatestEvent: {testEntitylessNodeDeliveryRoute("node-dead")},
 	}
 	for _, fixture := range []struct {
@@ -90,12 +90,12 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, older, olderEntity)
 	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), newerEvent)
-	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}, runtimedelivery.StateQueued, nil)
+	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, testAgentDeliveryRoute(t, newer, "agent-1", "fixture/agent-1"), runtimedelivery.StateQueued, nil)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), pendingDelivery, now.Add(3*time.Second), now.Add(3*time.Second))
 
 	middleEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), newerMiddleEvent)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)
-	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-failed")}, runtimedelivery.StateRetrying, &agentFailure)
+	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, testAgentDeliveryRoute(t, newer, "agent-failed", "fixture/agent-failed"), runtimedelivery.StateRetrying, &agentFailure)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), agentFailedDelivery, now.Add(4*time.Second), now.Add(5*time.Second))
 	agentFailedDeliveryID := agentFailedDelivery.DeliveryID
 
@@ -298,9 +298,12 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		t, readyRunID, uuid.NewString(), "quiescence-settled", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
 	))
 	cancelGenericScheduleFixture(t, ctx, sqliteStore, settled, "test_settled", now)
-	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
-	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
-	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, quiescenceIdentity, "active")
+	blockedIdentity := mustTestAgentIdentityForRun(blockedRunID, "quiescence-agent", "quiescence")
+	readyIdentity := mustTestAgentIdentityForRun(readyRunID, "quiescence-agent", "quiescence")
+	blockedFields := testAgentIdentityStorageFields(t, blockedIdentity)
+	readyFields := testAgentIdentityStorageFields(t, readyIdentity)
+	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, blockedIdentity, "active")
+	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, readyIdentity, "active")
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -311,13 +314,13 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', ?, 'active', ?, ?),
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', ?, 'active', ?, ?)
-	`, uuid.NewString(), blockedRunID,
-		quiescenceFields.AgentID, quiescenceFields.NameOwner, quiescenceFields.NameSource,
-		quiescenceFields.RoutePresence, quiescenceFields.FlowScopeKey, quiescenceFields.FlowInstanceID, quiescenceFields.FlowInstancePath,
+		`, uuid.NewString(), blockedRunID,
+		blockedFields.AgentID, blockedFields.NameOwner, blockedFields.NameSource,
+		blockedFields.RoutePresence, blockedFields.FlowScopeKey, blockedFields.FlowInstanceID, blockedFields.FlowInstancePath,
 		now.Add(time.Minute), now, now,
 		uuid.NewString(), readyRunID,
-		quiescenceFields.AgentID, quiescenceFields.NameOwner, quiescenceFields.NameSource,
-		quiescenceFields.RoutePresence, quiescenceFields.FlowScopeKey, quiescenceFields.FlowInstanceID, quiescenceFields.FlowInstancePath,
+		readyFields.AgentID, readyFields.NameOwner, readyFields.NameSource,
+		readyFields.RoutePresence, readyFields.FlowScopeKey, readyFields.FlowInstanceID, readyFields.FlowInstancePath,
 		now.Add(-time.Minute), now, now); err != nil {
 		t.Fatalf("seed sqlite sessions: %v", err)
 	}

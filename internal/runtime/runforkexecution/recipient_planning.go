@@ -117,7 +117,7 @@ func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) []r
 	seen := map[frontierRecipientKey]struct{}{}
 	for _, recipient := range in {
 		recipient = runfork.NewRunForkContractFrontierRecipient(
-			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
 		)
 		if recipient.Recipient.Empty() {
 			continue
@@ -391,7 +391,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 		actualKeys = actualRecipientIdentityKeys(actual.RoutedRecipients)
 	}
 	if !recipientKeysEqual(expectedKeys, actualKeys) {
-		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", runfork.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
+		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s: expected=%v actual=%v fresh_create_projection=%t", runfork.RunForkSelectedContractRecipientPlanningOwner, sourceEventID, expectedKeys, actualKeys, freshCreateProjection)
 	}
 	return nil
 }
@@ -531,7 +531,7 @@ func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []fron
 	out := make([]frontierRecipientKey, 0, len(in))
 	for _, recipient := range in {
 		recipient = runfork.NewRunForkContractFrontierRecipient(
-			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
 		)
 		if recipient.Recipient.Empty() {
 			continue
@@ -550,7 +550,7 @@ func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []frontierR
 			continue
 		}
 		out = append(out, recipientKey(runfork.NewRunForkContractFrontierRecipient(
-			typedRecipient, recipient.Path, recipient.RouteSource, agentidentity.Identity{},
+			typedRecipient, recipient.Path, recipient.RouteSource, agentidentity.Plan{},
 		)))
 	}
 	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })

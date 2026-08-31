@@ -421,8 +421,26 @@ func TestDescribeCommandRendersScalarTemplateInstanceIdentity(t *testing.T) {
 	if stderr.String() != "" {
 		t.Fatalf("describe stderr = %q, want empty", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "instance: field=account_id") {
+	if !strings.Contains(stdout.String(), "instance: field=account_id identity=run + flow + instance_key") {
 		t.Fatalf("describe output missing scalar instance readback:\n%s", stdout.String())
+	}
+}
+
+func TestDescribeCommandJSONRendersRunScopedTemplateInstanceIdentity(t *testing.T) {
+	contractsRoot := writeDescribeScalarTemplateInstanceContracts(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"describe", "--contracts", contractsRoot, "--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var output describeCommandOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode describe json: %v", err)
+	}
+	if len(output.Flows) != 1 || output.Flows[0].TemplateInstance == nil || output.Flows[0].TemplateInstance.Identity != "run + flow + instance_key" {
+		t.Fatalf("describe template identity = %#v", output.Flows)
 	}
 }
 

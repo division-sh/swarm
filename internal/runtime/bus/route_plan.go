@@ -253,19 +253,44 @@ func (a liveRecipientAuthority) Normalized() liveRecipientAuthority {
 	return liveRecipientAuthorityIdentity
 }
 
+type agentLifecycleAdmission uint8
+
+const (
+	agentLifecycleAdmissionNone agentLifecycleAdmission = iota
+	agentLifecycleAdmissionStaticDeclaration
+	agentLifecycleAdmissionMaterializingFlow
+)
+
+func (a agentLifecycleAdmission) pending() bool {
+	return a == agentLifecycleAdmissionStaticDeclaration || a == agentLifecycleAdmissionMaterializingFlow
+}
+
+func (a agentLifecycleAdmission) validate() error {
+	switch a {
+	case agentLifecycleAdmissionNone, agentLifecycleAdmissionStaticDeclaration, agentLifecycleAdmissionMaterializingFlow:
+		return nil
+	default:
+		return fmt.Errorf("invalid agent lifecycle admission %d", a)
+	}
+}
+
+func (a agentLifecycleAdmission) requiresMaterializingEntity() bool {
+	return a == agentLifecycleAdmissionMaterializingFlow
+}
+
 type RoutePlanDeliveryIntent struct {
-	Recipient             events.DeliveryRecipient
-	AgentIdentity         agentidentity.Identity
-	TargetBlueprint       events.RouteIdentity
-	TargetOwnership       events.DeliveryTargetOwnership
-	Handler               runtimepipeline.DeliveryTargetHandler
-	Context               events.DeliveryContext
-	PayloadProjection     events.DeliveryPayloadProjection
-	ConnectClaim          events.ConnectExecutionClaim
-	Producer              routeIntentProducer
-	Persist               bool
-	PendingAgentLifecycle bool
-	StructuralOwnerProof  runtimepinrouting.StructuralTargetOwnerProof
+	Recipient            events.DeliveryRecipient
+	AgentIdentity        agentidentity.Identity
+	TargetBlueprint      events.RouteIdentity
+	TargetOwnership      events.DeliveryTargetOwnership
+	Handler              runtimepipeline.DeliveryTargetHandler
+	Context              events.DeliveryContext
+	PayloadProjection    events.DeliveryPayloadProjection
+	ConnectClaim         events.ConnectExecutionClaim
+	Producer             routeIntentProducer
+	Persist              bool
+	AgentLifecycle       agentLifecycleAdmission
+	StructuralOwnerProof runtimepinrouting.StructuralTargetOwnerProof
 }
 
 type DeliveryRouteBlueprint struct {
@@ -482,7 +507,7 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 		if !intent.Persist {
 			continue
 		}
-		if intent.Recipient.IsAgent() && intent.PendingAgentLifecycle {
+		if intent.Recipient.IsAgent() && intent.AgentLifecycle.pending() {
 			if _, live := liveAgents[intent.AgentIdentity]; !live {
 				continue
 			}
@@ -523,9 +548,12 @@ func (p RoutePlan) ValidatePersistentDeliveries() error {
 		liveAgents[recipient.AgentIdentity] = struct{}{}
 	}
 	routeAgents := make(map[agentidentity.Identity]struct{})
-	pendingAgents := make(map[agentidentity.Identity]struct{})
+	pendingAgents := make(map[agentidentity.Identity]agentLifecycleAdmission)
 	for _, intent := range p.DeliveryIntents {
-		if !intent.PendingAgentLifecycle {
+		if err := intent.AgentLifecycle.validate(); err != nil {
+			return err
+		}
+		if !intent.AgentLifecycle.pending() {
 			continue
 		}
 		if !intent.Persist {
@@ -537,7 +565,10 @@ func (p RoutePlan) ValidatePersistentDeliveries() error {
 		if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
 			return fmt.Errorf("pending lifecycle delivery intent has invalid agent identity")
 		}
-		pendingAgents[intent.AgentIdentity] = struct{}{}
+		if previous, ok := pendingAgents[intent.AgentIdentity]; ok && previous != intent.AgentLifecycle {
+			return fmt.Errorf("pending lifecycle agent %q has conflicting admission authority", intent.AgentIdentity.Description())
+		}
+		pendingAgents[intent.AgentIdentity] = intent.AgentLifecycle
 	}
 	routes := p.DeliveryRoutes()
 	if err := events.ValidateDeliveryRoutes(routes); err != nil {
@@ -694,21 +725,29 @@ func routePlanDeliveryIntentsFromRoutes(routes []plannedDeliveryRoute, producer 
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routePlanDeliveryIntentsFromConnectRoutes(routes []runtimepinrouting.ConnectDeliveryRoute, producer routeIntentProducer, receiverEvent events.EventType) []RoutePlanDeliveryIntent {
+func routePlanDeliveryIntentsFromConnectRoutes(runID string, routes []runtimepinrouting.ConnectDeliveryRoute, producer routeIntentProducer, receiverEvent events.EventType) ([]RoutePlanDeliveryIntent, error) {
 	routes = runtimepinrouting.NormalizeConnectDeliveryRoutes(routes)
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
+		identity := agentidentity.Identity{}
+		var err error
+		if route.Recipient.IsAgent() {
+			identity, err = route.AgentPlan.Live(runID)
+			if err != nil {
+				return nil, fmt.Errorf("compose connect delivery live agent identity: %w", err)
+			}
+		}
 		handler := runtimepipeline.DeliveryTargetHandler{}
 		if !route.Handler.Empty() {
 			handler = runtimepipeline.MustDeliveryTargetHandler(route.Handler.Node()).ForEvent(receiverEvent)
 		}
 		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: route.Recipient, AgentIdentity: route.AgentIdentity, TargetBlueprint: route.Target,
+			Recipient: route.Recipient, AgentIdentity: identity, TargetBlueprint: route.Target,
 			Handler: handler, Context: route.Context, PayloadProjection: route.PayloadProjection, ConnectClaim: route.ConnectClaim,
 			Producer: producer, Persist: true,
 		})
 	}
-	return normalizeRoutePlanDeliveryIntents(out)
+	return normalizeRoutePlanDeliveryIntents(out), nil
 }
 
 func deliveryRouteLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLiveRecipient {
@@ -729,7 +768,13 @@ func deliveryRouteLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLiveR
 func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, producer routeIntentProducer) RoutePlan {
 	plan := newRoutePlan(evt)
 	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest, producer)...)
-	plan.AddDeliveryIntents(routePlanDeliveryIntentsFromAdmittedRoutes(manifest.DeliveryRoutes, producer)...)
+	intents := routePlanDeliveryIntentsFromAdmittedRoutes(manifest.DeliveryRoutes, producer)
+	for index := range intents {
+		if admission, ok := manifest.AgentLifecycles[intents[index].AgentIdentity.Normalize()]; ok {
+			intents[index].AgentLifecycle = admission
+		}
+	}
+	plan.AddDeliveryIntents(intents...)
 	plan.TargetFailure = manifest.TargetFailure
 	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || !plan.TargetFailure.Empty() {
 		plan.MarkLowerPrecedenceRouteProduction(producer)
@@ -847,6 +892,7 @@ type deliveryIntentKey struct {
 	projection     string
 	connectClaim   events.ConnectExecutionClaim
 	structural     runtimepinrouting.StructuralTargetOwnerProof
+	agentLifecycle agentLifecycleAdmission
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -882,10 +928,10 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			projection:     intent.PayloadProjection.Fingerprint(),
 			connectClaim:   intent.ConnectClaim,
 			structural:     intent.StructuralOwnerProof,
+			agentLifecycle: intent.AgentLifecycle,
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
-			out[idx].PendingAgentLifecycle = out[idx].PendingAgentLifecycle || intent.PendingAgentLifecycle
 			if out[idx].Handler.Empty() {
 				out[idx].Handler = intent.Handler
 			}

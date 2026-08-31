@@ -168,6 +168,9 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
+			requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+				Origin: semanticScenarioSetupRunOriginForTest(), RunID: identityFields.RunID,
+			})
 
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO agents (
@@ -180,7 +183,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					lifecycle_process_boot_id, lifecycle_generation_grant_id,
 					lifecycle_bundle_hash, lifecycle_bundle_source,
 					lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-					topology_authority_kind, topology_admission, execution_lifetime
+					topology_authority_kind, topology_admission, execution_lifetime, run_id
 				) VALUES (
 					$1, $2, $3, $4, $5, $6, $7,
 					'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
@@ -190,11 +193,11 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
 					'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
 					'00000000-0000-4000-8000-000000000004'::uuid, 1,
-					'static_declaration_plan', $9::jsonb, 'durable_managed'
+					'static_declaration_plan', $9::jsonb, 'durable_managed', $10::uuid
 				)
 			`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 				identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-				tt.runtimeDescriptor, testAgentTopologyJSON(t)); err != nil {
+				tt.runtimeDescriptor, testAgentTopologyJSON(t), identityFields.RunID); err != nil {
 				t.Fatalf("seed agent row: %v", err)
 			}
 

@@ -242,6 +242,7 @@ func testConversationForkAuthority() runtimeeffects.Authority {
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
 			ForkTurnID:          forkTurnID,
 			ForkID:              uuid.NewString(),
+			SourceRunID:         uuid.NewString(),
 			BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
 			ActorTokenID:        "actor-token",
 			RequestOccurrenceID: uuid.NewString(),
@@ -308,7 +309,7 @@ func testManagedCLISurfaceContext(t *testing.T, actor models.AgentConfig, tools 
 		caps = append(caps, toolcapabilities.Capability{Name: tool.Name, Visible: true, Callable: true})
 	}
 	ctx := models.WithActor(context.Background(), actor)
-	surface, err := managedCapabilityPlan(ctx, &ClaudeCLIRuntime{}, "test", tools, toolcapabilities.NewSet(caps), managedcapabilities.Authority{
+	surface, err := managedCapabilityPlanForTest(ctx, &ClaudeCLIRuntime{}, "test", tools, toolcapabilities.NewSet(caps), managedcapabilities.Authority{
 		Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 		ExecutionAuthorityID: uuid.NewString(), StartupOwnerID: "test-owner", StartupGeneration: 1,
 	})
@@ -596,7 +597,7 @@ func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObs
 }
 
 func TestValidateCLIResponseToolCallsForTurn_ManagedTurnRejectsMissingCapabilitySurface(t *testing.T) {
-	identity := testMemoryIdentity("market-research-agent", "market/instance-1").Agent
+	identity := testMemoryIdentity("market-research-agent", "market/instance-1")
 	actor := models.AgentConfig{ID: "market-research-agent", Identity: identity, FlowPath: identity.FlowInstance()}
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {

@@ -260,7 +260,7 @@ func managedHITLProviderConfig(backend, baseURL string) *config.Config {
 
 func managedHITLProviderActor(t *testing.T, backend string) models.AgentConfig {
 	t.Helper()
-	identity := agentidentitytest.RootRuntime(t, "hitl-agent", "hitl-provider-conformance")
+	identity := agentidentitytest.RootRuntimeForRun(t, hitlProviderTestRunID, "hitl-agent", "hitl-provider-conformance")
 	actor := models.AgentConfig{
 		ID: "hitl-agent", Identity: identity, Role: "matcher", ExecutionMode: runtimeeffects.ExecutionModeLive,
 		EntityID: "11111111-1111-4111-8111-111111111111", FlowPath: "", Memory: agentmemory.Authored(false),
@@ -326,7 +326,7 @@ func managedHITLProviderContext(t *testing.T, harness *effecttest.Harness, actor
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithRunID(ctx, hitlProviderTestRunID)
-	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{RunID: hitlProviderTestRunID, Agent: actor.Identity})
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), actor.Identity)
 	if actor.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	}

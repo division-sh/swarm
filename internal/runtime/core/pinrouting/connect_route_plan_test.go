@@ -106,7 +106,7 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 			if got := route.Recipient.ID(); got != tc.publicID {
 				t.Fatalf("recipient id = %q, want %q", got, tc.publicID)
 			}
-			if got := route.AgentIdentity.Name.Owner; got != tc.owner {
+			if got := route.AgentPlan.Name.Owner; got != tc.owner {
 				t.Fatalf("identity owner = %q, want %q", got, tc.owner)
 			}
 		})

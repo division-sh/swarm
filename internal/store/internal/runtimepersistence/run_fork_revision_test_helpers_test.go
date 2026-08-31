@@ -72,7 +72,7 @@ func finalizeSQLiteRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID st
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)
+	identity := mustTestAgentIdentityForRun(runID, agentID, runForkRevisionFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatal(err)

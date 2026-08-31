@@ -336,7 +336,7 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	}
 	store.authority = authority
 	eventID := uuid.NewString()
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("selected-agent"), AgentIdentity: testAgentRouteIdentity(t, "selected-agent", "")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("selected-agent"), AgentIdentity: testAgentRouteIdentityForRun(t, forkRunID, "selected-agent", "")}
 	store.seed(t, eventID, forkRunID, route)
 	proof, err := store.ProveHandoff(context.Background(), eventID, route)
 	if err != nil {
@@ -511,7 +511,7 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 		if len(recipients) != 1 || recipients[0].route == nil {
 			t.Fatalf("generation %d snapshot = %#v, want exact route handle", generation, recipients)
 		}
-		eventID, runID := uuid.NewString(), uuid.NewString()
+		eventID, runID := uuid.NewString(), busInternalTestRunID
 		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(token.AgentID), AgentIdentity: token.Identity}
 		evt := eventtest.RuntimeControl(
 			eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,

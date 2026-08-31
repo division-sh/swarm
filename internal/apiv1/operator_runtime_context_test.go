@@ -25,6 +25,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -44,10 +45,6 @@ const runtimeContextTestBundleHashC = "bundle-v1:sha256:cccccccccccccccccccccccc
 func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	chPrimary := runtimebustest.Subscribe(t, fixture.busA, "scan-orchestrator", events.EventType("triage.requested"))
-	defer runtimebustest.Unsubscribe(fixture.busA, "scan-orchestrator")
-	chSelected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
-	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 
 	published := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
 	if published.Error != nil {
@@ -60,11 +57,11 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 1 {
 		t.Fatalf("triage.requested count after event.publish = %d, want 1", got)
 	}
-	got := requireAPIV1RuntimeBusEvent(t, chSelected, "selected context delivery")
+	got := fixture.probeB.require(t, "selected context dispatch")
 	if got.ID() != publishedEventID {
 		t.Fatalf("selected context delivered event = %s, want %s", got.ID(), publishedEventID)
 	}
-	requireNoAPIV1RuntimeBusEvent(t, chPrimary, "primary context selected bundle route")
+	fixture.probeA.requireNone(t, "primary context selected bundle route")
 
 	runID := uuid.NewString()
 	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
@@ -80,8 +77,6 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	selected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
-	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 	body := eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"replay-after-unload"}`, "", "idem-context-replay-after-unload")
 
 	first := rpcCall(t, handler, body)
@@ -89,7 +84,9 @@ func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext
 		t.Fatalf("first event.publish error = %#v", first.Error)
 	}
 	firstEventID := stringValue(t, asMap(t, first.Result)["event_id"], "event_id")
-	requireAPIV1RuntimeBusEventID(t, selected, firstEventID, "selected context delivery before unload")
+	if got := fixture.probeB.require(t, "selected context dispatch before unload"); got.ID() != firstEventID {
+		t.Fatalf("selected context dispatched event = %s, want %s", got.ID(), firstEventID)
+	}
 
 	deactivated := fixture.manager.DeactivateBundleHash(runtimeContextTestBundleHashB, "idempotency replay proof")
 	if !deactivated.Found || !deactivated.Changed || deactivated.ShutdownErr != nil {
@@ -111,18 +108,18 @@ func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext
 func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	chSelected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
-	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 	runID := uuid.NewString()
-	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"seed-existing"}`, "idem-existing-seed"))
-	if started.Error != nil {
-		t.Fatalf("seed run.start error = %#v", started.Error)
-	}
-	got := requireAPIV1RuntimeBusEvent(t, chSelected, "seed existing-run delivery")
-	if got.RunID() != runID {
-		t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID(), runID)
-	}
-
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+	seedActiveAPIV1RuntimeBusAgentForRun(
+		t,
+		testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(runtimeContextTestBundleHashB)),
+		fixture.pg,
+		runID,
+		"scan-orchestrator",
+		"",
+	)
+	runtimebustest.SubscribeForRun(t, fixture.busB, runID, "scan-orchestrator", events.EventType("triage.requested"))
+	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
 	body := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"publish-existing","method":"event.publish","params":{"run_id":%q,"event_name":"triage.requested","payload":{"topic":"existing-run"},"idempotency_key":"idem-existing-context"}}`,
 		runID,
@@ -139,11 +136,11 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key(), "pending", 1)
-	if got := countEventRowsByRunID(t, fixture.db, runID); got != 2 {
-		t.Fatalf("event rows for existing run = %d, want 2", got)
+	if got := countEventRowsByRunID(t, fixture.db, runID); got != 1 {
+		t.Fatalf("event rows for existing run = %d, want 1", got)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
-	got = requireAPIV1RuntimeBusEventID(t, chSelected, eventID, "existing-run selected-context delivery")
+	got := fixture.probeB.require(t, "existing-run selected-context dispatch")
 	if got.ID() != eventID || got.RunID() != runID {
 		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
 	}
@@ -344,8 +341,12 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	fixture := newOperatorRuntimeContextFixture(t)
 	baseAgent := &directiveIntegrationAgent{id: "agent-1"}
 	selectedAgent := &directiveIntegrationAgent{id: "agent-1"}
-	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash))
-	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB))
+	baseRunID := uuid.NewString()
+	runID := uuid.NewString()
+	seedRuntimeContextRunBundle(t, fixture.pg, baseRunID, runStartTestBundleHash, storerunlifecycle.BundleSourcePersisted)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash), baseRunID)
+	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB), runID)
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
 		&swruntime.Runtime{Bus: fixture.busA, Manager: baseManager},
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
@@ -360,9 +361,6 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 			RuntimeContexts:  manager,
 		}),
 	})
-	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
-
 	resp := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", runID, "inspect context", "idem-context-agent-directive"))
 	if resp.Error != nil {
 		t.Fatalf("agent.send_directive error = %#v", resp.Error)
@@ -688,12 +686,15 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 			RuntimeContexts: fixture.manager,
 		}),
 	})
-	resp := rpcCall(t, agentHandler, agentControlBody("agent.restart", "agent-1", "idem-agent.restart"))
+	resp := rpcCall(t, agentHandler, `{"jsonrpc":"2.0","id":"agent-control","method":"agent.restart","params":{"agent_id":"agent-1","idempotency_key":"idem-agent.restart"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.restart error = nil")
 	}
-	if data := asMap(t, resp.Error.Data); data["code"] != BundleScopeRequiredCode {
-		t.Fatalf("agent.restart error data = %#v, want %s", data, BundleScopeRequiredCode)
+	if resp.Error.Code != codeInvalidParams {
+		t.Fatalf("agent.restart error code = %d, want %d; data=%#v", resp.Error.Code, codeInvalidParams, resp.Error.Data)
+	}
+	if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != "run_id" {
+		t.Fatalf("agent.restart error details = %#v, want missing run_id", details)
 	}
 	if agentControl.restartCalls != 0 {
 		t.Fatalf("agent singleton restart calls = %d, want 0", agentControl.restartCalls)
@@ -710,6 +711,8 @@ type operatorRuntimeContextFixture struct {
 	busB    *runtimebus.EventBus
 	ownerA  *worklifetime.RuntimeOccurrence
 	ownerB  *worklifetime.RuntimeOccurrence
+	probeA  *runtimeContextEventProbe
+	probeB  *runtimeContextEventProbe
 	manager *swruntime.RuntimeContextManager
 }
 
@@ -720,12 +723,11 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 	ctx := testAuthorActivityContext(context.Background())
 	seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
 	seedOperatorBundleDeleteBundle(t, ctx, db, runtimeContextTestBundleHashB)
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
 
 	sourceA := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	sourceB := semanticview.Wrap(runStartTestBundle("triage.requested"))
-	busA, ownerA := newRuntimeContextTestBus(t, pg, sourceA, runStartTestBundleHash)
-	busB, ownerB := newRuntimeContextTestBus(t, pg, sourceB, runtimeContextTestBundleHashB)
+	busA, ownerA, probeA := newRuntimeContextTestBus(t, pg, sourceA, runStartTestBundleHash)
+	busB, ownerB, probeB := newRuntimeContextTestBus(t, pg, sourceB, runtimeContextTestBundleHashB)
 	manager, err := swruntime.NewRuntimeContextManager(pg,
 		swruntime.BundleContext{
 			BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
@@ -754,6 +756,8 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 		busB:    busB,
 		ownerA:  ownerA,
 		ownerB:  ownerB,
+		probeA:  probeA,
+		probeB:  probeB,
 		manager: manager,
 	}
 }
@@ -818,7 +822,7 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 	return manager
 }
 
-func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, agent *directiveIntegrationAgent, fact runtimecorrelation.BundleSourceFact) *runtimemanager.AgentManager {
+func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, agent *directiveIntegrationAgent, fact runtimecorrelation.BundleSourceFact, runID string) *runtimemanager.AgentManager {
 	t.Helper()
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
@@ -836,7 +840,8 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 			t.Errorf("shutdown runtime context agent manager: %v", err)
 		}
 	})
-	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), fact), runID)
+	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	return manager
 }
 
@@ -910,18 +915,53 @@ func (s *recordingRuntimeContextRunControlStore) totalCalls() int {
 	return s.stopCalls + s.pauseCalls + s.continueCalls
 }
 
-func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence) {
+type runtimeContextEventProbe struct {
+	events chan events.Event
+}
+
+func newRuntimeContextEventProbe() *runtimeContextEventProbe {
+	return &runtimeContextEventProbe{events: make(chan events.Event, 16)}
+}
+
+func (p *runtimeContextEventProbe) Intercept(_ context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	p.events <- event
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (p *runtimeContextEventProbe) require(t *testing.T, label string) events.Event {
+	t.Helper()
+	select {
+	case event := <-p.events:
+		return event
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		return events.Event{}
+	}
+}
+
+func (p *runtimeContextEventProbe) requireNone(t *testing.T, label string) {
+	t.Helper()
+	select {
+	case event := <-p.events:
+		t.Fatalf("unexpected %s event %s", label, event.ID())
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func newRuntimeContextTestBus(t *testing.T, pg *store.PostgresStore, source semanticview.Source, bundleHash string) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, *runtimeContextEventProbe) {
 	t.Helper()
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bundleHash)
+	probe := newRuntimeContextEventProbe()
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: runtimeContextTestSourceFact(bundleHash),
 		WorkOwner:        workOwner,
+		Interceptors:     []runtimebus.EventInterceptor{probe},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	return bus, workOwner
+	return bus, workOwner, probe
 }
 
 func runtimeContextTestSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {

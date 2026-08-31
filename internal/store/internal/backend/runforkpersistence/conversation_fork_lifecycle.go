@@ -419,6 +419,7 @@ func scanConversationForkSession(scanner interface {
 	); err != nil {
 		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
+	identityFields.RunID = item.SourceRunID
 	identity, err := runtimeagentidentity.FromStorageFields(identityFields)
 	if err != nil {
 		return runtimerunfork.OperatorConversationForkSession{}, fmt.Errorf("decode conversation fork source identity: %w", err)

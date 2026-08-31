@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+const DefaultRunID = "00000000-0000-0000-0000-000000000001"
+
 type TestingT interface {
 	Helper()
 	Cleanup(func())
@@ -21,13 +23,17 @@ type TestingT interface {
 var routeGeneration atomic.Uint64
 
 func Identity(t TestingT, agentID, flowPath string) agentidentity.Identity {
+	return IdentityForRun(t, DefaultRunID, agentID, flowPath)
+}
+
+func IdentityForRun(t TestingT, runID, agentID, flowPath string) agentidentity.Identity {
 	t.Helper()
 	name, err := agentidentity.RuntimeName(agentID, "bus-test-route")
 	if err != nil {
 		t.Fatalf("test agent name: %v", err)
 	}
 	if strings.TrimSpace(flowPath) == "" {
-		identity, err := agentidentity.New(name, agentidentity.RootRoute())
+		identity, err := agentidentity.New(runID, name, agentidentity.RootRoute())
 		if err != nil {
 			t.Fatalf("test root agent identity: %v", err)
 		}
@@ -42,7 +48,7 @@ func Identity(t TestingT, agentID, flowPath string) agentidentity.Identity {
 	if err != nil {
 		t.Fatalf("test agent route: %v", err)
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New(runID, name, route)
 	if err != nil {
 		t.Fatalf("test agent identity: %v", err)
 	}
@@ -64,6 +70,10 @@ type testRoute struct {
 }
 
 func Subscribe(t TestingT, eventBus *runtimebus.EventBus, agentID string, eventTypes ...events.EventType) <-chan *runtimebus.LocalDelivery {
+	return SubscribeForRun(t, eventBus, DefaultRunID, agentID, eventTypes...)
+}
+
+func SubscribeForRun(t TestingT, eventBus *runtimebus.EventBus, runID, agentID string, eventTypes ...events.EventType) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
 	subscriptions := make([]string, 0, len(eventTypes))
 	for _, eventType := range eventTypes {
@@ -75,7 +85,7 @@ func Subscribe(t TestingT, eventBus *runtimebus.EventBus, agentID string, eventT
 	if err != nil {
 		t.Fatalf("admit test agent route: %v", err)
 	}
-	return SubscribeAdmission(t, eventBus, admission)
+	return SubscribeIdentity(t, eventBus, IdentityForRun(t, runID, admission.AgentID(), admission.FlowPath()), admission)
 }
 
 func SubscribeAdmission(t TestingT, eventBus *runtimebus.EventBus, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *runtimebus.LocalDelivery {

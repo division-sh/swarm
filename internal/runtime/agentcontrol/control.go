@@ -26,16 +26,14 @@ var (
 	ErrAgentNotRunning    = errors.New("agent not running")
 	ErrRunNotFound        = errors.New("run not found")
 	ErrRunAlreadyTerminal = errors.New("run already terminal")
-	ErrAmbiguousRunTarget = errors.New("ambiguous run target")
 )
 
 type StateError struct {
-	Err            error
-	AgentID        string
-	FlowInstance   string
-	RunID          string
-	CurrentStatus  string
-	ActiveSessions []ActiveSessionTarget
+	Err           error
+	AgentID       string
+	FlowInstance  string
+	RunID         string
+	CurrentStatus string
 }
 
 func (e *StateError) Error() string {
@@ -56,8 +54,6 @@ func (e *StateError) Error() string {
 			return fmt.Sprintf("run already terminal: %s current_status=%s", strings.TrimSpace(e.RunID), status)
 		}
 		return fmt.Sprintf("run already terminal: %s", strings.TrimSpace(e.RunID))
-	case errors.Is(e.Err, ErrAmbiguousRunTarget) && agentID != "":
-		return fmt.Sprintf("ambiguous run target for agent %s", agentID)
 	case e.Err != nil:
 		return e.Err.Error()
 	default:
@@ -77,40 +73,22 @@ const (
 	DirectiveEventMode = "directive"
 
 	RunResolutionSpecified         = "specified"
-	RunResolutionActiveSession     = "inferred_from_active_session"
-	RunResolutionNewRunAllocated   = "new_run_allocated"
 	DirectiveSourceV1RPC           = "v1_rpc"
 	DirectiveSourceDashboardLegacy = "dashboard_legacy_adapter"
 	DirectiveSourceInternalRuntime = "internal_runtime"
 )
 
-type ActiveSessionTarget struct {
-	SessionID string `json:"session_id"`
-	RunID     string `json:"run_id,omitempty"`
-}
-
 type RunTargetResolution struct {
-	RunID          string
-	Mode           string
-	ActiveSessions []ActiveSessionTarget
+	RunID string
+	Mode  string
 }
 
 func (r RunTargetResolution) Normalized() RunTargetResolution {
 	r.RunID = strings.TrimSpace(r.RunID)
 	r.Mode = strings.TrimSpace(r.Mode)
 	if r.Mode == "" {
-		r.Mode = RunResolutionNewRunAllocated
+		r.Mode = RunResolutionSpecified
 	}
-	out := make([]ActiveSessionTarget, 0, len(r.ActiveSessions))
-	for _, session := range r.ActiveSessions {
-		session.SessionID = strings.TrimSpace(session.SessionID)
-		session.RunID = strings.TrimSpace(session.RunID)
-		if session.SessionID == "" && session.RunID == "" {
-			continue
-		}
-		out = append(out, session)
-	}
-	r.ActiveSessions = out
 	return r
 }
 
@@ -159,6 +137,12 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	}
 	if target.RunID == "" {
 		return none, errors.New("run_id is required")
+	}
+	if target.Mode != RunResolutionSpecified {
+		return none, fmt.Errorf("unsupported run_id resolution %q", target.Mode)
+	}
+	if requestRunID := strings.TrimSpace(req.RunID); requestRunID == "" || requestRunID != target.RunID {
+		return none, fmt.Errorf("directive request run_id %q does not match exact target run %q", requestRunID, target.RunID)
 	}
 	if !posture.Valid() {
 		return none, errors.New("runtime execution posture is required")
@@ -209,14 +193,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 		Payload:  raw, ExecutionMode: posture.RootMode(), CreatedAt: now,
 	}
-	switch target.Mode {
-	case RunResolutionNewRunAllocated:
-		return events.NewRunCreatingDiagnosticDirectEvent(events.RunCreatingRuntimeEventInput{Facts: facts, RunID: target.RunID})
-	case RunResolutionSpecified, RunResolutionActiveSession:
-		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: target.RunID})
-	default:
-		return none, fmt.Errorf("unsupported run_id resolution %q", target.Mode)
-	}
+	return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: target.RunID})
 }
 
 func ValidateBoardDirective(d BoardDirective) error {
@@ -237,12 +214,14 @@ func ValidateBoardDirective(d BoardDirective) error {
 }
 
 type RestartRequest struct {
+	RunID        string
 	AgentID      string
 	FlowInstance string
 	OperationID  string
 }
 
 type RestartResult struct {
+	RunID        string `json:"run_id"`
 	AgentID      string `json:"agent_id"`
 	FlowInstance string `json:"flow_instance,omitempty"`
 	OperationID  string `json:"operation_id,omitempty"`

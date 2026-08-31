@@ -68,8 +68,7 @@ func projectClaudeInvocationTools(ctx context.Context, actor models.AgentConfig,
 		if err := surface.Validate(); err != nil {
 			return claudeInvocationToolProjection{}, fmt.Errorf("managed Claude capability surface is invalid: %w", err)
 		}
-		actorIdentity, identityErr := actor.ConcreteIdentity()
-		if identityErr != nil || !surface.MatchesActor(actorIdentity) {
+		if !capabilitySurfaceMatchesActorConfig(surface, actor) {
 			return claudeInvocationToolProjection{}, fmt.Errorf("managed Claude capability surface actor mismatch")
 		}
 		return newClaudeInvocationToolProjection(

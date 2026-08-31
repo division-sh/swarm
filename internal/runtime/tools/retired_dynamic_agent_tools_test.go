@@ -171,7 +171,7 @@ func TestRetiredDynamicAgentToolsAreAbsentFromNormalProviderInventories(t *testi
 
 type retiredToolManagerProbe struct{ resolveCalls int }
 
-func (m *retiredToolManagerProbe) ResolveAgentConfig(string, string) (models.AgentConfig, error) {
+func (m *retiredToolManagerProbe) ResolveAgentConfig(string, string, string) (models.AgentConfig, error) {
 	m.resolveCalls++
 	return models.AgentConfig{}, fmt.Errorf("unexpected manager resolution")
 }

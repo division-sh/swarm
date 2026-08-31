@@ -145,7 +145,7 @@ func seedRunDebugTraceBoundedDelivery(
 		uuid.NewString(), events.EventType(eventName), "runtime", "", json.RawMessage(fmt.Sprintf(`{"index":%d}`, createdAt.Unix())), 0,
 		runID, "", events.EventEnvelope{}, createdAt,
 	)
-	route := testAgentDeliveryRoute(t, agentID, "fixture/"+agentID)
+	route := testAgentDeliveryRoute(t, runID, agentID, "fixture/"+agentID)
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit bounded trace event %s: %v", event.ID(), err)
 	}

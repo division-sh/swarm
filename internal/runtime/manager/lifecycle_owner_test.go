@@ -13,7 +13,7 @@ func reconfigureAgentThroughLifecycleForTest(
 	patch models.AgentConfig,
 ) error {
 	t.Helper()
-	current, err := am.ResolveAgentConfig(agentID, flowInstance)
+	current, err := am.ResolveAgentConfig(managerIdentityTestRunID, agentID, flowInstance)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func teardownAgentThroughLifecycleForTest(
 	agentID, flowInstance string,
 ) error {
 	t.Helper()
-	current, err := am.ResolveAgentConfig(agentID, flowInstance)
+	current, err := am.ResolveAgentConfig(managerIdentityTestRunID, agentID, flowInstance)
 	if err != nil {
 		return err
 	}

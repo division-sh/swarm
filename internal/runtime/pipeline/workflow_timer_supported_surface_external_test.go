@@ -59,7 +59,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -67,7 +67,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -78,7 +78,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 					t.Fatalf("workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -143,7 +143,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			})
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer"), runtimepipeline.WorkflowInstance{
 				InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": "producer", "instance_id": "producer"},
@@ -151,7 +151,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			}, createdAt); err != nil {
 				t.Fatalf("materialize producer workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute("producer")); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer")); err != nil {
 				t.Fatalf("arm authored workflow timer: %v", err)
 			}
 
@@ -218,7 +218,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC().Add(-4900 * time.Millisecond)
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -226,13 +226,13 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
 			stateDeadline := time.Now().Add(5 * time.Second)
 			for {
-				instance, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -296,7 +296,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -326,7 +326,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 					t.Fatalf("restored workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := restored.Load(ctx, testWorkflowInstanceRoute(runID))
+				instance, found, err := restored.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 				if err != nil {
 					scheduler.Stop()
 					t.Fatalf("load workflow instance after restored fire: %v", err)
@@ -428,7 +428,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -436,10 +436,10 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
-			armed, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			armed, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !found {
 				t.Fatalf("load workflow instance after timer activation: found=%v err=%v", found, err)
 			}
@@ -465,7 +465,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				t.Fatalf("RestoreWorkflowTimers: %v", err)
 			}
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, beforeRestart+1)
-			beforeCancel, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			beforeCancel, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !found {
 				t.Fatalf("load workflow instance before cancellation: found=%v err=%v", found, err)
 			}
@@ -521,7 +521,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			cancelled := false
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
-				instance, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 				if err != nil {
 					t.Fatalf("load workflow instance after cancellation: %v", err)
 				}
@@ -590,7 +590,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			})
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -598,7 +598,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -674,7 +674,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
@@ -682,7 +682,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -693,7 +693,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 					t.Fatalf("workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+				instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -724,7 +724,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if recovered != 1 {
 				t.Fatalf("SweepPipelineObligations recovered=%d, want 1", recovered)
 			}
-			instance, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			instance, found, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !found {
 				t.Fatalf("load recovered workflow instance found=%v err=%v", found, err)
 			}

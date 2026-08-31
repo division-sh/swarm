@@ -932,9 +932,8 @@ contract_formats:
         existing-run-root constructor MUST carry a non-empty exact run_id and MUST
         never allocate or reopen that run. A fresh run may otherwise be allocated
         only for an explicitly standalone runtime-control
-        or runtime-diagnostic constructor or the exact typed run-creating
-        platform.agent_directive constructor consumed by its named operation.
-        Labels, payloads, context, run_id_resolution strings, and missing facts
+        or runtime-diagnostic constructor.
+        Labels, payloads, context, and missing facts
         never authorize run allocation. It MUST fail closed for missing
         child, replay, fork, or runtime-domain lineage
         facts that are required by the event class. EventBus, transactional
@@ -952,9 +951,8 @@ contract_formats:
 
         Admission MUST retain one opaque immutable run disposition with the admitted
         event until persistence. `create_authorized` belongs only to freshly admitted
-        run-creating root ingress, explicitly standalone runtime-control/runtime-diagnostic events,
-        and the exact typed run-creating platform.agent_directive produced after
-        new-run target resolution; it permits creation of the event's exact run.
+        run-creating root ingress and explicitly standalone runtime-control/runtime-diagnostic events;
+        it permits creation of the event's exact run.
         `require_active` belongs to existing-run root ingress, operator, child, replay,
         selected-fork, causal runtime, and run-scoped runtime events; their run MUST
         already exist in running or paused status. The durable `root_ingress` class,
@@ -1235,11 +1233,9 @@ contract_formats:
               The selected-store inbound publication ledger may append this evidence row only while its locked target run is
               running or paused and only in the atomic parent/ordered-child publication transaction.
             platform.agent_directive: >
-              The #1932 directive operation owner binds run_id_resolution to the admitted event's immutable run
-              disposition. Specified and inferred-active-session directives require a locked running or paused run.
-              A new-run-allocated directive carries create-authorized only through its dedicated typed constructor and
-              creates its exact run atomically with committed direct replay scope and the prepared directive operation.
-              Persisted readback restores require-active and can never recreate the run.
+              The #1932 directive operation owner requires one exact concrete-agent run identity before admission.
+              The directive event carries require-active authority and requires that exact run to be locked in running
+              or paused state. It never infers a run from sessions, allocates a run, or carries create authority.
         route_probe:
           rule: Route-query and sentinel probes may use dedicated probe
             constructors only when the event is not a persisted runtime emit and
@@ -4981,7 +4977,7 @@ engine:
         `flow_instances.config`, path shape, or a readiness row from another run cannot supply or complete that coordinate.
         Missing, partial, malformed, wrong-run, or nonmatching source coordinates fail closed before any exact route owner is
         replaced. When an active run's source revision changes, one run-scoped readiness reconciler must advance every active
-        `{run_id, instance_id}` plan from the revised semantic source and its exact persisted route projection before any route
+        `{run_id, instance_path}` plan from the revised semantic source and its exact persisted route projection before any route
         derivation in that selected mutation. For an un-emitted creation occurrence it re-derives event identity, type,
         validated payload, and delivery projection from the revised schema and persisted trigger lineage; removal of
         `auto_emit_on_create` removes that pending occurrence, while introducing one without persisted trigger lineage fails
@@ -4996,7 +4992,7 @@ engine:
         Persisted route truth MUST remain absent from the global process route table and independent recipient planning until
         readiness reconciliation publishes it. The selected mutation's private route overlay consumes the same exact
         topology so the triggering delivery can complete atomically; that overlay is not global publication authority.
-      - 8. One idempotent reconciler keyed by exact `{run_id, instance_id}` reloads the current readiness row and lifecycle
+      - 8. One idempotent reconciler keyed by exact `{run_id, instance_path}` reloads the current readiness row and lifecycle
         eligibility; captured callback snapshots are not authority.
       - 9. The reconciler coalesces concurrent attempts for that key, reconciles and verifies the complete declared-agent
         topology, then publishes and verifies the already-persisted route in process. The desired agent set is exact.
@@ -5077,8 +5073,8 @@ engine:
           descriptor consumer that erases source provenance, including connect-route `select` / `select-or-create` pin
           resolution, MUST pass through this exact EventBus source admission before projecting a target descriptor; one
           consumer may not bypass the owner because it does not itself persist routes.
-        recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
-          active `flow_instances` row identified by the persisted route's instance path. Dynamic instances additionally
+        recovery: Startup recovery of active flow-instance routes MUST load one exact run-scoped projection from the
+          active `flow_instances` row identified by the persisted route's `{run_id, instance_path}`. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
           agent revisions computed over canonical JSON semantics; the flow projection owns the validated stored instance
           identity, deterministic entity and parent facts, and cloned activation config. The finalizer MUST derive the same
@@ -5086,7 +5082,7 @@ engine:
           completeness before timers or creation events become runnable. JSON object key order or PostgreSQL JSONB
           normalization cannot manufacture lifecycle revision drift, while a changed fact must change the revision.
           Recovery MUST enumerate both running and paused run generations because both remain active and recoverable. A
-          separate all-status `{run_id, instance_id}` key census suppresses generic route restoration for every
+          separate all-status `{run_id, instance_path}` key census suppresses generic route restoration for every
           readiness-owned path and retires crash-left process topology for terminal/inactive work only when no active
           successor owns that path. Active successors reconcile before retired predecessors are considered. It MUST NOT read
           `entity_state`, synthesize or choose a run, infer readiness from existing subsets, fall back to current-state
@@ -6457,7 +6453,13 @@ engine:
           Both selected backends expose the same planning, historical readback, materialization, source-freeze,
           decision/effect gate, binding, route-recovery, activation, selected execution, delivery/settlement,
           cleanup, and terminal public-readback contract. Backend SQL is private adapter implementation and does
-          not own fork meaning. SQLite DB-loaded --bundle-hash boot remains unsupported, and changed-bundle or
+          not own fork meaning. Selected-fork agent planning carries only runless declaration and route plans before
+          admission. The selected-store materialization transaction composes those plans with the exact admitted fork
+          run, reconstructs each fork-owned template flow readiness plan and its declared-agent revisions, and returns
+          the committed opaque topology admissions consumed by the fork-local runtime. It never fabricates a source-run
+          live identity, recomputes topology after commit, or emits a new dynamic-flow creation occurrence while
+          reconstructing historical state. Exact replay verifies the same readiness bytes and topology evidence.
+          SQLite DB-loaded --bundle-hash boot remains unsupported, and changed-bundle or
           post-boot Dynamic Load remains split; neither may be inferred or emulated by the run.fork capability.
       runtime_nuke:
         method: runtime.nuke
@@ -7804,7 +7806,7 @@ engine:
       both the manager-owned loaded semantic source and the exact context `BundleSourceFact`, before reading request-carried
       scope, schema, agent, route, workflow-version, or timer facts and before any durable or process mutation. They consume
       only the admitted manager-owned source after that boundary. Selected-mutation post-commit finalization, automatic retry, and startup
-      consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
+      consume one reconciler keyed by `{run_id, instance_path}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
       route, reconciles the exact initial timer declaration set, and records topology readiness. Initial timer reconciliation
@@ -12060,7 +12062,9 @@ flow_model:
         rule: >
           The supported expanded authoring view is a projection over existing
           semantic owners. It must expose inferred primary entity, template
-          instance declaration/policy, output pin `key`/`carries`, versioned
+          instance declaration/policy and its concrete identity formula
+          `run + flow + instance_key` in both text and JSON output, output pin
+          `key`/`carries`, versioned
           routing topology, explicit and implicit key mappings,
           singleton cardinality and coordinator-demand boundaries, typed contained-state operations,
           lifecycle stage graphs requested with `--graph`, and retired static
@@ -12125,11 +12129,15 @@ flow_model:
             authored static scope, or overlaps a non-instance event identity; canonical namespace collision is a hard invalidity
             and MUST leave existing event paths, observers, and sibling instance routes unchanged. A declared nested template
             scope remains allowed to materialize below its authored static parent; parent ancestry alone is not collision proof.
-            RouteTable is the canonical lifecycle identity owner and stores one complete normalized `(scope_key, instance_id,
-            instance_path)` route per instance path. Normal template creation, recovery, and ad hoc fallback use the same
-            admission function. Exact replay of the complete identity is idempotent. A different identity at an owned path is a
-            hard conflict; presence requires the complete identity; removal must match the complete stored owner before either
-            persisted or in-memory authority is changed. All identity and authored-namespace collisions are validated before
+            Authored/template subscription law remains runless and is not live flow-instance ownership. For a materialized
+            flow instance, RouteTable consumes the canonical `flowidentity.RunScopedFlowInstance` and stores one complete
+            normalized `(run_id, scope_key, instance_id, instance_path)` owner per concrete route. Normal template creation,
+            recovery, and ad hoc fallback use the same admission function. Exact replay of the complete run-scoped identity is
+            idempotent. A different run or route identity at an owned path is a hard conflict; presence requires the complete
+            identity; removal must match the complete stored owner before either persisted or in-memory authority is changed.
+            Derived route caches and connect-recipient evaluation preserve the exact admitted run and may return only exact-run
+            materialized routes plus explicitly runless authored/static law. A runless cache key, cross-run live route, or
+            discarded source run cannot authorize delivery. All identity and authored-namespace collisions are validated before
             event paths, observers, or routes mutate. The static
             witness remains the sole authorization and ambiguity proof; runtime projection cannot broaden it to another local
             event or static flow.
@@ -13184,7 +13192,7 @@ flow_model:
           consumes:
           - implementation_slice_1472 typed ConnectRoutePlan artifacts
           - supported descriptor materialization targets from implementation_slice_1472
-          - RouteTable concrete receiver subscribers only after target route identity selection
+          - RouteTable concrete receiver subscribers only after target route identity selection and exact admitted-run filtering
           produces:
           - persisted event_deliveries delivery_target_route rows for supported connected outputs
           - pipeline receipt settlement through normal EventBus delivery consumers
@@ -13708,18 +13716,16 @@ agent_directive_operation_model:
     are evidence or projections only and MUST NOT authorize execution or infer success.
   reservation:
     transaction: >
-      Resolve the runtime context and run target first, then atomically persist one
+      Resolve the exact concrete agent and require its run to be active first, then atomically persist one
       operation row in prepared state, its reserved directive event, and committed direct
       replay scope. Failure leaves none of those facts. One keyed request identity is
       (method, actor_token_id, idempotency_key); a different request_hash fails before
       event persistence or execution.
     run_authority: >
-      Run target resolution and event construction are one closed typed contract. specified and
-      inferred_from_active_session construct require-active directive evidence. new_run_allocated
-      constructs the dedicated create-authorized directive evidence. The named operation rejects
-      any mismatch between run_id_resolution and the admitted disposition before mutation; it never
-      infers authority from the payload or resolution string. Canonical readback strips create
-      authority and restores require-active.
+      Concrete agent identity and event construction are one closed typed contract. run_id is required,
+      requested_run_id and resolved_run_id must equal the concrete identity RunID, and run_id_resolution
+      is the invariant value specified. The named operation accepts only require-active directive evidence
+      and rejects every disagreement before mutation. Session inference and new-run allocation are forbidden.
     event_identity: The directive_event_id is allocated once by the operation owner and is stable for every retry.
   states:
     prepared: Reserved durably but not admitted to BoardStep.
@@ -13859,6 +13865,11 @@ durable_data_resources:
     rule: Materialize one private read-only `/data` projection per execution actor. The generated host root is an ephemeral projection and is never parsed back, persisted as semantic authority, or exposed as an authored source. Paged resource-row tool reads bind the exact declaration and selected version through one fixed-size opaque target fingerprint; continuation state never embeds authored declaration bytes or accepts an older cursor form.
     verification: Reuse verifies the manifest, every canonical file byte, exact file set, regular-file kind, and immutable modes. Missing, modified, symlinked, mutable, or unexpected entries fail closed.
     container_binding: A managed Docker workspace container is bound to the complete typed container identity including exact run_id and bundle identity. A different managed identity is removed and recreated before use so a prior run's `/data` mount cannot survive; an unowned or malformed name collision fails closed.
+    capability_admission_execution: >
+      A normal pre-admission provider probe carries the exact runless agent plan as its actor owner and executes only in
+      an already-owned system or scaffold workspace. It MUST NOT materialize a data projection, create or select an agent
+      workspace, fabricate run identity, or treat startup infrastructure as live agent authority. A provider turn executes
+      only in the exact run-scoped live agent workspace. Startup and live workspace targets are not interchangeable.
     parity: Docker and host workspaces consume the same provider and logical paths. A backend may not add directory, config, environment, cwd, repository, or inherited-volume fallbacks.
   legacy_policy: Fresh schemas only. workspace.data_source, workspace.volumes_from, --data directory authority, SWARM_WORKSPACE_DATA_SOURCE, SWARM_WORKSPACE_DATA_MOUNT, ambient/default roots, runtime path reads, reverse parsing, dual readers, migration, and compatibility aliases are retired.
 platform_tables:
@@ -13883,10 +13894,11 @@ platform_tables:
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
-      - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, and provider-attempt drain evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry. Exact provider-origin coordinates are immutable snapshots, not foreign keys into deleted mutable origin rows; cleanup rejects nonterminal attempts or pending drains before deleting mutable origin history.
+      - Concrete agents and flow instances are run-owned live execution state and are deleted before their planned runs. Authored routing law remains runless and survives; materialized routing rows are deleted by exact run_id before their flow owner.
+      - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, provider-attempt drain evidence, and spend/cost rows are replay, reconciliation, no-redispatch, or audit authority. Their complete run-scoped agent coordinates are immutable snapshots rather than live foreign-key selectors, so they survive deletion of the concrete agent and run. Cleanup rejects nonterminal attempts or pending drains before deleting mutable origin history.
       - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
         missing generated node-state table only after platform-schema acceptance.
-      - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
+      - Schema, auth/idempotency-like, operator/system, authored product config/topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - "The bundle catalog is request-scoped by `runtime.nuke.include_bundles`: `false` preserves `bundles`; `true` deletes `bundles` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted bundle-source run remains outside the cleanup plan."
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
     classifications:
@@ -13925,6 +13937,8 @@ platform_tables:
         - entity_state
         - workflow_instance_initial_materializations
         - flow_instance_runtime_readiness
+        - agents
+        - flow_instances
         - run_control_state
         - events
       retain_directive_authority:
@@ -13941,6 +13955,7 @@ platform_tables:
         - conversation_fork_turns
         - conversation_forks
         - timers
+        - routing_rules
       delete_all:
         - channel_onboarding_operations
         - connected_channel_activations
@@ -13966,7 +13981,6 @@ platform_tables:
         - author_activity_order
         - api_idempotency
         - runtime_ingress_state
-        - agents
         - agent_topology_source_set_head
         - agent_topology_source_set_operations
         - bundle_delete_final_mutation_replays
@@ -13988,8 +14002,6 @@ platform_tables:
         - budget_admission_scopes
         - runtime_effect_budget_reservations
         - managed_agent_capability_surfaces
-        - flow_instances
-        - routing_rules
       request_scoped_bundle_catalog:
         - bundles
       split_preserve:
@@ -14744,11 +14756,13 @@ platform_tables:
         );
     agents:
       description: >-
-        Runtime agent registry keyed by the complete concrete agent identity.
+        Runtime agent registry keyed by the complete run-scoped concrete agent identity.
+        run_id is the admitted live execution owner and is never inferred from
+        route shape, an adjacent operation, session state, or ambient context.
         agent_id is the authored/runtime-created display name, agent_name_owner
         plus agent_name_source preserve exact declaration/name provenance, and
         agent_route_presence plus the three flow-route fields preserve either a
-        present concrete flow route or the explicit root fact. The seven
+        present concrete flow route or the explicit root fact. The eight
         identity columns form the physical primary key. No concatenated key,
         nullable route authority, fallback selector, legacy store reader, or
         migration is supported. Duplicate authored slugs across live loaded
@@ -14757,6 +14771,7 @@ platform_tables:
         route columns.
       ddl: |
         CREATE TABLE agents (
+            run_id                      UUID NOT NULL REFERENCES runs(run_id),
             agent_id                    TEXT NOT NULL,
             agent_name_owner            TEXT NOT NULL,
             agent_name_source           TEXT NOT NULL CHECK (agent_name_source IN ('declared', 'runtime_created')),
@@ -14798,14 +14813,14 @@ platform_tables:
             turn_count                  INTEGER NOT NULL DEFAULT 0,
             last_active_at              TIMESTAMPTZ,
             created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
+            PRIMARY KEY (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             CHECK ((agent_route_presence = 'root' AND flow_scope_key = '' AND flow_instance_id = '' AND flow_instance = '') OR (agent_route_presence = 'present' AND NULLIF(flow_scope_key, '') IS NOT NULL AND NULLIF(flow_instance_id, '') IS NOT NULL AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (NOT memory_enabled OR memory_source = 'authored'),
-            INDEX idx_agents_name (agent_id),
-            INDEX idx_agents_flow (flow_instance) WHERE flow_instance <> '',
-            INDEX idx_agents_role (role),
-            INDEX idx_agents_status (status),
-            INDEX idx_agents_parent (parent_agent_id) WHERE parent_agent_id IS NOT NULL
+            INDEX idx_agents_name (run_id, agent_id),
+            INDEX idx_agents_flow (run_id, flow_instance) WHERE flow_instance <> '',
+            INDEX idx_agents_role (run_id, role),
+            INDEX idx_agents_status (run_id, status),
+            INDEX idx_agents_parent (run_id, parent_agent_id) WHERE parent_agent_id IS NOT NULL
         );
     agent_directive_operations:
       description: >-
@@ -14830,9 +14845,9 @@ platform_tables:
             flow_instance_id           TEXT NOT NULL,
             flow_instance              TEXT NOT NULL,
             directive_text             TEXT NOT NULL,
-            requested_run_id           UUID,
+            requested_run_id           UUID NOT NULL,
             resolved_run_id            UUID NOT NULL REFERENCES runs(run_id),
-            run_id_resolution          TEXT NOT NULL CHECK (run_id_resolution IN ('specified', 'inferred_from_active_session', 'new_run_allocated')),
+            run_id_resolution          TEXT NOT NULL CHECK (run_id_resolution = 'specified'),
             source                     TEXT NOT NULL,
             operator_id                TEXT,
             directive_event_id         UUID NOT NULL UNIQUE REFERENCES events(event_id),
@@ -14848,9 +14863,10 @@ platform_tables:
             updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             expires_at                 TIMESTAMPTZ,
             CHECK (idempotency_key IS NULL OR idempotency_key <> ''),
+            CHECK (requested_run_id = resolved_run_id),
             CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL)),
             CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
+            FOREIGN KEY (resolved_run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE INDEX idx_agent_directive_operations_active_key (method, actor_token_id, idempotency_key) WHERE idempotency_key IS NOT NULL,
             INDEX idx_agent_directive_operations_recovery (state, execution_lease_expires_at, updated_at),
             INDEX idx_agent_directive_operations_expiry (expires_at),
@@ -14870,9 +14886,12 @@ platform_tables:
         exact readiness authority into both operation identity and request identity. Before
         either first execution or stored-result replay, the selected store revalidates the
         current locked topology owner; replay authority is never inherited from the original
-        commit.
+        commit. Its complete run-scoped agent coordinate is immutable operation evidence after
+        commit, not a live foreign-key selector; destructive reset may release the referenced
+        run and concrete lifecycle cell while retaining this replay authority.
       ddl: |
         CREATE TABLE agent_lifecycle_operations (
+            run_id             UUID NOT NULL,
             operation_id       UUID PRIMARY KEY,
             agent_id           TEXT NOT NULL,
             agent_name_owner   TEXT NOT NULL,
@@ -14905,16 +14924,16 @@ platform_tables:
             completed_at      TIMESTAMPTZ,
             CHECK ((state = 'succeeded') = (result IS NOT NULL)),
             CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             INDEX idx_agent_lifecycle_operations_agent (agent_id, flow_instance, created_at),
             INDEX idx_agent_lifecycle_operations_recovery (state, updated_at)
         );
     agent_lifecycle_transition_facts:
-      description: Immutable committed per-agent lifecycle transition evidence.
+      description: Immutable committed per-agent lifecycle transition evidence. Its complete run-scoped agent coordinate is a snapshot, not a live foreign-key selector.
       ddl: |
         CREATE TABLE agent_lifecycle_transition_facts (
             transition_id      UUID PRIMARY KEY,
             operation_id       UUID NOT NULL UNIQUE,
+            run_id             UUID NOT NULL,
             agent_id           TEXT NOT NULL,
             agent_name_owner   TEXT NOT NULL,
             agent_name_source  TEXT NOT NULL,
@@ -14939,15 +14958,15 @@ platform_tables:
             runtime_instance_id UUID NOT NULL,
             runtime_generation BIGINT NOT NULL CHECK (runtime_generation > 0),
             created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             INDEX idx_agent_lifecycle_transition_facts_agent (agent_id, flow_instance, created_at)
         );
     agent_lifecycle_diagnostic_outbox:
-      description: Durable non-authoritative projection queue for lifecycle diagnostics.
+      description: Durable non-authoritative projection queue for lifecycle diagnostics. Its complete run-scoped agent coordinate is a snapshot, not a live foreign-key selector.
       ddl: |
         CREATE TABLE agent_lifecycle_diagnostic_outbox (
             outbox_id          UUID PRIMARY KEY,
             operation_id       UUID NOT NULL UNIQUE,
+            run_id             UUID NOT NULL,
             agent_id           TEXT NOT NULL,
             agent_name_owner   TEXT NOT NULL,
             agent_name_source  TEXT NOT NULL,
@@ -14959,7 +14978,6 @@ platform_tables:
             payload            JSONB NOT NULL,
             projected_at       TIMESTAMPTZ,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
         );
     runtime_external_effect_operations:
@@ -14967,7 +14985,15 @@ platform_tables:
         Provider-neutral durable logical operation owner for every managed external provider,
         HTTP tool, credential, web-search, MCP, native command/write, and relay effect. Authority
         kind and authority_id are closed execution coordinates; selected-fork and forkchat work
-        never require a synthetic agents row.
+        never require a synthetic agents row. A normal-agent coordinate is immutable execution
+        evidence, not a live foreign-key selector, so terminal outcome/no-redispatch authority can
+        survive destructive release of its run-scoped agent. Normal-agent completion and generic
+        recovery must decode and compare the persisted agent_run_id, lineage run, usage-target
+        agent-identity run, concrete capability/effect agent-identity run, and delivery-origin run
+        when that origin is present. Every present run coordinate must equal the operation owner
+        before mutation. A non-agent authority must not carry agent_run_id. Missing, malformed, or
+        conflicting authority fails closed without settling, reclaiming, or otherwise mutating the
+        operation.
       ddl: |
         CREATE TABLE runtime_external_effect_operations (
             operation_id       UUID PRIMARY KEY,
@@ -14977,6 +15003,7 @@ platform_tables:
             bundle_hash        TEXT NOT NULL,
             authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation')),
             authority_id       TEXT NOT NULL,
+            agent_run_id       UUID,
             agent_id           TEXT,
             agent_name_owner   TEXT,
             agent_name_source  TEXT,
@@ -15001,8 +15028,7 @@ platform_tables:
             CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
             CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),
-            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'channel_confirmation' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
+            CHECK ((authority_kind = 'normal_agent' AND agent_run_id IS NOT NULL AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'channel_confirmation' AND agent_run_id IS NULL AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
             INDEX idx_runtime_external_effect_operations_authority (authority_kind, authority_id, created_at),
@@ -15070,8 +15096,9 @@ platform_tables:
         A pending row authorizes only immutable completion evidence, budget settlement, and the exact delivery or
         directive-operation origin outcome. Running successors remain running; terminal targets expose draining until their last row settles or expires.
         The closed delivery/directive origin snapshot deliberately does not retain a foreign key into mutable origin
-        history deleted by destructive reset. The row never authorizes provider dispatch, mutable session/provider-head
-        projection, output publication, or successor work.
+        history deleted by destructive reset. Its complete run-scoped agent coordinate is immutable evidence rather than
+        a live foreign-key selector. The row never authorizes provider dispatch, mutable session/provider-head projection,
+        output publication, or successor work.
       ddl: |
         CREATE TABLE runtime_provider_attempt_drains (
             drain_id                 UUID PRIMARY KEY,
@@ -15079,6 +15106,7 @@ platform_tables:
             operation_id             UUID NOT NULL REFERENCES runtime_external_effect_operations(operation_id),
             lifecycle_operation_id   UUID NOT NULL,
             lifecycle_transition_id  UUID NOT NULL,
+            run_id                   UUID NOT NULL,
             agent_id                 TEXT NOT NULL,
             agent_name_owner         TEXT NOT NULL,
             agent_name_source        TEXT NOT NULL,
@@ -15110,7 +15138,6 @@ platform_tables:
             CHECK (expires_at > captured_at),
             CHECK ((origin_kind = 'delivery' AND origin_delivery_id IS NOT NULL AND origin_run_id IS NOT NULL AND NULLIF(TRIM(origin_route_identity), '') IS NOT NULL AND origin_claim_token IS NOT NULL AND origin_claim_version > 0 AND origin_subscriber_type = 'agent' AND NULLIF(TRIM(origin_subscriber_id), '') IS NOT NULL AND origin_directive_operation_id IS NULL AND origin_directive_owner_id IS NULL) OR (origin_kind = 'directive' AND origin_delivery_id IS NULL AND origin_run_id IS NULL AND origin_route_identity IS NULL AND origin_claim_token IS NULL AND origin_claim_version IS NULL AND origin_subscriber_type IS NULL AND origin_subscriber_id IS NULL AND origin_directive_operation_id IS NOT NULL AND NULLIF(TRIM(origin_directive_owner_id), '') IS NOT NULL)),
             CHECK ((state = 'pending' AND failure IS NULL AND settled_at IS NULL) OR (state = 'settled' AND settled_at IS NOT NULL) OR (state = 'expired' AND failure IS NOT NULL AND settled_at IS NOT NULL)),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             INDEX idx_runtime_provider_attempt_drains_pending (state, expires_at, captured_at),
             INDEX idx_runtime_provider_attempt_drains_agent (agent_id, flow_instance, predecessor_generation)
         );
@@ -15539,14 +15566,15 @@ platform_tables:
         CREATE TABLE workflow_instance_initial_materializations (
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             entity_id          UUID NOT NULL,
-            instance_id        TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+            instance_path      TEXT NOT NULL,
             projection_version INTEGER NOT NULL CHECK (projection_version = 2),
             projection         JSONB NOT NULL,
             occurred_at        TIMESTAMPTZ NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (run_id, entity_id),
-            UNIQUE (run_id, instance_id),
-            FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE
+            UNIQUE (run_id, instance_path),
+            FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE,
+            FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE
         );
     agent_sessions:
       description: 'Live reusable agent conversation memory keyed exactly by run_id, agent_id, and flow_instance.
@@ -15583,7 +15611,7 @@ platform_tables:
             CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL),
             CHECK (successor_session_id IS NULL OR status = 'terminated'),
             CHECK (successor_session_id IS NULL OR successor_session_id <> session_id),
-            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
+            FOREIGN KEY (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE (session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE INDEX agent_sessions_nonterminated_unique (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) WHERE status <> 'terminated',
             INDEX idx_sessions_run (run_id),
@@ -15706,7 +15734,7 @@ platform_tables:
             INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );
     managed_agent_capability_surfaces:
-      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines the complete typed concrete actor identity, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. actor_id is only an indexed projection of the typed actor identity retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow that plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
+      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines one closed typed actor owner, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. Normal pre-admission startup probes carry the exact runless declaration plan; provider turns and selected-contract-fork startup probes carry the exact concrete live actor identity. The two actor variants are mutually exclusive. actor_id is only an indexed projection of that typed owner retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow the plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, dual, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
       ddl: |
         CREATE TABLE managed_agent_capability_surfaces (
             surface_id               UUID PRIMARY KEY,
@@ -15846,14 +15874,27 @@ platform_tables:
         may be true). On create_flow_instance: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from
         = parent rule_id). On flow instance termination: materialized rows set to inactive. Event dispatch: match concrete
         routes first (is_materialized = true, exact match), fall back to wildcard patterns.'
-      ddl: "CREATE TABLE routing_rules (\n    rule_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_pattern\
-        \     TEXT NOT NULL,\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id\
-        \     TEXT NOT NULL,\n    flow_instance     TEXT,\n    source_flow       TEXT,\n    is_wildcard       BOOLEAN NOT\
-        \ NULL DEFAULT FALSE,\n    is_materialized   BOOLEAN NOT NULL DEFAULT FALSE,\n    materialized_from UUID,\n    status\
-        \            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),\n    created_at        TIMESTAMPTZ\
-        \ NOT NULL DEFAULT NOW(),\n    INDEX idx_routing_event (event_pattern, status),\n    INDEX idx_routing_subscriber\
-        \ (subscriber_id),\n    INDEX idx_routing_flow (flow_instance) WHERE flow_instance IS NOT NULL,\n    INDEX idx_routing_materialized\
-        \ (materialized_from) WHERE materialized_from IS NOT NULL\n);"
+      ddl: |
+        CREATE TABLE routing_rules (
+            rule_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            run_id            UUID REFERENCES runs(run_id),
+            event_pattern     TEXT NOT NULL,
+            subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),
+            subscriber_id     TEXT NOT NULL,
+            flow_instance     TEXT,
+            source_flow       TEXT,
+            is_wildcard       BOOLEAN NOT NULL DEFAULT FALSE,
+            is_materialized   BOOLEAN NOT NULL DEFAULT FALSE,
+            materialized_from UUID,
+            status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((is_materialized AND run_id IS NOT NULL AND flow_instance IS NOT NULL) OR (NOT is_materialized AND run_id IS NULL)),
+            FOREIGN KEY (run_id, flow_instance) REFERENCES flow_instances (run_id, instance_path),
+            INDEX idx_routing_event (run_id, event_pattern, status),
+            INDEX idx_routing_subscriber (run_id, subscriber_id),
+            INDEX idx_routing_flow (run_id, flow_instance) WHERE flow_instance IS NOT NULL,
+            INDEX idx_routing_materialized (materialized_from) WHERE materialized_from IS NOT NULL
+        );
       lifecycle:
         boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
         create_flow_instance: In one selected mutation, project active dynamic-instance descriptors from the exact matching
@@ -16238,14 +16279,17 @@ platform_tables:
         );"
     spend_ledger:
       description: >-
-        LLM token and API cost tracking. external_effect_attempt_id is the exactly-once charge key
-        for new completion work. accounting_basis distinguishes ordinary accounting from the one
+        Run-scoped LLM token and API cost tracking. external_effect_attempt_id is the exactly-once charge key
+        for new completion work. An ordinary-agent row snapshots the complete run-scoped agent identity
+        without retaining a live foreign-key selector; fork-chat rows retain their distinct actor token
+        evidence without pretending it is a concrete live agent. accounting_basis distinguishes ordinary accounting from the one
         pessimistic unavailable-usage exhaustion row without adding a third usage_accounting value.
       ddl: |
         CREATE TABLE spend_ledger (
             ledger_id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             external_effect_attempt_id UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
             execution_mode             TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            run_id                     UUID NOT NULL,
             entity_id                  UUID,
             flow_instance              TEXT NOT NULL,
             agent_id                   TEXT NOT NULL,
@@ -16269,8 +16313,8 @@ platform_tables:
             created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (external_effect_attempt_id IS NOT NULL OR accounting_basis IS NULL),
             CHECK ((agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (NULLIF(TRIM(agent_name_owner), '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND flow_instance = '') OR (agent_route_presence = 'present' AND NULLIF(TRIM(agent_flow_scope_key), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_id), '') IS NOT NULL AND NULLIF(TRIM(flow_instance), '') IS NOT NULL)))),
-            INDEX idx_spend_flow (flow_instance, created_at),
-            INDEX idx_spend_agent (agent_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, flow_instance, created_at),
+            INDEX idx_spend_flow (run_id, flow_instance, created_at),
+            INDEX idx_spend_agent (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, flow_instance, created_at),
             INDEX idx_spend_effect_attempt (external_effect_attempt_id) WHERE external_effect_attempt_id IS NOT NULL
         );
     budget_admission_scopes:
@@ -16305,19 +16349,30 @@ platform_tables:
         );
     flow_instances:
       description: >-
-        Registry of all flow instances (static and dynamic). One row per instance. `mode=template` is selected at initial
+        Run-scoped registry of all live flow instances (static and dynamic). Identity is the exact
+        `(run_id, instance_path)` tuple; no reader may infer run authority from ambient context or path shape.
+        `mode=template` is selected at initial
         construction only by the exact dynamic runtime-readiness fact committed with that instance; slash/path shape is not
         a mode classifier. Later state upserts preserve the persisted mode rather than reinterpreting identity text.
-      ddl: "CREATE TABLE flow_instances (\n    instance_id       TEXT PRIMARY KEY,\n    flow_template     TEXT NOT NULL,\n\
-        \    mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),\n    parent_instance   TEXT,\n    config\
-        \            JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active',\
-        \ 'draining', 'terminated')),\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    terminated_at     TIMESTAMPTZ\n\
-        );"
+      ddl: |
+        CREATE TABLE flow_instances (
+            run_id            UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_path     TEXT NOT NULL,
+            flow_template     TEXT NOT NULL,
+            mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),
+            parent_instance   TEXT,
+            config            JSONB NOT NULL DEFAULT '{}',
+            status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draining', 'terminated')),
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            terminated_at     TIMESTAMPTZ,
+            PRIMARY KEY (run_id, instance_path),
+            FOREIGN KEY (run_id, parent_instance) REFERENCES flow_instances (run_id, instance_path)
+        );
     flow_instance_runtime_readiness:
       description: >-
         Durable run-generation-scoped desired runtime topology and creation occurrence for dynamic flow instances. The typed plan is written
         atomically with initial workflow materialization. Activation, post-commit signaling, EnsureFlowInstance/replay,
-        automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_id}`. Route rows
+        automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_path}`. Route rows
         may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
         eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
         route, transactionally reconciles the exact initial workflow-timer declaration set for the admitted source revision,
@@ -16341,7 +16396,7 @@ platform_tables:
         declaration revision cannot register, fire, or authorize an accepted event. One selected-store agent-topology
         admission covers lifecycle first execution,
         duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
-        terminalization. It locks and matches the exact `{run_id, instance_id, canonical plan fingerprint}`, desired
+        terminalization. It locks and matches the exact `{run_id, instance_path, canonical plan fingerprint}`, desired
         membership or absence, and declared config revision before any write or replay return. Authorized replay remains
         idempotent only while that current owner is unchanged; missing authority or stale authority after source revision
         fails before durable or process publication. Candidate and current paths plus declared agent identity are all
@@ -16367,13 +16422,14 @@ platform_tables:
       ddl: |
         CREATE TABLE flow_instance_runtime_readiness (
             run_id                      UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-            instance_id                 TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+            instance_path               TEXT NOT NULL,
             plan                        JSONB NOT NULL,
             topology_ready_at           TIMESTAMPTZ,
             creation_event_emitted_at   TIMESTAMPTZ,
             created_at                  TIMESTAMPTZ NOT NULL,
             updated_at                  TIMESTAMPTZ NOT NULL,
-            PRIMARY KEY (run_id, instance_id),
+            PRIMARY KEY (run_id, instance_path),
+            FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE,
             CHECK (updated_at >= created_at)
         );
     timers:
@@ -17551,13 +17607,18 @@ run_model:
       static contract-agent materialization semantics for ID rendering, subscriptions, emit events, permissions, native
       tools, flow path, role/model/memory plan, immutable resolved intent, and runtime descriptor normalization, and constructs
       ephemeral fork-local handlers through the normal AgentManager/static materialization/factory execution
-      path before selected fork publish. It may register only fork-local in-memory handler channels and runtime-active
+      path before selected fork publish. Initial activation and staged activation recovery MUST regenerate the same exact
+      blueprints, load each fork-run template agent''s persisted flow_instance_runtime_readiness, verify the run, route,
+      template/flow, entity, workflow version, execution mode, bundle hash/source, concrete agent identity, and config revision,
+      derive the canonical dynamic topology, and bind that topology to the fork-local AgentManager before container construction
+      or publication. Missing, stale, duplicate-owner, or mismatched readiness fails closed. It may register only fork-local
+      in-memory handler channels and runtime-active
       descriptors for the selected-fork EventBus; it MUST NOT persist those handlers into ordinary current-runtime
       agents, read source event_deliveries or source outcomes as executable truth, synthesize delivered/processed
       receipts, or let live subscriptions/active descriptors alone become recipient truth. Fresh event_deliveries,
       receipts, dead letters, sessions, turns, audits, idempotency state, and emitted follow-ups may appear only as
       fork-local outputs of actual selected-fork handler execution under the fork run_id. Flow-instance-scoped agent
-      materialization, restart recovery of fork-local handlers, session/turn/audit reconstruction, timers, non-agent
+      materialization, broader process restart recovery beyond the staged activation owner above, session/turn/audit reconstruction, timers, non-agent
       replay, retry/idempotency/follow-up policy beyond normal execution, and UI/API behavior remain split unless this
       owner has explicit fork-local proof for that subcase.'
     selected_contract_fork_local_runtime_container: 'Selected-contract fork-local live runtime container ownership is
@@ -17569,7 +17630,10 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy plus
       runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage before any live
       selected-fork publish path is authoritative. The container constructs the fork-run durable EventBus with the exact
-      loaded BundleSourceFact plus recipient-plan guards, registers only ephemeral fork-local runtime active-agent descriptors, starts selected handlers through
+      loaded BundleSourceFact plus recipient-plan guards. A staged activation/recovery container consumes only the regenerated
+      blueprints and exact persisted readiness topology verified and bound by the fork-local agent runtime owner; nil-blueprint,
+      readiness-JSON-only, inferred-current, or source-run fallback construction is forbidden. The container registers only
+      ephemeral fork-local runtime active-agent descriptors, starts selected handlers through
       AgentManager under the fork run_id, binds RuntimeLogger/platform diagnostics to the selected-fork lineage policy,
       carries typed runtime lineage until it is compiled to persisted ParentEventID/source_event_id truth, waits for
       runtime quiescence, and owns cleanup obligations for failed selected-fork execution attempts. Selected-fork agent
@@ -17720,7 +17784,9 @@ run_model:
       runtime.run_fork.selected_contract_execution_admission, selected route topology, selected recipient planning, and
       fork-local selected route recovery before any fork-local event, delivery, handler, receipt, dead-letter,
       retry/idempotency, or follow-up mutation. Its first-slice closure level is selected-contract execution of
-      owner-authorized delivery_event_replay_ready work only. It MUST map historical source delivery identities to
+      owner-authorized delivery_event_replay_ready work only. Before publication it MUST consume the same regenerated
+      selected-contract agent blueprints and exact persisted fork-run readiness binding as initial selected-contract activation;
+      historical/source rows, nil blueprints, or current-runtime descriptors cannot reconstruct that topology. It MUST map historical source delivery identities to
       selected recipient-plan work by source event, mint fresh fork-local event IDs under the fork run_id, publish
       through EventBus with selected recipient-plan guards, run selected handlers through the normal runtime pipeline,
       and record fork-local lineage without copying source event IDs or source delivery rows. Source delivery
@@ -18099,7 +18165,8 @@ agent_identity_model:
   current_supported_posture: concrete_name_and_route_identity
   authority_rule: >
     This section is the merge-bearing source authority for agent identity semantics. A concrete live identity consists
-    of an explicitly sourced authored or runtime-created name plus an explicit flow route. The route is either present
+    of one required admitted run, an explicitly sourced authored or runtime-created name, and an explicit flow route.
+    The route is either present
     with scope_key, instance_id, and instance_path, or explicitly root with no route fields. agent_id remains the
     operator-facing authored/runtime name but is not by itself a live runtime, store, EventBus, delivery, session, timer,
     workspace, recovery, or control identity.
@@ -18121,9 +18188,13 @@ agent_identity_model:
         emit-schema, native-tool, and permission projections MUST consume this same value. This does not change
         required_agents fulfillment: required-agent sockets remain bound to the scoped agents.yaml map key.'
     concrete_live_identity:
-      source: agent name provenance plus explicit present-or-root route
+      source: admitted run_id plus agent name provenance plus explicit present-or-root route
       role: Durable composite primary key, runtime map key, EventBus target key, delivery/session/timer/workspace owner,
         recovery selector, and internal control identity.
+      pre_run_boundary: >
+        Declaration-owned compile-time and startup planning carries one runless agent plan containing the exact name and
+        route facts. It is not live authority. Only run admission composes that plan with a required run_id. Empty,
+        optional, ambient, inferred, or fabricated runs and runless live-identity constructors are forbidden.
       repeated_template_instances: >
         Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
         No ownership-bearing consumer may collapse those siblings to the display slug.
@@ -19373,7 +19444,7 @@ platform_events:
         directive_text: string
         mode: string (directive)
         run_id: string
-        run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
+        run_id_resolution: string (specified)
         source: string
         operator_id: string (nullable)
         timestamp: string (ISO 8601)
@@ -22908,13 +22979,13 @@ cli_specification:
       agent_replay_event_targeted:
         classification: required_current_contract
         reason: >
-          Platform spec requires `swarm agent replay <agent-id> --event-id <event-id>` over `agent.replay`.
+          Platform spec requires `swarm agent replay <agent-id> --event-id <event-id> --run-id <run-id>` over `agent.replay`.
           The review artifact anticipated event-targeted replay but left the command row under-specified.
       agent_directive_run_targeting:
         classification: required_current_contract
         reason: >
-          Platform spec promotes directive run targeting through `--run-id` and server-owned run target
-          resolution after #755. This is required current behavior, not legacy compatibility.
+          Platform spec requires exact directive run targeting through `--run-id`. The server resolves one
+          concrete run-scoped agent and never infers a run from sessions or allocates a run for a directive.
       serve_bundle_match_admission:
         classification: required_current_contract
         reason: >
@@ -23669,7 +23740,10 @@ cli_specification:
           control_pause_run: {command: swarm control pause, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
           control_continue_run: {command: swarm control continue, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
           control_stop_run: {command: swarm control stop, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
+          agent_frame_run: {command: swarm agent frame, selector: 'flag:run-id', family: run, mode: full_only}
           agent_deliveries_run: {command: swarm agent deliveries, selector: 'flag:run-id', family: run, mode: full_only}
+          agent_restart_run: {command: swarm agent restart, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
+          agent_replay_run: {command: swarm agent replay, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
           agent_directive_run: {command: swarm agent directive, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
           conversation_list_run: {command: swarm conversation list, selector: 'flag:run-id', family: run, mode: full_only}
           entity_list_run: {command: swarm entity list, selector: 'flag:run-id', family: run, mode: full_only}
@@ -27277,14 +27351,14 @@ cli_specification:
       - --json, --quiet, --no-color, and --json/--quiet collision consume the shared output owner
       - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
     agent_frame:
-      command: swarm agent frame <agent-id> --scope <static|effective> [selector] [--json|--quiet] [--no-color]
+      command: swarm agent frame <agent-id> --scope <static|effective> [selector] [--run-id <run-id>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.frame
       behavior: >
         Read-only exact execution-frame inspection. Static requires --bundle-hash and --flow and forbids runtime selectors.
-        Effective requires exactly one of --root or --flow-instance and forbids static selectors. The CLI renders only the
+        Effective requires --run-id plus exactly one of --root or --flow-instance and forbids static selectors. The CLI renders only the
         AgentExecutionFrameInspection returned by the API and never reads bundles, runtime state, provider evidence, turn
         history, files, databases, or event payloads to reconstruct frame facts locally.
       output:
@@ -27301,7 +27375,7 @@ cli_specification:
         not_found_errors: [AGENT_NOT_FOUND, BUNDLE_NOT_FOUND]
       proof_expectations:
       - static sends only scope, agent_id, bundle_hash, and authored flow
-      - effective sends only scope, agent_id, and exactly one exact runtime selector
+      - effective sends scope, agent_id, exact run_id, and exactly one exact runtime selector
       - selector conflicts fail before API client construction or request
       - all occurrence fields remain explicit unresolved values in static and effective inspection
       - no local frame reconstruction or alternate prompt/event/capability owner
@@ -27382,12 +27456,12 @@ cli_specification:
       - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDeliveryLifecycleList / AgentDeliveryLifecycleRow responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.get, event.list, agent.diagnose, or agent.delivery_diagnostics method usage
     agent_restart:
-      command: swarm agent restart <agent-id> [--idempotency-key <key>]
+      command: swarm agent restart <agent-id> --run-id <run-id> [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.restart
-      behavior: Mutating agent-control CLI consumer. The CLI sends agent_id and optional idempotency_key to /v1/rpc agent.restart through the shared v1 API client. The CLI MUST NOT inspect runtime/session/agent state locally, call dashboard/Builder REST, call runtime/store/EventBus/agentcontrol directly, or use directive/replay/conversation owners to satisfy restart behavior.
+      behavior: Mutating agent-control CLI consumer. The CLI sends agent_id, required exact run_id, and optional idempotency_key to /v1/rpc agent.restart through the shared v1 API client. The CLI MUST NOT inspect runtime/session/agent state locally, call dashboard/Builder REST, call runtime/store/EventBus/agentcontrol directly, or use directive/replay/conversation owners to satisfy restart behavior.
       output:
         success_line: agent restart ok with agent_id
       exit_codes:
@@ -27402,14 +27476,14 @@ cli_specification:
         resource_state_or_conflict_errors:
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
-      - exact /v1/rpc agent.restart call with agent_id param
+      - exact /v1/rpc agent.restart call with agent_id and run_id params
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders agent_id and validates OkResult.ok is true
       - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, directive, or replay method usage
     agent_replay:
-      command: swarm agent replay <agent-id> --event-id <event-id> [--idempotency-key <key>]
+      command: swarm agent replay <agent-id> --event-id <event-id> --run-id <run-id> [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented
@@ -27442,12 +27516,12 @@ cli_specification:
       - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
     agent_directive:
-      command: swarm agent directive <agent-id> "<message>" [--run-id <run-id>] [--idempotency-key <key>]
+      command: swarm agent directive <agent-id> "<message>" --run-id <run-id> [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.send_directive
-      behavior: Mutating directive-delivery CLI consumer. The CLI sends agent_id, directive, optional run_id, and optional idempotency_key to /v1/rpc agent.send_directive. The CLI MUST NOT resolve runs, inspect sessions, read conversations, call dashboard/Builder REST, or call runtime/store/EventBus/agentcontrol directly; server-side agent.send_directive owns run target resolution, durable operation/outcome identity, platform.agent_directive persistence, idempotency, and directive event identity.
+      behavior: Mutating directive-delivery CLI consumer. The CLI sends agent_id, directive, required exact run_id, and optional idempotency_key to /v1/rpc agent.send_directive. The CLI MUST NOT resolve runs, inspect sessions, read conversations, call dashboard/Builder REST, or call runtime/store/EventBus/agentcontrol directly; server-side agent.send_directive owns exact concrete-agent resolution, durable operation/outcome identity, platform.agent_directive persistence, idempotency, and directive event identity.
       output:
         success_line: agent directive ok with agent_id, operation_id, run_id, run_id_resolution, directive_event_id, and directive_event_type
         optional_response_line: response=<server acknowledgement> when the API response includes a non-empty response
@@ -27464,19 +27538,18 @@ cli_specification:
         resource_state_or_conflict_errors:
         - AGENT_NOT_RUNNING
         - RUN_ALREADY_TERMINAL
-        - AMBIGUOUS_RUN_TARGET
         - IDEMPOTENCY_CONFLICT
         - AGENT_DIRECTIVE_IN_PROGRESS
         - AGENT_DIRECTIVE_COMPLETION_PENDING
         - AGENT_DIRECTIVE_EXECUTION_FAILED
         - AGENT_DIRECTIVE_OUTCOME_INDETERMINATE
       proof_expectations:
-      - exact /v1/rpc agent.send_directive call with agent_id and directive params
-      - --run-id passes run_id exactly and does not trigger local run/session lookup
+      - exact /v1/rpc agent.send_directive call with agent_id, directive, and run_id params
+      - --run-id is required, passes run_id exactly, and does not trigger local run/session lookup
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders server-owned operation_id, run_id, run_id_resolution, directive_event_id, and directive_event_type
       - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
-      - AGENT_NOT_FOUND, RUN_NOT_FOUND, AGENT_NOT_RUNNING, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE, HTTP failures, and malformed success responses fail closed with tested exit codes
+      - AGENT_NOT_FOUND, RUN_NOT_FOUND, AGENT_NOT_RUNNING, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE, HTTP failures, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, restart, or replay method usage
     events_list:
       command: swarm event list
@@ -31136,8 +31209,9 @@ api_specification:
       AgentFrameIdentity:
         type: object
         additionalProperties: false
-        required: [name, route]
+        required: [run_id, name, route]
         properties:
+          run_id: {$ref: '#/components/schemas/OpaqueId'}
           name:
             type: object
             additionalProperties: false
@@ -34432,32 +34506,6 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
-      AMBIGUOUS_RUN_TARGET:
-        type: object
-        additionalProperties: false
-        required:
-        - agent_id
-        properties:
-          agent_id:
-            $ref: '#/components/schemas/OpaqueId'
-          run_id:
-            $ref: '#/components/schemas/OpaqueId'
-            description: Present when ambiguity was caused by an explicit run target combined with incompatible legacy targeting
-              flags.
-          active_sessions:
-            type: array
-            description: Active sessions that prevent implicit target resolution. A session without run_id is reported without
-              a run_id field and still fail-closes implicit resolution.
-            items:
-              type: object
-              additionalProperties: false
-              required:
-              - session_id
-              properties:
-                session_id:
-                  $ref: '#/components/schemas/OpaqueId'
-                run_id:
-                  $ref: '#/components/schemas/OpaqueId'
       RUN_NOT_PAUSED:
         type: object
         additionalProperties: false
@@ -35894,7 +35942,7 @@ api_specification:
         - read:entities
       params:
       - name: run_id
-        required: false
+        required: true
         schema:
           $ref: '#/components/schemas/OpaqueId'
       - name: flow
@@ -36338,6 +36386,11 @@ api_specification:
         required:
         - read:agents
       params:
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the concrete live agent.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36359,7 +36412,7 @@ api_specification:
       description: >
         Inspect the canonical managed agent execution-frame projection without selecting or fabricating a provider-turn
         occurrence. Static scope requires an exact registered bundle hash, authored flow (`root` for root), and agent id.
-        Effective scope requires an exact agent id plus exactly one of root=true or a full concrete flow_instance. Static
+        Effective scope requires an exact agent id and run_id plus exactly one of root=true or a full concrete flow_instance. Static
         runtime facts and all occurrence facts are explicit unresolved values. Effective runtime/session facts are resolved
         from the live canonical manager owner while all occurrence facts remain explicit unresolved values. The API never
         reconstructs frame semantics from prompts, payload heuristics, mutable provider evidence, or turn history.
@@ -36372,6 +36425,10 @@ api_specification:
         schema: {type: string, enum: [static, effective]}
       - name: agent_id
         required: true
+        schema: {$ref: '#/components/schemas/OpaqueId'}
+      - name: run_id
+        required: false
+        description: Required for effective scope and forbidden for static scope; selects the exact live run owner.
         schema: {$ref: '#/components/schemas/OpaqueId'}
       - name: bundle_hash
         required: false
@@ -36438,6 +36495,11 @@ api_specification:
         required:
         - read:agents
       params:
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the concrete live agent.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36478,7 +36540,7 @@ api_specification:
         remains lean, and rich failed/dead-letter evidence remains owned by
         agent.delivery_diagnostics.
 
-        The API handler validates agent_id, optional run_id, optional
+        The API handler validates exact run_id plus agent identity, optional
         delivery_status filters, list bounds, cursor, and unknown params, then
         consumes one named persisted delivery lifecycle read owner. The owner
         reads only canonical event_deliveries rows for subscriber_type agent
@@ -36490,10 +36552,9 @@ api_specification:
         memory, runtime memory, or direct DB/store readers outside this owner.
 
         Rows are ordered by event_deliveries.created_at DESC, then delivery_id
-        DESC. cursor is an opaque cursor over that ordering. run_id filters use
-        the canonical delivery/event run identity, currently
-        COALESCE(event_deliveries.run_id, events.run_id), and return only rows
-        matching the supplied run. delivery_status filters are exact
+        DESC. cursor is an opaque cursor over that ordering. run_id is the
+        canonical concrete-agent owner and all returned delivery/event rows
+        must match it exactly. delivery_status filters are exact
         event_deliveries.status values. Empty lists are represented as empty
         arrays. The method reports only lifecycle summaries
         (status/timestamps/retry_count/reason_code/failure); it does not
@@ -36505,6 +36566,11 @@ api_specification:
         - read:agents
         - read:events
       params:
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the concrete live agent and returned deliveries.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36514,11 +36580,6 @@ api_specification:
         description: Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.
         schema:
           type: string
-      - name: run_id
-        required: false
-        description: Optional run filter over COALESCE(event_deliveries.run_id, events.run_id).
-        schema:
-          $ref: '#/components/schemas/OpaqueId'
       - name: delivery_status
         required: false
         description: Optional exact lifecycle-status filter. When supplied, only these canonical event_deliveries.status values are returned.
@@ -36552,7 +36613,7 @@ api_specification:
         Read the owner-backed per-agent LLM token and estimated-cost usage
         aggregate. This is a separate owner from agent.diagnose:
         AgentDiagnosis remains lean and must not expose token usage. The API
-        handler validates agent_id and optional created_at window params, then
+        handler validates exact run-scoped agent identity and optional created_at window params, then
         consumes one named per-agent usage read owner over spend_ledger facts.
         It must not locally reconstruct usage from raw request_payload,
         response_payload, agent.diagnose, agent.delivery_diagnostics,
@@ -36567,12 +36628,17 @@ api_specification:
         model breakdowns so provider usage and estimated CLI usage are not
         silently merged. estimated_cost_usd is the
         BudgetTracker guardrail cost estimate, not provider billing truth. This
-        method does not make run_id, session_id, turn_id, last-turn, or
+        method does not return session_id, turn_id, last-turn, or
         provider-billing claims.
       scope:
         required:
         - read:agents
       params:
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the concrete live agent and spend facts.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36635,6 +36701,11 @@ api_specification:
         - read:agents
         - read:events
       params:
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the concrete live agent and delivery facts.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36680,10 +36751,9 @@ api_specification:
     agent.send_directive:
       tier: should_have
       description: >-
-        Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before
-        reservation: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate
-        a new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with
-        AMBIGUOUS_RUN_TARGET. One agent_directive_operations row and one platform.agent_directive event are persisted
+        Send a directive (free-form instruction) to a running agent. Required run_id selects one exact concrete agent
+        in an existing nonterminal run; session inference and new-run allocation are forbidden.
+        One agent_directive_operations row and one platform.agent_directive event are persisted
         atomically before the operation receives its sole BoardStep admission. Successful BoardStep response is made
         durable before pipeline settlement and API completion are finalized. Same-key retries consume the same operation
         and never re-execute an admitted, executed, failed, or indeterminate operation. Keyless calls create fresh
@@ -36713,11 +36783,10 @@ api_specification:
           type: string
           minLength: 1
       - name: run_id
-        required: false
+        required: true
         schema:
           $ref: '#/components/schemas/OpaqueId'
-        description: Optional explicit nonterminal run target. If omitted, the runtime resolves from active sessions or allocates
-          a new run_id.
+        description: Exact nonterminal run owning the concrete target agent. Session inference and run allocation are forbidden.
       - name: idempotency_key
         required: false
         schema:
@@ -36750,8 +36819,6 @@ api_specification:
               type: string
               enum:
               - specified
-              - inferred_from_active_session
-              - new_run_allocated
             directive_event_id:
               $ref: '#/components/schemas/OpaqueId'
             directive_event_type:
@@ -36762,7 +36829,6 @@ api_specification:
       - AGENT_NOT_RUNNING
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL
-      - AMBIGUOUS_RUN_TARGET
       - IDEMPOTENCY_CONFLICT
       - AGENT_DIRECTIVE_IN_PROGRESS
       - AGENT_DIRECTIVE_COMPLETION_PENDING
@@ -36776,6 +36842,10 @@ api_specification:
         - control:agents
       idempotency: per the convention.
       params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
         required: true
         schema:
@@ -36818,6 +36888,11 @@ api_specification:
       params:
       - name: event_id
         required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: run_id
+        required: true
+        description: Exact admitted run owning the original concrete agent recipient.
         schema:
           $ref: '#/components/schemas/OpaqueId'
       - name: agent_id
@@ -38431,6 +38506,7 @@ managed_agent_capability_surface:
     monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
+    actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-contract-fork probes consume the exact concrete fork-run actor identity because the fork run is already admitted. A startup surface cannot carry both forms, fabricate a run, infer a run from context, or reuse a provider-turn identity.
     startup_authority: >
       Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is
       strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus
@@ -38456,7 +38532,7 @@ managed_agent_capability_surface:
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
     managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. Normal-agent admission requires exact equality among lifecycle identity, usage-target identity, and capability-surface identity. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. For a normal provider delivery continuation, this fingerprint excludes only the process-generation execution authority and stateless session UUID; it retains exact actor, run, turn ordinal, provider contract, tool definitions, bindings, and effective callability. Selected-fork surfaces retain their exact execution coordinates. Forkchat attempts carry neither value.
   persistence:
-    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with its complete typed concrete actor identity; actor_id columns are derived index projections only. Settlement and recovery independently compare the persisted surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
+    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with exactly one typed actor owner; normal pre-admission startup surfaces carry a runless agent plan, while provider-turn and selected-contract-fork startup surfaces carry a typed concrete live identity. actor_id columns are derived index projections only. Settlement and recovery independently compare provider-turn surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
     migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
   proof:
     required: [API adapter delivery parity, Claude CLI positive-selection startup and first/resumed-turn evidence, Claude CLI zero/each/all native-family selection, Claude CLI incompatible-selector denial, Claude CLI unknown-builtin mismatch, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, recovery and replacement handoff ordering, selected-fork preflight and first/resumed-turn ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, public forkchat exact-policy selection and source-native non-interference, deterministic release-binary lifecycle, opt-in installed-Claude selector conformance, opt-in paid public-binary agentic lifecycle]
@@ -38469,7 +38545,7 @@ managed_external_effect_authority:
   context_authority:
     managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and exactly one live typed origin, either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
-    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Startup authority cannot authorize a provider turn or be reused after execution admission.
+    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Normal pre-admission probing carries the exact runless agent plan; selected-contract-fork probing carries the exact fork-run actor identity. Startup authority cannot authorize a provider turn or be reused after execution admission.
     serve_registration: >
       Channel-backed provider callback apply requires one closed serve-registration authority containing the current
       startup authority identity/state version and one process-local registration intent identity. The selected-store

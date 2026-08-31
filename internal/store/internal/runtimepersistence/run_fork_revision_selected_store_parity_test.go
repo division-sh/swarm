@@ -359,7 +359,7 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 			})
-			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "revision-matrix-agent", ""), "active")
+			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""), "active")
 
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
@@ -421,7 +421,7 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 	})
-	identity := testAgentIdentity(t, "revision-matrix-agent", "")
+	identity := mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", "")
 	seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 
 	tx, err := db.BeginTx(ctx, nil)

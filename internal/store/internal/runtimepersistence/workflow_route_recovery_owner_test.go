@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -15,12 +16,12 @@ import (
 )
 
 type activeWorkflowRouteReader interface {
-	LoadActiveWorkflowRoute(context.Context, string) (runtimeworkflowroute.RecoveryRecord, error)
+	LoadActiveWorkflowRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimeworkflowroute.RecoveryRecord, error)
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
 }
 
-func TestActiveWorkflowRouteRecoveryUsesOnlyCurrentRunOwnersOnBothStores(t *testing.T) {
+func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) {
 	tests := []struct {
 		name   string
 		open   func(*testing.T) (activeWorkflowRouteReader, *sql.DB)
@@ -65,15 +66,19 @@ func TestActiveWorkflowRouteRecoveryUsesOnlyCurrentRunOwnersOnBothStores(t *test
 			config := `{"workflow_version":"1","instance_id":"one","flow_path":"` + instancePath + `"}`
 			if tc.sqlite {
 				if _, err := db.ExecContext(ctx, `
-					INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-					VALUES (?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP)
-				`, instancePath, config); err != nil {
+					INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+					VALUES (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP),
+					       (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP),
+					       (?, ?, 'review', 'template', ?, 'active', CURRENT_TIMESTAMP)
+				`, retiredRunID, instancePath, config, currentRunID, instancePath, config, ambiguousRunID, instancePath, config); err != nil {
 					t.Fatalf("seed SQLite flow instance: %v", err)
 				}
 			} else if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-				VALUES ($1, 'review', 'template', $2::jsonb, 'active', NOW())
-			`, instancePath, config); err != nil {
+				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+				VALUES ($1::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW()),
+				       ($4::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW()),
+				       ($5::uuid, $2, 'review', 'template', $3::jsonb, 'active', NOW())
+			`, retiredRunID, instancePath, config, currentRunID, ambiguousRunID); err != nil {
 				t.Fatalf("seed Postgres flow instance: %v", err)
 			}
 
@@ -90,28 +95,40 @@ func TestActiveWorkflowRouteRecoveryUsesOnlyCurrentRunOwnersOnBothStores(t *test
 
 			insertOwner(retiredRunID, retiredEntityID)
 			insertOwner(currentRunID, currentEntityID)
-			record, err := selected.LoadActiveWorkflowRoute(ctx, instancePath)
+			insertOwner(ambiguousRunID, ambiguousEntityID)
+			currentIdentity := runtimeflowidentity.RunScopedFlowInstance{
+				RunID: currentRunID,
+				Route: runtimeflowidentity.RouteForInstancePath(instancePath),
+			}
+			record, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity)
 			if err != nil {
-				t.Fatalf("recover current owner with retired predecessor: %v", err)
+				t.Fatalf("recover exact current owner with same-path siblings: %v", err)
 			}
 			if record.EntityID != currentEntityID {
 				t.Fatalf("recovered entity_id = %q, want current owner %q instead of retired owner %q", record.EntityID, currentEntityID, retiredEntityID)
 			}
 
-			insertOwner(ambiguousRunID, ambiguousEntityID)
-			if _, err := selected.LoadActiveWorkflowRoute(ctx, instancePath); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
-				t.Fatalf("ambiguous current owner error = %v", err)
+			foreign, err := selected.LoadActiveWorkflowRoute(ctx, runtimeflowidentity.RunScopedFlowInstance{
+				RunID: ambiguousRunID,
+				Route: runtimeflowidentity.RouteForInstancePath(instancePath),
+			})
+			if err != nil || foreign.EntityID != ambiguousEntityID {
+				t.Fatalf("recover same path from exact paused run: record=%#v err=%v", foreign, err)
 			}
 
-			for _, runID := range []string{currentRunID, ambiguousRunID} {
-				if _, _, err := storetest.TerminalizeRun(ctx, selected, runtimerunlifecycle.TerminalRequest{
-					RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
-				}); err != nil {
-					t.Fatalf("retire current route owner run %s: %v", runID, err)
-				}
+			secondCurrentOwner := uuid.NewString()
+			insertOwner(currentRunID, secondCurrentOwner)
+			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+				t.Fatalf("ambiguous exact-run owner error = %v", err)
 			}
-			if _, err := selected.LoadActiveWorkflowRoute(ctx, instancePath); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
-				t.Fatalf("missing current owner error = %v", err)
+
+			if _, _, err := storetest.TerminalizeRun(ctx, selected, runtimerunlifecycle.TerminalRequest{
+				RunID: currentRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("retire exact route owner run %s: %v", currentRunID, err)
+			}
+			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+				t.Fatalf("retired exact-run owner error = %v", err)
 			}
 		})
 	}

@@ -23,6 +23,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -212,7 +213,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
-			agentRoute := startupRecoveryAgentRoute(t, agentID)
+			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
 			agentEvent := eventtest.ExistingRunRootIngress(
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
@@ -277,6 +278,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err := runtime.Manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
 				t.Fatalf("persist startup-order declared agent: %v", err)
 			}
+			if err := runtime.Manager.FinalizeCommittedAgentReadiness(ctx, agentEvent, []events.DeliveryRoute{agentRoute}); err != nil {
+				t.Fatalf("materialize startup-order committed static agent: %v", err)
+			}
 			if err := runtime.Manager.Shutdown(); err != nil {
 				t.Fatalf("retire constructed manager before startup-order replacement: %v", err)
 			}
@@ -300,6 +304,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 
 			if err := runtime.Start(ctx); err != nil {
 				t.Fatalf("Start: %v", err)
+			}
+			if !hydrated.Load() {
+				t.Fatal("startup did not hydrate the persisted static agent before delivery recovery")
 			}
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
 			waitForRecoveredNodeDelivery(t, ctx, selected, agentEventID, agentRoute, 1)
@@ -329,17 +336,18 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 	}
 	cases := []struct {
 		name       string
-		route      events.DeliveryRoute
+		agentID    string
+		nodeID     string
 		state      string
 		foreign    bool
 		wantDenied bool
 	}{
-		{name: "pending_agent", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "pending", wantDenied: true},
-		{name: "pending_node", route: startupRecoveryNodeRoute(t, "complete-task"), state: "pending", wantDenied: true},
-		{name: "future_failed", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "future_failed", wantDenied: true},
-		{name: "busy_in_progress", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "busy", wantDenied: true},
-		{name: "reclaimable_in_progress", route: startupRecoveryNodeRoute(t, "complete-task"), state: "reclaimable", wantDenied: true},
-		{name: "foreign_bundle_excluded", route: startupRecoveryAgentRoute(t, "foreign-agent"), state: "pending", foreign: true},
+		{name: "pending_agent", agentID: "startup-agent", state: "pending", wantDenied: true},
+		{name: "pending_node", nodeID: "complete-task", state: "pending", wantDenied: true},
+		{name: "future_failed", agentID: "startup-agent", state: "future_failed", wantDenied: true},
+		{name: "busy_in_progress", agentID: "startup-agent", state: "busy", wantDenied: true},
+		{name: "reclaimable_in_progress", nodeID: "complete-task", state: "reclaimable", wantDenied: true},
+		{name: "foreign_bundle_excluded", agentID: "foreign-agent", state: "pending", foreign: true},
 		{name: "empty_control"},
 	}
 
@@ -381,6 +389,12 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
 							seedStartupRecoverySourceRun(t, eventCtx, db, backend, selected, eventSource, eventRunID)
 						}
+						var route events.DeliveryRoute
+						if test.agentID != "" {
+							route = startupRecoveryAgentRoute(t, eventRunID, test.agentID)
+						} else {
+							route = startupRecoveryNodeRoute(t, test.nodeID)
+						}
 						deliveryCtx = eventCtx
 						event := eventtest.ExistingRunRootIngress(
 							eventtest.UUID("recovery-disabled-event-"+backend+"-"+mode.name+"-"+test.name),
@@ -389,17 +403,17 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							time.Now().UTC(),
 						)
 						storetest.CommitSemanticEventWithInitialFacts(
-							t, eventCtx, selected, event, []events.DeliveryRoute{test.route},
+							t, eventCtx, selected, event, []events.DeliveryRoute{route},
 							runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 						)
-						deliveryID, err = runtimedelivery.DeliveryID(event.ID(), test.route)
+						deliveryID, err = runtimedelivery.DeliveryID(event.ID(), route)
 						if err != nil {
 							t.Fatalf("derive startup delivery id: %v", err)
 						}
 						switch test.state {
 						case "pending":
 						case "future_failed":
-							claimed, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route)
+							claimed, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route)
 							if claimErr != nil {
 								t.Fatalf("claim future-failed startup delivery: %v", claimErr)
 							}
@@ -412,11 +426,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 								t.Fatalf("settle future-failed startup delivery: %v", settleErr)
 							}
 						case "busy":
-							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route); claimErr != nil {
+							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route); claimErr != nil {
 								t.Fatalf("claim busy startup delivery: %v", claimErr)
 							}
 						case "reclaimable":
-							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route); claimErr != nil {
+							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route); claimErr != nil {
 								t.Fatalf("claim reclaimable startup delivery: %v", claimErr)
 							}
 							expireNodeDeliveryClaim(t, eventCtx, db, backend == "postgres", deliveryID)
@@ -625,13 +639,13 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 	}
 }
 
-func startupRecoveryAgentRoute(t *testing.T, agentID string) events.DeliveryRoute {
+func startupRecoveryAgentRoute(t *testing.T, runID, agentID string) events.DeliveryRoute {
 	t.Helper()
 	name, err := runtimeagentidentity.DeclaredName(agentID, "swarm-test://root/agents/"+agentID)
 	if err != nil {
 		t.Fatalf("construct startup recovery agent name: %v", err)
 	}
-	identity, err := runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+	identity, err := runtimeagentidentity.New(runID, name, runtimeagentidentity.RootRoute())
 	if err != nil {
 		t.Fatalf("construct startup recovery agent identity: %v", err)
 	}
@@ -831,7 +845,8 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				FlowRoutes:          bus,
 			})
 
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			instance := artifactActionResultWorkflowInstance()
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
@@ -923,7 +938,8 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				FlowRoutes:          bus,
 			})
 
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			healthyInstance := artifactActionResultWorkflowInstance()
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(healthyInstance.StorageRef)}, healthyInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed healthy workflow instance: %v", err)
 			}
 
@@ -937,7 +953,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
 				"display_slug": "Poison", "source_record_id": "poison-record",
 			}
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), poisonInstance, time.Now().UTC()); err != nil {
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(poisonInstance.StorageRef)}, poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)
 			}
 			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
@@ -1081,7 +1097,8 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				},
 			})
 
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			instance := artifactActionResultWorkflowInstance()
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 

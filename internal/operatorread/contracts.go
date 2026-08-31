@@ -20,7 +20,7 @@ type EntityReader interface {
 }
 
 type AgentReader interface {
-	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
+	ResolveOperatorAgentIdentity(context.Context, string, string, string) (agentidentity.Identity, error)
 	ListOperatorAgents(context.Context, OperatorAgentListOptions) (OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, agentidentity.Identity) (OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error)
@@ -28,12 +28,12 @@ type AgentReader interface {
 }
 
 type AgentDeliveryLifecycleReader interface {
-	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
+	ResolveOperatorAgentIdentity(context.Context, string, string, string) (agentidentity.Identity, error)
 	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error)
 }
 
 type AgentUsageReader interface {
-	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
+	ResolveOperatorAgentIdentity(context.Context, string, string, string) (agentidentity.Identity, error)
 	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
 }
 

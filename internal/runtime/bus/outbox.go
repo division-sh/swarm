@@ -173,6 +173,9 @@ func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []r
 		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.committed.Activations); err != nil {
 			return err
 		}
+		if err := eb.finalizeCommittedAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes()); err != nil {
+			return err
+		}
 		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 		}

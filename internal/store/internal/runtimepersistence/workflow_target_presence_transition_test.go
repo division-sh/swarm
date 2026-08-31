@@ -77,7 +77,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 				entityID := uuid.NewString()
 				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
-				seedStateOnlyAcquisitionLifecycle(t, backend, db, instancePath, "active")
+				seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instancePath, "active")
 				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
 
 				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil {
@@ -140,11 +140,11 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 				if !ok {
 					t.Fatalf("%s selected store does not expose the workflow target reader", backend)
 				}
-				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, first.Route, runtimeidentity.NormalizeEntityID(entityID))
+				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, first.Identity, runtimeidentity.NormalizeEntityID(entityID))
 				if err != nil {
 					t.Fatalf("reload committed target: %v", err)
 				}
-				if err := persisted.Validate(first.Route, runtimeidentity.NormalizeEntityID(entityID)); err != nil {
+				if err := persisted.Validate(first.Identity.Route, runtimeidentity.NormalizeEntityID(entityID)); err != nil {
 					t.Fatalf("validate reloaded committed target: %v", err)
 				}
 				if persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
@@ -193,7 +193,7 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 				record.Transition = runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
 				routeEntityID := runtimeidentity.NormalizeEntityID(entityID)
 
-				initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+				initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
 				if err != nil || initial.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent {
 					t.Fatalf("attempt %d initial target presence = %d error = %v, want absent", attempt, initial.Presence, err)
 				}
@@ -207,7 +207,7 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 						defer readers.Done()
 						<-start
 						for range 16 {
-							target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+							target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
 							if err != nil {
 								errors <- err
 								continue
@@ -227,7 +227,7 @@ func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t
 				for err := range errors {
 					t.Fatalf("attempt %d target snapshot read: %v", attempt, err)
 				}
-				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, record.Identity, routeEntityID)
 				if err != nil || persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
 					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, persisted.Presence, err)
 				}
@@ -328,7 +328,7 @@ func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instance
 		t.Fatal(err)
 	}
 	return runtimepipeline.WorkflowEngineStateRecord{
-		RunID: runID, Route: route, EntityID: entityID,
+		Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: route}, EntityID: entityID,
 		WorkflowName: flowID, WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "done", EntityType: "review_item",
 		Fields: json.RawMessage(`{"account_id":"preserved","handled":true}`), Bookkeeping: json.RawMessage(`{}`),
@@ -355,10 +355,10 @@ func seedWorkflowTargetStateForTransition(t *testing.T, backend string, db *sql.
 func assertWorkflowTargetTransitionRows(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, wantWorkflow, wantState string, wantRevision, wantCompanions int) {
 	t.Helper()
 	stateQuery := `SELECT current_state, revision FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
-	companionQuery := `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE instance_id = ?`
+	companionQuery := `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if backend == "postgres" {
 		stateQuery = `SELECT current_state, revision FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
-		companionQuery = `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE instance_id = $1`
+		companionQuery = `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	var state string
 	var revision int
@@ -370,7 +370,7 @@ func assertWorkflowTargetTransitionRows(t *testing.T, backend string, db *sql.DB
 	}
 	var companions int
 	var workflow string
-	if err := db.QueryRowContext(context.Background(), companionQuery, instancePath).Scan(&companions, &workflow); err != nil {
+	if err := db.QueryRowContext(context.Background(), companionQuery, runID, instancePath).Scan(&companions, &workflow); err != nil {
 		t.Fatalf("load workflow target companion: %v", err)
 	}
 	if companions != wantCompanions || workflow != wantWorkflow {

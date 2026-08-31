@@ -230,6 +230,7 @@ type PrimaryEntityView struct {
 type TemplateInstanceView struct {
 	Field         string `json:"field"`
 	PrimaryEntity string `json:"primary_entity"`
+	Identity      string `json:"identity"`
 	SourceFile    string `json:"source_file,omitempty"`
 }
 
@@ -497,6 +498,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 				item.TemplateInstance = &TemplateInstanceView{
 					Field:         instance.Field.Path(),
 					PrimaryEntity: strings.TrimSpace(instance.PrimaryEntity.EntityType),
+					Identity:      "run + flow + instance_key",
 					SourceFile:    strings.TrimSpace(flow.Paths.SchemaFile),
 				}
 			} else {

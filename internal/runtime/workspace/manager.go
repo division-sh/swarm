@@ -569,8 +569,29 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	return m.resolveWorkspace(ctx, actor, true)
 }
 
-func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error) {
-	return m.resolveWorkspace(ctx, actor, false)
+func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, actor models.AgentConfig) (*Target, error) {
+	class, err := m.workspaceClass(actor)
+	if err != nil {
+		return nil, err
+	}
+	container := strings.TrimSpace(m.cfg.SystemContainer)
+	workdir := strings.TrimSpace(m.cfg.SystemWorkdir)
+	switch workspaceRouteClass(class) {
+	case "scaffold":
+		container = strings.TrimSpace(m.cfg.ScaffoldContainer)
+		workdir = strings.TrimSpace(m.cfg.ScaffoldWorkdir)
+	case "system":
+	default:
+		if _, err := workspaceScopeForCapabilityAdmission(m.semanticSource(), actor); err != nil {
+			return nil, err
+		}
+	}
+	return &Target{
+		Container: container,
+		Workdir:   workdir,
+		Backend:   BackendDocker,
+		Mounts:    dockerExecutionMounts(m.cfg, false),
+	}, nil
 }
 
 func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
@@ -755,6 +776,38 @@ func workspaceScopeForActor(source semanticview.Source, actor models.AgentConfig
 	}
 }
 
+func workspaceScopeForCapabilityAdmission(source semanticview.Source, actor models.AgentConfig) (string, error) {
+	class, err := workspaceClassForSource(source, actor)
+	if err != nil {
+		return "", err
+	}
+	scope := "per-agent"
+	if class != "" {
+		if source == nil {
+			return "", fmt.Errorf("workspace resolution failed: semantic source is required for workspace_class %q", class)
+		}
+		resolved, ok, err := workspaceClassScope(source, class)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("workspace resolution failed: workspace_class %q is not defined for agent %s", class, strings.TrimSpace(actor.ID))
+		}
+		scope = resolved
+	}
+	switch scope {
+	case "per-agent":
+		return scope, nil
+	case "per-flow-instance":
+		if actor.CanonicalFlowPath() == "" {
+			return "", fmt.Errorf("workspace resolution failed: per-flow-instance workspace for agent %s requires flow_path", strings.TrimSpace(actor.ID))
+		}
+		return scope, nil
+	default:
+		return "", fmt.Errorf("workspace resolution failed: unsupported workspace scope %q", scope)
+	}
+}
+
 func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, actor models.AgentConfig) (string, string, error) {
 	scope = strings.TrimSpace(scope)
 	scopeKey = SanitizeSlug(scopeKey)
@@ -806,9 +859,16 @@ func (m *DockerManager) systemContainerIdentity(source, kind string) runtimecont
 }
 
 func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, container, scope, scopeKey string, actor models.AgentConfig, projectionID runtimedataaccess.ProjectionID) (runtimecontaineridentity.Identity, error) {
-	runID, err := workspaceRunID(ctx)
+	agentIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace container identity: %w", err)
+	}
+	contextRunID, err := workspaceRunID(ctx)
 	if err != nil {
 		return runtimecontaineridentity.Identity{}, err
+	}
+	if contextRunID != "" && contextRunID != agentIdentity.RunID {
+		return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace context run_id does not match concrete agent identity")
 	}
 	identity := runtimecontaineridentity.Identity{
 		Owner:          runtimecontaineridentity.OwnerRuntime,
@@ -817,25 +877,16 @@ func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, containe
 		ContainerName:  strings.TrimSpace(container),
 		WorkspaceScope: strings.TrimSpace(scope),
 		BundleHash:     m.bundleHashLabel(),
-		RunID:          runID,
+		RunID:          agentIdentity.RunID,
 		DataProjection: projectionID,
+		AgentIdentity:  agentIdentity,
 	}
 	switch strings.TrimSpace(scope) {
 	case "per-flow-instance":
 		identity.Kind = runtimecontaineridentity.KindFlow
 		identity.FlowInstance = strings.Trim(strings.TrimSpace(scopeKey), "/")
-		agentIdentity, err := actor.ConcreteIdentity()
-		if err != nil {
-			return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace container identity: %w", err)
-		}
-		identity.AgentIdentity = agentIdentity
 	default:
 		identity.Kind = runtimecontaineridentity.KindAgent
-		agentIdentity, err := actor.ConcreteIdentity()
-		if err != nil {
-			return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace container identity: %w", err)
-		}
-		identity.AgentIdentity = agentIdentity
 	}
 	return identity, nil
 }

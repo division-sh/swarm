@@ -130,20 +130,21 @@ func InstallPostgresEventDeliveryFailureAfterFlowMaterialization(
 	quotedTemplate := strings.ReplaceAll(flowTemplate, "'", "''")
 	functionSQL := fmt.Sprintf(`
 		CREATE FUNCTION %s() RETURNS trigger AS $$
+		DECLARE lifecycle_run UUID;
 		DECLARE lifecycle_instance TEXT;
 		BEGIN
-			SELECT instance_id INTO lifecycle_instance
+			SELECT run_id, instance_path INTO lifecycle_run, lifecycle_instance
 			FROM flow_instances
-			WHERE flow_template = '%s'
-			ORDER BY created_at DESC, instance_id DESC
+			WHERE run_id = NEW.run_id AND flow_template = '%s'
+			ORDER BY created_at DESC, run_id DESC, instance_path DESC
 			LIMIT 1;
 			IF lifecycle_instance IS NULL THEN
 				RAISE EXCEPTION 'event delivery failure injection reached before flow instance materialization';
 			END IF;
-			IF NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance = lifecycle_instance) THEN
+			IF NOT EXISTS (SELECT 1 FROM entity_state WHERE run_id = lifecycle_run AND flow_instance = lifecycle_instance) THEN
 				RAISE EXCEPTION 'event delivery failure injection reached before entity materialization';
 			END IF;
-			IF NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance = lifecycle_instance) THEN
+			IF NOT EXISTS (SELECT 1 FROM routing_rules WHERE run_id = lifecycle_run AND flow_instance = lifecycle_instance) THEN
 				RAISE EXCEPTION 'event delivery failure injection reached before route materialization';
 			END IF;
 			RAISE EXCEPTION 'injected delivery route persistence failure';
@@ -190,15 +191,13 @@ func InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(
 		BEFORE INSERT ON event_deliveries
 		BEGIN
 			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM flow_instances WHERE flow_template = '%s'
+				SELECT 1 FROM flow_instances WHERE run_id = NEW.run_id AND flow_template = '%s'
 			) THEN RAISE(ABORT, 'event delivery failure injection reached before flow instance materialization') END;
 			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM entity_state
-				WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')
+				SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = NEW.run_id AND fi.flow_template = '%s'
 			) THEN RAISE(ABORT, 'event delivery failure injection reached before entity materialization') END;
 			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM routing_rules
-				WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')
+				SELECT 1 FROM routing_rules rr JOIN flow_instances fi ON fi.run_id = rr.run_id AND fi.instance_path = rr.flow_instance WHERE fi.run_id = NEW.run_id AND fi.flow_template = '%s'
 			) THEN RAISE(ABORT, 'event delivery failure injection reached before route materialization') END;
 			SELECT RAISE(ABORT, 'injected delivery route persistence failure');
 		END
@@ -223,9 +222,9 @@ func InstallPostgresReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Co
 			IF NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.event_id) THEN
 				RAISE EXCEPTION 'replay-scope failure injection reached before delivery persistence';
 			END IF;
-			IF NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
-			   NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
-			   NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) THEN
+			IF NOT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND fi.flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM routing_rules rr JOIN flow_instances fi ON fi.run_id = rr.run_id AND fi.instance_path = rr.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND fi.flow_template = '%s') THEN
 				RAISE EXCEPTION 'replay-scope failure injection reached before lifecycle persistence';
 			END IF;
 			RAISE EXCEPTION 'injected committed replay-scope persistence failure';
@@ -253,9 +252,9 @@ func InstallSQLiteReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Cont
 				THEN RAISE(ABORT, 'replay-scope failure injection reached before event persistence') END;
 			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.event_id)
 				THEN RAISE(ABORT, 'replay-scope failure injection reached before delivery persistence') END;
-			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
-				NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
-				NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s'))
+			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND fi.flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM routing_rules rr JOIN flow_instances fi ON fi.run_id = rr.run_id AND fi.instance_path = rr.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.event_id) AND fi.flow_template = '%s')
 				THEN RAISE(ABORT, 'replay-scope failure injection reached before lifecycle persistence') END;
 			SELECT RAISE(ABORT, 'injected committed replay-scope persistence failure');
 		END
@@ -279,9 +278,9 @@ func InstallPostgresAPICompletionFailureAfterPublication(t testing.TB, ctx conte
 			IF NOT EXISTS (SELECT 1 FROM events WHERE event_id = publication_event) OR
 			   NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = publication_event) OR
 			   NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id = publication_event) OR
-			   NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
-			   NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
-			   NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) THEN
+			   NOT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = (SELECT run_id FROM events WHERE event_id = publication_event) AND flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = publication_event) AND fi.flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM routing_rules rr JOIN flow_instances fi ON fi.run_id = rr.run_id AND fi.instance_path = rr.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = publication_event) AND fi.flow_template = '%s') THEN
 				RAISE EXCEPTION 'API completion failure injection reached before complete publication persistence';
 			END IF;
 			RAISE EXCEPTION 'injected API idempotency completion persistence failure';
@@ -308,9 +307,9 @@ func InstallSQLiteAPICompletionFailureAfterPublication(t testing.TB, ctx context
 			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id = NEW.resource_id) OR
 				NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.resource_id) OR
 				NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id = NEW.resource_id) OR
-				NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
-				NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
-				NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s'))
+				NOT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = (SELECT run_id FROM events WHERE event_id = NEW.resource_id) AND flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.resource_id) AND fi.flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM routing_rules rr JOIN flow_instances fi ON fi.run_id = rr.run_id AND fi.instance_path = rr.flow_instance WHERE fi.run_id = (SELECT run_id FROM events WHERE event_id = NEW.resource_id) AND fi.flow_template = '%s')
 				THEN RAISE(ABORT, 'API completion failure injection reached before complete publication persistence') END;
 			SELECT RAISE(ABORT, 'injected API idempotency completion persistence failure');
 		END

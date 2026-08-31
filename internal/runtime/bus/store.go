@@ -401,8 +401,12 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 }
 
 type CommitSelectedForkEventRequest struct {
-	Commit  CommitPublishRequest
-	Lineage runfork.RunForkSelectedContractExecutionLineage
+	Commit              CommitPublishRequest
+	Lineage             runfork.RunForkSelectedContractExecutionLineage
+	AuthorScope         runtimeauthoractivity.Scope
+	HasAuthorScope      bool
+	AuthorDescriptor    runtimeauthoractivity.EventDescriptor
+	HasAuthorDescriptor bool
 }
 
 type CommittedSelectedForkEvent struct {
@@ -423,7 +427,7 @@ func (r CommittedSelectedForkEvent) Validate() error {
 }
 
 type FlowInstanceRouteRecord struct {
-	Identity       runtimeflowidentity.Route
+	Identity       runtimeflowidentity.RunScopedFlowInstance
 	EventPattern   string
 	SubscriberType string
 	SubscriberID   string
@@ -432,32 +436,32 @@ type FlowInstanceRouteRecord struct {
 
 type FlowInstanceRoutePersistence interface {
 	UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
+	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
+	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 }
 
 // FlowInstanceRouteSetPersistence replaces one materialized route owner's
 // complete active record set inside the selected mutation.
 type FlowInstanceRouteSetPersistence interface {
-	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route, routes []FlowInstanceRouteRecord) error
+	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error
 }
 
 // FlowInstanceRouteRecordSet is one exact route owner's complete materialized
 // record set within a topology replacement.
 type FlowInstanceRouteRecordSet struct {
-	Identity runtimeflowidentity.Route
+	Identity runtimeflowidentity.RunScopedFlowInstance
 	Routes   []FlowInstanceRouteRecord
 }
 
 func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error {
-	seen := make(map[runtimeflowidentity.Route]struct{}, len(sets))
+	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(sets))
 	for setIndex, set := range sets {
-		identity := runtimeflowidentity.StoredRoute(set.Identity.ScopeKey, set.Identity.InstanceID, set.Identity.InstancePath)
-		if !identity.Valid() || identity != set.Identity {
+		identity := set.Identity.Normalize()
+		if err := identity.Validate(); err != nil || identity != set.Identity {
 			return fmt.Errorf("route set %d requires canonical exact identity", setIndex)
 		}
 		if _, exists := seen[identity]; exists {
-			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.InstancePath)
+			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.Key())
 		}
 		seen[identity] = struct{}{}
 		for routeIndex, route := range set.Routes {
@@ -477,11 +481,11 @@ type FlowInstanceRouteTopologyPersistence interface {
 }
 
 type FlowInstanceRouteRecordReader interface {
-	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error)
+	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error)
 }
 
 type FlowInstanceRouteRollbackPersistence interface {
-	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
+	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type ActiveAgentDescriptor struct {
@@ -508,10 +512,11 @@ func (d ActiveAgentDescriptor) TargetDescriptor() ActiveTargetDescriptor {
 // ActiveAgentDescriptorLister is an optional capability for runtime delivery
 // planning. PostgresStore implements this; InMemoryEventStore does not.
 type ActiveAgentDescriptorLister interface {
-	ListActiveAgentDescriptors(ctx context.Context) ([]ActiveAgentDescriptor, error)
+	ListActiveAgentDescriptors(ctx context.Context, runID string) ([]ActiveAgentDescriptor, error)
 }
 
 type ActiveFlowInstanceDescriptor struct {
+	RunID           string
 	InstanceID      string
 	EntityID        string
 	FlowInstance    string
@@ -533,6 +538,7 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 	}
 	entityID := strings.TrimSpace(d.EntityID)
 	return ActiveFlowInstanceDescriptor{
+		RunID:           strings.TrimSpace(d.RunID),
 		InstanceID:      instanceID,
 		EntityID:        entityID,
 		FlowInstance:    flowInstance,
@@ -565,7 +571,7 @@ func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor 
 // routable target descriptors. Stores implement this from persisted flow
 // instance state, not from live subscriptions or readback.
 type ActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error)
+	ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error)
 }
 
 type ActiveTargetDescriptor struct {
@@ -592,7 +598,7 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 // static and root owners come from entity_state, while template descriptors
 // additionally carry readiness and address evidence.
 type SelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwners(ctx context.Context) ([]ActiveTargetDescriptor, error)
+	ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {

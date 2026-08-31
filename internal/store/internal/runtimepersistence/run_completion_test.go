@@ -53,10 +53,10 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		t.Fatalf("commit pipeline scope fixture: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES ($1, $2, 'static', '{}'::jsonb, 'active', now())
-			ON CONFLICT (instance_id) DO UPDATE SET flow_template = EXCLUDED.flow_template
-		`, flowInstance, flowTemplate); err != nil {
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES ($1::uuid, $2, $3, 'static', '{}'::jsonb, 'active', now())
+			ON CONFLICT (run_id, instance_path) DO UPDATE SET flow_template = EXCLUDED.flow_template
+		`, runID, flowInstance, flowTemplate); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -250,7 +250,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	sessionID := uuid.NewString()
-	identity := testAgentIdentity(t, "agent-1", "completion")
+	identity := mustTestAgentIdentityForRun(fixture.RunID, "agent-1", "completion")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `

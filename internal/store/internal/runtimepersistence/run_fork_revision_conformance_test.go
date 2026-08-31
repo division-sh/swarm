@@ -375,7 +375,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	publishedEventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	route := testAgentDeliveryRoute(t, "revision-agent", "fixture/revision-agent")
+	route := testAgentDeliveryRoute(t, runID, "revision-agent", "fixture/revision-agent")
 	deliveryID := seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), seedEvent, route, runtimedelivery.StateQueued, nil).DeliveryID
 
 	publishTx, err := db.BeginTx(ctx, nil)
@@ -606,8 +606,9 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
 	agentID := "revision-lifecycle-agent"
-	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)
+	identity := mustTestAgentIdentityForRun(runID, agentID, runForkRevisionFlowInstance)
 	fields := testAgentIdentityStorageFields(t, identity)
 	agent := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agentID, Identity: identity, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
@@ -637,7 +638,6 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		t.Fatalf("start lifecycle agent: %v", err)
 	}
 
-	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	tx, err := db.BeginTx(ctx, nil)

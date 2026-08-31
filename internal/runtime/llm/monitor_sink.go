@@ -78,7 +78,7 @@ func (s *fileMonitorSink) OpenTurn(_ context.Context, meta MonitorTurnMeta) (Mon
 	if s == nil {
 		return nil, nil
 	}
-	path, err := MonitorLogPath(s.rootDir, meta.MemoryIdentity.Agent)
+	path, err := MonitorLogPath(s.rootDir, meta.MemoryIdentity)
 	if err != nil {
 		return nil, err
 	}

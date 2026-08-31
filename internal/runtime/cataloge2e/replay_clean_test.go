@@ -68,6 +68,7 @@ func (b catalogTranscriptBarrier) validate() error {
 
 var catalogReplayCleanExclusions = map[string]string{
 	"tests/tier12-runtime-fork/test-non-agent-replay-fail-closed":     "selected-contract fork",
+	"tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork":       "selected-contract fork",
 	"tests/tier12-runtime-fork/test-selected-contract-fork-execution": "selected-contract fork",
 	"tests/tier12-runtime-tools/test-flow-data-access":                "direct tool execution",
 	"tests/tier5-flow-lifecycle/test-template-no-boot-instance":       "boot-only runtime",
@@ -669,8 +670,8 @@ func TestCatalogReplayCleanCensus(t *testing.T) {
 func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 	t.Helper()
 	inventory := catalogInventory(t)
-	if len(inventory.Fixtures) != 156 {
-		t.Fatalf("catalog fixtures = %d, want 156", len(inventory.Fixtures))
+	if len(inventory.Fixtures) != 157 {
+		t.Fatalf("catalog fixtures = %d, want 157", len(inventory.Fixtures))
 	}
 
 	runtimeCount := 0
@@ -694,11 +695,11 @@ func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 			fixtures = append(fixtures, fixture)
 		}
 	}
-	if runtimeCount != 98 {
-		t.Fatalf("runtime fixtures = %d, want 98", runtimeCount)
+	if runtimeCount != 99 {
+		t.Fatalf("runtime fixtures = %d, want 99", runtimeCount)
 	}
-	if len(fixtures) != 94 || len(excluded) != 4 {
-		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 94 + 4", len(fixtures), len(excluded))
+	if len(fixtures) != 94 || len(excluded) != 5 {
+		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 94 + 5", len(fixtures), len(excluded))
 	}
 	for path, disposition := range catalogReplayCleanExclusions {
 		if !excluded[path] {

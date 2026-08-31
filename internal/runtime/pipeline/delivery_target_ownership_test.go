@@ -23,7 +23,7 @@ func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-classification"), events.EventType("review/one/work.ready"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	entityID := eventtest.UUID("existing-delivery-target")
 	tests := []struct {
@@ -90,7 +90,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-hostile"), events.EventType("review/one/work.ready"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	canonicalID := FlowInstanceEntityID("review/one")
 	tests := []struct {
@@ -168,7 +168,7 @@ func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-handler-flow"), events.EventType("review/one/work.ready"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	node := pipelineNode(t, "review", "entity-reader")
 	handler, err := AdmitDeliveryTargetHandler(source, node)
@@ -212,7 +212,7 @@ func TestClassifyDeliveryTargetOwnershipPreservesExactOwnerForEntityOptionalHand
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-optional-owner"), events.EventType("review/one/work.ready"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	node := pipelineNode(t, "review", "entityless")
 	handler, err := AdmitDeliveryTargetHandler(source, node)
@@ -338,7 +338,7 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 		t.Run(test.name, func(t *testing.T) {
 			evt := eventtest.RunCreatingRootIngress(
 				eventtest.UUID("input-acquisition-"+test.name), events.EventType("review/one/"+string(test.eventType)),
-				"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+				"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 			)
 			node := pipelineNode(t, "review", test.nodeID)
 			handler, err := AdmitDeliveryTargetHandler(source, node)
@@ -373,7 +373,7 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("declared-key-target"), events.EventType("review/work.keyed"),
-		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	instance := WorkflowInstance{
 		EntityID: eventtest.UUID("declared-key-existing"), WorkflowName: "review", InstanceID: "one",
@@ -512,7 +512,7 @@ func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppeara
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("declared-key-race"), events.EventType("review/work.keyed"),
-		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	instanceID, err := selectOrCreateEntityInstanceID(source, "review", map[string]any{"account_id": "account-1"})
 	if err != nil {
@@ -556,27 +556,27 @@ type deliveryTargetWorkflowReader struct {
 	loadedStates   map[string]WorkflowEntityStatePersistenceRecord
 }
 
-func (r deliveryTargetWorkflowReader) LoadWorkflowInstance(_ context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
-	instance, ok := r.loaded[route.InstancePath]
+func (r deliveryTargetWorkflowReader) LoadWorkflowInstance(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
+	instance, ok := r.loaded[identity.Route.InstancePath]
 	return instance, ok, nil
 }
 
-func (r deliveryTargetWorkflowReader) ListWorkflowInstances(context.Context) ([]WorkflowInstance, error) {
+func (r deliveryTargetWorkflowReader) ListWorkflowInstances(context.Context, string) ([]WorkflowInstance, error) {
 	return append([]WorkflowInstance(nil), r.selected...), nil
 }
 
-func (r deliveryTargetWorkflowReader) LoadWorkflowEntityState(_ context.Context, route runtimeflowidentity.Route, _ runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
-	if record, ok := r.loadedStates[route.InstancePath]; ok {
+func (r deliveryTargetWorkflowReader) LoadWorkflowEntityState(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance, _ runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
+	if record, ok := r.loadedStates[identity.Route.InstancePath]; ok {
 		return record, true, nil
 	}
-	instance, ok := r.loaded[route.InstancePath]
+	instance, ok := r.loaded[identity.Route.InstancePath]
 	if !ok {
 		return WorkflowEntityStatePersistenceRecord{}, false, nil
 	}
 	return deliveryTargetStateRecord(instance), true, nil
 }
 
-func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, string, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
 	if r.selectedStates != nil {
 		return append([]WorkflowEntityStatePersistenceRecord(nil), r.selectedStates...), nil
 	}
@@ -587,7 +587,7 @@ func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.C
 	return records, nil
 }
 
-func (r deliveryTargetWorkflowReader) SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error) {
+func (r deliveryTargetWorkflowReader) SelectActiveWorkflowInstances(context.Context, string, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error) {
 	return append([]WorkflowInstance(nil), r.selected...), nil
 }
 
@@ -617,7 +617,7 @@ func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("stamped-acquisition-owner"), events.EventType("review/one/work.created"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
 	node := pipelineNode(t, "review", "pin-creator")
 	handlerFact, err := AdmitDeliveryTargetHandler(source, node)

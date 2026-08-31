@@ -29,7 +29,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	newerEventID := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
-	olderAgentRoute := testAgentDeliveryRoute(t, "agent-a", "fixture/agent-a")
+	olderAgentRoute := testAgentDeliveryRoute(t, runID, "agent-a", "fixture/agent-a")
 	olderNodeRoute := testEntitylessNodeDeliveryRoute("node-a")
 	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base, olderAgentRoute, olderNodeRoute)
 	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))

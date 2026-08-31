@@ -302,9 +302,9 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID, state string) {
 	t.Helper()
 	if _, err := h.db.ExecContext(h.ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES (
-			$1::text, 'catalog-assertion', 'static',
+			$1::uuid, $1::text, 'catalog-assertion', 'static',
 			jsonb_build_object(
 				'workflow_version', '1',
 				'instance_id', $1::text,
@@ -313,7 +313,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 			),
 			'active', now()
 		)
-		ON CONFLICT (instance_id) DO NOTHING
+		ON CONFLICT (run_id, instance_path) DO NOTHING
 	`, catalogRuntimeRunID); err != nil {
 		t.Fatalf("insert root flow instance: %v", err)
 	}

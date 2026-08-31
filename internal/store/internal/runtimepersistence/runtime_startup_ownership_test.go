@@ -812,8 +812,16 @@ func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendPari
 
 			firstSource := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
 			secondSource := runtimeagenttopology.SourceCoordinate{BundleHash: secondBundleHash, BundleSource: "persisted"}
-			firstAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "source-agent", ""), Source: firstSource, ConfigRevision: "config-v1"}
-			secondAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "second-agent", ""), Source: secondSource, ConfigRevision: "config-v1"}
+			firstIdentity, err := testAgentIdentity(t, "source-agent", "").Plan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondIdentity, err := testAgentIdentity(t, "second-agent", "").Plan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstAgent := runtimeagenttopology.DesiredAgent{Identity: firstIdentity, Source: firstSource, ConfigRevision: "config-v1"}
+			secondAgent := runtimeagenttopology.DesiredAgent{Identity: secondIdentity, Source: secondSource, ConfigRevision: "config-v1"}
 			initial, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{firstSource}, []runtimeagenttopology.DesiredAgent{firstAgent})
 			if err != nil {
 				t.Fatal(err)

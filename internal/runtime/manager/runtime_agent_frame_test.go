@@ -8,7 +8,7 @@ import (
 func TestResolveAgentFrameConfigRejectsNoncanonicalFlowInstanceBeforeLookup(t *testing.T) {
 	manager := &AgentManager{}
 	for _, flowInstance := range []string{"/review/one/", " review/one ", "review/one/"} {
-		if _, err := manager.ResolveAgentFrameConfig("reviewer", flowInstance, false); err == nil {
+		if _, err := manager.ResolveAgentFrameConfig(managerIdentityTestRunID, "reviewer", flowInstance, false); err == nil {
 			t.Fatalf("resolver accepted noncanonical flow-instance alias %q", flowInstance)
 		}
 	}
@@ -17,7 +17,7 @@ func TestResolveAgentFrameConfigRejectsNoncanonicalFlowInstanceBeforeLookup(t *t
 func TestResolveAgentFrameConfigRejectsNoncanonicalAgentIDBeforeLookup(t *testing.T) {
 	manager := &AgentManager{}
 	for _, agentID := range []string{" reviewer", "reviewer ", " reviewer "} {
-		_, err := manager.ResolveAgentFrameConfig(agentID, "", true)
+		_, err := manager.ResolveAgentFrameConfig(managerIdentityTestRunID, agentID, "", true)
 		if err == nil {
 			t.Fatalf("resolver accepted noncanonical agent id %q", agentID)
 		}

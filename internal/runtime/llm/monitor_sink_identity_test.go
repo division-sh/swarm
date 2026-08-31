@@ -14,15 +14,15 @@ func TestFileMonitorSinkIsolatesConcreteSameSlugSiblings(t *testing.T) {
 	identityA := testMemoryIdentity("worker", "review/inst-a")
 	identityB := testMemoryIdentity("worker", "review/inst-b")
 
-	pathA, err := MonitorLogPath(root, identityA.Agent)
+	pathA, err := MonitorLogPath(root, identityA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayPathA, err := MonitorLogPath(root, identityA.Agent)
+	replayPathA, err := MonitorLogPath(root, identityA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pathB, err := MonitorLogPath(root, identityB.Agent)
+	pathB, err := MonitorLogPath(root, identityB)
 	if err != nil {
 		t.Fatal(err)
 	}

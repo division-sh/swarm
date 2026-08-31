@@ -209,7 +209,7 @@ func (r CommittedWorkflowLifecycleMutation) Validate() error {
 	return nil
 }
 
-func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Context, instance *WorkflowInstance, effects []runtimeworkflowlifecycle.Effect, reconcileGenerations bool) (PreparedWorkflowLifecycleMutation, error) {
+func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effects []runtimeworkflowlifecycle.Effect, reconcileGenerations bool) (PreparedWorkflowLifecycleMutation, error) {
 	var prepared PreparedWorkflowLifecycleMutation
 	if len(effects) == 0 && !reconcileGenerations {
 		return prepared, nil
@@ -217,17 +217,21 @@ func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Cont
 	if pc == nil || instance == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return prepared, fmt.Errorf("workflow lifecycle planning requires selected workflow persistence and semantic source")
 	}
+	owner = owner.Normalize()
+	if err := owner.Validate(); err != nil {
+		return prepared, fmt.Errorf("workflow lifecycle planning requires exact live flow identity: %w", err)
+	}
 	mode, err := workflowLifecycleExecutionMode(effects)
 	if err != nil {
 		return PreparedWorkflowLifecycleMutation{}, err
 	}
 	for index, effect := range effects {
-		if err := pc.planWorkflowLifecycleEffect(ctx, instance, effect, &prepared); err != nil {
+		if err := pc.planWorkflowLifecycleEffect(ctx, owner, instance, effect, &prepared); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, fmt.Errorf("workflow lifecycle effect %d: %w", index, err)
 		}
 	}
 	if reconcileGenerations {
-		if err := pc.planSupersededWorkflowArtifacts(ctx, instance, effects[0].Route(), effects[0].EntityID(), mode, &prepared.Commit); err != nil {
+		if err := pc.planSupersededWorkflowArtifacts(ctx, owner, instance, effects[0].EntityID(), mode, &prepared.Commit); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, err
 		}
 	}
@@ -251,7 +255,7 @@ func workflowLifecycleExecutionMode(effects []runtimeworkflowlifecycle.Effect) (
 	return mode, nil
 }
 
-func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, mode executionmode.Mode, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, entityID identity.EntityID, mode executionmode.Mode, plan *WorkflowLifecycleMutationPlan) error {
 	if instance == nil || plan == nil {
 		return nil
 	}
@@ -269,10 +273,11 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 			current = append(current, generation)
 		}
 	}
+	route := owner.Route
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
 		return fmt.Errorf("validate loop artifact owner: %w", err)
 	}
-	runID := workflowTimerRunID(ctx, *instance)
+	runID := owner.RunID
 	if runID == "" || entityID.IsZero() {
 		return fmt.Errorf("loop artifact reconciliation requires exact run and entity identity")
 	}
@@ -303,7 +308,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		command.RunID = workflowTimerRunID(ctx, *instance)
+		command.RunID = runID
 		if workflowLifecycleHasScheduleMutation(plan.Schedules, command.ScheduleKey) {
 			continue
 		}
@@ -339,11 +344,14 @@ func workflowLifecycleHasScheduleMutation(items []WorkflowScheduleMutation, sche
 	return false
 }
 
-func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
+func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
 	entityID := effect.EntityID()
-	route := runtimeflowidentity.StoredRoute(effect.Route().ScopeKey, effect.Route().InstanceID, effect.Route().InstancePath)
+	route := owner.Route
 	if effect.OccurredAt().IsZero() {
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
+	}
+	if effect.Route() != route {
+		return fmt.Errorf("workflow lifecycle effect route disagrees with the exact live flow owner")
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope: %w", err)
@@ -369,21 +377,21 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
-	if err := pc.planWorkflowTimerEffect(ctx, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
+	if err := pc.planWorkflowTimerEffect(ctx, owner.RunID, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowJoinEffect(ctx, instance, route, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
+	if err := pc.planWorkflowJoinEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowGateEffect(ctx, instance, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
+	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, instance WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentState, nextState string, cause workflowTimerCause, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runID string, instance WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentState, nextState string, cause workflowTimerCause, plan *WorkflowLifecycleMutationPlan) error {
 	source := pc.SemanticSource()
-	runID := workflowTimerRunID(ctx, instance)
+	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires run identity")
 	}
@@ -443,7 +451,11 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage string, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID string, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage string, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("workflow join lifecycle requires exact run identity")
+	}
 	if !mode.Valid() {
 		return fmt.Errorf("workflow join lifecycle requires an exact causal execution mode")
 	}
@@ -472,7 +484,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err != nil {
 			return err
 		}
-		command.RunID = workflowTimerRunID(ctx, *instance)
+		command.RunID = runID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		plan.RequestCompletionCandidate = true
 	}
@@ -546,14 +558,18 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err != nil {
 			return err
 		}
-		command.RunID = workflowTimerRunID(ctx, *instance)
+		command.RunID = runID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time, prepared *PreparedWorkflowLifecycleMutation) error {
+func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID string, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time, prepared *PreparedWorkflowLifecycleMutation) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("workflow gate lifecycle requires exact run identity")
+	}
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
 	if instance == nil || entityID.IsZero() || nextStage == "" || currentStage == nextStage {
@@ -610,7 +626,6 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 		if existing, found, err := gateruntime.Load(carrier.StateBuckets, flowID, gatePlan.Decision); err != nil {
 			return err
 		} else if !found || existing.Stage != nextStage || existing.Status != gateruntime.StatusOpen && existing.Status != gateruntime.StatusDecisionCommitted {
-			runID := workflowTimerRunID(ctx, *instance)
 			bundleHash := workflowGateBundleHash(ctx, pc)
 			if runID == "" || bundleHash == "" {
 				return fmt.Errorf("run and bundle identity are required before entering gated stage %s", nextStage)
@@ -634,7 +649,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 			if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 				return err
 			}
-			card, err := pc.buildWorkflowDecisionCard(ctx, route, entityID, *instance, activation, gatePlan, frozenOutcomes)
+			card, err := pc.buildWorkflowDecisionCard(ctx, runID, route, entityID, *instance, activation, gatePlan, frozenOutcomes)
 			if err != nil {
 				return err
 			}

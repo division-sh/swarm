@@ -30,6 +30,7 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -1453,6 +1454,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, managerOptions, runtimeDeps.ManagerStore)
 	managerRef = rt.Manager
+	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		return managerRef.FinalizeCommittedAgentReadiness(ctx, event, routes)
+	}))
 	if runtimeDeps.StartupGrant != nil {
 		if err := rt.InstallStartupGrant(runtimeDeps.StartupGrant); err != nil {
 			return nil, fmt.Errorf("install runtime generation grant: %w", err)
@@ -1473,11 +1477,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		if toolGatewayToken == "" {
 			return nil, fmt.Errorf("tool gateway binding token is required")
 		}
-		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(agentID string) (runtimeactors.AgentConfig, bool) {
+		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 			if rt.Manager == nil {
 				return runtimeactors.AgentConfig{}, false
 			}
-			cfg, err := rt.Manager.ResolveAgentConfig(strings.TrimSpace(agentID), "")
+			cfg, err := rt.Manager.ResolveAgentConfig(identity.RunID, identity.AgentID(), identity.FlowInstance())
 			return cfg, err == nil
 		}, rt.shutdownAdmissionClosed, rt.MCPTurns))
 	}
@@ -1625,31 +1629,13 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
 	staticAgentIDs := []string{}
 	if rt.Manager != nil {
-		staticAgentIDs, err = staticBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
-		if err != nil {
-			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
-			return fmt.Errorf("bootstrap static agents: %w", err)
-		}
-		if err := rt.Manager.VerifyStaticAgents(rt.Options.WorkflowModule.SemanticSource()); err != nil {
-			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
-			return fmt.Errorf("bootstrap static agents: %w", err)
-		}
-		rt.emitBootProgress(12, "static_agents_bootstrap", "ok", fmt.Sprintf("%d static agents", len(staticAgentIDs)))
+		rt.emitBootProgress(12, "static_agents_bootstrap", "ok", "declaration plans validated; concrete agents materialize per admitted run")
 	} else {
 		rt.emitBootProgress(12, "static_agents_bootstrap", "skipped", "manager unavailable")
 	}
 	flowRequiredAgentIDs := []string{}
 	if rt.Manager != nil {
-		flowRequiredAgentIDs, err = staticFlowRequiredBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
-		if err != nil {
-			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
-			return fmt.Errorf("bootstrap static flow required agents: %w", err)
-		}
-		if err := rt.Manager.VerifyStaticFlowRequiredAgents(rt.Options.WorkflowModule.SemanticSource()); err != nil {
-			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
-			return fmt.Errorf("bootstrap static flow required agents: %w", err)
-		}
-		rt.emitBootProgress(13, "flow_required_agents", "ok", fmt.Sprintf("%d flow-required agents", len(flowRequiredAgentIDs)))
+		rt.emitBootProgress(13, "flow_required_agents", "ok", "declaration plans validated; concrete agents materialize per admitted run")
 	} else {
 		rt.emitBootProgress(13, "flow_required_agents", "skipped", "manager unavailable")
 	}
@@ -2118,32 +2104,6 @@ type bootCompletedReport struct {
 	FlowRequiredAgentsStarted []string
 	SystemContainersStarted   []string
 	SelfCheckRequired         bool
-}
-
-func staticBootAgentIDs(source semanticview.Source) ([]string, error) {
-	records, err := runtimemanager.StaticAgentMaterializationRecords(source)
-	if err != nil {
-		return nil, err
-	}
-	return persistedBootAgentIDs(records), nil
-}
-
-func staticFlowRequiredBootAgentIDs(source semanticview.Source) ([]string, error) {
-	records, err := runtimemanager.StaticFlowRequiredAgentMaterializationRecords(source)
-	if err != nil {
-		return nil, err
-	}
-	return persistedBootAgentIDs(records), nil
-}
-
-func persistedBootAgentIDs(records []runtimemanager.PersistedAgent) []string {
-	out := make([]string, 0, len(records))
-	for _, rec := range records {
-		if id := strings.TrimSpace(rec.Config.ID); id != "" {
-			out = append(out, id)
-		}
-	}
-	return sortedNonEmptyStrings(out)
 }
 
 func sortedNonEmptyStrings(in []string) []string {

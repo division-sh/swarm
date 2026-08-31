@@ -36,7 +36,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			identity := testAgentIdentity(t, "agent-a", "")
+			identity := mustTestAgentIdentityForRun(runID, "agent-a", "")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
@@ -47,7 +47,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 				t.Fatalf("upsert agent: %v", err)
 			}
 
-			route := testAgentDeliveryRoute(t, "agent-a", "")
+			route := testAgentDeliveryRoute(t, runID, "agent-a", "")
 			failed := seedOperatorAgentDeliveryPageHistory(t, ctx, fixture, selected, route, runID, "failed", now)
 			deadLetters := seedOperatorAgentDeliveryPageHistory(t, ctx, fixture, selected, route, runID, "dead_letter", now.Add(-10*time.Minute))
 

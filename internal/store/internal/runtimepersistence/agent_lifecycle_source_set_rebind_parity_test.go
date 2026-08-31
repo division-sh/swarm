@@ -75,8 +75,13 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
+				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
+				identityArgs := []any{
+					fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+				}
 
 				switch drift {
 				case "json execution lifetime":
@@ -87,25 +92,29 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 						t.Fatalf("encode drifted topology admission: %v", err)
 					}
 					if postgres {
-						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=$1::jsonb WHERE agent_id=$2`, string(raw), fields.AgentID)
+						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=$1::jsonb WHERE run_id=$2::uuid AND agent_id=$3 AND agent_name_owner=$4 AND agent_name_source=$5 AND agent_route_presence=$6 AND flow_scope_key=$7 AND flow_instance_id=$8 AND flow_instance=$9`, append([]any{string(raw)}, identityArgs...)...)
 					} else {
-						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=? WHERE agent_id=?`, string(raw), fields.AgentID)
+						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=? WHERE run_id=? AND agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?`, append([]any{string(raw)}, identityArgs...)...)
 					}
 					if err != nil {
 						t.Fatalf("persist execution-lifetime drift: %v", err)
 					}
 				case "canonical authority kind":
-					if _, err := db.ExecContext(ctx, `UPDATE agents SET topology_authority_kind='flow_readiness_plan' WHERE agent_id=`+map[bool]string{true: "$1", false: "?"}[postgres], fields.AgentID); err != nil {
+					query := `UPDATE agents SET topology_authority_kind='flow_readiness_plan' WHERE run_id=? AND agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?`
+					if postgres {
+						query = `UPDATE agents SET topology_authority_kind='flow_readiness_plan' WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3 AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6 AND flow_instance_id=$7 AND flow_instance=$8`
+					}
+					if _, err := db.ExecContext(ctx, query, identityArgs...); err != nil {
 						t.Fatalf("persist authority-kind drift: %v", err)
 					}
 				}
 
 				var predecessorBinding string
-				bindingQuery := `SELECT lifecycle_process_authority_id FROM agents WHERE agent_id=?`
+				bindingQuery := `SELECT lifecycle_process_authority_id FROM agents WHERE run_id=? AND agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?`
 				if postgres {
-					bindingQuery = `SELECT lifecycle_process_authority_id::text FROM agents WHERE agent_id=$1`
+					bindingQuery = `SELECT lifecycle_process_authority_id::text FROM agents WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3 AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6 AND flow_instance_id=$7 AND flow_instance=$8`
 				}
-				if err := db.QueryRowContext(ctx, bindingQuery, fields.AgentID).Scan(&predecessorBinding); err != nil {
+				if err := db.QueryRowContext(ctx, bindingQuery, identityArgs...).Scan(&predecessorBinding); err != nil {
 					t.Fatalf("read predecessor lifecycle binding: %v", err)
 				}
 
@@ -139,7 +148,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("startup reconciliation error = %v, want canonical/admission drift refusal", err)
 				}
 				var afterBinding string
-				if err := db.QueryRowContext(ctx, bindingQuery, fields.AgentID).Scan(&afterBinding); err != nil {
+				if err := db.QueryRowContext(ctx, bindingQuery, identityArgs...).Scan(&afterBinding); err != nil {
 					t.Fatalf("read lifecycle binding after failed census: %v", err)
 				}
 				if afterBinding != predecessorBinding {
@@ -153,8 +162,12 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	now := time.Now().UTC()
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
-	readinessIdentity := testAgentIdentity(t, "process-readiness-agent", "readiness/instance-1")
+	runID := uuid.NewString()
+	readinessIdentity := mustTestAgentIdentityForRun(runID, "process-readiness-agent", "readiness/instance-1")
+	requireRunningRunForTest(t, ctx, store, staticIdentity.RunID, now)
+	requireRunningRunForTest(t, ctx, store, runID, now)
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-static-agent", Identity: staticIdentity,
@@ -197,9 +210,6 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		t.Fatal(err)
 	}
 	readinessRevision = strings.TrimPrefix(readinessRevision, "sha256:")
-	runID := uuid.NewString()
-	now := time.Now().UTC()
-	requireRunningRunForTest(t, ctx, store, runID, now)
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "readiness", ScopeKey: "readiness", InstanceID: "instance-1",
@@ -243,7 +253,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err != nil || !found {
 		t.Fatalf("load readiness lifecycle before termination: found=%v err=%v", found, err)
 	}
-	terminateLifecycleReadinessOwnerForTest(t, ctx, store, readinessPlan.Identity.InstancePath)
+	terminateLifecycleReadinessOwnerForTest(t, ctx, store, runID, readinessPlan.Identity.InstancePath)
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: uuid.NewString(),
 		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "terminated_census_fixture",
@@ -336,7 +346,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 }
 
-func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, store lifecycleSourceSetRebindStore, instancePath string) {
+func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, store any, runID, instancePath string) {
 	t.Helper()
 	var db *sql.DB
 	placeholder := "?"
@@ -349,7 +359,12 @@ func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, 
 	default:
 		t.Fatalf("unsupported lifecycle readiness fixture store %T", store)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status='terminated' WHERE instance_id=`+placeholder, instancePath); err != nil {
+	query := `UPDATE flow_instances SET status='terminated' WHERE run_id=? AND instance_path=?`
+	args := []any{runID, instancePath}
+	if placeholder == "$1" {
+		query = `UPDATE flow_instances SET status='terminated' WHERE run_id=$1::uuid AND instance_path=$2`
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("terminate lifecycle readiness owner: %v", err)
 	}
 }
@@ -377,13 +392,13 @@ func seedLifecycleReadinessOwner(
 	}
 	if postgres {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES ($1, 'readiness', 'template', '{}'::jsonb, 'active', $2)
-		`, instancePath, now); err != nil {
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES ($1::uuid, $2, 'readiness', 'template', '{}'::jsonb, 'active', $3)
+		`, runID, instancePath, now); err != nil {
 			t.Fatalf("seed postgres flow instance: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
 			VALUES ($1::uuid, $2, $3::jsonb, $4, $4)
 		`, runID, instancePath, plan, now); err != nil {
 			t.Fatalf("seed postgres readiness owner: %v", err)
@@ -391,13 +406,13 @@ func seedLifecycleReadinessOwner(
 		return
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, 'readiness', 'template', '{}', 'active', ?)
-	`, instancePath, now); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES (?, ?, 'readiness', 'template', '{}', 'active', ?)
+	`, runID, instancePath, now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, runID, instancePath, plan, now, now); err != nil {
 		t.Fatalf("seed sqlite readiness owner: %v", err)
@@ -410,6 +425,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
+	requireRunningRunForTest(t, ctx, store, identity.RunID, now)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",

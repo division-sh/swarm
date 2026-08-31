@@ -45,7 +45,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Plan.SourceRunID, req.Source, req.Plan.PendingWork); err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
@@ -53,8 +53,11 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
-	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	dynamicFlowInstances, err := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteAdmission{}, err
+	}
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		Message: "selected-contract route admission is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
@@ -169,7 +172,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, runID string, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
@@ -181,7 +184,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 			})
 			continue
 		}
-		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, event.eventName, event.routingSource)
+		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, runID, event.eventName, event.routingSource)
 		eventIncomplete := evaluation.requiresRuntimeResolution
 		incomplete = incomplete || eventIncomplete
 		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
@@ -190,7 +193,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 		}
 		recipients := evaluation.recipients
 		if !evaluation.connectMatched {
-			recipients = contractFrontierRecipients(routeTable.Resolve(event.eventName))
+			recipients = contractFrontierRecipients(routeTable.ResolveForRun(runID, event.eventName))
 		}
 		out = append(out, runfork.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
@@ -204,10 +207,10 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 
 func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runfork.RunForkContractFrontierRecipient {
 	type recipientKey struct {
-		recipient     events.DeliveryRecipient
-		path          string
-		routeSource   string
-		agentIdentity runtimeagentidentity.Identity
+		recipient   events.DeliveryRecipient
+		path        string
+		routeSource string
+		agentPlan   runtimeagentidentity.Plan
 	}
 	seen := map[recipientKey]runfork.RunForkContractFrontierRecipient{}
 	for _, route := range routes {
@@ -216,10 +219,10 @@ func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runf
 			continue
 		}
 		key := recipientKey{
-			recipient:     recipient.Recipient,
-			path:          recipient.Path,
-			routeSource:   recipient.RouteSourceCode(),
-			agentIdentity: recipient.AgentIdentity,
+			recipient:   recipient.Recipient,
+			path:        recipient.Path,
+			routeSource: recipient.RouteSourceCode(),
+			agentPlan:   recipient.AgentPlan,
 		}
 		seen[key] = recipient
 	}
@@ -239,7 +242,7 @@ func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runf
 	return out
 }
 
-func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []string {
+func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) ([]string, error) {
 	seen := map[string]struct{}{}
 	add := func(value string) {
 		value = strings.Trim(strings.TrimSpace(value), "/")
@@ -249,14 +252,20 @@ func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan r
 	}
 	add(plan.ForkPoint.RoutingSource.Route().FlowInstance)
 	for _, item := range plan.PendingWork {
-		add(item.RoutingSource.Route().FlowInstance)
+		instances, err := contractFrontierExactFlowInstances(plan.SourceRunID, item)
+		if err != nil {
+			return nil, err
+		}
+		for _, instance := range instances {
+			add(instance)
+		}
 	}
 	for _, event := range frontier.FrontierEvents {
 		for _, flowInstance := range event.SourceFlowInstances {
 			add(flowInstance)
 		}
 	}
-	return sortedSet(seen)
+	return sortedSet(seen), nil
 }
 
 func selectedRouteHistoryRequiredConsumers() []runfork.RunForkSelectedContractExecutionBoundary {

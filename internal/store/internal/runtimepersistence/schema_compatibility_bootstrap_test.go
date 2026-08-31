@@ -74,7 +74,7 @@ func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDia
 		t.Cleanup(func() { _ = unaccepted.Close() })
 		bootstrap = unaccepted.BootstrapSchema
 		runtimeProbe = func() error {
-			_, err := unaccepted.ListActiveAgentDescriptors(ctx)
+			_, err := unaccepted.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)
 			return err
 		}
 	} else {
@@ -88,7 +88,7 @@ func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDia
 		unaccepted := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB))
 		bootstrap = unaccepted.BootstrapSchema
 		runtimeProbe = func() error {
-			_, err := unaccepted.ListActiveAgentDescriptors(ctx)
+			_, err := unaccepted.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)
 			return err
 		}
 	}
@@ -520,6 +520,59 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("drift bootstrap error = %v, want SchemaCompatibilityError", err)
 	}
+}
+
+func TestSchemaBootstrapRejectsRetiredGlobalFlowInstanceIdentityWithFreshStoreRemediation(t *testing.T) {
+	request := canonicalSchemaBootstrapTestRequest(t)
+	assertRejected := func(t *testing.T, backend SchemaDialect, target string, bootstrap func() error) {
+		t.Helper()
+		err := bootstrap()
+		var incompatible *SchemaCompatibilityError
+		if !errors.As(err, &incompatible) {
+			t.Fatalf("retired flow identity bootstrap error = %v, want SchemaCompatibilityError", err)
+		}
+		assertSchemaCompatibilityDiagnostic(t, err, backend, target, request.Origin, &request.Origin, "flow_instances", "instance_path", "instance_id")
+	}
+
+	t.Run("sqlite", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "retired-flow-identity.db")
+		store, err := NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
+			t.Fatalf("bootstrap canonical SQLite schema: %v", err)
+		}
+		if _, err := store.backend.Exec(`ALTER TABLE flow_instances RENAME COLUMN instance_path TO instance_id`); err != nil {
+			t.Fatalf("install retired SQLite flow identity: %v", err)
+		}
+		assertRejected(t, SchemaDialectSQLite, path, func() error {
+			return store.BootstrapSchema(testAuthorActivityContext(), request)
+		})
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
+			t.Fatalf("bootstrap canonical PostgreSQL schema: %v", err)
+		}
+		storedOrigin, err := readRuntimeStoreOrigin(testAuthorActivityContext(), db)
+		if err != nil || storedOrigin == nil {
+			t.Fatalf("read PostgreSQL stored origin: origin=%#v err=%v", storedOrigin, err)
+		}
+		if _, err := db.Exec(`ALTER TABLE flow_instances RENAME COLUMN instance_path TO instance_id`); err != nil {
+			t.Fatalf("install retired PostgreSQL flow identity: %v", err)
+		}
+		err = store.BootstrapSchema(testAuthorActivityContext(), request)
+		var incompatible *SchemaCompatibilityError
+		if !errors.As(err, &incompatible) {
+			t.Fatalf("retired flow identity bootstrap error = %v, want SchemaCompatibilityError", err)
+		}
+		assertSchemaCompatibilityDiagnostic(t, err, SchemaDialectPostgres, incompatible.Target, request.Origin, storedOrigin, "flow_instances", "instance_path", "instance_id")
+	})
 }
 
 func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testing.T) {

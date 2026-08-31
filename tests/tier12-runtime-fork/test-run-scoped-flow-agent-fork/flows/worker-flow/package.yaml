@@ -1,0 +1,5 @@
+name: worker-flow
+version: 1.0.0
+description: Template flow reconstructed under the selected fork run.
+platform_version: ">=0.7.0 <0.8.0"
+flows: []

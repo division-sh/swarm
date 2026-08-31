@@ -36,15 +36,18 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 
 	agentID := "agent-run-control"
 	eventType := events.EventType("custom.run_control")
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, eb, agentID, eventType)
-	defer runtimebustest.Unsubscribe(eb, agentID)
-
 	pausedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	for _, runID := range []string{pausedRunID, otherRunID} {
 		seedRunControlTestRun(t, ctx, db, runID)
 	}
+	pausedIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, pausedRunID, agentID)
+	otherIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, otherRunID, agentID)
+	pausedCh := runtimebustest.SubscribeForRun(t, eb, pausedRunID, agentID, eventType)
+	otherCh := runtimebustest.SubscribeForRun(t, eb, otherRunID, agentID, eventType)
+	defer runtimebustest.UnsubscribeIdentity(eb, pausedIdentity)
+	defer runtimebustest.UnsubscribeIdentity(eb, otherIdentity)
+
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: pausedRunID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -63,7 +66,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	)); err != nil {
 		t.Fatalf("Publish paused run event: %v", err)
 	}
-	requireNoBusEvent(t, ch, "paused run before continue")
+	requireNoBusEvent(t, pausedCh, "paused run before continue")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 0 {
 		t.Fatalf("paused run pipeline receipts = %d, want 0", got)
 	}
@@ -82,7 +85,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	)); err != nil {
 		t.Fatalf("Publish other run event: %v", err)
 	}
-	got := requireBusEvent(t, ch, "other run dispatch")
+	got := requireBusEvent(t, otherCh, "other run dispatch")
 	if got.ID() != otherEventID {
 		t.Fatalf("delivered event = %s, want other run %s", got.ID(), otherEventID)
 	}
@@ -94,7 +97,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	if result.Recovery.Sweep.Settled != 1 {
 		t.Fatalf("released deliveries = %d, want 1", result.Recovery.Sweep.Settled)
 	}
-	got = requireBusEvent(t, ch, "paused run release")
+	got = requireBusEvent(t, pausedCh, "paused run release")
 	if got.ID() != pausedEventID {
 		t.Fatalf("released event = %s, want paused run %s", got.ID(), pausedEventID)
 	}
@@ -118,12 +121,12 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 
 	agentID := "agent-run-control-acked"
 	eventType := events.EventType("custom.run_control.acked")
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, eb, agentID, eventType)
-	defer runtimebustest.Unsubscribe(eb, agentID)
-
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)
+	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType)
+	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
+
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -180,12 +183,12 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	eb.SetRunDispatchGate(controller)
 
 	agentID := "agent-run-control-interceptor"
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, eb, agentID, eventType, deferredType)
-	defer runtimebustest.Unsubscribe(eb, agentID)
-
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)
+	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
+	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
+
 	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
@@ -251,12 +254,11 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	eb.SetRunDispatchGate(controller)
 
 	agentID := "agent-run-control-postcommit"
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, eb, agentID, eventType, deferredType)
-	defer runtimebustest.Unsubscribe(eb, agentID)
-
 	runID := uuid.NewString()
 	seedRunControlTestRun(t, ctx, db, runID)
+	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
+	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
+	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.ExistingRunRootIngress(

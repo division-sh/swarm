@@ -3,7 +3,6 @@ package apiv1
 import (
 	"context"
 	"database/sql"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +11,11 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
@@ -273,10 +275,39 @@ func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner act
 	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, owner, agentID, "")
 }
 
+func seedActiveAPIV1RuntimeBusAgentNewRun(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) (context.Context, string) {
+	t.Helper()
+	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); !ok {
+		ctx = testAuthorActivityContext(ctx)
+	}
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, "")
+	return ctx, runID
+}
+
 func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID, flowPath string) {
 	t.Helper()
-	identity := runtimebustest.Identity(t, agentID, flowPath)
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, owner, runtimemanager.PersistedAgent{
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if runID == "" {
+		runID = runtimebustest.DefaultRunID
+	}
+	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, owner, runID, agentID, flowPath)
+}
+
+func seedActiveAPIV1RuntimeBusAgentForRun(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, runID, agentID, flowPath string) {
+	t.Helper()
+	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		source = authorActivityTestBundleSourceFact
+		ctx = testAuthorActivityContextForSource(ctx, source)
+	}
+	if source.Validate() != nil {
+		t.Fatalf("seed active API runtime-bus agent %s received invalid bundle source", agentID)
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	identity := runtimebustest.IdentityForRun(t, runID, agentID, flowPath)
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, owner, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "observer", FlowID: "global", FlowPath: identity.FlowInstance(),
 			Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
@@ -284,7 +315,7 @@ func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner a
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
 }

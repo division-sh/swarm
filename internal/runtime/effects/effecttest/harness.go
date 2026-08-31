@@ -49,7 +49,7 @@ func New() *Harness {
 	if err != nil {
 		panic(err)
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New("00000000-0000-0000-0000-000000000001", name, route)
 	if err != nil {
 		panic(err)
 	}
@@ -71,7 +71,7 @@ func (h *Harness) Context(identity string) context.Context {
 	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	target := runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: h.Token.AgentID,
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: h.Token.Identity.RunID, AgentID: h.Token.AgentID,
 		AgentIdentity: h.Token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: h.Token.Identity.FlowInstance(),
 	}
@@ -95,7 +95,7 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	ctx := h.Context(identity)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: "11111111-1111-4111-8111-111111111111",
-		RunID: "33333333-3333-4333-8333-333333333333", AgentID: h.Token.AgentID,
+		RunID: h.Token.Identity.RunID, AgentID: h.Token.AgentID,
 		AgentIdentity: h.Token.Identity, SessionID: "22222222-2222-4222-8222-222222222222",
 		FlowInstance: h.Token.Identity.FlowInstance(),
 		Memory:       agentmemory.PlatformDefault(),

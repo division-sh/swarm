@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -325,8 +324,4 @@ func workflowTimerJSONEqual(left, right []byte) bool {
 	leftJSON, _ := json.Marshal(leftValue)
 	rightJSON, _ := json.Marshal(rightValue)
 	return bytes.Equal(leftJSON, rightJSON)
-}
-
-func workflowTimerRunID(ctx context.Context, instance WorkflowInstance) string {
-	return strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 }

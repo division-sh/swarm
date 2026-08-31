@@ -12,7 +12,7 @@ import (
 
 func TestRunForkContractFrontierRecipientUsesPrivateTypedWireCodec(t *testing.T) {
 	want := NewRunForkContractFrontierRecipient(
-		events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "worker")), "review/inst-1", "compiled_connect_evaluation", agentidentity.Identity{},
+		events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "worker")), "review/inst-1", "compiled_connect_evaluation", agentidentity.Plan{},
 	)
 	raw, err := json.Marshal(want)
 	if err != nil {

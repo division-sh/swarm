@@ -76,10 +76,10 @@ func TestRoutePlanPendingLifecycleAuthorityPersistsWithoutLiveDispatch(t *testin
 		Persist: true,
 	}
 	pendingAgentRoute := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
-		TargetBlueprint:       targetRoute,
-		TargetOwnership:       targetOwner,
-		Persist:               true,
-		PendingAgentLifecycle: true,
+		TargetBlueprint: targetRoute,
+		TargetOwnership: targetOwner,
+		Persist:         true,
+		AgentLifecycle:  agentLifecycleAdmissionStaticDeclaration,
 	}
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{nodeRoute, pendingAgentRoute}}
 
@@ -105,14 +105,14 @@ func TestRoutePlanRejectsMalformedPendingLifecycleAuthority(t *testing.T) {
 		{
 			name: "not persistent",
 			intent: RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
-				PendingAgentLifecycle: true,
+				AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
 			},
 			want: "must be persistent",
 		},
 		{
 			name: "not agent",
 			intent: RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-a")), Persist: true,
-				PendingAgentLifecycle: true,
+				AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
 			},
 			want: "must identify one agent",
 		},

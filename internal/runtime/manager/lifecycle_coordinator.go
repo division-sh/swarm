@@ -160,6 +160,41 @@ func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runti
 	}
 }
 
+// committedRouteReadinessByIdentity observes an already executable occurrence
+// without requesting lifecycle mutation authority. Source-set transitions still
+// fence delivery admission; this observation only lets EventBus retain work for
+// an exact route that was executable before the transition began.
+func (c *agentLifecycleCoordinator) committedRouteReadinessByIdentity(identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+	if c == nil {
+		return executableAgentReadiness{}, errors.New("agent lifecycle coordinator is required")
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return executableAgentReadiness{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[identity]
+	if cell == nil || cell.execution == nil || cell.execution.agent == nil {
+		return executableAgentReadiness{}, fmt.Errorf("agent %s has no executable lifecycle projection", identity.Description())
+	}
+	state := lifecycleStateFromCell(cell)
+	switch c.phase {
+	case runtimeLifecycleStopped:
+		if !executionPreparedBeforeRunLocked(cell) {
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not an exact pre-run preparation")
+		}
+		return executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
+	case runtimeLifecycleRunning:
+		if !c.executionRunnableCurrentOccurrenceLocked(cell) {
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not reachable in the current manager occurrence")
+		}
+		return executableAgentReadiness{Kind: executableAgentRunnableCurrentOccurrence, State: state}, nil
+	default:
+		return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "manager lifecycle does not admit executable readiness")
+	}
+}
+
 func lifecycleStateFromCell(cell *agentLifecycleCell) AgentLifecycleState {
 	if cell == nil {
 		return AgentLifecycleState{}
@@ -453,12 +488,17 @@ func lifecycleToken(
 }
 
 func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
+	runID string,
 	agentID string,
 	flowInstance string,
 	includeTerminated bool,
 ) (runtimeagentidentity.Identity, *agentLifecycleCell, error) {
+	runID = strings.TrimSpace(runID)
 	agentID = strings.TrimSpace(agentID)
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if runID == "" {
+		return runtimeagentidentity.Identity{}, nil, fmt.Errorf("run_id is required")
+	}
 	if agentID == "" {
 		return runtimeagentidentity.Identity{}, nil, fmt.Errorf("agent_id is required")
 	}
@@ -466,7 +506,7 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 	var matchedCell *agentLifecycleCell
 	candidates := make([]runtimeagentidentity.Identity, 0, 2)
 	for identity, cell := range c.cells {
-		if !identity.MatchesAgentID(agentID) || cell == nil {
+		if identity.RunID != runID || !identity.MatchesAgentID(agentID) || cell == nil {
 			continue
 		}
 		if flowInstance != "" && identity.FlowInstance() != flowInstance {
@@ -487,8 +527,9 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 			descriptions = append(descriptions, identity.Description())
 		}
 		return runtimeagentidentity.Identity{}, nil, fmt.Errorf(
-			"agent_id %q is ambiguous across multiple live flow instances; provide agent_id and flow_instance; candidates: %s",
+			"agent_id %q in run %q is ambiguous across multiple live flow instances; provide flow_instance; candidates: %s",
 			agentID,
+			runID,
 			strings.Join(descriptions, ", "),
 		)
 	}
@@ -502,13 +543,13 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 	return matched, matchedCell, nil
 }
 
-func (c *agentLifecycleCoordinator) resolveAgentTarget(agentID, flowInstance string, includeTerminated bool) (runtimeagentidentity.Identity, error) {
+func (c *agentLifecycleCoordinator) resolveAgentTarget(runID, agentID, flowInstance string, includeTerminated bool) (runtimeagentidentity.Identity, error) {
 	if c == nil {
 		return runtimeagentidentity.Identity{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	identity, _, err := c.resolveAgentTargetLocked(agentID, flowInstance, includeTerminated)
+	identity, _, err := c.resolveAgentTargetLocked(runID, agentID, flowInstance, includeTerminated)
 	return identity, err
 }
 
@@ -573,12 +614,43 @@ func prepareManagerRunAuthorities(parent context.Context, owner worklifetime.Occ
 }
 
 func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
-	raw, err := canonicaljson.Bytes(rec.Config)
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return "", err
+	}
+	plan, err := identity.Plan()
+	if err != nil {
+		return "", err
+	}
+	return AgentConfigPlanRevision(rec.Config, plan)
+}
+
+// AgentConfigPlanRevision returns the run-independent revision admitted by
+// declaration and readiness topology owners before a concrete run exists.
+func AgentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentity.Plan) (string, error) {
+	plan = plan.Normalize()
+	if err := plan.Validate(); err != nil {
+		return "", err
+	}
+	raw, err := canonicaljson.Bytes(config)
+	if err != nil {
+		return "", err
+	}
+	var projection map[string]any
+	if err := canonicaljson.DecodeInto(raw, &projection); err != nil {
+		return "", err
+	}
+	projection["identity"] = plan
+	raw, err = canonicaljson.Bytes(projection)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func agentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentity.Plan) (string, error) {
+	return AgentConfigPlanRevision(config, plan)
 }
 
 func lifecycleRequestHash(parts ...string) string {
@@ -618,6 +690,7 @@ func lifecycleRequestHashForIdentity(
 ) string {
 	identity = identity.Normalize()
 	parts = append(parts,
+		identity.RunID,
 		identity.Name.AgentID,
 		identity.Name.Owner,
 		string(identity.Name.Source),

@@ -83,17 +83,17 @@ type workspaceLookupTestStore interface {
 func seedWorkspaceLookupFacts(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID, entityFlow, sharedFlow string) {
 	t.Helper()
 	now := time.Now().UTC()
-	flowQuery := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES (?, 'workspace', 'static', ?, 'active', ?)`
+	flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'workspace', 'static', ?, 'active', ?)`
 	entityQuery := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'default', ?, ?, 'active', '{}', '{}', '{}', 1, ?, ?, ?)`
 	if backend == "postgres" {
-		flowQuery = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES ($1, 'workspace', 'static', $2::jsonb, 'active', $3)`
+		flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'workspace', 'static', $3::jsonb, 'active', $4)`
 		entityQuery = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'default', $4, $5, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $6, $7, $8)`
 	}
 	for _, flow := range []struct {
 		id     string
 		config string
 	}{{entityFlow, `{"instance_kind":"entity"}`}, {sharedFlow, `{"instance_kind":"shared"}`}} {
-		if _, err := db.ExecContext(ctx, flowQuery, flow.id, flow.config, now); err != nil {
+		if _, err := db.ExecContext(ctx, flowQuery, runID, flow.id, flow.config, now); err != nil {
 			t.Fatalf("seed %s flow instance: %v", backend, err)
 		}
 	}

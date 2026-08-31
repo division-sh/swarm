@@ -291,6 +291,7 @@ func (r *AgentSQLite) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sq
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT
+			a.run_id,
 			a.agent_id,
 			a.agent_name_owner,
 			a.agent_name_source,
@@ -311,7 +312,8 @@ func (r *AgentSQLite) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sq
 		LEFT JOIN agent_sessions sess ON sess.session_id = (
 			SELECT session_id
 			FROM agent_sessions s
-			WHERE s.agent_id = a.agent_id
+			WHERE s.run_id = a.run_id
+			  AND s.agent_id = a.agent_id
 			  AND s.agent_name_owner = a.agent_name_owner
 			  AND s.agent_name_source = a.agent_name_source
 			  AND s.agent_route_presence = a.agent_route_presence
@@ -324,7 +326,7 @@ func (r *AgentSQLite) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sq
 			LIMIT 1
 		)
 			WHERE a.status NOT IN ('terminated', 'ephemeral')
-			ORDER BY a.created_at ASC, a.agent_id ASC
+			ORDER BY a.run_id ASC, a.created_at ASC, a.agent_id ASC
 		`)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite agent operator projections: %w", err)
@@ -342,6 +344,7 @@ func (r *AgentSQLite) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sq
 			runtimeStateRaw   []byte
 		)
 		if err := rows.Scan(
+			&fields.RunID,
 			&fields.AgentID,
 			&fields.NameOwner,
 			&fields.NameSource,
@@ -596,7 +599,8 @@ func (r *AgentSQLite) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Cont
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
-			WHERE agent_id = ?
+			WHERE run_id = ?
+			  AND agent_id = ?
 			  AND agent_name_owner = ?
 			  AND agent_name_source = ?
 			  AND agent_route_presence = ?
@@ -605,7 +609,7 @@ func (r *AgentSQLite) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Cont
 			  AND flow_instance = ?
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load sqlite agent delivery diagnostics agent: %w", err)
 	}

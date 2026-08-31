@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -412,7 +413,11 @@ func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 	if err != nil {
 		return nil, err
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, anchor.Route)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, anchor.Route)
+	if err != nil {
+		return nil, err
+	}
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +442,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 		return nil, err
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
-	record, err := workflowEngineStateRecord(card.RunID, anchor.Route, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, now.UTC())
+	record, err := workflowEngineStateRecord(runtimeflowidentity.RunScopedFlowInstance{RunID: card.RunID, Route: anchor.Route}, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, now.UTC())
 	if err != nil {
 		return nil, err
 	}

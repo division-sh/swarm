@@ -25,13 +25,17 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	seedSQLiteBudgetRun(t, ctx, store, runID, now)
 	seedSQLiteBudgetEntity(t, ctx, store, runID, activeEntity, "flow/active", "active", now)
 	seedSQLiteBudgetEntity(t, ctx, store, runID, terminalEntity, "flow/done", "done", now)
+	activeIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "flow/active")
+	globalIdentity := mustTestAgentIdentityForRun(runID, "agent-global", "global")
+	seedTestAgentRow(t, ctx, store.backend.ConstructionHandle(), false, activeIdentity, "active")
+	seedTestAgentRow(t, ctx, store.backend.ConstructionHandle(), false, globalIdentity, "active")
 
 	if err := store.RecordSpend(ctx, budgetspend.SpendRecord{
 		ExecutionMode:   "live",
 		EntityID:        activeEntity,
 		FlowInstance:    "flow/active",
 		AgentID:         "agent-1",
-		AgentIdentity:   testAgentIdentity(t, "agent-1", "flow/active"),
+		AgentIdentity:   activeIdentity,
 		Model:           "claude-sonnet",
 		ModelAlias:      "regular",
 		BackendProfile:  "anthropic",
@@ -51,7 +55,7 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 		ExecutionMode:   "live",
 		FlowInstance:    "global",
 		AgentID:         "agent-global",
-		AgentIdentity:   testAgentIdentity(t, "agent-global", "global"),
+		AgentIdentity:   globalIdentity,
 		Model:           "claude-cli",
 		ModelAlias:      "regular",
 		BackendProfile:  "claude_cli",
@@ -132,13 +136,13 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM entity_state").
 		WithArgs(runID, entityID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	identity := testAgentIdentity(t, "agent-1", "flow/1")
+	identity := mustTestAgentIdentityForRun(runID, "agent-1", "flow/1")
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatal(err)
 	}
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO spend_ledger")).
-		WithArgs("live", entityID, "flow/1", "agent-1", fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
+		WithArgs("live", runID, entityID, "flow/1", "agent-1", fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	if err := pg.RecordSpend(ctx, budgetspend.SpendRecord{

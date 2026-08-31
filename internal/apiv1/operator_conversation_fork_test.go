@@ -583,15 +583,17 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	forkTurnID := uuid.NewString()
 	requestOccurrenceID := uuid.NewString()
 	runtimeInstanceID := uuid.NewString()
+	sourceRunID := uuid.NewString()
 	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	prepared := runfork.ConversationForkChatPrepared{
 		Fork: runfork.OperatorConversationForkSession{
 			ForkID:        forkID,
-			SourceRunID:   "run-1",
+			SourceRunID:   sourceRunID,
 			SourceAgentID: "agent-source",
 		},
 		Snapshot: runfork.ConversationForkSnapshot{
 			SnapshotOwner: runfork.ConversationForkChatSnapshotOwner,
+			SourceRunID:   sourceRunID,
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Type: "managed", Role: "researcher", Model: llmselection.ModelAliasRegular,
 				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
@@ -691,13 +693,15 @@ func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *test
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
 	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	sourceRunID := uuid.NewString()
 	policy := runfork.CanonicalConversationForkSandboxPolicy()
 	prepared := runfork.ConversationForkChatPrepared{
 		Fork: runfork.OperatorConversationForkSession{
-			ForkID: uuid.NewString(), SourceRunID: "run-1", SourceAgentID: "agent-source",
+			ForkID: uuid.NewString(), SourceRunID: sourceRunID, SourceAgentID: "agent-source",
 		},
 		Snapshot: runfork.ConversationForkSnapshot{
 			SnapshotOwner: runfork.ConversationForkChatSnapshotOwner,
+			SourceRunID:   sourceRunID,
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Role: "researcher",
 				ResolvedLLMBackend:   llmselection.BackendAnthropic,

@@ -32,6 +32,7 @@ type deliveryRecipientCandidate struct {
 	PersistAsDelivery bool
 	LiveAuthority     liveRecipientAuthority
 	AgentRoute        *agentRouteHandle
+	AgentLifecycle    agentLifecycleAdmission
 }
 
 type exactDirectRecipientsUnavailableError struct {
@@ -83,7 +84,7 @@ func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber
 		subscribedRecipients = append(subscribedRecipients, r.resolveSubscribedRecipients(eventKey)...)
 	}
 	subscribedRecipients = normalizeDeliveryRecipientCandidates(subscribedRecipients)
-	routedCandidates := routedSubscriberCandidates(routedRecipients)
+	routedCandidates := routedSubscriberCandidates(evt.RunID(), routedRecipients)
 	if r.resolveRoutedNodeInternalRecipients != nil {
 		routedCandidates = append(routedCandidates, r.resolveRoutedNodeInternalRecipients(evt, routedRecipients)...)
 	}
@@ -112,6 +113,7 @@ type deliveryRecipientManifest struct {
 	PersistedRecipients []string
 	DeliveryRoutes      []events.DeliveryRoute
 	TargetFailure       runtimepinrouting.TargetFailure
+	AgentLifecycles     map[agentidentity.Identity]agentLifecycleAdmission
 }
 
 type deliveryRecipientPolicy struct {
@@ -143,13 +145,107 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
 			DeliveryRoutes:      agentDeliveryRoutesForCandidates(evt, persistedRecipients),
+			AgentLifecycles:     agentLifecycleAdmissionsForCandidates(persistedRecipients),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
 			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
 		}
 		return manifest, nil
 	}
-	return filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors), nil
+	manifest := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors)
+	return admitPendingStaticAgentRecipients(evt, recipients, descriptors, projection, manifest)
+}
+
+func agentLifecycleAdmissionsForCandidates(recipients []deliveryRecipientCandidate) map[agentidentity.Identity]agentLifecycleAdmission {
+	out := make(map[agentidentity.Identity]agentLifecycleAdmission)
+	for _, candidate := range normalizeDeliveryRecipientCandidates(recipients) {
+		if !candidate.AgentLifecycle.pending() || candidate.AgentIdentity.IsZero() {
+			continue
+		}
+		out[candidate.AgentIdentity.Normalize()] = candidate.AgentLifecycle
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func admitPendingStaticAgentRecipients(
+	evt events.Event,
+	recipients []deliveryRecipientCandidate,
+	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
+	projection selectedRunTargetOwnerProjection,
+	manifest deliveryRecipientManifest,
+) (deliveryRecipientManifest, error) {
+	admitted := false
+	root := rootExecutionCoordinate(projection.source, evt.RunID())
+	for _, candidate := range normalizeDeliveryRecipientCandidates(recipients) {
+		if candidate.AgentLifecycle != agentLifecycleAdmissionStaticDeclaration {
+			continue
+		}
+		identity := candidate.AgentIdentity.Normalize()
+		if _, active := descriptors[identity]; active {
+			continue
+		}
+		if err := identity.Validate(); err != nil || identity.RunID != strings.TrimSpace(evt.RunID()) {
+			return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery identity: event and agent run ownership disagree")
+		}
+		target, matched := staticAgentLifecycleTarget(evt, identity, root)
+		if !matched {
+			continue
+		}
+		owner := events.DeliveryTargetOwnership{}
+		if !target.Empty() {
+			var err error
+			owner, err = projection.resolveSelectedRoute(target, runtimepinrouting.StructuralTargetOwnerProof{})
+			if err != nil {
+				return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery target for %s: %w", identity.Description(), err)
+			}
+			if !owner.ExistingEntity() && !owner.MaterializingEntity() {
+				return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery target for %s: exact entity owner is required", identity.Description())
+			}
+		}
+		manifest.LiveRecipients = append(manifest.LiveRecipients, candidate)
+		manifest.Recipients = append(manifest.Recipients, candidate.ID)
+		manifest.PersistedRecipients = append(manifest.PersistedRecipients, candidate.ID)
+		manifest.DeliveryRoutes = append(manifest.DeliveryRoutes, events.DeliveryRoute{
+			Recipient: events.MustAgentDeliveryRecipient(candidate.ID), AgentIdentity: identity, Target: owner,
+		})
+		if manifest.AgentLifecycles == nil {
+			manifest.AgentLifecycles = make(map[agentidentity.Identity]agentLifecycleAdmission)
+		}
+		manifest.AgentLifecycles[identity] = agentLifecycleAdmissionStaticDeclaration
+		admitted = true
+	}
+	manifest.LiveRecipients = normalizeDeliveryRecipientCandidates(manifest.LiveRecipients)
+	manifest.Recipients = uniqueStrings(manifest.Recipients)
+	manifest.PersistedRecipients = uniqueStrings(manifest.PersistedRecipients)
+	manifest.DeliveryRoutes = events.NormalizeDeliveryRoutes(manifest.DeliveryRoutes)
+	if admitted {
+		manifest.TargetFailure = 0
+	}
+	return manifest, nil
+}
+
+func staticAgentLifecycleTarget(evt events.Event, identity agentidentity.Identity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool) {
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(targets) == 0 {
+		return events.RouteIdentity{}, true
+	}
+	for _, target := range targets {
+		target = target.Normalized()
+		switch identity.Route.Presence {
+		case agentidentity.RouteRoot:
+			if exactRootTarget(target, root) {
+				return target, true
+			}
+		case agentidentity.RoutePresent:
+			if target.FlowInstance == identity.FlowInstance() {
+				return target, true
+			}
+		}
+	}
+	return events.RouteIdentity{}, false
 }
 
 type deliveryPlanner struct {
@@ -547,8 +643,9 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 	}
 	out := make([]deliveryRecipientCandidate, 0, len(in))
 	type candidateKey struct {
-		identity agentidentity.Identity
-		id       string
+		identity  agentidentity.Identity
+		id        string
+		lifecycle agentLifecycleAdmission
 	}
 	indexByKey := make(map[candidateKey]int, len(in))
 	for _, candidate := range in {
@@ -562,9 +659,9 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 				continue
 			}
 		}
-		key := candidateKey{id: candidate.ID}
+		key := candidateKey{id: candidate.ID, lifecycle: candidate.AgentLifecycle}
 		if !candidate.AgentIdentity.IsZero() {
-			key = candidateKey{identity: candidate.AgentIdentity}
+			key = candidateKey{identity: candidate.AgentIdentity, lifecycle: candidate.AgentLifecycle}
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || candidate.PersistAsDelivery
@@ -590,7 +687,7 @@ func mergeDeliveryRecipientAuthority(current, candidate deliveryRecipientCandida
 	return current
 }
 
-func routedSubscriberCandidates(in []Subscriber) []deliveryRecipientCandidate {
+func routedSubscriberCandidates(runID string, in []Subscriber) []deliveryRecipientCandidate {
 	if len(in) == 0 {
 		return nil
 	}
@@ -602,10 +699,15 @@ func routedSubscriberCandidates(in []Subscriber) []deliveryRecipientCandidate {
 		if !subscriber.Recipient.IsAgent() {
 			continue
 		}
+		identity, err := subscriber.AgentPlan.Live(runID)
+		if err != nil {
+			continue
+		}
 		out = append(out, deliveryRecipientCandidate{
 			ID:                subscriber.Recipient.ID(),
-			AgentIdentity:     subscriber.AgentIdentity,
+			AgentIdentity:     identity,
 			PersistAsDelivery: true,
+			AgentLifecycle:    subscriber.agentLifecycle,
 		})
 	}
 	return out

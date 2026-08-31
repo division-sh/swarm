@@ -42,30 +42,30 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 	}
 	bundleHash, bundleSource := source.StorageValues()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.bundle_source, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		WHERE LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
 		  AND run.bundle_hash = $1 AND run.bundle_source = $2
-		ORDER BY readiness.run_id, readiness.instance_id`
+		ORDER BY readiness.run_id, readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.bundle_source, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
 			WHERE LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 			  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
 			  AND run.bundle_hash = ? AND run.bundle_source = ?
-			ORDER BY readiness.run_id, readiness.instance_id`
+			ORDER BY readiness.run_id, readiness.instance_path`
 	}
 	items, err := queryDynamicFlowRuntimeReadiness(ctx, db, query, bundleHash, bundleSource)
 	if err != nil {
@@ -91,10 +91,10 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 	invalidQuery := `
 		SELECT route.flow_instance
 		FROM routing_rules AS route
-		JOIN flow_instances AS instance ON instance.instance_id = route.flow_instance
-		JOIN entity_state AS entity ON entity.flow_instance = instance.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = route.run_id AND instance.instance_path = route.flow_instance
+		JOIN entity_state AS entity ON entity.run_id = instance.run_id AND entity.flow_instance = instance.instance_path
 		JOIN runs AS run ON run.run_id = entity.run_id
-		LEFT JOIN flow_instance_runtime_readiness AS readiness ON readiness.run_id = run.run_id AND readiness.instance_id = instance.instance_id
+		LEFT JOIN flow_instance_runtime_readiness AS readiness ON readiness.run_id = run.run_id AND readiness.instance_path = instance.instance_path
 		WHERE LOWER(BTRIM(route.status)) = 'active' AND route.is_materialized = TRUE
 		  AND LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 		  AND LOWER(BTRIM(instance.mode)) = 'template'
@@ -140,32 +140,32 @@ func inspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, db dynamicFlo
 	}
 	bundleHash, bundleSource := source.StorageValues()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.bundle_source, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		WHERE readiness.run_id = $1::uuid
 		  AND run.bundle_hash = $2 AND run.bundle_source = $3
 		  AND LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
-		ORDER BY readiness.instance_id`
+		ORDER BY readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.bundle_source, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
 			WHERE readiness.run_id = ?
 			  AND run.bundle_hash = ? AND run.bundle_source = ?
 			  AND LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 			  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-			ORDER BY readiness.instance_id`
+			ORDER BY readiness.instance_path`
 	}
 	items, err := queryDynamicFlowRuntimeReadiness(ctx, db, query, runID, bundleHash, bundleSource)
 	if err != nil {
@@ -344,10 +344,10 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 			if !results[index].Changed {
 				continue
 			}
-			query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_id = $4`
+			query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
 			args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
 			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_id = ?`
+				query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ?`
 			}
 			result, err := tx.ExecContext(txctx, query, args...)
 			if err != nil {
@@ -450,9 +450,9 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		       run.bundle_hash, run.bundle_source, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
-		WHERE readiness.run_id = $1::uuid AND readiness.instance_id = $2`
+		WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2`
 	if lock {
 		query += ` FOR UPDATE OF readiness, instance, run`
 	}
@@ -462,9 +462,9 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 			       run.bundle_hash, run.bundle_source, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
-			WHERE readiness.run_id = ? AND readiness.instance_id = ?`
+			WHERE readiness.run_id = ? AND readiness.instance_path = ?`
 	}
 	record := runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{RunID: runID, InstancePath: route.InstancePath}
 	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
@@ -527,10 +527,10 @@ func markDynamicFlowRuntimeTopologyReady(
 		query := `
 			UPDATE flow_instance_runtime_readiness AS readiness
 			SET topology_ready_at = COALESCE(readiness.topology_ready_at, $1), updated_at = $1
-			WHERE readiness.run_id = $2::uuid AND readiness.instance_id = $3 AND readiness.plan = $4::jsonb
+			WHERE readiness.run_id = $2::uuid AND readiness.instance_path = $3 AND readiness.plan = $4::jsonb
 			  AND EXISTS (
 				SELECT 1 FROM flow_instances AS instance JOIN runs AS run ON run.run_id = readiness.run_id
-				WHERE instance.instance_id = readiness.instance_id
+				WHERE instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 				  AND LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 				  AND LOWER(BTRIM(run.status)) IN ('running', 'paused'))`
 		args := []any{readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}
@@ -538,10 +538,10 @@ func markDynamicFlowRuntimeTopologyReady(
 			query = `
 				UPDATE flow_instance_runtime_readiness
 				SET topology_ready_at = COALESCE(topology_ready_at, ?), updated_at = ?
-				WHERE run_id = ? AND instance_id = ? AND plan = ?
+				WHERE run_id = ? AND instance_path = ? AND plan = ?
 				  AND EXISTS (
 					SELECT 1 FROM flow_instances AS instance JOIN runs AS run ON run.run_id = flow_instance_runtime_readiness.run_id
-					WHERE instance.instance_id = flow_instance_runtime_readiness.instance_id
+					WHERE instance.run_id = flow_instance_runtime_readiness.run_id AND instance.instance_path = flow_instance_runtime_readiness.instance_path
 					  AND LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 					  AND LOWER(TRIM(run.status)) IN ('running', 'paused'))`
 			args = []any{readyAt, readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}

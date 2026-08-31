@@ -35,22 +35,22 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	now := time.Now().UTC().Add(time.Minute)
-	identity := testAgentIdentity(t, "agent-a", "bundle-delete")
+	activeRunID := uuid.NewString()
+	completedRunID := uuid.NewString()
+	otherRunID := uuid.NewString()
+	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
+	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteOtherHash)
+	seedBundleDeleteRun(t, ctx, pg, activeRunID, "running", bundleDeleteTestHash)
+	seedBundleDeleteRun(t, ctx, pg, completedRunID, "completed", bundleDeleteTestHash)
+	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
+
+	identity := mustTestAgentIdentityForRun(activeRunID, "agent-a", "bundle-delete")
 	identityFields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatal(err)
 	}
 	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, identity, "active")
-	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
-	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteOtherHash)
-
-	activeRunID := uuid.NewString()
-	completedRunID := uuid.NewString()
-	otherRunID := uuid.NewString()
 	sessionID := uuid.NewString()
-	seedBundleDeleteRun(t, ctx, pg, activeRunID, "running", bundleDeleteTestHash)
-	seedBundleDeleteRun(t, ctx, pg, completedRunID, "completed", bundleDeleteTestHash)
-	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
 	eventID := seedBundleDeleteDelivery(t, ctx, pg, activeRunID, "agent-a")
 	if _, err := pg.backend.ExecContext(ctx, `
 			INSERT INTO agent_sessions (

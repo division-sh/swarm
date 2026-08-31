@@ -76,12 +76,13 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
-	identity := sqliteAgentUsageIdentity(t, agentID)
+	identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 	intent := apiTestResolvedIntent(t, agentID, "Provide operator-read proof for the selected PostgreSQL store.")
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("operator read identity fields: %v", err)
 	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
@@ -91,7 +92,6 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert postgres operator-read agent: %v", err)
 	}
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -127,11 +127,11 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		params string
 	}{
 		{method: "agent.list", params: `{}`},
-		{method: "agent.get", params: fmt.Sprintf(`{"agent_id":%q}`, agentID)},
-		{method: "agent.diagnose", params: fmt.Sprintf(`{"agent_id":%q,"queue_limit":10}`, agentID)},
-		{method: "agent.delivery_diagnostics", params: fmt.Sprintf(`{"agent_id":%q,"failure_limit":10,"dead_letter_limit":10}`, agentID)},
-		{method: "agent.delivery_lifecycle", params: fmt.Sprintf(`{"agent_id":%q,"limit":10}`, agentID)},
-		{method: "agent.usage", params: fmt.Sprintf(`{"agent_id":%q}`, agentID)},
+		{method: "agent.get", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q}`, runID, agentID)},
+		{method: "agent.diagnose", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"queue_limit":10}`, runID, agentID)},
+		{method: "agent.delivery_diagnostics", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"failure_limit":10,"dead_letter_limit":10}`, runID, agentID)},
+		{method: "agent.delivery_lifecycle", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"limit":10}`, runID, agentID)},
+		{method: "agent.usage", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q}`, runID, agentID)},
 		{method: "conversation.list", params: `{}`},
 		{method: "conversation.list_turns", params: fmt.Sprintf(`{"session_id":%q}`, sessionID)},
 		{method: "conversation.get_turn", params: fmt.Sprintf(`{"session_id":%q,"turn_id":%q}`, sessionID, turnID)},

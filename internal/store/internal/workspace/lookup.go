@@ -55,7 +55,7 @@ func (o *Postgres) ListContainers(ctx context.Context, runID string) (runtimewor
 	rows, err := o.backend.QueryContext(ctx, `
 		SELECT DISTINCT es.slug
 		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND fi.config->>'instance_kind' = 'entity'
 		ORDER BY 1
 	`, strings.TrimSpace(runID))
@@ -70,7 +70,7 @@ func (o *SQLite) ListContainers(ctx context.Context, runID string) (runtimeworks
 	rows, err := o.backend.QueryContext(ctx, `
 		SELECT DISTINCT es.slug
 		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = ? AND json_extract(fi.config, '$.instance_kind') = 'entity'
 		ORDER BY 1
 	`, strings.TrimSpace(runID))

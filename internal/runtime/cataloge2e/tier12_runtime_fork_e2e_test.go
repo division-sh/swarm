@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -38,8 +39,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	)
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtures := catalogRuntimeFixtures(t, "catalog.runtime.selected_contract_fork")
-	if len(fixtures) != 2 {
-		t.Fatalf("selected-contract fork runtime fixtures = %d, want 2", len(fixtures))
+	if len(fixtures) != 3 {
+		t.Fatalf("selected-contract fork runtime fixtures = %d, want 3", len(fixtures))
 	}
 	fixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-selected-contract-fork-execution").Root
 
@@ -56,7 +57,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build test-agent declaration name: %v", err)
 	}
-	identity, err := agentidentity.New(name, agentidentity.RootRoute())
+	identity, err := agentidentity.New(catalogRuntimeRunID, name, agentidentity.RootRoute())
 	if err != nil {
 		t.Fatalf("build test-agent identity: %v", err)
 	}
@@ -184,6 +185,58 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
 	}
 	return owner
+}
+
+func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHarness) runtimerunforkexecution.SelectedContractExecutionOwner {
+	t.Helper()
+	if h.pg != nil {
+		return selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg)
+	}
+	selected := h.sqlite
+	if selected == nil {
+		t.Fatal("selected-contract execution requires a catalog selected store")
+	}
+	durable := runtimebus.DurableDependencies{
+		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected, PreparedEvents: selected,
+		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+	}
+	managerRoles := runtimemanager.PersistenceRoles{
+		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
+		EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected,
+		DirectiveTargets: selected, FlowRoutes: selected, StandingRestarts: selected,
+	}
+	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
+		runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+		selected, durable, selected.PipelineObligations(), selected, managerRoles,
+		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedContractExecutionOwner(SQLite): %v", err)
+	}
+	return owner
+}
+
+func selectedContractAgentRuntimeOptionsForCatalogHarness(h *runtimeHarness, cfg *config.Config) runtimerunforkexecution.SelectedContractAgentRuntimeOptions {
+	options := runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+		Config: cfg, ProcessCapability: h.processTopology, ExecutionPosture: executionposture.Live,
+		LLMRuntime: h.llm, QuiescenceTimeout: 10 * time.Second,
+	}
+	if h.pg != nil {
+		options.EntityStore = h.pg
+		options.HumanTaskStore = h.pg
+		options.SessionRegistry = h.pg
+		options.ConversationStore = h.pg
+		options.MailboxStore = h.pg
+		return options
+	}
+	options.EntityStore = h.sqlite
+	options.HumanTaskStore = h.sqlite
+	options.SessionRegistry = h.sqlite
+	options.ConversationStore = h.sqlite
+	options.MailboxStore = h.sqlite
+	return options
 }
 
 func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {

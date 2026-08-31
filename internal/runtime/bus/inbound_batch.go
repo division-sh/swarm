@@ -197,6 +197,9 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed[index].Activations); err != nil {
 			return nil, err
 		}
+		if err := eb.finalizeCommittedAgentReadiness(ctx, prepared[index].Event, prepared[index].plan.DeliveryRoutes()); err != nil {
+			return nil, err
+		}
 		if eb.testLifecycleProbe != nil && !prepared[index].exactDuplicate {
 			eb.notifyTestPublishPersisted(ctx, prepared[index].Event, prepared[index].plan)
 		}

@@ -33,7 +33,7 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	harness.Token.AgentID = actorID
 	harness.Token.Identity = identity
 	target := runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: actorID,
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: identity.RunID, AgentID: actorID,
 		AgentIdentity: identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
 		FlowInstance: identity.FlowInstance(),
 	}
@@ -164,8 +164,9 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 func TestTurnContextRegistryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
 	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	siblingIdentity := agentidentitytest.Runtime(
+	siblingIdentity := agentidentitytest.RuntimeForRun(
 		t,
+		surface.Authority.RunID,
 		surface.ActorID,
 		"mcp-managed-turn-test",
 		"claude",
@@ -180,6 +181,35 @@ func TestTurnContextRegistryRejectsSameSlugSiblingCapabilityPrincipal(t *testing
 	}
 	if token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface); token == "" {
 		t.Fatal("exact capability principal did not register")
+	}
+}
+
+func TestTurnContextRegistryAdmitsOnlyExactRunlessStartupPlanProjection(t *testing.T) {
+	identity := agentidentitytest.Runtime(t, "startup-agent", "mcp-startup-test", "review", "instance-a", "review/instance-a")
+	plan, err := identity.Plan()
+	if err != nil {
+		t.Fatalf("build startup actor plan: %v", err)
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorPlan: plan, RuntimeMode: "startup_probe", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude-cli-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "startup-authority",
+			StartupOwnerID: "startup-owner", StartupGeneration: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build startup capability surface: %v", err)
+	}
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	exact := models.WithActor(context.Background(), models.AgentConfig{ID: plan.AgentID(), FlowPath: plan.FlowInstance()})
+	if token := registry.RegisterTurnContextWithCapabilitySurface(exact, time.Minute, surface); token == "" {
+		t.Fatal("exact runless startup plan projection did not register")
+	}
+	hostile := models.WithActor(context.Background(), models.AgentConfig{ID: plan.AgentID(), FlowPath: "review/instance-b"})
+	if token := registry.RegisterTurnContextWithCapabilitySurface(hostile, time.Minute, surface); token != "" {
+		t.Fatalf("cross-route startup plan projection registered as %q", token)
 	}
 }
 

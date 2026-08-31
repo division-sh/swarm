@@ -7,12 +7,12 @@ import (
 )
 
 type FlowInstanceRouteMaterializationRequest struct {
-	Identity            runtimeflowidentity.Route
+	Identity            runtimeflowidentity.RunScopedFlowInstance
 	ActivationVariables map[string]string
 }
 
 func (r FlowInstanceRouteMaterializationRequest) Normalized() FlowInstanceRouteMaterializationRequest {
-	r.Identity = runtimeflowidentity.StoredRoute(r.Identity.ScopeKey, r.Identity.InstanceID, r.Identity.InstancePath)
+	r.Identity = r.Identity.Normalize()
 	r.ActivationVariables = cloneRouteActivationVariables(r.ActivationVariables)
 	return r
 }

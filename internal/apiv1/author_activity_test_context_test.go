@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -227,6 +228,14 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if err != nil {
 		return nil, err
 	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if route.Recipient.IsAgent() && route.AgentIdentity.RunID != event.RunID() {
+				return fmt.Errorf("API test agent route run %s does not match event run %s", route.AgentIdentity.RunID, event.RunID())
+			}
+		}
+		return nil
+	}))
 	t.Cleanup(func() {
 		if err := bus.ResetInMemoryState(); err != nil {
 			t.Errorf("retire API test EventBus queues: %v", err)

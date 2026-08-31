@@ -388,7 +388,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
@@ -818,7 +818,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
@@ -845,7 +845,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatalf("proposal failure disposition = %#v, present=%v; want typed dead letter", disposition, disposed)
 			}
 
-			instance, ok, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			instance, ok, err := coordinator.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 			if err != nil || !ok || instance.CurrentState != "drafting" {
 				t.Fatalf("workflow after rollback = %#v, %v, %v", instance, ok, err)
 			}
@@ -1084,7 +1084,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
-	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
@@ -1202,7 +1202,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
@@ -1286,9 +1286,9 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	}
 	outcomeAgent := "gate-outcome-recorder"
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
-		Identity: runtimebustest.Identity(t, outcomeAgent, ""),
+		Identity: runtimebustest.IdentityForRun(t, runID, outcomeAgent, ""),
 	})
-	outcomeEvents := runtimebustest.Subscribe(t, bus, outcomeAgent, events.EventType("launch.approved"))
+	outcomeEvents := runtimebustest.SubscribeForRun(t, bus, runID, outcomeAgent, events.EventType("launch.approved"))
 	t.Cleanup(func() { runtimebustest.Unsubscribe(bus, outcomeAgent) })
 
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
@@ -1302,7 +1302,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
@@ -1630,7 +1630,7 @@ func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string)
 
 func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
-	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(runtimecorrelation.RunIDFromContext(ctx)))
+	instance, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runtimecorrelation.RunIDFromContext(ctx)))
 	if err != nil || !ok {
 		t.Fatalf("Load workflow instance = %#v, %v, %v", instance, ok, err)
 	}

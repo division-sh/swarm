@@ -1,11 +1,13 @@
 package runforkadmission
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -447,6 +449,25 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	}
 }
 
+func TestAdmitContractFrontier_UsesExactPendingTargetWhenRoutingSourceIsAbsent(t *testing.T) {
+	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "review/inst-1"
+	plan.PendingWork[0].DeliveryRoute.Target = events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/inst-1", EntityID: "entity-1",
+	})
+	source := testContractFrontierTemplateSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan: plan, Source: source, ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if len(admission.FrontierEvents) != 1 || !hasString(admission.FrontierEvents[0].SourceFlowInstances, "review/inst-1") {
+		t.Fatalf("source flow instances = %#v, want exact pending target", admission.FrontierEvents)
+	}
+}
+
 func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 	_, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan: testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node"),
@@ -472,6 +493,82 @@ func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *tes
 	event := admission.FrontierEvents[0]
 	if len(event.DerivedRecipients) != 0 {
 		t.Fatalf("derived recipients = %#v, want no inferred materialized route", event.DerivedRecipients)
+	}
+}
+
+func TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runfork.RunForkPendingWork)
+	}{
+		{
+			name: "event receiver",
+			mutate: func(item *runfork.RunForkPendingWork) {
+				item.FlowInstance = "review/inst-1"
+			},
+		},
+		{
+			name: "delivery target",
+			mutate: func(item *runfork.RunForkPendingWork) {
+				item.DeliveryRoute.Target = events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: "review", FlowInstance: "review/inst-1", EntityID: uuid.NewString(),
+				})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
+			plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
+			tc.mutate(&plan.PendingWork[0])
+			source := testContractFrontierTemplateSource()
+
+			admission, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan: plan, Source: source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier: %v", err)
+			}
+			if len(admission.FrontierEvents) != 1 || len(admission.FrontierEvents[0].DerivedRecipients) != 1 {
+				t.Fatalf("frontier events = %#v, want one exact materialized recipient", admission.FrontierEvents)
+			}
+			recipient := admission.FrontierEvents[0].DerivedRecipients[0]
+			if !recipient.Recipient.IsNode() || recipient.Path != "review/inst-1" {
+				t.Fatalf("derived recipient = %#v, want review/inst-1 node", recipient)
+			}
+			if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
+				t.Fatalf("blockers = %#v, want exact persisted receiver route resolved", admission.UnsupportedBlockers)
+			}
+		})
+	}
+}
+
+func TestAdmitContractFrontier_RejectsPendingAgentFromAnotherRun(t *testing.T) {
+	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "agent", "review-agent")
+	name, err := runtimeagentidentity.DeclaredName("review-agent", "test://review-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := runtimeagentidentity.PresentRoute("review", "inst-1", "review/inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := runtimeagentidentity.New(uuid.NewString(), name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.PendingWork[0].DeliveryRoute = events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient("review-agent"),
+		AgentIdentity: identity,
+	}
+	source := testContractFrontierTemplateSource()
+
+	_, err = AdmitContractFrontier(ContractFrontierRequest{
+		Plan: plan, Source: source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "disagrees with source run_id") {
+		t.Fatalf("AdmitContractFrontier error = %v, want cross-run agent rejection", err)
 	}
 }
 

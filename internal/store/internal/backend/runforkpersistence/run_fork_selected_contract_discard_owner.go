@@ -136,6 +136,9 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 			{"conversation audits", `DELETE FROM agent_conversation_audits WHERE run_id = $1`},
 			{"author activity", `DELETE FROM author_activity_occurrences WHERE run_id = $1`},
 		}, statements...)
+		statements = append(statements, struct{ label, query string }{
+			"agents", `DELETE FROM agents WHERE run_id = $1`,
+		})
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement.query, forkRunID); err != nil {

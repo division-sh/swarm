@@ -61,9 +61,9 @@ func (s *chatTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
 func (s *chatTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
-func (s *chatTestStore) ResolveAgentDirectiveRunTarget(context.Context, runtimeagentidentity.Identity, string) (runtimeagentcontrol.RunTargetResolution, error) {
+func (s *chatTestStore) ResolveAgentDirectiveRunTarget(_ context.Context, identity runtimeagentidentity.Identity) (runtimeagentcontrol.RunTargetResolution, error) {
 	return runtimeagentcontrol.RunTargetResolution{
-		RunID: "00000000-0000-0000-0000-000000000700",
+		RunID: identity.RunID,
 		Mode:  runtimeagentcontrol.RunResolutionSpecified,
 	}, nil
 }
@@ -75,12 +75,16 @@ type directiveTargetStore struct {
 	calls  int
 }
 
-func (s *directiveTargetStore) ResolveAgentDirectiveRunTarget(context.Context, runtimeagentidentity.Identity, string) (runtimeagentcontrol.RunTargetResolution, error) {
+func (s *directiveTargetStore) ResolveAgentDirectiveRunTarget(_ context.Context, identity runtimeagentidentity.Identity) (runtimeagentcontrol.RunTargetResolution, error) {
 	s.calls++
 	if s.err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, s.err
 	}
-	return s.target, nil
+	target := s.target
+	if target.RunID == "" {
+		target.RunID = identity.RunID
+	}
+	return target, nil
 }
 
 type directiveTestBus struct {
@@ -130,18 +134,26 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 	return nil
 }
 
-func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
+func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent, runID string) {
 	t.Helper()
 	rec := PersistedAgent{Config: managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
-		Identity:      directiveTestAgentIdentity(t, agent.ID()),
+		Identity:      directiveTestAgentIdentityForRun(t, runID, agent.ID()),
 	}), Status: "active", HiredBy: "test", Topology: managerTestTopologyAdmission(t)}
 	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), rec, false, agent, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register directive test agent: %v", err)
 	}
-	cell, _ := testLifecycleCell(t, am.lifecycle, agent.ID(), "")
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		t.Fatalf("resolve directive test agent identity: %v", err)
+	}
 	am.lifecycle.mu.Lock()
+	cell := am.lifecycle.cells[identity.Normalize()]
+	if cell == nil {
+		am.lifecycle.mu.Unlock()
+		t.Fatalf("directive test lifecycle cell %s is missing", identity.Description())
+	}
 	cell.phase = AgentLifecycleRunning
 	cell.runMode = AgentRunModeStandard
 	am.lifecycle.mu.Unlock()
@@ -150,6 +162,11 @@ func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
 func directiveTestAgentIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return runtimeagentidentitytest.RootRuntime(t, agentID, "manager.directive_test")
+}
+
+func directiveTestAgentIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return runtimeagentidentitytest.RootRuntimeForRun(t, runID, agentID, "manager.directive_test")
 }
 
 type directiveEventStore struct {
@@ -413,65 +430,30 @@ func TestConsumeProviderSettledDirectiveUsesExactDurableTerminalState(t *testing
 
 var _ runtimeagentcontrol.DirectiveOperationStore = (*directiveEventStore)(nil)
 
-func TestAgentManager_ChatWithAgentPersistsDirectiveEventBeforeBoardStep(t *testing.T) {
-	bus := &directiveTestBus{}
-	store := &chatTestStore{}
-	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
-
-	got, err := am.ChatWithAgent(testAuthorActivityContext(context.Background()), agent.id, "run corpus")
-	if err != nil {
-		t.Fatalf("ChatWithAgent: %v", err)
-	}
-	if got != "ok" {
-		t.Fatalf("ChatWithAgent result = %q, want ok", got)
-	}
-	if agent.calls != 1 || agent.directive != "run corpus" {
-		t.Fatalf("board step calls=%d directive=%q", agent.calls, agent.directive)
-	}
-	if agent.runID == "" || agent.directiveEvent == "" || agent.directiveSource != runtimeagentcontrol.DirectiveEventType {
-		t.Fatalf("board directive event = run:%q event:%q type:%q", agent.runID, agent.directiveEvent, agent.directiveSource)
-	}
-	eventCount := 0
-	if bus.store != nil {
-		eventCount = len(bus.store.events)
-	}
-	if eventCount != 1 {
-		t.Fatalf("persisted directive events = %d, want 1", eventCount)
-	}
-	if bus.store.events[0].ID() != agent.directiveEvent || bus.store.events[0].RunID() != agent.runID {
-		t.Fatalf("persisted directive event = %#v, board saw event=%q run=%q", bus.store.events[0], agent.directiveEvent, agent.runID)
-	}
-}
-
 func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardStep(t *testing.T) {
 	runID := "00000000-0000-0000-0000-000000000701"
 	bus := &directiveTestBus{}
 	store := &directiveTargetStore{
 		target: runtimeagentcontrol.RunTargetResolution{
 			RunID: runID,
-			Mode:  runtimeagentcontrol.RunResolutionActiveSession,
-			ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{
-				SessionID: "00000000-0000-0000-0000-000000000801",
-				RunID:     runID,
-			}},
+			Mode:  runtimeagentcontrol.RunResolutionSpecified,
 		},
 	}
 	agent := &chatTestAgent{id: "campaign-coordinator"}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
+	installDirectiveTestAgent(t, am, agent, runID)
 
 	result, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:    agent.id,
 		Directive:  "run corpus",
+		RunID:      runID,
 		Source:     runtimeagentcontrol.DirectiveSourceV1RPC,
 		OperatorID: "operator-token",
 	})
 	if err != nil {
 		t.Fatalf("SendDirective: %v", err)
 	}
-	if result.RunID != runID || result.RunIDResolution != runtimeagentcontrol.RunResolutionActiveSession || result.DirectiveEventID == "" {
+	if result.RunID != runID || result.RunIDResolution != runtimeagentcontrol.RunResolutionSpecified || result.DirectiveEventID == "" {
 		t.Fatalf("directive result = %#v", result)
 	}
 	if store.calls != 1 {
@@ -504,7 +486,7 @@ func TestAgentManager_SendDirectiveTargetErrorFailsBeforeBoardStep(t *testing.T)
 	}
 	agent := &chatTestAgent{id: "campaign-coordinator"}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
+	installDirectiveTestAgent(t, am, agent, "00000000-0000-0000-0000-000000000404")
 
 	_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:   agent.id,
@@ -532,9 +514,10 @@ func TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce(t *tes
 	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	agent := &chatTestAgent{id: "campaign-coordinator", started: started, release: release}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
 	req := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:        agent.id,
+		RunID:          store.target.RunID,
 		Directive:      "run corpus",
 		ActorTokenID:   "operator-token",
 		IdempotencyKey: "same-key",
@@ -593,10 +576,11 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBounda
 		renewalTimeout:  2 * time.Millisecond,
 		shutdownTimeout: 5 * time.Millisecond,
 	}
-	installDirectiveTestAgent(t, am, agent)
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
 
 	req := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:        agent.id,
+		RunID:          store.target.RunID,
 		Directive:      "run corpus",
 		ActorTokenID:   "operator-token",
 		IdempotencyKey: "stalled-heartbeat",
@@ -692,12 +676,13 @@ func TestAgentManager_SendDirectiveHeartbeatTimeoutSkipsSerializedFailurePersist
 		renewalTimeout:  2 * time.Millisecond,
 		shutdownTimeout: 5 * time.Millisecond,
 	}
-	installDirectiveTestAgent(t, am, agent)
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
 
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 			AgentID:        agent.id,
+			RunID:          store.target.RunID,
 			Directive:      "run corpus",
 			ActorTokenID:   "operator-token",
 			IdempotencyKey: "stalled-failure-heartbeat",
@@ -765,9 +750,10 @@ func TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBo
 				renewalTimeout:  100 * time.Millisecond,
 				shutdownTimeout: 100 * time.Millisecond,
 			}
-			installDirectiveTestAgent(t, am, agent)
+			installDirectiveTestAgent(t, am, agent, store.target.RunID)
 			req := runtimeagentcontrol.SendDirectiveRequest{
 				AgentID:        agent.id,
+				RunID:          store.target.RunID,
 				Directive:      "run corpus",
 				ActorTokenID:   "operator-token",
 				IdempotencyKey: "compliant-heartbeat-" + tc.name,
@@ -821,8 +807,8 @@ func TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep(t *tes
 	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000712", Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	agent := &chatTestAgent{id: "campaign-coordinator"}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
-	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "completion-key", RequestHash: "completion-hash"}
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
+	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, RunID: store.target.RunID, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "completion-key", RequestHash: "completion-hash"}
 
 	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveCompletionPending) {
 		t.Fatalf("first SendDirective error = %v, want completion pending", err)
@@ -849,8 +835,8 @@ func TestAgentManager_SendDirectiveResultPersistenceFailureNeverReadmitsBoardSte
 	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000713", Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	agent := &chatTestAgent{id: "campaign-coordinator"}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
-	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "indeterminate-key", RequestHash: "indeterminate-hash"}
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
+	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, RunID: store.target.RunID, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "indeterminate-key", RequestHash: "indeterminate-hash"}
 
 	if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("first SendDirective error = %v, want indeterminate", err)
@@ -878,8 +864,8 @@ func TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe(t *tes
 	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000714", Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	agent := &chatTestAgent{id: "campaign-coordinator", err: errors.New("provider failed")}
 	am := newTestAgentManager(t, bus, nil, store)
-	installDirectiveTestAgent(t, am, agent)
-	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "failure-key", RequestHash: "failure-hash"}
+	installDirectiveTestAgent(t, am, agent, store.target.RunID)
+	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, RunID: store.target.RunID, Directive: "run corpus", ActorTokenID: "operator-token", IdempotencyKey: "failure-key", RequestHash: "failure-hash"}
 
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := am.SendDirective(testAuthorActivityContext(context.Background()), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
@@ -909,8 +895,8 @@ func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *tes
 			store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000715", Mode: runtimeagentcontrol.RunResolutionSpecified}}
 			agent := &chatTestAgent{id: "campaign-coordinator", err: tc.firstErr}
 			am := newTestAgentManager(t, bus, nil, store)
-			installDirectiveTestAgent(t, am, agent)
-			firstReq := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "old directive", ActorTokenID: "operator-token", IdempotencyKey: "expired-key", RequestHash: "old-hash"}
+			installDirectiveTestAgent(t, am, agent, store.target.RunID)
+			firstReq := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, RunID: store.target.RunID, Directive: "old directive", ActorTokenID: "operator-token", IdempotencyKey: "expired-key", RequestHash: "old-hash"}
 
 			firstResult, err := am.SendDirective(testAuthorActivityContext(context.Background()), firstReq)
 			if tc.firstErr == nil && err != nil {
@@ -929,7 +915,7 @@ func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *tes
 			directiveStore.mu.Unlock()
 			agent.err = nil
 
-			secondResult, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "new directive", ActorTokenID: firstReq.ActorTokenID, IdempotencyKey: firstReq.IdempotencyKey, RequestHash: "new-hash"})
+			secondResult, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, RunID: store.target.RunID, Directive: "new directive", ActorTokenID: firstReq.ActorTokenID, IdempotencyKey: firstReq.IdempotencyKey, RequestHash: "new-hash"})
 			if err != nil {
 				t.Fatalf("fresh SendDirective after expiry: %v", err)
 			}
@@ -978,10 +964,11 @@ func TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliatio
 			}}
 			agent := &chatTestAgent{id: operation.AgentID()}
 			am := newTestAgentManager(t, bus, nil, store)
-			installDirectiveTestAgent(t, am, agent)
+			installDirectiveTestAgent(t, am, agent, store.target.RunID)
 
 			_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
 				AgentID:        operation.AgentID(),
+				RunID:          store.target.RunID,
 				FlowInstance:   operation.FlowInstance(),
 				Directive:      operation.Directive,
 				ActorTokenID:   operation.ActorTokenID,
@@ -1012,20 +999,5 @@ func TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliatio
 				t.Fatalf("operation mutated before source admission: got %#v want %#v", unchanged, operation)
 			}
 		})
-	}
-}
-
-func TestAgentManager_ChatWithAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := newTestAgentManagerWithOptions(t, &directiveTestBus{}, nil, AgentManagerOptions{
-		RuntimeShutdownAdmissionClosed: func() bool { return true },
-	})
-	installDirectiveTestAgent(t, am, agent)
-
-	if _, err := am.ChatWithAgent(testAuthorActivityContext(context.Background()), agent.id, "run corpus"); err == nil || err.Error() != "runtime shutting down" {
-		t.Fatalf("ChatWithAgent err = %v, want runtime shutting down", err)
-	}
-	if agent.calls != 0 {
-		t.Fatalf("board step calls = %d, want 0", agent.calls)
 	}
 }

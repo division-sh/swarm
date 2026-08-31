@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -27,7 +28,7 @@ type GatewayHooks struct {
 	RuntimeShutdownAdmissionClosed func() bool
 	WithActor                      func(context.Context, models.AgentConfig) context.Context
 	ActorFromContext               func(context.Context) (models.AgentConfig, bool)
-	ResolveActorConfig             func(string) (models.AgentConfig, bool)
+	ResolveActorConfig             func(agentidentity.Identity) (models.AgentConfig, bool)
 	WithCurrentRuntimeEpoch        func(context.Context) context.Context
 	WithInboundEvent               func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder      func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
@@ -75,7 +76,11 @@ func (g *Gateway) hydrateActor(actor models.AgentConfig) models.AgentConfig {
 	if actor.ID == "" || g.hooks.ResolveActorConfig == nil {
 		return actor
 	}
-	if resolved, ok := g.hooks.ResolveActorConfig(actor.ID); ok {
+	identity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return actor
+	}
+	if resolved, ok := g.hooks.ResolveActorConfig(identity); ok {
 		resolved.NormalizeRuntimeDescriptor()
 		resolved.NormalizeEntityID()
 		resolved.ID = actor.ID
@@ -640,8 +645,7 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 	if turn.CapabilitySurface == nil {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "surface_missing"})
 	}
-	actorIdentity, identityErr := turn.Actor.ConcreteIdentity()
-	if err := turn.CapabilitySurface.Validate(); err != nil || identityErr != nil || !turn.CapabilitySurface.MatchesActor(actorIdentity) {
+	if err := turn.CapabilitySurface.Validate(); err != nil || !capabilitySurfaceMatchesActorConfig(*turn.CapabilitySurface, turn.Actor) {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
 	}
 	_, definitions, release, err := g.acquireToolDefinitionsInContext(ctx, turn.Actor, true)
@@ -866,9 +870,8 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
 	}
 	if turn.CapabilitySurface != nil {
-		actorIdentity, err := turn.Actor.ConcreteIdentity()
-		if err != nil || !turn.CapabilitySurface.MatchesActor(actorIdentity) {
-			return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, err, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
+		if !capabilitySurfaceMatchesActorConfig(*turn.CapabilitySurface, turn.Actor) {
+			return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
 		}
 	}
 	return turn, nil

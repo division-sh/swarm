@@ -901,6 +901,7 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	identity := agentidentity.Identity{}
 	if runtimegenericschedule.OwnerKind(ownerKind) == runtimegenericschedule.OwnerAgent {
 		identity, err = agentidentity.FromStorageFields(agentidentity.StorageFields{
+			RunID:   runID,
 			AgentID: ownerID, NameOwner: nameOwner, NameSource: nameSource, RoutePresence: routePresence,
 			FlowScopeKey: flowScopeKey, FlowInstanceID: flowInstanceID, FlowInstancePath: flowInstance,
 		})

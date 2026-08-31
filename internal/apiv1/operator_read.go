@@ -29,7 +29,7 @@ type ObservabilityReadStore = operatorread.ObservabilityReader
 type EntityReadStore = operatorread.EntityReader
 
 type AgentIdentityResolver interface {
-	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
+	ResolveOperatorAgentIdentity(context.Context, string, string, string) (agentidentity.Identity, error)
 }
 
 type AgentReadStore = operatorread.AgentReader
@@ -441,13 +441,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 		if err != nil {
 			return nil, err
 		}
-		runID, _, err := optionalStringParam(req.Params, "run_id")
-		if err != nil {
-			return nil, err
-		}
-		if runID != "" && !opaqueIDPattern.MatchString(runID) {
-			return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must match OpaqueId pattern"})
-		}
+		runID := identity.RunID
 		statuses, _, err := optionalStringListParam(req.Params, "delivery_status")
 		if err != nil {
 			return nil, err
@@ -733,14 +727,18 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 }
 
 func resolveOperatorAgentIdentityParam(ctx context.Context, resolver AgentIdentityResolver, params map[string]any, agentID string) (agentidentity.Identity, error) {
+	runID, err := requiredStringParam(params, "run_id")
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
 	flowInstance, _, err := optionalStringParam(params, "flow_instance")
 	if err != nil {
 		return agentidentity.Identity{}, err
 	}
-	identity, err := resolver.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
+	identity, err := resolver.ResolveOperatorAgentIdentity(ctx, runID, agentID, flowInstance)
 	if errors.Is(err, operatorread.ErrAgentNotFound) {
 		return agentidentity.Identity{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{
-			"agent_id": agentID, "flow_instance": flowInstance,
+			"run_id": runID, "agent_id": agentID, "flow_instance": flowInstance,
 		})
 	}
 	if operatorread.IsAgentTargetAmbiguous(err) {

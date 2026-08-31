@@ -25,6 +25,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPreservesBoundaries(t *testing.T) {
@@ -74,6 +75,9 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
 	assertCleanupTableResult(t, result, "decision_cards", 1, 1)
+	assertCleanupTableResult(t, result, "routing_rules", 1, 1)
+	assertCleanupTableResult(t, result, "agents", 1, 1)
+	assertCleanupTableResult(t, result, "flow_instances", 1, 1)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
 	assertCleanupTableResult(t, result, "generated_entity_tables", 0, 0)
 
@@ -92,10 +96,12 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"agent_turns",
 		"agent_conversation_audits",
 		"agent_sessions",
+		"agents",
 		"human_task_continuations",
 		"decision_cards",
 		"entity_mutations",
 		"entity_state",
+		"flow_instances",
 		"run_control_state",
 	} {
 		if got := countRows(t, ctx, pg, table); got != 0 {
@@ -114,8 +120,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"runtime_store_metadata",
 		"api_idempotency",
 		"runtime_ingress_state",
-		"agents",
-		"flow_instances",
 		"routing_rules",
 		"mailbox",
 		"generated_entity_fixture",
@@ -127,6 +131,13 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	}
 	if got := countRows(t, ctx, pg, "spend_ledger"); got != 2 {
 		t.Fatalf("spend_ledger rows after cleanup = %d, want 2 preserved immutable rows", got)
+	}
+	var retainedSpendRuns int
+	if err := pg.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM spend_ledger WHERE run_id = ANY($1::uuid[])`, pq.Array(result.RunIDs)).Scan(&retainedSpendRuns); err != nil {
+		t.Fatalf("count retained run-scoped spend evidence: %v", err)
+	}
+	if retainedSpendRuns != 2 {
+		t.Fatalf("retained run-scoped spend evidence = %d, want 2", retainedSpendRuns)
 	}
 }
 
@@ -260,6 +271,18 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 			}
 			if err != nil {
 				t.Fatalf("clean terminal provider evidence: %v", err)
+			}
+			for table, column := range map[string]string{
+				"runs":                            "run_id",
+				"agents":                          "run_id",
+				"agent_sessions":                  "run_id",
+				"flow_instances":                  "run_id",
+				"flow_instance_runtime_readiness": "run_id",
+			} {
+				var count int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+column+`=$1::uuid`, fixture.authority.Target.RunID).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("terminal cleanup %s rows=%d err=%v, want 0", table, count, err)
+				}
 			}
 			var attempts int
 			if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE attempt_id=$1::uuid`, handle.Attempt().AttemptID).Scan(&attempts); err != nil || attempts != 1 {
@@ -628,7 +651,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 		Action:        destructivereset.ContainerActionStop,
 		ResetEligible: true,
 		RunID:         "11111111-1111-1111-1111-111111111111",
-		AgentIdentity: testAgentIdentity(t, "agent-a", "reset/agent-a"),
+		AgentIdentity: mustTestAgentIdentityForRun("11111111-1111-1111-1111-111111111111", "agent-a", "reset/agent-a"),
 	}}
 	plan, err := (destructivereset.InventoryPlanner{Reader: destructivereset.CompositeInventoryReader{
 		Reader:     pg,
@@ -685,7 +708,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	replyContextID := "reply-v1:cleanup-" + uuid.NewString()
 	mailboxID := uuid.NewString()
 	entityID := uuid.NewString()
-	agentIdentity := testAgentIdentity(t, "agent-a", "cleanup")
+	agentIdentity := mustTestAgentIdentityForRun(runID, "agent-a", "cleanup")
 	agentFields, err := agentIdentityFields(agentIdentity)
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
@@ -696,6 +719,9 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	})
 	registerTestAuthorActivityCatalog(t, pg)
 	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
+	preservedAgentIdentity := mustTestAgentIdentityForRun(preservedRunID, "agent-a", "cleanup")
+	preservedAgentFields := testAgentIdentityStorageFields(t, preservedAgentIdentity)
+	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, preservedAgentIdentity, "terminated")
 	cleanupSemanticEvent := eventtest.PersistedProjectionForProducer(
 		eventID, events.EventType("batch.contract"), eventtest.Producer(events.EventProducerExternal, "cleanup-reference-ingress"), "",
 		[]byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -723,8 +749,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 			$1::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
 			TRUE, 'authored', 'terminated', 'cancelled', now(), $2::uuid
 		)
-	`, predecessorSessionID, activeSessionID, preservedRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
-		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
+	`, predecessorSessionID, activeSessionID, preservedRunID, preservedAgentFields.AgentID, preservedAgentFields.NameOwner, preservedAgentFields.NameSource,
+		preservedAgentFields.RoutePresence, preservedAgentFields.FlowScopeKey, preservedAgentFields.FlowInstanceID, preservedAgentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.backend.ConstructionHandle(), runID)
@@ -1215,7 +1241,7 @@ func destructiveResetDirectiveReservation(t *testing.T, runID, key, requestHash 
 			ActorTokenID:     request.ActorTokenID,
 			IdempotencyKey:   key,
 			RequestHash:      requestHash,
-			AgentIdentity:    testAgentIdentity(t, request.AgentID, request.FlowInstance),
+			AgentIdentity:    mustTestAgentIdentityForRun(runID, request.AgentID, request.FlowInstance),
 			Directive:        request.Directive,
 			RequestedRunID:   runID,
 			ResolvedRunID:    runID,
@@ -1242,7 +1268,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	timerForkEvent := uuid.NewString()
 	humanTaskCardID := uuid.NewString()
 	seededAt := time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC)
-	agentIdentity := testAgentIdentity(t, "agent-a", "cleanup")
+	agentIdentity := mustTestAgentIdentityForRun(runA, "agent-a", "cleanup")
 	agentFields, err := agentIdentityFields(agentIdentity)
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
@@ -1460,7 +1486,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	turnID := uuid.NewString()
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
-		AgentID: agentIdentity.AgentID(), Identity: agentmemory.Identity{RunID: runA, Agent: agentIdentity},
+		AgentID: agentIdentity.AgentID(), Identity: agentIdentity,
 		RunID: runA, FlowInstance: agentIdentity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
 		EntityID:       entityID,
 		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true,
@@ -1517,7 +1543,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`); err != nil {
 		t.Fatalf("seed runtime ingress: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (instance_id, flow_template, mode) VALUES ('flow/a', 'flow', 'static')`); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode) VALUES ($1::uuid, 'flow/a', 'flow', 'static')`, runA); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
@@ -1527,15 +1553,21 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed routing rule: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
+		INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, is_materialized)
+		VALUES ($1::uuid, 'source.event', 'agent', 'agent-a', 'flow/a', TRUE)
+	`, runA); err != nil {
+		t.Fatalf("seed materialized routing rule: %v", err)
+	}
+	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO mailbox (entity_id, flow_instance, item_type, source_event_id, from_agent, summary)
 		VALUES ($1::uuid, 'flow/a', 'review_notice', $2::uuid, 'agent-a', 'preserve mailbox')
 	`, entityID, sourceEvent); err != nil {
 		t.Fatalf("seed mailbox: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO spend_ledger (execution_mode, entity_id, flow_instance, agent_id, model, invocation_type)
-		VALUES ('live', $1::uuid, 'flow/a', 'agent-a', 'model', 'agent_turn')
-	`, entityID); err != nil {
+		INSERT INTO spend_ledger (execution_mode, run_id, entity_id, flow_instance, agent_id, model, invocation_type)
+		VALUES ('live', $1::uuid, $2::uuid, 'flow/a', 'agent-a', 'model', 'agent_turn')
+	`, runA, entityID); err != nil {
 		t.Fatalf("seed spend ledger: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO generated_entity_fixture (entity_id) VALUES ($1::uuid)`, entityID); err != nil {

@@ -34,7 +34,7 @@ import (
 )
 
 type AgentDirectiveRunTargetResolver interface {
-	ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
+	ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity) (runtimeagentcontrol.RunTargetResolution, error)
 }
 
 const DefaultShutdownGrace = 30 * time.Second
@@ -104,7 +104,7 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	if agentID == "" {
 		return runtimeagentcontrol.RestartResult{}, errors.New("agent id is required")
 	}
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, req.FlowInstance, false)
+	identity, err := am.lifecycle.resolveAgentTarget(req.RunID, agentID, req.FlowInstance, false)
 	if err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
 	}
@@ -128,7 +128,7 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	}
 	token, _ := am.lifecycle.tokenIdentity(identity)
 	return runtimeagentcontrol.RestartResult{
-		AgentID: agentID, FlowInstance: identity.FlowInstance(), OperationID: operationID, Generation: token.Generation,
+		RunID: identity.RunID, AgentID: agentID, FlowInstance: identity.FlowInstance(), OperationID: operationID, Generation: token.Generation,
 	}, nil
 }
 
@@ -216,8 +216,8 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 	return false
 }
 
-func (am *AgentManager) ResolveAgentConfig(agentID, flowInstance string) (runtimeactors.AgentConfig, error) {
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+func (am *AgentManager) ResolveAgentConfig(runID, agentID, flowInstance string) (runtimeactors.AgentConfig, error) {
+	identity, err := am.lifecycle.resolveAgentTarget(runID, agentID, flowInstance, false)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, err
 	}
@@ -237,15 +237,16 @@ type AgentFrameConfig struct {
 // ResolveAgentFrameConfig performs exact operator inspection selection. Root
 // and flow-instance coordinates are explicit so same-slug siblings cannot be
 // selected through the broader runtime convenience resolver.
-func (am *AgentManager) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (AgentFrameConfig, error) {
+func (am *AgentManager) ResolveAgentFrameConfig(runID, agentID, flowInstance string, root bool) (AgentFrameConfig, error) {
+	runID = strings.TrimSpace(runID)
 	flowInstanceIsExact := root || exactAgentFrameFlowInstance(flowInstance)
-	if !exactAgentFrameScalar(agentID) || root == (flowInstance != "") || !flowInstanceIsExact {
-		return AgentFrameConfig{}, fmt.Errorf("agent frame selection requires agent_id and exactly one of root or flow_instance")
+	if !exactAgentFrameScalar(runID) || !exactAgentFrameScalar(agentID) || root == (flowInstance != "") || !flowInstanceIsExact {
+		return AgentFrameConfig{}, fmt.Errorf("agent frame selection requires run_id, agent_id, and exactly one of root or flow_instance")
 	}
 	var matches []runtimeactors.AgentConfig
 	for _, cfg := range am.ListAgentConfigs() {
 		identity, err := cfg.ConcreteIdentity()
-		if err != nil || identity.AgentID() != agentID {
+		if err != nil || identity.RunID != runID || identity.AgentID() != agentID {
 			continue
 		}
 		if (root && identity.Route.Presence == runtimeagentidentity.RouteRoot) || (!root && identity.FlowInstance() == flowInstance) {
@@ -435,17 +436,6 @@ func (am *AgentManager) safeProcessEventOwned(ctx context.Context, agent Agent, 
 	return
 }
 
-func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string) (string, error) {
-	result, err := am.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:   agentID,
-		Directive: directive,
-	})
-	if err != nil {
-		return "", legacyAgentControlError(err)
-	}
-	return result.Response, nil
-}
-
 func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -496,7 +486,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if req.Directive == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive is required")
 	}
-	identity, err := am.lifecycle.resolveAgentTarget(agentID, req.FlowInstance, false)
+	identity, err := am.lifecycle.resolveAgentTarget(req.RunID, agentID, req.FlowInstance, false)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -538,7 +528,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if _, err := am.directiveBoardAgentIdentity(identity); err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	target, err := am.resolveAgentDirectiveRunTarget(ctx, identity, req.RunID)
+	target, err := am.resolveAgentDirectiveRunTarget(ctx, identity)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -804,21 +794,24 @@ func directiveRequestHash(req runtimeagentcontrol.SendDirectiveRequest) (string,
 	return fmt.Sprintf("%x", sum[:]), nil
 }
 
-func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
+func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity) (runtimeagentcontrol.RunTargetResolution, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
-	explicitRunID = strings.TrimSpace(explicitRunID)
 	resolver := am.roles.DirectiveTargets
 	if resolver == nil {
 		return runtimeagentcontrol.RunTargetResolution{}, errors.New("directive run target resolver is required")
 	}
-	target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+	target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, identity)
 	if err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
-	return target.Normalized(), nil
+	target = target.Normalized()
+	if target.RunID != identity.RunID {
+		return runtimeagentcontrol.RunTargetResolution{}, fmt.Errorf("directive run target %q disagrees with concrete agent run %q", target.RunID, identity.RunID)
+	}
+	return target, nil
 }
 
 func (am *AgentManager) Run(ctx context.Context) error {
@@ -1229,22 +1222,6 @@ func agentControlNotRunning(agentID, currentStatus string) error {
 		AgentID:       strings.TrimSpace(agentID),
 		CurrentStatus: status,
 	}
-}
-
-func legacyAgentControlError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var stateErr *runtimeagentcontrol.StateError
-	if errors.As(err, &stateErr) && stateErr != nil {
-		switch {
-		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotFound):
-			return fmt.Errorf("agent not found: %s", strings.TrimSpace(stateErr.AgentID))
-		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotRunning) && strings.TrimSpace(stateErr.CurrentStatus) == runtimeagentcontrol.StatusTerminated:
-			return errRuntimeShuttingDown
-		}
-	}
-	return err
 }
 
 func (am *AgentManager) ResetRuntimeState() error {

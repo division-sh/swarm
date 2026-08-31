@@ -438,10 +438,7 @@ func TestEnrichTurnRecord_RootAgentIdentityRejectsInboundFlowProjection(t *testi
 		events.EventEnvelope{FlowInstance: "review/inst-1"},
 		time.Now(),
 	))
-	identity := agentmemory.Identity{
-		RunID: testMemoryRunID,
-		Agent: agentidentitytest.RootRuntime(t, "analysis-agent", "llm-root-agent-test"),
-	}
+	identity := agentidentitytest.RootRuntimeForRun(t, testMemoryRunID, "analysis-agent", "llm-root-agent-test")
 	rec := enrichTurnRecord(ctx, &Session{
 		ID:             "session-1",
 		Memory:         agentmemory.Authored(false),

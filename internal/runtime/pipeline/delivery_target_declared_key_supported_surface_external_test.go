@@ -100,13 +100,13 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							WorkflowVersion: "1", ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
-						if _, err := coordinator.MaterializeInitialEntry(ctx, instance, createdAt); err != nil {
+						if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), instance, createdAt); err != nil {
 							t.Fatalf("materialize %s: %v", instance.Fields["owner"], err)
 						}
 						if err := coordinator.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, createdAt); err != nil {
 							t.Fatalf("mark %s topology ready: %v", instance.Fields["owner"], err)
 						}
-						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}); err != nil {
+						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef)}); err != nil {
 							t.Fatalf("publish %s route: %v", instance.Fields["owner"], err)
 						}
 					}
@@ -144,8 +144,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						t.Fatal("targeted declared-key delivery was forwarded instead of consumed")
 					}
 
-					exact, exactFound, exactErr := coordinator.Load(ctx, exactRoute)
-					competing, competingFound, competingErr := coordinator.Load(ctx, competingRoute)
+					exact, exactFound, exactErr := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, exactRoute.InstancePath))
+					competing, competingFound, competingErr := coordinator.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, competingRoute.InstancePath))
 					if exactErr != nil || !exactFound || competingErr != nil || !competingFound {
 						t.Fatalf("load declared-key owners: exact=%t/%v competing=%t/%v", exactFound, exactErr, competingFound, competingErr)
 					}

@@ -332,6 +332,11 @@ func settleBufferedLocalDelivery(ctx context.Context, store EventStore, delivery
 }
 
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok || strings.TrimSpace(inbound.RunID()) == "" {
+		return nil, false, errors.New("active agent descriptors require exact inbound run identity")
+	}
+	runID := inbound.RunID()
 	ephemeral := eb.runtimeActiveAgentDescriptors()
 	lister := eb.durable.ActiveAgents
 	if lister == nil {
@@ -340,7 +345,7 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidenti
 		}
 		return nil, false, nil
 	}
-	descriptors, err := lister.ListActiveAgentDescriptors(ctx)
+	descriptors, err := lister.ListActiveAgentDescriptors(ctx, runID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -350,10 +355,15 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidenti
 		if err := descriptor.Identity.Validate(); err != nil {
 			continue
 		}
+		if descriptor.Identity.RunID != runID {
+			return nil, true, fmt.Errorf("active agent descriptor %s escaped selected run %s", descriptor.Identity.AgentID(), runID)
+		}
 		set[descriptor.Identity] = descriptor
 	}
 	for identity, descriptor := range ephemeral {
-		set[identity] = descriptor
+		if identity.RunID == runID {
+			set[identity] = descriptor
+		}
 	}
 	return set, true, nil
 }
@@ -387,12 +397,17 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 }
 
 func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok || strings.TrimSpace(inbound.RunID()) == "" {
+		return nil, false, errors.New("active target descriptors require exact inbound run identity")
+	}
+	runID := inbound.RunID()
 	out := []ActiveTargetDescriptor{}
 	available := false
 	targetOwners := eb.durable.TargetOwners
 	if targetOwners != nil {
 		available = true
-		owners, err := targetOwners.ListSelectedRunTargetOwners(ctx)
+		owners, err := targetOwners.ListSelectedRunTargetOwners(ctx, runID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -405,11 +420,15 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 		return out, available, nil
 	}
 	available = true
-	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)
+	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
 	if err != nil {
 		return nil, true, err
 	}
-	out = appendActiveFlowInstanceTargetDescriptors(out, flowDescriptors)
+	for _, descriptor := range flowDescriptors {
+		if descriptor.RunID == runID {
+			out = appendActiveFlowInstanceTargetDescriptors(out, []ActiveFlowInstanceDescriptor{descriptor})
+		}
+	}
 	return out, available, nil
 }
 
@@ -502,7 +521,7 @@ func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscri
 	out := make([]Subscriber, 0, 8)
 	if table != nil {
 		for _, eventType := range eventKeys {
-			out = append(out, table.Resolve(eventType)...)
+			out = append(out, table.ResolveForRun(evt.RunID(), eventType)...)
 		}
 	}
 	return dedupeSubscribers(out)
@@ -735,6 +754,11 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	ctx, err = eb.withAuthorActivityEventDescriptor(ctx, evt)
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(err)
+	}
+	if route.Recipient.IsAgent() {
+		if err := eb.finalizeCommittedAgentReadiness(ctx, evt, []events.DeliveryRoute{route}); err != nil {
+			return runtimedeliverycontinuation.Fatal(err)
+		}
 	}
 	projection, err := eb.receiverProjection(ctx, route.Context)
 	if err != nil {

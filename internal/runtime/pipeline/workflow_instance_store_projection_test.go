@@ -90,7 +90,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("review/inst-1"))
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance("review/inst-1"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("projection-flow"))
+	loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "projection-flow"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if err := db.QueryRowContext(ctx, `
 		SELECT es.current_state, es.fields, COALESCE(fi.config->>'status', '')
 		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
 	`, testPipelineRunID, workflowInstanceRowID(entityID)).Scan(&currentState, &fieldsRaw, &controlStatus); err != nil {
 		t.Fatalf("query entity_state projection: %v", err)
@@ -281,7 +281,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("duplicate create failure = %#v, want canonical already-exists failure", failure)
 	}
 
-	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
+	loaded, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance after duplicate create: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	if err := db.QueryRowContext(ctx, `
 		SELECT es.revision, COALESCE(fi.config->>'name', ''), es.fields
 		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
 	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&revision, &configName, &fieldsRaw); err != nil {
 		t.Fatalf("query persisted projection after duplicate create: %v", err)
@@ -352,7 +352,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnRou
 		t.Fatalf("upsert static workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("static-flow"))
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance("static-flow"))
 	if err != nil {
 		t.Fatalf("load static workflow instance: %v", err)
 	}
@@ -390,42 +390,42 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 	}{
 		{
 			name:         "fields not object",
-			mutateSQL:    `UPDATE entity_state SET fields = $2::jsonb WHERE entity_id = $1::uuid`,
+			mutateSQL:    `UPDATE entity_state SET fields = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
 			mutateKey:    "entity",
 			mutateArg:    `[]`,
 			wantContains: "entity_state.fields must be a JSON object",
 		},
 		{
 			name:         "gates not bool map",
-			mutateSQL:    `UPDATE entity_state SET gates = $2::jsonb WHERE entity_id = $1::uuid`,
+			mutateSQL:    `UPDATE entity_state SET gates = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
 			mutateKey:    "entity",
 			mutateArg:    `{"g_ready":1}`,
 			wantContains: "entity_state.gates must be an object of booleans",
 		},
 		{
 			name:         "accumulator not object",
-			mutateSQL:    `UPDATE entity_state SET accumulator = $2::jsonb WHERE entity_id = $1::uuid`,
+			mutateSQL:    `UPDATE entity_state SET accumulator = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
 			mutateKey:    "entity",
 			mutateArg:    `[]`,
 			wantContains: "entity_state.accumulator must be a JSON object",
 		},
 		{
 			name:         "control metadata malformed",
-			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
+			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
 		},
 		{
 			name:         "instance id disagrees with flow path",
-			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
+			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
 			wantContains: "instance_id",
 		},
 		{
 			name:         "slash-only flow path fails closed",
-			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
+			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
 			wantContains: "flow_path",
@@ -458,11 +458,11 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			if tc.mutateKey == "entity" {
 				mutateID = entityID
 			}
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), tc.mutateSQL, mutateID, tc.mutateArg); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), tc.mutateSQL, mutateID, tc.mutateArg, testPipelineRunID); err != nil {
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef))
+			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance(storageRef))
 			if tc.wantContains == "" {
 				if err != nil {
 					t.Fatalf("load with slash-only flow_path: %v", err)

@@ -15,11 +15,11 @@ type pipelineWorkflowLifecycleOwner struct {
 	coordinator *PipelineCoordinator
 }
 
-func (o pipelineWorkflowLifecycleOwner) PrepareWorkflowLifecycleMutation(ctx context.Context, instance *WorkflowInstance, effects []runtimeworkflowlifecycle.Effect, reconcileGenerations bool) (PreparedWorkflowLifecycleMutation, error) {
+func (o pipelineWorkflowLifecycleOwner) PrepareWorkflowLifecycleMutation(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effects []runtimeworkflowlifecycle.Effect, reconcileGenerations bool) (PreparedWorkflowLifecycleMutation, error) {
 	if o.coordinator == nil {
 		return PreparedWorkflowLifecycleMutation{}, fmt.Errorf("workflow lifecycle owner is unavailable")
 	}
-	return o.coordinator.prepareWorkflowLifecycleMutation(ctx, instance, effects, reconcileGenerations)
+	return o.coordinator.prepareWorkflowLifecycleMutation(ctx, owner, instance, effects, reconcileGenerations)
 }
 
 func (o pipelineWorkflowLifecycleOwner) FinalizeWorkflowLifecycleMutation(ctx context.Context, committed CommittedWorkflowLifecycleMutation) error {
@@ -81,26 +81,26 @@ func (o pipelineWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(ctx contex
 	return fmt.Errorf("durable workflow lifecycle effects must be committed by the selected workflow engine mutation owner")
 }
 
-func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.ArmInitialEntryTimers(ctx, route)
+	return pc.workflowTimers.ArmInitialEntryTimers(ctx, identity)
 }
 
-func (o pipelineWorkflowLifecycleOwner) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+func (o pipelineWorkflowLifecycleOwner) ReconcileInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, route)
+	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, identity)
 }
 
-func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
+func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.RetireInitialEntryTimerWakeups(ctx, route)
+	return pc.workflowTimers.RetireInitialEntryTimerWakeups(ctx, identity)
 }

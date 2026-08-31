@@ -12,11 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -76,28 +74,18 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			eventID := stringValue(t, result["event_id"], "event_id")
 			runID := stringValue(t, result["run_id"], "run_id")
 			deliveries := asSlice(t, result["deliveries"])
-			if len(deliveries) != 2 {
-				t.Fatalf("event.publish deliveries = %#v, want workflow-runtime and reviewer deliveries", deliveries)
+			if len(deliveries) != 1 {
+				t.Fatalf("event.publish deliveries = %#v, want the reviewer node delivery", deliveries)
 			}
-			seenWorkflowRuntime := false
-			seenReviewer := false
-			for _, rawDelivery := range deliveries {
-				delivery := asMap(t, rawDelivery)
-				subscriberType := fmt.Sprint(delivery["subscriber_type"])
-				subscriberID := fmt.Sprint(delivery["subscriber_id"])
-				status := fmt.Sprint(delivery["status"])
-				if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" || !validEventPublishSubscriberType(subscriberType) {
-					t.Fatalf("event.publish delivery identity = %#v, want persisted typed delivery identity", delivery)
-				}
-				switch subscriberID {
-				case "workflow-runtime":
-					seenWorkflowRuntime = subscriberType == "agent" && status == "pending"
-				case reviewerNodeID:
-					seenReviewer = subscriberType == "node" && (status == "pending" || status == "in_progress" || status == "delivered")
-				}
+			delivery := asMap(t, deliveries[0])
+			subscriberType := fmt.Sprint(delivery["subscriber_type"])
+			subscriberID := fmt.Sprint(delivery["subscriber_id"])
+			status := fmt.Sprint(delivery["status"])
+			if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" || !validEventPublishSubscriberType(subscriberType) {
+				t.Fatalf("event.publish delivery identity = %#v, want persisted typed delivery identity", delivery)
 			}
-			if !seenWorkflowRuntime || !seenReviewer {
-				t.Fatalf("event.publish deliveries = %#v, want durable workflow-runtime and reviewer node snapshot", deliveries)
+			if subscriberID != reviewerNodeID || subscriberType != "node" || (status != "pending" && status != "in_progress" && status != "delivered") {
+				t.Fatalf("event.publish delivery = %#v, want durable reviewer node snapshot", delivery)
 			}
 
 			releaseMailboxWritePendingNodeDeliveries(t, testAuthorActivityContextForSource(ctx, fact), db, bus, probe, tc.name, eventID)
@@ -234,41 +222,6 @@ func newMailboxWriteSupportedSurfaceHandler(
 		TestLifecycleProbe:  probe,
 	}))
 
-	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
-		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
-	})
-	workflowDeliveries := runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("thing.created"))
-	workerOwner := worklifetime.NewProcess()
-	workerLease, err := workerOwner.Begin(context.Background())
-	if err != nil {
-		t.Fatalf("admit workflow runtime test carrier: %v", err)
-	}
-	stopWorker := make(chan struct{})
-	workerDone := make(chan struct{})
-	go func() {
-		defer close(workerDone)
-		defer workerLease.Done()
-		for {
-			select {
-			case <-stopWorker:
-				return
-			case delivery := <-workflowDeliveries:
-				if delivery != nil {
-					_ = delivery.Complete()
-				}
-			}
-		}
-	}()
-	t.Cleanup(func() {
-		close(stopWorker)
-		<-workerDone
-		workerOwner.Retire()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := workerOwner.Join(ctx); err != nil {
-			t.Errorf("join workflow runtime test carrier: %v", err)
-		}
-	})
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {
 		t.Fatal("persistence store does not implement MailboxAPIStore")

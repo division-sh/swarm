@@ -135,6 +135,7 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 
 	changedActor := seed
 	changedActor.AgentIdentity = agentidentity.Identity{
+		RunID: event.RunID(),
 		Name:  agentidentity.Name{AgentID: "reviewer", Owner: "agentframe-test", Source: agentidentity.NameSourceDeclared},
 		Route: agentidentity.RootRoute(),
 	}
@@ -393,7 +394,9 @@ func testExecutionFrameInputs(t testing.TB) (SessionSeed, events.Event, managedc
 	if err != nil {
 		t.Fatal(err)
 	}
+	runID := "00000000-0000-4000-8000-000000000001"
 	identity := agentidentity.Identity{
+		RunID: runID,
 		Name:  agentidentity.Name{AgentID: "worker", Owner: "agentframe-test", Source: agentidentity.NameSourceDeclared},
 		Route: agentidentity.RootRoute(),
 	}
@@ -401,7 +404,6 @@ func testExecutionFrameInputs(t testing.TB) (SessionSeed, events.Event, managedc
 		AgentIdentity: identity, Role: "worker", Intent: intent, ProviderPrompt: providerPrompt,
 		RuntimeMode: "api", Provider: "anthropic", Transport: "api", ModelAlias: "regular", Model: "test-model",
 	}
-	runID := "00000000-0000-4000-8000-000000000001"
 	event := eventtest.RunCreatingRootIngress(
 		"00000000-0000-4000-8000-000000000002", "work.requested", "operator", "task-1",
 		json.RawMessage(`{"b":2,"a":1}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-4000-8000-000000000003"), time.Unix(1, 0).UTC(),

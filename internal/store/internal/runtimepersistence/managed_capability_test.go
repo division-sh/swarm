@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -162,10 +163,6 @@ func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context
 }
 
 func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
-	return managedNormalEffectStoreTestContextForRun(t, ctx, authority, managedNormalEffectStoreTestRunID(authority.Normal.AgentID))
-}
-
-func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, runID string) context.Context {
 	t.Helper()
 	ctx = managedExecutionStoreTestContext(t, ctx)
 	admission, _ := managedexecution.FromContext(ctx)
@@ -175,6 +172,7 @@ func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context
 	}
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-turn:"+principal)).String()
 	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-session:"+principal)).String()
+	runID := authority.Normal.Identity.RunID
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
 		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
@@ -195,10 +193,6 @@ func managedNormalEffectStoreTestContextForRun(t testing.TB, ctx context.Context
 		t.Fatalf("build normal managed-effect test surface: %v", err)
 	}
 	return managedcapabilities.WithContext(ctx, surface)
-}
-
-func managedNormalEffectStoreTestRunID(agentID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-run:"+agentID)).String()
 }
 
 func managedSelectedExecutionStoreTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
@@ -232,16 +226,16 @@ type managedAgentTurnFixtureOptions struct {
 	OriginEvent *events.Event
 }
 
-func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, agentID, flowInstance string) agentmemory.Identity {
+func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
-	identity := testAgentMemoryIdentity(t, uuid.NewString(), agentID, flowInstance)
+	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
 	memory := agentmemory.PlatformDefault()
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Authored(true)
 	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ExecutionMode: "live", ID: agentID, Identity: identity.Agent, Role: "worker", Type: "managed",
+			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
 			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
 			Memory: memory, FlowID: "global", FlowPath: flowInstance,
 		}),
@@ -266,7 +260,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	if strings.TrimSpace(rec.SessionID) == "" {
 		return fmt.Errorf("session_id is required")
 	}
-	if err := identity.ValidateOwner(); err != nil {
+	if err := identity.Validate(); err != nil {
 		return err
 	}
 	if plan.Enabled {
@@ -283,7 +277,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
 		return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
 	}
-	lifecycle, found, err := store.LoadAgentLifecycleState(fixtureCtx, identity.Agent)
+	lifecycle, found, err := store.LoadAgentLifecycleState(fixtureCtx, identity)
 	if err != nil {
 		return err
 	}
@@ -299,12 +293,12 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		turnID = uuid.NewString()
 	}
 	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{
-		Identity: identity.Agent, AgentID: rec.AgentID,
+		Identity: identity, AgentID: rec.AgentID,
 		RuntimeEpoch: lifecycle.RuntimeEpoch, Generation: lifecycle.Generation,
 	}, "store-test-owner", now.Add(time.Hour))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: rec.RunID,
-		AgentID: rec.AgentID, AgentIdentity: identity.Agent, SessionID: rec.SessionID,
+		AgentID: rec.AgentID, AgentIdentity: identity, SessionID: rec.SessionID,
 		Memory: plan, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
 	}
 	adapter := "anthropic_api"
@@ -401,7 +395,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 			LatencyMS: latencyMS, RetryCount: rec.RetryCount, Failure: settlementFailure,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			EntityID: rec.EntityID, FlowInstance: rec.FlowInstance, AgentID: rec.AgentID, AgentIdentity: identity.Agent,
+			EntityID: rec.EntityID, FlowInstance: rec.FlowInstance, AgentID: rec.AgentID, AgentIdentity: identity,
 			Model: "regular", ModelAlias: "regular", BackendProfile: "store-test", Provider: adapter,
 			Transport: surface.Transport, ResolvedModel: "store-test-model", CostUSD: 0, InvocationType: "agent_turn",
 		},
@@ -502,11 +496,63 @@ type managedCapabilityTestStore interface {
 	SaveManagedCapabilitySurface(context.Context, managedcapabilities.Surface) error
 }
 
+func TestNormalStartupCapabilitySurfacePersistsRunlessActorPlanOnBothStores(t *testing.T) {
+	name, err := agentidentity.DeclaredName("startup-agent", "managed-startup-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorPlan, err := agentidentity.NewPlan(name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			surface, err := managedcapabilities.New(managedcapabilities.Plan{
+				ActorPlan: actorPlan, RuntimeMode: "startup_probe", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude-cli-test",
+				Authority: managedcapabilities.Authority{
+					Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+					ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "startup-authority",
+					StartupOwnerID: "startup-owner", StartupGeneration: 1,
+				},
+				CreatedAt: time.Unix(1, 0).UTC(),
+			})
+			if err != nil {
+				t.Fatalf("build normal startup surface: %v", err)
+			}
+			store, ok := fixture.store.(managedCapabilityTestStore)
+			if !ok {
+				t.Fatal("selected store does not expose managed capability persistence")
+			}
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err != nil {
+				t.Fatalf("persist normal startup surface: %v", err)
+			}
+			query := `SELECT surface, run_id FROM managed_agent_capability_surfaces WHERE surface_id=?`
+			if fixture.postgres {
+				query = `SELECT surface::text, run_id::text FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid`
+			}
+			var raw string
+			var runID sql.NullString
+			if err := fixture.db.QueryRowContext(context.Background(), query, surface.ID).Scan(&raw, &runID); err != nil {
+				t.Fatalf("read normal startup surface: %v", err)
+			}
+			var persisted managedcapabilities.Surface
+			if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
+				t.Fatalf("decode normal startup surface: %v", err)
+			}
+			if err := persisted.Validate(); err != nil || !persisted.MatchesActorPlan(actorPlan) || !persisted.ActorIdentity.IsZero() || runID.Valid {
+				t.Fatalf("normal startup readback = %#v run=%#v err=%v", persisted, runID, err)
+			}
+		})
+	}
+}
+
 func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
-	identityA := testAgentIdentity(t, "recovery-worker", "review/inst-a")
-	identityB := testAgentIdentity(t, "recovery-worker", "review/inst-b")
+	runID := uuid.NewString()
+	identityA := mustTestAgentIdentityForRun(runID, "recovery-worker", "review/inst-a")
+	identityB := mustTestAgentIdentityForRun(runID, "recovery-worker", "review/inst-b")
 	targetA := runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(),
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
 		AgentID: identityA.AgentID(), AgentIdentity: identityA, SessionID: uuid.NewString(),
 		Memory: agentmemory.PlatformDefault(), FlowInstance: identityA.FlowInstance(),
 	}
@@ -557,6 +603,8 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		t.Fatalf("encode recovery identity: %v", err)
 	}
 	recovered.AgentID = identityFields.AgentID
+	recovered.AgentRunID = targetA.RunID
+	recovered.LineageRunID = targetA.RunID
 	recovered.AgentNameOwner = identityFields.NameOwner
 	recovered.AgentNameSource = identityFields.NameSource
 	recovered.AgentRoutePresence = identityFields.RoutePresence
@@ -603,7 +651,7 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		recovered, runtimeeffects.StateOutcomeUncertain, nil, time.Now().UTC(),
 	); err != nil {
 		t.Fatalf("launched completion recovery rejected exact capability principal: %v", err)
-	} else if settlement.AgentTurn == nil || settlement.AgentTurn.Identity.Agent != identityA {
+	} else if settlement.AgentTurn == nil || settlement.AgentTurn.Identity != identityA {
 		t.Fatalf("recovered launched agent turn = %#v", settlement.AgentTurn)
 	}
 }

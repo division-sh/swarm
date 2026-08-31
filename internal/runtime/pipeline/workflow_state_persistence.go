@@ -12,7 +12,8 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
-func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID) (WorkflowState, error) {
+func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (WorkflowState, error) {
+	owner = owner.Normalize()
 	entityID = identity.NormalizeEntityID(entityID.String())
 	state := WorkflowState{
 		EntityID: entityID.String(),
@@ -25,17 +26,17 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route r
 	if entityID.IsZero() {
 		return WorkflowState{}, fmt.Errorf("load current workflow state requires an exact entity identity")
 	}
-	if !route.Valid() {
-		return WorkflowState{}, fmt.Errorf("load current workflow state requires an exact workflow instance route")
+	if err := owner.Validate(); err != nil {
+		return WorkflowState{}, err
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, route)
+	instance, ok, err := pc.workflowStore.Load(ctx, owner)
 	if err != nil {
 		return WorkflowState{}, err
 	}
 	if !ok {
 		return state, nil
 	}
-	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+	if _, err := requireWorkflowInstanceIdentity(owner.Route, entityID, instance); err != nil {
 		return WorkflowState{}, fmt.Errorf("validate loaded workflow state identity: %w", err)
 	}
 	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
@@ -51,7 +52,7 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	if pc == nil {
 		return nil, fmt.Errorf("record_evidence requires pipeline coordinator")
 	}
-	route := execCtx.Request.StateAddress().Route
+	route := execCtx.Request.StateAddress().FlowInstance.Route
 	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
 	flowID := execCtx.Request.Node.FlowID()
 	bucketID = strings.TrimSpace(bucketID)

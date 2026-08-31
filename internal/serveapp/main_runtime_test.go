@@ -142,7 +142,21 @@ func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentit
 	return agentidentitytest.RootRuntime(t, agentID, "serveapp-test")
 }
 
+func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "serveapp-test")
+}
+
 func requireServeTestAgentFixture(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	source, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("construct serve test agent source: %v", err)
+	}
+	requireServeTestAgentFixtureForSource(t, selected, cfg, source)
+}
+
+func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig, source runtimecorrelation.BundleSourceFact) {
 	t.Helper()
 	cfg = serveTestAgentConfig(cfg)
 	cfg.FlowPath = cfg.Identity.FlowInstance()
@@ -152,9 +166,18 @@ func requireServeTestAgentFixture(t testing.TB, selected storetest.AgentFixtureS
 	if cfg.ExecutionMode == "" {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
-	storetest.RequireStaticAgentFixture(t, context.Background(), selected, runtimemanager.PersistedAgent{
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		t.Fatalf("resolve serve test agent identity: %v", err)
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), identity.RunID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", source.BundleHash()))
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "serve-test-fixture",
-	})
+	}, source); err != nil {
+		t.Fatalf("admit agent fixture %s: %v", cfg.ID, err)
+	}
 }
 
 func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.AgentFixtureStore) {
@@ -180,9 +203,31 @@ func servedRuntimeFlowIdentity(t testing.TB, agentID, scopeKey, instanceID strin
 	)
 }
 
+func servedRuntimeFlowIdentityForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.RuntimeForRun(
+		t,
+		runID,
+		agentID,
+		"serveapp-test",
+		scopeKey,
+		instanceID,
+		scopeKey+"/"+instanceID,
+	)
+}
+
 func servedRuntimeFlowIdentityFields(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
 	t.Helper()
 	fields, err := servedRuntimeFlowIdentity(t, agentID, scopeKey, instanceID).StorageFields()
+	if err != nil {
+		t.Fatalf("project served runtime flow agent identity: %v", err)
+	}
+	return fields
+}
+
+func servedRuntimeFlowIdentityFieldsForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
+	t.Helper()
+	fields, err := servedRuntimeFlowIdentityForRun(t, runID, agentID, scopeKey, instanceID).StorageFields()
 	if err != nil {
 		t.Fatalf("project served runtime flow agent identity: %v", err)
 	}
@@ -1916,6 +1961,8 @@ func TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRe
 	if rt.Postgres == nil {
 		t.Fatal("postgres selected-store owner is required for non-force bundle.delete proof")
 	}
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-2125-bundle-non-force-run-"+uuid.NewString())
+	publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "bundle-non-force")
 	deletePlan, err := rt.Postgres.PlanBundleDelete(context.Background(), runtimebundledelete.Request{
 		BundleHash:  rt.BundleHash,
 		RequestedAt: time.Now().UTC(),
@@ -3156,6 +3203,17 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, initial.RunID)
+	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "fork-source/fork.source_message",
+		"run_id":          initial.RunID,
+		"source_event_id": initial.EventID,
+		"payload":         map[string]any{"note": "materialize source agent"},
+		"idempotency_key": "issue-1997-" + rt.Backend + "-source-agent-readiness",
+	})
+	if ready.RunID != initial.RunID || ready.NewRunCreated {
+		t.Fatalf("%s conversation fork source-agent readiness = %#v", rt.Backend, ready)
+	}
+	waitServedConversationForkSourceAgentReady(t, rt, initial.RunID, ready.EventID)
 	fixture := seedServedConversationForkSource(t, rt, initial.RunID)
 	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
 
@@ -3346,6 +3404,23 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 
 	for _, scenarioID := range []string{servedparity.ScenarioConversationForkLifecycle, servedparity.ScenarioConversationForkChatLifecycle, servedparity.ScenarioConversationForkDeleteLifecycle} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+	}
+}
+
+func waitServedConversationForkSourceAgentReady(t *testing.T, rt servedConversationForkProofRuntime, runID, eventID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if servedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, eventID, "agent", "fork-source-agent", "delivered") == 1 {
+			return
+		}
+		if servedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, eventID, "agent", "fork-source-agent", "dead_letter") != 0 {
+			t.Fatalf("%s conversation fork source-agent readiness dead-lettered\n%s", rt.Backend, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s conversation fork source-agent readiness timed out\n%s", rt.Backend, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -3852,7 +3927,10 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RouteForInstancePath(fixture.RunID))
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RunScopedFlowInstance{
+			RunID: fixture.RunID,
+			Route: runtimeflowidentity.RouteForInstancePath(fixture.RunID),
+		})
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -4247,7 +4325,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatal("served decision-card fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
+	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 		EntityType: entityType,
@@ -4710,20 +4788,23 @@ type servedAgentRestartProofResult struct {
 func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	const agentID = "load-agent"
-	beforeGeneration := servedAgentLifecycleGeneration(t, rt, agentID)
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1927-restart-delivery-"+uuid.NewString())
+	beforeRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-before-restart")
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, beforeRestart.EventID, "agent", agentID, "delivered", 1)
+	beforeGeneration := servedAgentLifecycleGeneration(t, rt, runID, agentID)
 	key := "issue-1927-" + rt.Backend + "-restart-" + uuid.NewString()
-	params := map[string]any{"agent_id": agentID, "idempotency_key": key}
+	params := map[string]any{"run_id": runID, "agent_id": agentID, "idempotency_key": key}
 
 	var first servedAgentRestartProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &first)
 	if !first.OK {
 		t.Fatalf("%s agent.restart result = %#v", rt.Backend, first)
 	}
-	afterGeneration := servedAgentLifecycleGeneration(t, rt, agentID)
+	afterGeneration := servedAgentLifecycleGeneration(t, rt, runID, agentID)
 	if afterGeneration != beforeGeneration+1 {
 		t.Fatalf("%s restart generation = %d, want adjacent %d", rt.Backend, afterGeneration, beforeGeneration+1)
 	}
-	requireServedAgentRestartEvidence(t, rt, agentID, afterGeneration, 1)
+	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
 
 	var replay servedAgentRestartProofResult
@@ -4731,47 +4812,48 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 	if replay != first {
 		t.Fatalf("%s restart replay = %#v, want %#v", rt.Backend, replay, first)
 	}
-	if got := servedAgentLifecycleGeneration(t, rt, agentID); got != afterGeneration {
+	if got := servedAgentLifecycleGeneration(t, rt, runID, agentID); got != afterGeneration {
 		t.Fatalf("%s replay generation = %d, want unchanged %d", rt.Backend, got, afterGeneration)
 	}
-	requireServedAgentRestartEvidence(t, rt, agentID, afterGeneration, 1)
+	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
 
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1927-restart-delivery-"+uuid.NewString())
 	postRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-restart")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
 }
 
-func servedAgentLifecycleGeneration(t *testing.T, rt servedControlProofRuntime, agentID string) uint64 {
+func servedAgentLifecycleGeneration(t *testing.T, rt servedControlProofRuntime, runID, agentID string) uint64 {
 	t.Helper()
-	query := `SELECT lifecycle_generation FROM agents WHERE agent_id = ?`
+	query := `SELECT lifecycle_generation FROM agents WHERE run_id = ? AND agent_id = ?`
 	if rt.Backend == "postgres" {
-		query = `SELECT lifecycle_generation FROM agents WHERE agent_id = $1`
+		query = `SELECT lifecycle_generation FROM agents WHERE run_id = $1::uuid AND agent_id = $2`
 	}
 	var generation int64
-	if err := rt.DB.QueryRow(query, agentID).Scan(&generation); err != nil {
+	if err := rt.DB.QueryRow(query, runID, agentID).Scan(&generation); err != nil {
 		t.Fatalf("%s load lifecycle generation for %s: %v", rt.Backend, agentID, err)
 	}
 	return uint64(generation)
 }
 
-func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntime, agentID string, generation uint64, want int) {
+func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntime, runID, agentID string, generation uint64, want int) {
 	t.Helper()
-	placeholder := "?"
-	factGenerationPlaceholder := "?"
+	operationQuery := `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE run_id = ? AND agent_id = ? AND operation_kind = 'restart'`
+	factQuery := `SELECT COUNT(*) FROM agent_lifecycle_transition_facts WHERE run_id = ? AND agent_id = ? AND trigger = 'restart' AND next_generation = ?`
+	outboxQuery := `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id = ? AND agent_id = ? AND operation_id IN (SELECT operation_id FROM agent_lifecycle_operations WHERE run_id = ? AND operation_kind = 'restart')`
 	if rt.Backend == "postgres" {
-		placeholder = "$1"
-		factGenerationPlaceholder = "$2"
+		operationQuery = `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE run_id = $1::uuid AND agent_id = $2 AND operation_kind = 'restart'`
+		factQuery = `SELECT COUNT(*) FROM agent_lifecycle_transition_facts WHERE run_id = $1::uuid AND agent_id = $2 AND trigger = 'restart' AND next_generation = $3`
+		outboxQuery = `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id = $1::uuid AND agent_id = $2 AND operation_id IN (SELECT operation_id FROM agent_lifecycle_operations WHERE run_id = $3::uuid AND operation_kind = 'restart')`
 	}
 	var operations, facts, outbox int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_operations WHERE agent_id = `+placeholder+` AND operation_kind = 'restart'`, agentID).Scan(&operations); err != nil {
+	if err := rt.DB.QueryRow(operationQuery, runID, agentID).Scan(&operations); err != nil {
 		t.Fatalf("%s count restart operations: %v", rt.Backend, err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_transition_facts WHERE agent_id = `+placeholder+` AND trigger = 'restart' AND next_generation = `+factGenerationPlaceholder, agentID, generation).Scan(&facts); err != nil {
+	if err := rt.DB.QueryRow(factQuery, runID, agentID, generation).Scan(&facts); err != nil {
 		t.Fatalf("%s count restart transition facts: %v", rt.Backend, err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE agent_id = `+placeholder+` AND operation_id IN (SELECT operation_id FROM agent_lifecycle_operations WHERE operation_kind = 'restart')`, agentID).Scan(&outbox); err != nil {
+	if err := rt.DB.QueryRow(outboxQuery, runID, agentID, runID).Scan(&outbox); err != nil {
 		t.Fatalf("%s count restart diagnostic outbox rows: %v", rt.Backend, err)
 	}
 	if operations != want || facts != want || outbox != want {
@@ -4821,6 +4903,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	var agentReplay servedAgentReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
 		"event_id":        agentReplayOriginal.EventID,
+		"run_id":          runID,
 		"agent_id":        "load-agent",
 		"idempotency_key": agentReplayKey,
 	}, &agentReplay)
@@ -4836,6 +4919,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	var agentReplayAgain servedAgentReplayProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
 		"event_id":        agentReplayOriginal.EventID,
+		"run_id":          runID,
 		"agent_id":        "load-agent",
 		"idempotency_key": agentReplayKey,
 	}, &agentReplayAgain)
@@ -4860,8 +4944,12 @@ type servedAgentDirectiveProofResult struct {
 
 func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
 	t.Helper()
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "agent-directive-"+uuid.NewString())
+	publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-directive-readiness")
+	effects.Store(0)
 	key := "issue-1932-" + rt.Backend + "-directive"
 	params := map[string]any{
+		"run_id":          runID,
 		"agent_id":        "load-agent",
 		"directive":       "perform one durable directive step",
 		"idempotency_key": key,
@@ -4881,6 +4969,7 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
 
 	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"run_id":          runID,
 		"agent_id":        "load-agent",
 		"directive":       "a conflicting directive body",
 		"idempotency_key": key,
@@ -4893,10 +4982,12 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 
 	var keylessA, keylessB servedAgentDirectiveProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"run_id":    runID,
 		"agent_id":  "load-agent",
 		"directive": "keyless operation A",
 	}, &keylessA)
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"run_id":    runID,
 		"agent_id":  "load-agent",
 		"directive": "keyless operation B",
 	}, &keylessB)
@@ -4924,6 +5015,7 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 		t.Run(failureCase.name+"_failure", func(t *testing.T) {
 			failureKey := "issue-1869-" + rt.Backend + "-" + failureCase.name
 			failureParams := map[string]any{
+				"run_id":          runID,
 				"agent_id":        "load-agent",
 				"directive":       failureCase.directive,
 				"idempotency_key": failureKey,
@@ -4944,11 +5036,11 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 			}
 		})
 	}
-	runServedDirectiveResultPersistenceUncertaintyProof(t, rt, effects, faults)
+	runServedDirectiveResultPersistenceUncertaintyProof(t, rt, runID, effects, faults)
 	requireServedAgentDirectiveOperationCount(t, rt.DB, rt.Backend, 7)
 }
 
-func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
+func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt servedControlProofRuntime, runID string, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
 	t.Helper()
 	for _, test := range []struct {
 		name        string
@@ -4960,6 +5052,7 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 		t.Run("result_persistence_"+test.name, func(t *testing.T) {
 			key := "issue-1869-" + rt.Backend + "-result-" + test.name
 			params := map[string]any{
+				"run_id":          runID,
 				"agent_id":        "load-agent",
 				"directive":       "complete a directive with " + test.name,
 				"idempotency_key": key,
@@ -5409,7 +5502,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	}
 	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: servedRuntimeRootIdentity(t, "agent-pending")}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, "agent-pending", "serveapp-test")}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
@@ -5466,7 +5559,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatal("served run-control fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
+	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 		EntityType: entityType,
@@ -5561,7 +5654,10 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RouteForInstancePath(runID))
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.RouteForInstancePath(runID),
+	})
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}
@@ -5859,7 +5955,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
 	)
 	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("frontier-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "frontier-agent")}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("frontier-agent"), AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "frontier-agent")}},
 		storetest.AcknowledgedPipelineDisposition())
 	return eventID
 }
@@ -6872,7 +6968,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_id, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.flow_instance = fi.instance_id WHERE es.run_id = $1::uuid ORDER BY fi.instance_id LIMIT 5`
+			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -6882,7 +6978,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', ''), COALESCE(d.failure->'detail'->'attributes'->>'validation_error', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = $1::uuid ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":
@@ -6895,7 +6991,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_id, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.flow_instance = fi.instance_id WHERE es.run_id = ? ORDER BY fi.instance_id LIMIT 5`
+			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = ? ORDER BY fi.instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -6905,7 +7001,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), ''), COALESCE(json_extract(d.failure, '$.detail.attributes.validation_error'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = ? ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":
@@ -8641,6 +8737,23 @@ func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *test
 		t.Fatalf("read surviving predecessor grant: %v", err)
 	}
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
+	for _, fixture := range []struct {
+		bundleHash string
+		label      string
+	}{
+		{bundleHash: firstHash, label: "deleted"},
+		{bundleHash: secondHash, label: "survivor"},
+	} {
+		published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+			"event_name":      "agent.requested",
+			"bundle_hash":     fixture.bundleHash,
+			"payload":         map[string]any{},
+			"idempotency_key": "issue-2125-survivor-refresh-" + fixture.label + "-" + uuid.NewString(),
+		})
+		if published.RunID == "" || !published.NewRunCreated {
+			t.Fatalf("%s source-set lifecycle materialization = %#v", fixture.label, published)
+		}
+	}
 	deletePlan, err := pg.PlanBundleDelete(ctx, runtimebundledelete.Request{
 		BundleHash:  firstHash,
 		RequestedAt: time.Now().UTC(),
@@ -8940,12 +9053,6 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	})
 	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	ctx := context.Background()
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
-	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Authored(true),
-	})
 	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repoRootForTest(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
 	if err != nil {
 		t.Fatalf("contracts root: %v", err)
@@ -9049,16 +9156,20 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
-	requireServeTestAgentFixture(t, sqliteStore, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
+	bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("construct sqlite abandon agent source: %v", err)
+	}
+	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
-	})
+	}, bundleSource)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, sqliteStore, event, route)
@@ -9157,7 +9268,6 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source string) {
 	t.Helper()
 	db := storetest.DatabaseForTest(runtimePG)
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	admissionSource := source
 	if source == storerunlifecycle.BundleSourceDeleted {
@@ -9166,10 +9276,20 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	sessionID := uuid.NewString()
 	eventID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: admissionSource})
+	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "startup-recovery", "agent-a")
+	bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("construct unavailable-bundle agent source: %v", err)
+	}
+	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "startup-recovery", "agent-a"),
+		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Memory: runtimeagentmemory.Authored(true),
+	}, bundleSource)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "startup-recovery", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
@@ -10478,19 +10598,23 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
-	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
+	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(repoRootForTest(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+	bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("construct postgres abandon agent source: %v", err)
+	}
+	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
-	})
+	}, bundleSource)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)

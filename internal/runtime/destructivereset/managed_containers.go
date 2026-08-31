@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
 )
 
 type ManagedContainerStopper struct {
@@ -102,18 +104,13 @@ func (s ManagedContainerStopper) now() time.Time {
 }
 
 func resetEligibleManagedIdentity(identity ContainerIdentity) bool {
-	return strings.TrimSpace(identity.Owner) == "runtime" &&
-		identity.ResetEligible &&
-		resetEligibleContainerKind(identity.Kind)
-}
-
-func resetEligibleContainerKind(kind string) bool {
-	switch strings.TrimSpace(kind) {
-	case "entity", "agent", "flow":
-		return true
-	default:
-		return false
-	}
+	canonical := runtimecontaineridentity.Identity{
+		Owner: identity.Owner, Kind: identity.Kind, ResetEligible: identity.ResetEligible,
+		CreationSource: identity.CreationSource, ContainerName: identity.ContainerName,
+		WorkspaceScope: identity.WorkspaceScope, RunID: identity.RunID, EntityID: identity.EntityID,
+		AgentIdentity: identity.AgentIdentity, FlowInstance: identity.FlowInstance,
+	}.Normalized()
+	return canonical.Validate() == nil && canonical.ResetEligibleManaged()
 }
 
 func containerRefFromIdentity(identity ContainerIdentity, action string) ContainerRef {

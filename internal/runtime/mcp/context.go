@@ -94,8 +94,7 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	if !ok {
 		return ""
 	}
-	actorIdentity, err := actor.ConcreteIdentity()
-	if err != nil || !surface.MatchesActor(actorIdentity) {
+	if !capabilitySurfaceMatchesActorConfig(surface, actor) {
 		return ""
 	}
 	effectAuthority, hasEffectAuthority := runtimeeffects.AuthorityFromContext(ctx)
@@ -147,6 +146,14 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 		ExpiresAt:              now.Add(ttl),
 	})
 	return token
+}
+
+func capabilitySurfaceMatchesActorConfig(surface managedcapabilities.Surface, actor models.AgentConfig) bool {
+	if !surface.ActorPlan.IsZero() {
+		return surface.MatchesPreRunActorProjection(actor.ID, actor.CanonicalFlowPath())
+	}
+	identity, err := actor.ConcreteIdentity()
+	return err == nil && surface.MatchesActor(identity)
 }
 
 func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx context.Context, ttl time.Duration, allowedTools []string) string {

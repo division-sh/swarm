@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -53,9 +51,8 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			continue
 		}
 		actor = resolved.Actor
-		name, err := namePlan.Materialize()
+		_, err = namePlan.Materialize()
 		if err == nil {
-			route := runtimeagentidentity.RootRoute()
 			flowID := strings.TrimSpace(declaration.OwnerFlowID)
 			flowPath := ""
 			if flowID != "" {
@@ -64,16 +61,6 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 					failures = append(failures, fmt.Sprintf("agent %s scoped declaration owner %s has no canonical flow path", strings.TrimSpace(agentID), flowID))
 					continue
 				}
-				route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
-				if err != nil {
-					failures = append(failures, fmt.Sprintf("agent %s scoped declaration route: %v", strings.TrimSpace(agentID), err))
-					continue
-				}
-			}
-			actor.Identity, err = runtimeagentidentity.New(name, route)
-			if err != nil {
-				failures = append(failures, err.Error())
-				continue
 			}
 			actor.FlowID = flowID
 			actor.FlowPath = flowPath
