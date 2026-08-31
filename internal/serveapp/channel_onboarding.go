@@ -432,7 +432,10 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	facts.CredentialsCurrent = true
 	for _, admission := range activation.CredentialAdmissions {
 		current, currentErr := o.credentials.CurrentValueMatchesSeal(ctx, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
-		if currentErr != nil || !current {
+		if currentErr != nil {
+			return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("observe connected channel credential %q: %w", admission.StoreKey, currentErr)
+		}
+		if !current {
 			facts.CredentialsCurrent = false
 			break
 		}

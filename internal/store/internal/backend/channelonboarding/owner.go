@@ -272,11 +272,15 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		coordinateOnlyTerminalRebind := req.RebindCoordinate != nil && op.Phase == domain.PhaseSucceeded && req.Phase == op.Phase
 		credentialStaleReset := op.Phase == domain.PhaseAwaitingOperatorConfirmation && req.Phase == domain.PhasePreparing &&
-			req.ClearIdentityOperationID && req.ClearBindingRevision && req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
-		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !credentialStaleReset {
+			req.ClearIdentityOperationID && req.ClearBindingRevision && !req.RetainBindingRevision &&
+			req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
+		boundCredentialStaleReset := (op.Phase == domain.PhaseAwaitingOperatorConfirmation || op.Phase == domain.PhasePublishingActivation) &&
+			req.Phase == domain.PhasePreparing && req.ClearIdentityOperationID && !req.ClearBindingRevision && req.RetainBindingRevision &&
+			op.BindingRevision > 0 && req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
+		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !credentialStaleReset && !boundCredentialStaleReset {
 			return domain.ErrConflict
 		}
-		if (req.ClearIdentityOperationID || req.ClearBindingRevision) && !credentialStaleReset {
+		if (req.ClearIdentityOperationID || req.ClearBindingRevision || req.RetainBindingRevision) && !credentialStaleReset && !boundCredentialStaleReset {
 			return domain.ErrInvalidRequest
 		}
 		var reboundActivation *domain.ConnectedChannelActivation

@@ -10000,9 +10000,15 @@ tool_model:
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
         return the original outcome while changed input conflicts. Credential currentness gates only a pending approved
-        mutation after terminal replay classification. A stale provider credential terminally settles that pending identity
-        ceremony as credential_stale; its parent onboarding responsibility releases the old admissions, resets to preparing,
-        and accepts replacement hidden input into a fresh identity ceremony. After same-request replay handling, an unresolved
+        mutation after terminal replay classification. Only a successful currentness observation whose value does not match
+        proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
+        trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
+        pending identity ceremony as credential_stale; its parent onboarding responsibility releases the old admissions,
+        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. If currentness changes
+        after the child commits bound but before its parent publishes activation, the parent likewise releases the old
+        admissions and resets while retaining the exact bound revision; fresh evidence may then create only an exact
+        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb. After
+        same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
@@ -10035,7 +10041,9 @@ tool_model:
         exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
         validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
         and complete the selected-store responsibility without rewriting the proof or consulting later credential
-        currentness; currentness gates only a new proof-file write. Any mismatch fails closed. A retained
+        currentness; currentness gates only a new proof-file write. A successful mismatch terminally fails that new write,
+        while a currentness observation error leaves the durable proof responsibility pending for retry. Any immutable
+        responsibility mismatch fails closed. A retained
         interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation. V1 or digest-less proof
         documents are unsupported stale material: they may be classified and quarantined, but no identity fact is decoded,
         copied, adapted, migrated, or rewritten into v2 authority. Fresh v2 evidence requires a new confirmation ceremony.

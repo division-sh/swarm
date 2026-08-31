@@ -625,6 +625,14 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 				}
 				binding, blocked, err := s.confirmedBinding(ctx, op)
 				if err != nil {
+					if errors.Is(err, operatorchannel.ErrCredentialStale) && op.BindingRevision > 0 {
+						op, err = s.resetBoundCredentialStaleIdentity(context.WithoutCancel(ctx), op)
+						if err != nil {
+							return err
+						}
+						step = 5
+						continue
+					}
 					return err
 				}
 				if blocked {
@@ -800,8 +808,10 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return result, nil
 			}
 		case PhaseAwaitingOperatorConfirmation:
+			var identityOp operatorchannel.Operation
 			if op.IdentityOperationID != "" {
-				identityOp, identityErr := s.currentIdentityOperation(ctx, op.IdentityOperationID)
+				var identityErr error
+				identityOp, identityErr = s.currentIdentityOperation(ctx, op.IdentityOperationID)
 				if identityErr != nil {
 					return Result{}, identityErr
 				}
@@ -825,6 +835,17 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			binding, blocked, err := s.confirmedBinding(ctx, op)
 			if err != nil {
+				if errors.Is(err, operatorchannel.ErrCredentialStale) && op.BindingRevision > 0 {
+					required := credentialRequiredForStaleParent(op, identityOp)
+					op, err = s.resetBoundCredentialStaleIdentity(context.WithoutCancel(ctx), op)
+					if err != nil {
+						return Result{}, err
+					}
+					if strings.TrimSpace(providerCredential) == "" {
+						return s.blockedResult(ctx, op, candidate, required)
+					}
+					continue
+				}
 				return Result{}, err
 			}
 			if blocked {
@@ -840,6 +861,24 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		case PhasePublishingActivation:
 			binding, _, err := s.confirmedBinding(ctx, op)
 			if err != nil {
+				if errors.Is(err, operatorchannel.ErrCredentialStale) && op.BindingRevision > 0 {
+					identityOp := operatorchannel.Operation{}
+					if op.IdentityOperationID != "" {
+						identityOp, err = s.currentIdentityOperation(ctx, op.IdentityOperationID)
+						if err != nil {
+							return Result{}, err
+						}
+					}
+					required := credentialRequiredForStaleParent(op, identityOp)
+					op, err = s.resetBoundCredentialStaleIdentity(context.WithoutCancel(ctx), op)
+					if err != nil {
+						return Result{}, err
+					}
+					if strings.TrimSpace(providerCredential) == "" {
+						return s.blockedResult(ctx, op, candidate, required)
+					}
+					continue
+				}
 				return Result{}, err
 			}
 			op, _, err = s.store.PublishConnectedChannelActivation(ctx, PublishActivationRequest{
@@ -1006,6 +1045,24 @@ func (s *Service) resetCredentialStaleIdentity(ctx context.Context, op Operation
 	return reset, nil
 }
 
+func (s *Service) resetBoundCredentialStaleIdentity(ctx context.Context, op Operation) (Operation, error) {
+	if (op.Phase != PhaseAwaitingOperatorConfirmation && op.Phase != PhasePublishingActivation) || op.BindingRevision < 1 {
+		return op, fmt.Errorf("%w: bound credential-stale reset requires an unpublished exact binding", ErrConflict)
+	}
+	if err := s.releaseCandidateCredentials(ctx, op.CredentialAdmissions); err != nil {
+		return op, fmt.Errorf("release bound credential-stale onboarding admissions: %w", err)
+	}
+	reset, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePreparing,
+		ReplaceCredentialAdmissions: true, ClearIdentityOperationID: true, RetainBindingRevision: true,
+		Now: s.now().UTC(),
+	})
+	if err != nil {
+		return op, fmt.Errorf("reset bound credential-stale onboarding responsibility: %w", err)
+	}
+	return reset, nil
+}
+
 func credentialRequiredForStaleIdentity(parent Operation, identity operatorchannel.Operation) *CredentialRequiredError {
 	role := "provider"
 	if len(parent.CredentialReservations) > 0 && strings.TrimSpace(parent.CredentialReservations[0].Role) != "" {
@@ -1016,6 +1073,20 @@ func credentialRequiredForStaleIdentity(parent Operation, identity operatorchann
 		Role:        role,
 		StoreKey:    strings.TrimSpace(identity.ProviderCredential.Key),
 	}
+}
+
+func credentialRequiredForStaleParent(parent Operation, identity operatorchannel.Operation) *CredentialRequiredError {
+	required := credentialRequiredForStaleIdentity(parent, identity)
+	if required.StoreKey != "" {
+		return required
+	}
+	for _, admission := range parent.CredentialAdmissions {
+		if admission.Role == required.Role {
+			required.StoreKey = strings.TrimSpace(admission.StoreKey)
+			break
+		}
+	}
+	return required
 }
 
 func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string) ([]CredentialAdmission, error) {
@@ -1146,7 +1217,21 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	}
 	identityKind := operatorchannel.OperationConnect
 	expectedRevision := int64(0)
-	if op.Verb == VerbReconnect {
+	boundCredentialRestart := op.Phase == PhaseAwaitingExternalIdentity && op.BindingRevision > 0
+	if boundCredentialRestart {
+		binding, _, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
+		if !errors.Is(bindingErr, operatorchannel.ErrCredentialStale) {
+			if bindingErr == nil {
+				return op, false, fmt.Errorf("%w: retained stale binding revision is current without fresh identity verification", ErrRevisionConflict)
+			}
+			return op, false, bindingErr
+		}
+		if binding.Revision != op.BindingRevision {
+			return op, false, fmt.Errorf("%w: retained stale binding revision changed before reconnect", ErrRevisionConflict)
+		}
+		identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
+	}
+	if !boundCredentialRestart && op.Verb == VerbReconnect {
 		binding, proofCurrent, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
 		if bindingErr == nil {
 			proofPostureCurrent := binding.ProviderCredential == providerCredential &&
@@ -1168,7 +1253,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 			identityKind, expectedRevision = operatorchannel.OperationReconnect, binding.Revision
 		}
 	}
-	if op.Verb == VerbRebind {
+	if !boundCredentialRestart && op.Verb == VerbRebind {
 		identityKind = operatorchannel.OperationRebind
 		binding, err := s.identities.CurrentBinding(ctx, op.Interface)
 		if err != nil && !errors.Is(err, operatorchannel.ErrCredentialStale) {
