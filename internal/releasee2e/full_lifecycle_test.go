@@ -275,6 +275,7 @@ func runFullLifecycleGracefulJourney(
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-second")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
 	second := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1002, secondReceipt)
+	assertFullLifecycleStandingReceiptContinuity(t, firstReceipt, secondReceipt)
 	assertFullLifecycleSameRoute(t, first, second)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 }
@@ -329,6 +330,7 @@ func runFullLifecycleRefuseRecoverJourney(
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-fresh")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 3)
 	fresh := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2002, freshReceipt)
+	assertFullLifecycleStandingReceiptContinuity(t, baselineReceipt, checkpointReceipt, freshReceipt)
 	assertFullLifecycleSameRoute(t, old, fresh)
 	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
@@ -616,6 +618,15 @@ type fullLifecycleIngressReceipt struct {
 	PublicationID string   `json:"publication_id"`
 	EventIDs      []string `json:"event_ids"`
 	EventNames    []string `json:"event_names"`
+}
+
+func assertFullLifecycleStandingReceiptContinuity(t *testing.T, first fullLifecycleIngressReceipt, subsequent ...fullLifecycleIngressReceipt) {
+	t.Helper()
+	for index, receipt := range subsequent {
+		if receipt.EntityID != first.EntityID {
+			t.Fatalf("standing ingress receipt entity changed at occurrence %d: first=%#v current=%#v", index+2, first, receipt)
+		}
+	}
 }
 
 func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) fullLifecycleIngressReceipt {
