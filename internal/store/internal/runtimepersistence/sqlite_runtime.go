@@ -44,7 +44,6 @@ import (
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
-	storeworkspace "github.com/division-sh/swarm/internal/store/internal/workspace"
 )
 
 // SQLiteRuntimeStore is the file-backed SQLite implementation of the selected
@@ -83,13 +82,11 @@ type SQLiteRuntimeStore struct {
 	sourceArtifactOwner          *storesourceartifact.SQLite
 	channelOnboardingSQLiteOwner *storechannelonboarding.SQLiteOwner
 
-	schema                *SQLiteSchemaStore
-	backend               *sqlitebackend.Backend
-	runBundles            *storerunbundle.SQLite
-	workflowEntityQueries *storeworkflowentityquery.SQLite
-	workflowRoutes        *storeworkflowroute.SQLite
-	workspaceLookups      *storeworkspace.SQLite
-
+	schema                 *SQLiteSchemaStore
+	backend                *sqlitebackend.Backend
+	runBundles             *storerunbundle.SQLite
+	workflowEntityQueries  *storeworkflowentityquery.SQLite
+	workflowRoutes         *storeworkflowroute.SQLite
 	nowFn                  func() time.Time
 	runLifecycleCandidates *storerunhandoff.CandidateCoordinator
 }

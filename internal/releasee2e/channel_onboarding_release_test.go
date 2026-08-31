@@ -60,7 +60,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	env := appendReleaseChannelEnv(goldenProcessEnv(t, root, "", 1), providerEnv...)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Contracts: contracts,
+			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Source: contracts,
 			Store: "sqlite", APIPort: apiPort, MCPPort: mcpPort,
 			PublicWebhookBaseURL: "https://" + releaseChannelPublicHost, PublicWebhookListen: publicListen,
 			TokenFile: tokenFile, Token: releaseChannelAPIToken, Env: env,

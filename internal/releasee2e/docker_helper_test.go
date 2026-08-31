@@ -2,6 +2,8 @@ package releasee2e
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,25 +22,30 @@ import (
 )
 
 const (
-	fakeDockerHelperEnv          = "RELEASE_E2E_DOCKER_HELPER"
-	fakeDockerRootEnv            = "RELEASE_E2E_DOCKER_ROOT"
-	fakeDockerMCPEmitGateEnv     = "RELEASE_E2E_MCP_EMIT_GATE"
-	releaseE2EOAuthToken         = "release-e2e-oauth-value"
-	releaseE2ERawMCPURL          = "http://host.docker.internal:8082/mcp"
-	releaseE2EHostMCPURL         = "http://127.0.0.1:8082/mcp"
-	releaseE2EWorkspaceImage     = "swarm-workspace:latest"
-	releaseE2ENetwork            = "mas_default"
-	releaseE2EAgentWorkdir       = "/workspace"
-	releaseE2EManagedModel       = "sonnet"
-	releaseE2EAgentFingerprint   = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
-	releaseE2EProjectionDigest   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	releaseE2EProjectionID       = "runtime-projection-v1:" + releaseE2EProjectionDigest
-	releaseE2EFixtureBundleScope = "bundle-aaaaaaaaaaaa"
-	releaseE2EFixtureScope       = releaseE2EFixtureBundleScope + "-projection-bbbbbbbbbbbb"
-	releaseE2EAgentSuffix        = "agent-" + releaseE2EAgentFingerprint
-	releaseE2EFixtureAgent       = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
-	releaseE2EFixtureAgentVol    = "workspaces_swarm_bundle_aaaaaaaaaaaa_agent_" + releaseE2EAgentFingerprint
-	releaseE2EOrphanKill         = `if command -v pkill >/dev/null 2>&1; then
+	fakeDockerHelperEnv            = "RELEASE_E2E_DOCKER_HELPER"
+	fakeDockerRootEnv              = "RELEASE_E2E_DOCKER_ROOT"
+	fakeDockerMCPEmitGateEnv       = "RELEASE_E2E_MCP_EMIT_GATE"
+	releaseE2EOAuthToken           = "release-e2e-oauth-value"
+	releaseE2ERawMCPURL            = "http://host.docker.internal:8082/mcp"
+	releaseE2EHostMCPURL           = "http://127.0.0.1:8082/mcp"
+	releaseE2EWorkspaceImage       = "swarm-workspace:latest"
+	releaseE2ENetwork              = "mas_default"
+	releaseE2EAgentWorkdir         = "/workspace"
+	releaseE2EManagedModel         = "sonnet"
+	releaseE2EAgentFingerprint     = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
+	releaseE2EProjectionDigest     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	releaseE2EProjectionID         = "runtime-projection-v1:" + releaseE2EProjectionDigest
+	releaseE2EFixtureBundleScope   = "bundle-aaaaaaaaaaaa"
+	releaseE2EFixtureScope         = releaseE2EFixtureBundleScope + "-projection-bbbbbbbbbbbb"
+	releaseE2EAgentSuffix          = "agent-" + releaseE2EAgentFingerprint
+	releaseE2EFixtureAgent         = "swarm-" + releaseE2EFixtureScope + "-" + releaseE2EAgentSuffix
+	releaseE2EDurableKeyDomain     = "swarm-durable-workspace-v1"
+	releaseE2EDurableScaffold      = "scaffold"
+	releaseE2EDurableSystemEntity  = "system-entities"
+	releaseE2EDurableSystemNginx   = "system-nginx"
+	releaseE2EDurableSystemSystemd = "system-systemd"
+	releaseE2EDurableAgent         = "agent"
+	releaseE2EOrphanKill           = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
   for p in /proc/[0-9]*; do
@@ -49,6 +56,12 @@ else
   done
 fi`
 )
+
+var releaseE2EFixtureAgentVol = mustReleaseE2EDurableBackingKey(releaseE2EDurableAgent, releaseE2EAgentFingerprint)
+
+func mustReleaseE2EDurableBackingKey(kind, semanticIdentity string) string {
+	return mustReleaseE2EDurableBackingKeyForHash("bundle-v2:sha256:"+strings.Repeat("a", 64), kind, semanticIdentity)
+}
 
 type fakeDockerContainer struct {
 	Running bool              `json:"running"`
@@ -356,9 +369,9 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	if !ok {
 		return fmt.Errorf("unexpected create container %q", create.name)
 	}
-	bundleScope, _, ok := strings.Cut(processScope, "-projection-")
-	if !ok {
-		return fmt.Errorf("unexpected process scope %q", processScope)
+	bundleHash := create.labels["dev.swarm.bundle_hash"]
+	if !validReleaseBundleHash(bundleHash) {
+		return fmt.Errorf("create bundle_hash is invalid")
 	}
 	expected := map[string]expectation{
 		"scaffold": {
@@ -367,7 +380,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			resetEligible: "false",
 			source:        "workspace.EnsureSystemWorkspaces",
 			scope:         "scaffold",
-			requiredMount: map[string]string{"/opt/swarm/scaffold": "swarm-" + bundleScope + "-scaffold"},
+			requiredMount: map[string]string{"/opt/swarm/scaffold": mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableScaffold, "")},
 		},
 		"system": {
 			workdir:       "/opt/swarm",
@@ -377,9 +390,9 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			source:        "workspace.EnsureSystemWorkspaces",
 			scope:         "system",
 			requiredMount: map[string]string{
-				"/opt/swarm/entities": "swarm-" + bundleScope + "-entities",
-				"/opt/swarm/nginx":    "swarm-" + bundleScope + "-nginx",
-				"/etc/systemd/system": "swarm-" + bundleScope + "-systemd",
+				"/opt/swarm/entities": mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableSystemEntity, ""),
+				"/opt/swarm/nginx":    mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableSystemNginx, ""),
+				"/etc/systemd/system": mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableSystemSystemd, ""),
 			},
 		},
 		"agent": {
@@ -388,7 +401,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			resetEligible: "true",
 			source:        "workspace.ResolveWorkspace",
 			scope:         "per-agent",
-			requiredMount: map[string]string{releaseE2EAgentWorkdir: "workspaces_" + strings.ReplaceAll("swarm-"+bundleScope+"-agent_"+releaseE2EAgentFingerprint, "-", "_")},
+			requiredMount: map[string]string{releaseE2EAgentWorkdir: mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableAgent, releaseE2EAgentFingerprint)},
 		},
 	}[kind]
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
@@ -401,6 +414,20 @@ func validateReleaseDockerCreate(root string, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func mustReleaseE2EDurableBackingKeyForHash(bundleHash, kind, semanticIdentity string) string {
+	if !validReleaseBundleHash(bundleHash) {
+		panic("release E2E durable backing key requires a canonical bundle hash")
+	}
+	digest := sha256.New()
+	for _, value := range []string{releaseE2EDurableKeyDomain, bundleHash, kind, semanticIdentity} {
+		var length [8]byte
+		binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+		_, _ = digest.Write(length[:])
+		_, _ = digest.Write([]byte(value))
+	}
+	return releaseE2EDurableKeyDomain + "-" + kind + "-" + hex.EncodeToString(digest.Sum(nil))
 }
 
 func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {

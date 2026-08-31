@@ -385,9 +385,8 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 	}
 }
 
-func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T) {
+func TestCloseServeRuntimeReleasesProjectionAfterShutdown(t *testing.T) {
 	shutdownErr := fmt.Errorf("shutdown timed out")
-	cleanupErr := fmt.Errorf("cleanup failed")
 	var order []string
 	supervisor := &processLifecycleSupervisor{
 		currentRT: &runtimepkg.Runtime{},
@@ -397,10 +396,6 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 		return shutdownErr
 	}
 	workspaces := serveRuntimeWorkspaceStub{
-		cleanup: func(context.Context) (runtimedestructivereset.ContainerResetResult, error) {
-			order = append(order, "cleanup")
-			return runtimedestructivereset.ContainerResetResult{}, cleanupErr
-		},
 		release: func(context.Context) error {
 			order = append(order, "release_projection")
 			return nil
@@ -411,11 +406,11 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 		Dev:           true,
 		ShutdownGrace: runtimepkg.DefaultShutdownGrace,
 	}, workspaces)
-	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) || !strings.Contains(err.Error(), cleanupErr.Error()) {
-		t.Fatalf("closeServeRuntime err = %v, want joined shutdown and cleanup errors", err)
+	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) {
+		t.Fatalf("closeServeRuntime err = %v, want shutdown error", err)
 	}
-	if got := strings.Join(order, ","); got != "shutdown,cleanup,release_projection" {
-		t.Fatalf("order = %s, want shutdown,cleanup,release_projection", got)
+	if got := strings.Join(order, ","); got != "shutdown,release_projection" {
+		t.Fatalf("order = %s, want shutdown,release_projection", got)
 	}
 	if got := supervisor.CurrentRuntime(); got != nil {
 		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
@@ -7358,7 +7353,7 @@ func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 func stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t *testing.T, bundleScopes *[]string) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{bundleScopes: bundleScopes}, nil
 	}
 	t.Cleanup(func() {
@@ -7393,7 +7388,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ workspace.Lookup, _ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -8366,7 +8361,7 @@ func localPreflightReportHasFinding(report cliapp.LocalPreflightReport, code str
 func stubServeWorkspaceLifecycleForTest(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -8453,7 +8448,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -8580,7 +8575,6 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 
 type serveRuntimeWorkspaceStub struct {
 	stubWorkspaceLifecycle
-	cleanup           func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
 	release           func(context.Context) error
 	managedContainers []runtimedestructivereset.ContainerRef
 	stoppedContainers *[]string
@@ -8599,13 +8593,6 @@ func (s serveRuntimeWorkspaceStub) ReleaseSourceProjection(ctx context.Context) 
 		return s.release(ctx)
 	}
 	return nil
-}
-
-func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
-	if s.cleanup != nil {
-		return s.cleanup(ctx)
-	}
-	return runtimedestructivereset.ContainerResetResult{}, nil
 }
 
 func (s serveRuntimeWorkspaceStub) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {

@@ -159,7 +159,7 @@ type Plan struct {
 	IncludeSourceArtifacts bool                 `json:"include_source_artifacts"`
 	ActiveDeliveries       []DeliveryRef        `json:"active_deliveries"`
 	RunScopedTables        []TableRef           `json:"run_scoped_tables"`
-	EntityContainers       []ContainerRef       `json:"entity_containers"`
+	ManagedContainers      []ContainerRef       `json:"managed_containers"`
 	Preserved              PreservedResources   `json:"preserved"`
 	DownstreamContracts    []DownstreamContract `json:"downstream_contracts"`
 	ResetSeams             []ResetSeam          `json:"reset_seams"`
@@ -190,7 +190,6 @@ type ContainerRef struct {
 	CreationSource string                        `json:"creation_source,omitempty"`
 	WorkspaceScope string                        `json:"workspace_scope,omitempty"`
 	RunID          string                        `json:"run_id,omitempty"`
-	EntityID       string                        `json:"entity_id,omitempty"`
 	AgentIdentity  runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
 	FlowInstance   string                        `json:"flow_instance,omitempty"`
 }
@@ -222,7 +221,7 @@ type Inventory struct {
 	CleanupRunSetKnown bool
 	ActiveDeliveries   []DeliveryRef
 	RunScopedTables    []TableRef
-	EntityContainers   []ContainerRef
+	ManagedContainers  []ContainerRef
 	Preserved          PreservedResources
 }
 
@@ -297,7 +296,6 @@ type ContainerIdentity struct {
 	ContainerName  string
 	WorkspaceScope string
 	RunID          string
-	EntityID       string
 	AgentIdentity  runtimeagentidentity.Identity
 	FlowInstance   string
 }

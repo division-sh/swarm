@@ -90,9 +90,7 @@ func (s claudeStartupWorkspaceStub) EnsureSystemWorkspaces(context.Context) erro
 func (s claudeStartupWorkspaceStub) BindSourceProjection(*sourceartifact.RuntimeProjection) error {
 	return nil
 }
-func (s claudeStartupWorkspaceStub) ReleaseSourceProjection(context.Context) error       { return nil }
-func (s claudeStartupWorkspaceStub) EnsureEntityWorkspace(context.Context, string) error { return nil }
-func (s claudeStartupWorkspaceStub) StopEntityWorkspace(context.Context, string) error   { return nil }
+func (s claudeStartupWorkspaceStub) ReleaseSourceProjection(context.Context) error { return nil }
 
 type claudeStartupCapabilityWorkspaceStub struct {
 	claudeStartupWorkspaceStub

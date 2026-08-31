@@ -2190,10 +2190,6 @@ func (selectedForkWorkspaceLifecycle) BindSourceProjection(*sourceartifact.Runti
 func (selectedForkWorkspaceLifecycle) ReleaseSourceProjection(context.Context) error { return nil }
 func (selectedForkWorkspaceLifecycle) EnsurePrereqs(context.Context) error           { return nil }
 func (selectedForkWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error  { return nil }
-func (selectedForkWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error {
-	return nil
-}
-func (selectedForkWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error { return nil }
 
 func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Context, db *sql.DB, result SelectedContractExecutionResult) {
 	t.Helper()

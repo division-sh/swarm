@@ -30,7 +30,7 @@ func (r CompositeInventoryReader) ReadResetInventory(ctx context.Context) (Inven
 	if err != nil {
 		return Inventory{}, err
 	}
-	inventory.EntityContainers = append([]ContainerRef(nil), containers...)
+	inventory.ManagedContainers = append([]ContainerRef(nil), containers...)
 	return inventory, nil
 }
 
@@ -60,7 +60,7 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, req Request) (Plan, err
 		IncludeSourceArtifacts: includeSourceArtifacts,
 		ActiveDeliveries:       append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
 		RunScopedTables:        resetInventoryRunScopedTables(inventory.RunScopedTables, includeSourceArtifacts),
-		EntityContainers:       append([]ContainerRef(nil), inventory.EntityContainers...),
+		ManagedContainers:      append([]ContainerRef(nil), inventory.ManagedContainers...),
 		Preserved:              copyPreservedResources(preserved),
 		DownstreamContracts:    append([]DownstreamContract(nil), contracts...),
 		ResetSeams:             append([]ResetSeam(nil), seams...),

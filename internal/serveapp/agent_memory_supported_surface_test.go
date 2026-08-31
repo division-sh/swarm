@@ -27,7 +27,6 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -442,7 +441,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {

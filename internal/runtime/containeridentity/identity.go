@@ -20,7 +20,6 @@ const (
 	LabelBundleHash            = "dev.swarm.bundle_hash"
 	LabelSourceProjection      = "dev.swarm.source_projection"
 	LabelRunID                 = "dev.swarm.run_id"
-	LabelEntityID              = "dev.swarm.entity_id"
 	LabelAgentID               = "dev.swarm.agent_id"
 	LabelAgentNameOwner        = "dev.swarm.agent_name_owner"
 	LabelAgentNameSource       = "dev.swarm.agent_name_source"
@@ -35,7 +34,6 @@ const (
 
 	KindScaffold = "scaffold"
 	KindSystem   = "system"
-	KindEntity   = "entity"
 	KindAgent    = "agent"
 	KindFlow     = "flow"
 )
@@ -50,7 +48,6 @@ type Identity struct {
 	BundleHash       string
 	SourceProjection string
 	RunID            string
-	EntityID         string
 	AgentIdentity    runtimeagentidentity.Identity
 	FlowInstance     string
 	DataProjection   runtimedataaccess.ProjectionID
@@ -65,7 +62,6 @@ func (i Identity) Normalized() Identity {
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.SourceProjection = strings.TrimSpace(i.SourceProjection)
 	i.RunID = strings.TrimSpace(i.RunID)
-	i.EntityID = strings.TrimSpace(i.EntityID)
 	i.AgentIdentity = i.AgentIdentity.Normalize()
 	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
 	i.DataProjection = runtimedataaccess.ProjectionID(strings.TrimSpace(string(i.DataProjection)))
@@ -89,7 +85,6 @@ func (i Identity) Labels() map[string]string {
 	addOptionalLabel(labels, LabelBundleHash, i.BundleHash)
 	addOptionalLabel(labels, LabelSourceProjection, i.SourceProjection)
 	addOptionalLabel(labels, LabelRunID, i.RunID)
-	addOptionalLabel(labels, LabelEntityID, i.EntityID)
 	if !i.AgentIdentity.IsZero() {
 		fields, err := i.AgentIdentity.StorageFields()
 		if err == nil {
@@ -118,7 +113,7 @@ func (i Identity) Validate() error {
 		return fmt.Errorf("container identity owner = %q, want %q", i.Owner, OwnerRuntime)
 	}
 	if !validKind(i.Kind) {
-		return fmt.Errorf("container identity kind = %q, want scaffold, system, entity, agent, or flow", i.Kind)
+		return fmt.Errorf("container identity kind = %q, want scaffold, system, agent, or flow", i.Kind)
 	}
 	if i.ContainerName == "" {
 		return fmt.Errorf("container identity container name is required")
@@ -138,10 +133,6 @@ func (i Identity) Validate() error {
 		return fmt.Errorf("container kind %q cannot be reset eligible", i.Kind)
 	}
 	switch i.Kind {
-	case KindEntity:
-		if i.EntityID == "" {
-			return fmt.Errorf("entity container identity requires entity_id")
-		}
 	case KindAgent:
 		if err := i.AgentIdentity.Validate(); err != nil {
 			return fmt.Errorf("agent container identity requires complete concrete identity: %w", err)
@@ -175,7 +166,7 @@ func (i Identity) ResetEligibleManaged() bool {
 
 func ResetEligibleKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case KindEntity, KindAgent, KindFlow:
+	case KindAgent, KindFlow:
 		return true
 	default:
 		return false
@@ -204,7 +195,6 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 		BundleHash:       labels[LabelBundleHash],
 		SourceProjection: labels[LabelSourceProjection],
 		RunID:            labels[LabelRunID],
-		EntityID:         labels[LabelEntityID],
 		FlowInstance:     labels[LabelFlowInstance],
 		DataProjection:   runtimedataaccess.ProjectionID(labels[LabelDataProjectionID]),
 	}.Normalized()
@@ -284,7 +274,7 @@ func parseBoolLabel(value string) (bool, error) {
 
 func validKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case KindScaffold, KindSystem, KindEntity, KindAgent, KindFlow:
+	case KindScaffold, KindSystem, KindAgent, KindFlow:
 		return true
 	default:
 		return false

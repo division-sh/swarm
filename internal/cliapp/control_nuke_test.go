@@ -406,7 +406,7 @@ func runtimeNukeTestResult(status string) map[string]any {
 					map[string]any{"name": "events", "action": "delete"},
 					map[string]any{"name": "event_deliveries", "action": "delete"},
 				},
-				"entity_containers": []any{
+				"managed_containers": []any{
 					map[string]any{"name": "swarm-agent-1", "kind": "entity"},
 				},
 			},
@@ -466,10 +466,10 @@ func runtimeNukeEmptyResult() map[string]any {
 		"operation_name": "runtime.destructive_reset",
 		"plan": map[string]any{
 			"plan": map[string]any{
-				"active_runs":       []any{},
-				"active_deliveries": []any{},
-				"run_scoped_tables": []any{},
-				"entity_containers": []any{},
+				"active_runs":        []any{},
+				"active_deliveries":  []any{},
+				"run_scoped_tables":  []any{},
+				"managed_containers": []any{},
 			},
 		},
 		"quiescence":      map[string]any{"runs": []any{}, "deliveries": []any{}},

@@ -44,10 +44,10 @@ type runtimeNukePlanResult struct {
 }
 
 type runtimeNukePlan struct {
-	ActiveRuns       []runtimeNukeRunRef       `json:"active_runs"`
-	ActiveDeliveries []runtimeNukeDeliveryRef  `json:"active_deliveries"`
-	RunScopedTables  []runtimeNukeTableRef     `json:"run_scoped_tables"`
-	EntityContainers []runtimeNukeContainerRef `json:"entity_containers"`
+	ActiveRuns        []runtimeNukeRunRef       `json:"active_runs"`
+	ActiveDeliveries  []runtimeNukeDeliveryRef  `json:"active_deliveries"`
+	RunScopedTables   []runtimeNukeTableRef     `json:"run_scoped_tables"`
+	ManagedContainers []runtimeNukeContainerRef `json:"managed_containers"`
 }
 
 type runtimeNukeRunRef struct {

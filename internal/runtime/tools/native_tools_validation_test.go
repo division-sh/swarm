@@ -383,12 +383,14 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
 		t.Fatalf("write flow schema: %v", err)
 	}
+	projection := toolTestRuntimeSourceProjection(t, contractsDir)
 	workspaces := workspace.NewHostManager()
 	workspaces.SetConfigForTest(workspace.HostConfig{
 		WorkspaceRoot:    root,
-		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceProjection: projection,
 		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindToolTestHostProjection(t, workspaces, projection)
 	workspaces.SetSemanticSource(source)
 
 	warnings, err := ValidateNativeToolBootConfig(
@@ -404,7 +406,12 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
 	}
-	if info, err := os.Stat(filepath.Join(root, "flows", "review")); err != nil || !info.IsDir() {
+	backingKey, err := workspace.DurableBackingKey(projection.BundleHash(), workspace.DurableBackingFlow, "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleScope := "bundle-" + strings.TrimPrefix(projection.BundleHash(), "bundle-v2:sha256:")
+	if info, err := os.Stat(filepath.Join(root, bundleScope, backingKey)); err != nil || !info.IsDir() {
 		t.Fatalf("scoped flow workspace stat = info:%#v err:%v, want directory", info, err)
 	}
 }

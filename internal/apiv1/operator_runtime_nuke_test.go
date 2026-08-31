@@ -348,7 +348,7 @@ func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructiv
 		Plan: destructivereset.Plan{
 			IncludeSourceArtifacts: req.IncludeSourceArtifacts,
 			ActiveRuns:             []destructivereset.RunRef{{RunID: "00000000-0000-0000-0000-000000000001", Status: "running"}},
-			EntityContainers: []destructivereset.ContainerRef{{
+			ManagedContainers: []destructivereset.ContainerRef{{
 				Name:          "swarm-agent-1",
 				Kind:          "agent",
 				Action:        destructivereset.ContainerActionStop,
@@ -433,19 +433,19 @@ func (o *recordingRuntimeNukeOwners) ApplyContainerReset(req destructivereset.Co
 		OperationName: req.Result.OperationName,
 		DryRun:        req.Result.DryRun,
 		AppliedAt:     req.RequestedAt,
-		Selected:      req.Result.Plan.EntityContainers,
+		Selected:      req.Result.Plan.ManagedContainers,
 	}
 	if req.Result.DryRun {
 		return result
 	}
 	if o.containerFailure != "" {
 		result.Failed = []destructivereset.ContainerStopFailure{{
-			Container: req.Result.Plan.EntityContainers[0],
+			Container: req.Result.Plan.ManagedContainers[0],
 			Error:     o.containerFailure,
 		}}
 		return result
 	}
-	result.Stopped = req.Result.Plan.EntityContainers
+	result.Stopped = req.Result.Plan.ManagedContainers
 	return result
 }
 

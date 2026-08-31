@@ -33,7 +33,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -195,7 +194,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			db = storetest.DatabaseForTest(pg)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -929,7 +928,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -1117,7 +1116,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 					storetest.BootstrapPostgresRuntimeStore(t, opened)
 					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg), nil
 				}
-				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
 				}
 				t.Cleanup(func() {

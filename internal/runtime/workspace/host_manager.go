@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -141,7 +140,11 @@ func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimePro
 	cfg.SourceProjection = projection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = strings.TrimSpace(projection.Identity())
-	cfg.BundleScope = bundleScopeKey(cfg.BundleHash)
+	cfg.BundleScope, err = durableBundleScopeKey(cfg.BundleHash)
+	if err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
 	m.cfg = cfg
 	m.ownedProjection = ownedProjection
 	return nil
@@ -198,23 +201,15 @@ func (m *HostManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	if err := m.EnsurePrereqs(ctx); err != nil {
 		return err
 	}
-	for _, name := range []string{"scaffold", "system"} {
+	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
+		name, err := durableWorkspaceBackingKey(m.cfg.BundleHash, kind, "")
+		if err != nil {
+			return err
+		}
 		if _, err := m.ensureHostWorkspaceDir(name); err != nil {
 			return err
 		}
 	}
-	return nil
-}
-
-func (m *HostManager) EnsureEntityWorkspace(_ context.Context, entityID string) error {
-	if strings.TrimSpace(entityID) == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	_, err := m.ensureHostWorkspaceDir(filepath.Join("entities", SanitizeSlug(entityID)))
-	return err
-}
-
-func (m *HostManager) StopEntityWorkspace(context.Context, string) error {
 	return nil
 }
 
@@ -236,9 +231,17 @@ func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentCo
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		return m.hostTarget("scaffold", "")
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceScaffold, "")
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, "")
 	case "system":
-		return m.hostTarget("system", "")
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceSystem, "")
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, "")
 	}
 	dataRoot := ""
 	if materializeData && m.data != nil {
@@ -257,17 +260,18 @@ func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentCo
 	}
 	switch scope {
 	case "per-flow-instance":
-		return m.hostTarget(filepath.Join("flows", SanitizeSlug(scopeKey)), dataRoot)
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceFlow, scopeKey)
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, dataRoot)
 	default:
-		return m.hostTarget(filepath.Join("agents", SanitizeSlug(scopeKey)), dataRoot)
+		key, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceAgent, scopeKey)
+		if err != nil {
+			return nil, err
+		}
+		return m.hostTarget(key, dataRoot)
 	}
-}
-
-func (m *HostManager) CleanupDevEntityContainers(context.Context) (runtimedestructivereset.ContainerResetResult, error) {
-	return runtimedestructivereset.ContainerResetResult{
-		OperationName: DevEntityCleanupOperationName,
-		AppliedAt:     time.Now().UTC(),
-	}, nil
 }
 
 func (m *HostManager) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
@@ -361,7 +365,7 @@ func (m *HostManager) hostRoot() (string, error) {
 		return "", err
 	}
 	if scope := strings.TrimSpace(m.cfg.BundleScope); scope != "" {
-		root = filepath.Join(root, SanitizeSlug(scope))
+		root = filepath.Join(root, scope)
 	}
 	return canonicalPathForOverlap(root, "host workspace root")
 }

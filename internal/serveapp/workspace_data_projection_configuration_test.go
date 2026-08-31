@@ -39,6 +39,10 @@ func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantF
 	cfg.WorkspaceRoot = t.TempDir()
 	cfg.SourceProjection = projection
 	manager.SetConfigForTest(cfg)
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("bind source projection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	manager.SetSemanticSource(source)
 
@@ -113,12 +117,16 @@ func TestConfigureWorkspaceDataProjectionMountsCanonicalEmptyDataInDocker(t *tes
 		t.Fatalf("materialize source: %v", err)
 	}
 	t.Cleanup(func() { _ = projection.Release() })
-	manager := workspace.NewDockerManager(nil)
+	manager := workspace.NewDockerManager()
 	cfg := workspace.DefaultDockerConfig()
 	cfg.SourceProjection = projection
 	cfg.WorkspaceImage = "test-image"
 	cfg.WorkspaceNetwork = ""
 	manager.SetConfig(cfg)
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("bind source projection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	manager.SetSemanticSource(source)
 	var created []string

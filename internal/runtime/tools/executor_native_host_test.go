@@ -186,12 +186,14 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 		t.Fatalf("write flow schema: %v", err)
 	}
 
+	projection := toolTestRuntimeSourceProjection(t, contractsDir)
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:    workspaceRoot,
-		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceProjection: projection,
 		SourceMountPoint: workspace.LogicalSourceMount,
 	})
+	bindToolTestHostProjection(t, manager, projection)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(ctx, source); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
@@ -285,12 +287,14 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 		t.Fatalf("write flow schema: %v", err)
 	}
 
+	projection := toolTestRuntimeSourceProjection(t, contractsDir)
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:    workspaceRoot,
-		SourceProjection: toolTestRuntimeSourceProjection(t, contractsDir),
+		SourceProjection: projection,
 		SourceMountPoint: workspace.LogicalSourceMount,
 	})
+	bindToolTestHostProjection(t, manager, projection)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(ctx, source); err != nil {
 		t.Fatalf("ValidateSource: %v", err)

@@ -469,7 +469,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	loaded.source = projection.Source()
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = sourceArtifactFact.BundleHash()
-	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.workspace, req.Config, loaded.sourceProjection, loaded.source, req.MountSources, req.WorkspaceBackend)
+	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Config, loaded.sourceProjection, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -1037,10 +1037,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
 		} else if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
 			shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
-			if opts.Dev && workspaces != nil {
-				_, cleanupErr := workspaces.CleanupDevEntityContainers(context.Background())
-				shutdownErr = errors.Join(shutdownErr, cleanupErr)
-			}
 			if workspaces != nil {
 				shutdownErr = errors.Join(shutdownErr, workspaces.ReleaseSourceProjection(context.Background()))
 			}
@@ -2226,15 +2222,11 @@ func closeServeRuntime(ctx context.Context, supervisor *processLifecycleSupervis
 		shutdownOpts := runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}
 		shutdownErr = supervisor.ShutdownProcessWithOptions(ctx, shutdownOpts)
 	}
-	var cleanupErr error
-	if opts.Dev && workspaces != nil {
-		_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
-	}
 	var projectionErr error
 	if workspaces != nil {
 		projectionErr = workspaces.ReleaseSourceProjection(ctx)
 	}
-	return errors.Join(shutdownErr, cleanupErr, projectionErr)
+	return errors.Join(shutdownErr, projectionErr)
 }
 
 func runServeSourceArtifactStartupRecovery(

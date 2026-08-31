@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -71,8 +70,6 @@ type Lifecycle interface {
 	ValidateSource(ctx context.Context, source semanticview.Source) error
 	EnsurePrereqs(ctx context.Context) error
 	EnsureSystemWorkspaces(ctx context.Context) error
-	EnsureEntityWorkspace(ctx context.Context, entityID string) error
-	StopEntityWorkspace(ctx context.Context, entityID string) error
 }
 
 // SourceProjectionRebinder creates an isolated lifecycle for a selected source
@@ -122,12 +119,6 @@ type OrphanKiller interface {
 	KillOrphanProcesses(ctx context.Context) error
 }
 
-type DevEntityContainerCleaner interface {
-	CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error)
-}
-
-const DevEntityCleanupOperationName = "swarm.serve.dev.entity_container_cleanup"
-
 const (
 	defaultDockerBin        = "docker"
 	defaultWorkspaceImage   = "swarm-workspace:latest"
@@ -147,54 +138,51 @@ func DefaultWorkspaceNetwork() string {
 }
 
 type DockerConfig struct {
-	DockerBin             string
-	WorkspaceImage        string
-	WorkspaceNetwork      string
-	WorkspaceVolumesFrom  string
-	SharedDataSource      string
-	DataMountPoint        string
-	SourceProjection      *sourceartifact.RuntimeProjection
-	SourceMountPoint      string
-	ScaffoldContainer     string
-	ScaffoldWorkdir       string
-	ScaffoldVolume        string
-	SystemContainer       string
-	SystemWorkdir         string
-	SystemEntitiesVolume  string
-	SystemNginxVolume     string
-	SystemSystemdVolume   string
-	EntityContainerPrefix string
-	EntityWorkdir         string
-	BundleHash            string
-	BundleScope           string
-	ProcessScope          string
-	SourceProjectionID    string
+	DockerBin            string
+	WorkspaceImage       string
+	WorkspaceNetwork     string
+	WorkspaceVolumesFrom string
+	SharedDataSource     string
+	DataMountPoint       string
+	SourceProjection     *sourceartifact.RuntimeProjection
+	SourceMountPoint     string
+	ScaffoldContainer    string
+	ScaffoldWorkdir      string
+	ScaffoldVolume       string
+	SystemContainer      string
+	SystemWorkdir        string
+	SystemEntitiesVolume string
+	SystemNginxVolume    string
+	SystemSystemdVolume  string
+	WorkspaceWorkdir     string
+	BundleHash           string
+	BundleScope          string
+	ProcessScope         string
+	SourceProjectionID   string
 }
 
 func DefaultDockerConfig() DockerConfig {
 	return DockerConfig{
-		DockerBin:             defaultDockerBin,
-		WorkspaceImage:        defaultWorkspaceImage,
-		WorkspaceNetwork:      defaultWorkspaceNetwork,
-		WorkspaceVolumesFrom:  "",
-		SharedDataSource:      "",
-		DataMountPoint:        "/data",
-		SourceMountPoint:      "/opt/swarm/source",
-		ScaffoldContainer:     "swarm-scaffold",
-		ScaffoldWorkdir:       "/opt/swarm/scaffold",
-		ScaffoldVolume:        "scaffold",
-		SystemContainer:       "swarm-system",
-		SystemWorkdir:         "/opt/swarm",
-		SystemEntitiesVolume:  "entities",
-		SystemNginxVolume:     "nginx",
-		SystemSystemdVolume:   "systemd",
-		EntityContainerPrefix: "swarm-",
-		EntityWorkdir:         "/workspace",
+		DockerBin:            defaultDockerBin,
+		WorkspaceImage:       defaultWorkspaceImage,
+		WorkspaceNetwork:     defaultWorkspaceNetwork,
+		WorkspaceVolumesFrom: "",
+		SharedDataSource:     "",
+		DataMountPoint:       "/data",
+		SourceMountPoint:     "/opt/swarm/source",
+		ScaffoldContainer:    "swarm-scaffold",
+		ScaffoldWorkdir:      "/opt/swarm/scaffold",
+		ScaffoldVolume:       "scaffold",
+		SystemContainer:      "swarm-system",
+		SystemWorkdir:        "/opt/swarm",
+		SystemEntitiesVolume: "entities",
+		SystemNginxVolume:    "nginx",
+		SystemSystemdVolume:  "systemd",
+		WorkspaceWorkdir:     "/workspace",
 	}
 }
 
 type DockerManager struct {
-	lookup               Lookup
 	cfg                  DockerConfig
 	baseCfg              DockerConfig
 	source               semanticview.Source
@@ -245,10 +233,9 @@ else
   done
 fi`
 
-func NewDockerManager(lookup Lookup) *DockerManager {
+func NewDockerManager() *DockerManager {
 	cfg := DefaultDockerConfig()
 	return &DockerManager{
-		lookup:               lookup,
 		cfg:                  cfg,
 		baseCfg:              cfg,
 		projectionContainers: map[string]struct{}{},
@@ -286,7 +273,7 @@ func (m *DockerManager) RebindSourceProjection(projection *sourceartifact.Runtim
 	}
 	cfg := m.baseCfg
 	cfg.SourceProjection = projection
-	clone := NewDockerManager(m.lookup)
+	clone := NewDockerManager()
 	clone.SetConfig(cfg)
 	clone.SetSemanticSource(source)
 	clone.SetDataProjectionProvider(m.data)
@@ -431,18 +418,34 @@ func (m *DockerManager) BindSourceProjection(projection *sourceartifact.RuntimeP
 	cfg.SourceProjection = projection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = projectionID
-	cfg.BundleScope = bundleScopeKey(cfg.BundleHash)
-	cfg.ProcessScope = projectionScopeKey(cfg.BundleHash, projectionID)
-	if cfg.BundleScope != "" {
-		cfg.ScaffoldVolume = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldVolume, "scaffold")
-		cfg.SystemEntitiesVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemEntitiesVolume, "entities")
-		cfg.SystemNginxVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemNginxVolume, "nginx")
-		cfg.SystemSystemdVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemSystemdVolume, "systemd")
+	cfg.BundleScope, err = durableBundleScopeKey(cfg.BundleHash)
+	if err != nil {
+		_ = ownedProjection.Release()
+		return err
 	}
-	if cfg.ProcessScope != "" {
-		cfg.ScaffoldContainer = scopedRuntimeName(cfg.ProcessScope, cfg.ScaffoldContainer, "scaffold")
-		cfg.SystemContainer = scopedRuntimeName(cfg.ProcessScope, cfg.SystemContainer, "system")
+	cfg.ProcessScope, err = projectionScopeKey(cfg.BundleHash, projectionID)
+	if err != nil {
+		_ = ownedProjection.Release()
+		return err
 	}
+	if cfg.ScaffoldVolume, err = durableWorkspaceBackingKey(cfg.BundleHash, durableWorkspaceScaffold, ""); err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
+	if cfg.SystemEntitiesVolume, err = durableWorkspaceBackingKey(cfg.BundleHash, durableWorkspaceSystemEntity, ""); err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
+	if cfg.SystemNginxVolume, err = durableWorkspaceBackingKey(cfg.BundleHash, durableWorkspaceSystemNginx, ""); err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
+	if cfg.SystemSystemdVolume, err = durableWorkspaceBackingKey(cfg.BundleHash, durableWorkspaceSystemSystemd, ""); err != nil {
+		_ = ownedProjection.Release()
+		return err
+	}
+	cfg.ScaffoldContainer = scopedRuntimeName(cfg.ProcessScope, cfg.ScaffoldContainer, "scaffold")
+	cfg.SystemContainer = scopedRuntimeName(cfg.ProcessScope, cfg.SystemContainer, "system")
 	m.cfg = cfg
 	m.ownedProjection = ownedProjection
 	return nil
@@ -560,127 +563,6 @@ func (m *DockerManager) CheckWorkspaceCLICommandAvailable(ctx context.Context, c
 	return nil
 }
 
-func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID string) error {
-	slug, err := m.LookupEntitySlug(ctx, entityID)
-	if err != nil {
-		return err
-	}
-	if slug == "" {
-		return fmt.Errorf("entity %s slug is required for workspace container", entityID)
-	}
-	container := m.EntityContainerName(slug)
-	volume := m.entityWorkspaceVolume(slug)
-	runID, err := workspaceRunID(ctx)
-	if err != nil {
-		return err
-	}
-
-	return m.EnsureContainerRunningWithIdentity(ctx, container, runtimecontaineridentity.Identity{
-		Owner:            runtimecontaineridentity.OwnerRuntime,
-		Kind:             runtimecontaineridentity.KindEntity,
-		ResetEligible:    true,
-		CreationSource:   "workspace.EnsureEntityWorkspace",
-		ContainerName:    container,
-		WorkspaceScope:   "entity",
-		BundleHash:       m.bundleHashLabel(),
-		SourceProjection: m.sourceProjectionLabel(),
-		RunID:            runID,
-		EntityID:         strings.TrimSpace(entityID),
-	}, append(m.standardMountArgs(),
-		[]string{
-			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
-			"-w", m.cfg.EntityWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}...))
-}
-
-func (m *DockerManager) entityWorkspaceVolume(slug string) string {
-	slug = SanitizeSlug(slug)
-	volume := fmt.Sprintf("entities_%s", slug)
-	if m != nil && strings.TrimSpace(m.cfg.BundleScope) != "" {
-		volume = "entities_" + volumeScopeKey(m.bundleScopedPrefix()+"entity_"+slug)
-	}
-	return volume
-}
-
-func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string) error {
-	slug, err := m.LookupEntitySlug(ctx, entityID)
-	if err != nil {
-		return err
-	}
-	if slug == "" {
-		return nil
-	}
-	container := m.EntityContainerName(slug)
-	if err := m.StopContainer(ctx, container); err != nil {
-		return fmt.Errorf("stop entity workspace %s: %w", container, err)
-	}
-	return nil
-}
-
-func (m *DockerManager) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	result := runtimedestructivereset.ContainerResetResult{
-		OperationName: DevEntityCleanupOperationName,
-		AppliedAt:     time.Now().UTC(),
-	}
-	if m == nil {
-		return result, fmt.Errorf("dev entity container cleanup workspace manager is not configured")
-	}
-	inventory, err := m.ManagedResetContainerInventory(ctx)
-	if err != nil {
-		return result, fmt.Errorf("dev entity container cleanup inventory: %w", err)
-	}
-	for _, candidate := range inventory {
-		name := strings.TrimSpace(candidate.Name)
-		if name == "" {
-			continue
-		}
-		if strings.TrimSpace(candidate.Kind) != runtimecontaineridentity.KindEntity {
-			result.Preserved = append(result.Preserved, containerRefWithAction(candidate, runtimedestructivereset.ContainerActionPreserve))
-			continue
-		}
-		inspection, err := m.InspectManagedContainer(ctx, name)
-		if err != nil {
-			result.Failed = append(result.Failed, runtimedestructivereset.ContainerStopFailure{
-				Container: containerRefWithAction(candidate, runtimedestructivereset.ContainerActionFailed),
-				Error:     err.Error(),
-			})
-			continue
-		}
-		if !inspection.Exists {
-			result.Missing = append(result.Missing, containerRefWithAction(candidate, runtimedestructivereset.ContainerActionMissing))
-			continue
-		}
-		identity := containerIdentityFromResetInspection(inspection)
-		if !inspection.HasIdentity || !identity.ResetEligibleManaged() || strings.TrimSpace(identity.Kind) != runtimecontaineridentity.KindEntity || strings.TrimSpace(identity.ContainerName) != name {
-			result.Preserved = append(result.Preserved, preservedManagedContainerRef(candidate, identity))
-			continue
-		}
-		ref := managedContainerRef(identity, runtimedestructivereset.ContainerActionStop)
-		if !inspection.Running {
-			result.AlreadyStopped = append(result.AlreadyStopped, containerRefWithAction(ref, runtimedestructivereset.ContainerActionAlreadyStopped))
-			continue
-		}
-		result.Selected = append(result.Selected, ref)
-		if err := m.StopManagedContainer(ctx, ref.Name); err != nil {
-			result.Failed = append(result.Failed, runtimedestructivereset.ContainerStopFailure{
-				Container: containerRefWithAction(ref, runtimedestructivereset.ContainerActionFailed),
-				Error:     err.Error(),
-			})
-			continue
-		}
-		result.Stopped = append(result.Stopped, ref)
-	}
-	if len(result.Failed) > 0 {
-		return result, fmt.Errorf("dev entity container cleanup failed: %d container(s)", len(result.Failed))
-	}
-	return result, nil
-}
-
 func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
 	containers, err := m.RuntimeWorkspaceContainers(ctx)
 	if err != nil {
@@ -704,6 +586,7 @@ func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
 }
 
 func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]string, error) {
+	_ = ctx
 	set := map[string]struct{}{}
 	for _, name := range []string{
 		strings.TrimSpace(m.cfg.ScaffoldContainer),
@@ -714,25 +597,12 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 		}
 	}
 
-	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		if m.lookup == nil {
-			return nil, errors.New("runtime workspace container lookup is required")
+	if m != nil {
+		m.projectionMu.Lock()
+		for name := range m.projectionContainers {
+			set[name] = struct{}{}
 		}
-		containers, err := m.lookup.ListRuntimeWorkspaceContainers(ctx, runID)
-		if err != nil {
-			return nil, fmt.Errorf("list runtime workspace containers: %w", err)
-		}
-		for _, raw := range containers.EntitySlugs {
-			slug := SanitizeSlug(raw)
-			if slug == "" {
-				return nil, errors.New("runtime workspace container lookup returned an empty entity slug")
-			}
-			set[m.EntityContainerName(slug)] = struct{}{}
-		}
+		m.projectionMu.Unlock()
 	}
 
 	out := make([]string, 0, len(set))
@@ -806,8 +676,8 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 	}
 	if err := m.EnsureContainerRunningWithIdentity(ctx, container, identity, append(mounts,
 		[]string{
-			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
-			"-w", m.cfg.EntityWorkdir,
+			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.WorkspaceWorkdir),
+			"-w", m.cfg.WorkspaceWorkdir,
 			m.cfg.WorkspaceImage,
 			"sleep", "infinity",
 		}...)); err != nil {
@@ -815,7 +685,7 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 	}
 	return &Target{
 		Container: container,
-		Workdir:   m.cfg.EntityWorkdir,
+		Workdir:   m.cfg.WorkspaceWorkdir,
 		Backend:   BackendDocker,
 		Mounts:    dockerExecutionMounts(m.cfg, projection.Root != ""),
 	}, nil
@@ -922,8 +792,11 @@ func workspaceScopeForActor(source semanticview.Source, actor models.AgentConfig
 
 func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, actor models.AgentConfig) (string, string, error) {
 	scope = strings.TrimSpace(scope)
-	scopeKey = SanitizeSlug(scopeKey)
-	containerScopeKey := scopeKey
+	exactScopeKey := scopeKey
+	if exactScopeKey == "" {
+		return "", "", fmt.Errorf("workspace semantic identity is required")
+	}
+	containerScopeKey := SanitizeSlug(exactScopeKey)
 	if scope == "per-flow-instance" {
 		identity, err := actor.ConcreteIdentity()
 		if err != nil {
@@ -935,21 +808,17 @@ func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, acto
 		}
 		containerScopeKey += "-agent-" + fingerprint
 	}
-	if strings.TrimSpace(m.cfg.ProcessScope) == "" && strings.TrimSpace(m.cfg.BundleScope) == "" {
-		switch scope {
-		case "per-flow-instance":
-			return "swarm-flow-" + containerScopeKey, "workspaces_flow_" + scopeKey, nil
-		default:
-			return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey, nil
-		}
+	if strings.TrimSpace(m.cfg.ProcessScope) == "" {
+		return "", "", fmt.Errorf("workspace process projection identity is required")
 	}
 	containerPrefix := m.processScopedPrefix()
-	volumePrefix := m.bundleScopedPrefix()
 	switch scope {
 	case "per-flow-instance":
-		return containerPrefix + "flow-" + containerScopeKey, "workspaces_" + volumeScopeKey(volumePrefix+"flow_"+scopeKey), nil
+		volume, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceFlow, exactScopeKey)
+		return containerPrefix + "flow-" + containerScopeKey, volume, err
 	default:
-		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(volumePrefix+"agent_"+scopeKey), nil
+		volume, err := durableWorkspaceBackingKey(m.cfg.BundleHash, durableWorkspaceAgent, exactScopeKey)
+		return containerPrefix + "agent-" + containerScopeKey, volume, err
 	}
 }
 
@@ -1440,7 +1309,6 @@ func resetContainerIdentity(identity runtimecontaineridentity.Identity) runtimed
 		ContainerName:  identity.ContainerName,
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
-		EntityID:       identity.EntityID,
 		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}
@@ -1456,7 +1324,6 @@ func containerIdentityFromResetInspection(inspection runtimedestructivereset.Man
 		ContainerName:  identity.ContainerName,
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
-		EntityID:       identity.EntityID,
 		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}.Normalized()
@@ -1472,7 +1339,6 @@ func managedContainerRef(identity runtimecontaineridentity.Identity, action stri
 		CreationSource: identity.CreationSource,
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
-		EntityID:       identity.EntityID,
 		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}
@@ -1520,53 +1386,11 @@ func (m *DockerManager) RunDocker(ctx context.Context, args ...string) (string, 
 	return out, nil
 }
 
-func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (string, error) {
-	trimmedID := strings.TrimSpace(entityID)
-	if trimmedID == "" {
-		return "", errors.New("entity_id is required")
-	}
-	identity, err := runtimecurrentstate.RequireIdentity(ctx, trimmedID)
-	if err != nil {
-		return "", err
-	}
-	if m.lookup == nil {
-		return "", errors.New("workspace entity lookup is required")
-	}
-	result, err := m.lookup.LookupWorkspaceEntity(ctx, identity)
-	if err != nil {
-		return "", fmt.Errorf("lookup workspace entity: %w", err)
-	}
-	slug := SanitizeSlug(result.Slug)
-	if slug == "" {
-		return "", errors.New("workspace entity lookup returned an empty slug")
-	}
-	return slug, nil
-}
-
-func (m *DockerManager) EntityContainerName(slug string) string {
-	slug = SanitizeSlug(slug)
-	if strings.TrimSpace(m.cfg.ProcessScope) == "" {
-		return m.cfg.EntityContainerPrefix + slug
-	}
-	return m.processScopedPrefix() + strings.TrimPrefix(m.cfg.EntityContainerPrefix, "swarm-") + slug
-}
-
 func (m *DockerManager) processScopedPrefix() string {
 	if m == nil {
 		return "swarm-"
 	}
 	scope := strings.TrimSpace(m.cfg.ProcessScope)
-	if scope == "" {
-		return "swarm-"
-	}
-	return "swarm-" + SanitizeSlug(scope) + "-"
-}
-
-func (m *DockerManager) bundleScopedPrefix() string {
-	if m == nil {
-		return "swarm-"
-	}
-	scope := strings.TrimSpace(m.cfg.BundleScope)
 	if scope == "" {
 		return "swarm-"
 	}
@@ -1585,37 +1409,6 @@ func (m *DockerManager) sourceProjectionLabel() string {
 		return ""
 	}
 	return strings.TrimSpace(m.cfg.SourceProjectionID)
-}
-
-func bundleScopeKey(bundleHash string) string {
-	bundleHash = strings.TrimSpace(bundleHash)
-	if bundleHash == "" {
-		return ""
-	}
-	const prefix = "bundle-v2:sha256:"
-	hash := strings.TrimPrefix(bundleHash, prefix)
-	if len(hash) > 12 {
-		hash = hash[:12]
-	}
-	return "bundle-" + hash
-}
-
-func projectionScopeKey(bundleHash, projectionID string) string {
-	bundle := bundleScopeKey(bundleHash)
-	projectionID = strings.TrimPrefix(strings.TrimSpace(projectionID), "runtime-projection-v1:")
-	if len(projectionID) > 12 {
-		projectionID = projectionID[:12]
-	}
-	if bundle == "" || projectionID == "" {
-		return ""
-	}
-	return bundle + "-projection-" + projectionID
-}
-
-func volumeScopeKey(raw string) string {
-	raw = strings.Trim(SanitizeSlug(raw), "-")
-	raw = strings.ReplaceAll(raw, "-", "_")
-	return raw
 }
 
 func scopedRuntimeName(scope, current, fallback string) string {

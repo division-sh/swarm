@@ -78,7 +78,7 @@ func (w *blockingAdministrativeExternalWork) Apply(ctx context.Context, req dest
 		OperationName: req.Result.OperationName,
 		DryRun:        req.Result.DryRun,
 		AppliedAt:     req.RequestedAt,
-		Selected:      append([]destructivereset.ContainerRef(nil), req.Result.Plan.EntityContainers...),
+		Selected:      append([]destructivereset.ContainerRef(nil), req.Result.Plan.ManagedContainers...),
 	}, nil
 }
 

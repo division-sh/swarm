@@ -860,15 +860,19 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	for _, want := range []string{
 		"`--abandon-active-runs`",
 		"without setting `--verbose`",
-		"dev entity-container cleanup",
 	} {
 		if !stringSliceContains(spec.Composition, want) {
 			t.Fatalf("dev mode composition missing %q: %#v", want, spec.Composition)
 		}
 	}
-	for _, want := range []string{"workspace", "containeridentity"} {
+	for _, want := range []string{"internal/cliapp", "devscratch.EpochAuthority", "internal/serveapp"} {
 		if !strings.Contains(spec.Owner, want) {
 			t.Fatalf("dev mode owner missing %q:\n%s", want, spec.Owner)
+		}
+	}
+	for _, retired := range []string{"entity-container cleanup", "containeridentity", "bundle-match"} {
+		if strings.Contains(spec.Owner, retired) || stringSliceContains(spec.Composition, retired) {
+			t.Fatalf("dev mode retains retired %q seam: owner=%q composition=%#v", retired, spec.Owner, spec.Composition)
 		}
 	}
 	for _, want := range []string{"--dev --verbose", "not redundant"} {
@@ -876,19 +880,14 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
 		}
 	}
-	for _, want := range []string{"runtime shutdown admission", "Cleanup still runs after a shutdown timeout/error", "joined shutdown and cleanup errors"} {
+	for _, want := range []string{"runtime shutdown admission", "source-projection owner", "before releasing the projection filesystem"} {
 		if !strings.Contains(spec.ShutdownOrdering, want) {
 			t.Fatalf("dev mode shutdown ordering missing %q:\n%s", want, spec.ShutdownOrdering)
 		}
 	}
-	for _, want := range []string{"identity-proven runtime-owned", "`kind=entity`", "MUST NOT infer ownership from names"} {
-		if !strings.Contains(spec.CleanupScope, want) {
-			t.Fatalf("dev mode cleanup scope missing %q:\n%s", want, spec.CleanupScope)
-		}
-	}
-	for _, want := range []string{"Scaffold/system", "operator-managed", "unlabeled", "`kind=agent`", "`kind=flow`"} {
-		if !strings.Contains(spec.PreservationBoundary, want) {
-			t.Fatalf("dev mode preservation boundary missing %q:\n%s", want, spec.PreservationBoundary)
+	for _, want := range []string{"no entity-workspace container cleanup", "`kind=entity`", "no compatibility or migration", "Destructive reset"} {
+		if !strings.Contains(spec.EntityCleanupRetirement, want) {
+			t.Fatalf("dev mode entity cleanup retirement missing %q:\n%s", want, spec.EntityCleanupRetirement)
 		}
 	}
 }
@@ -1411,7 +1410,7 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 func TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource(t *testing.T) {
 	projection := testRuntimeSourceProjection(t)
 
-	manager, err := configuredWorkspaceLifecycle(nil, nil, projection, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{})
+	manager, err := configuredWorkspaceLifecycle(nil, projection, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{})
 	if err != nil {
 		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
 	}
@@ -1421,7 +1420,7 @@ func TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource(t *testing.T) {
 }
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
-	_, err := configuredWorkspaceLifecycle(nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "--data",
 	})
@@ -1432,7 +1431,7 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
 
 func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback(t *testing.T) {
 	missingDataDir := filepath.Join(t.TempDir(), "missing-data")
-	_, err := configuredWorkspaceLifecycle(nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       missingDataDir,
 		DataSourceSource: "--data",
 	})
@@ -1443,7 +1442,7 @@ func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := configuredWorkspaceLifecycle(nil, cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "workspace.data_source",
 	})
@@ -1476,13 +1475,17 @@ func testRuntimeSourceProjection(t *testing.T) *sourceartifact.RuntimeProjection
 
 func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{HostRoot: filepath.Join(t.TempDir(), "host-workspaces")}}
-	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, testRuntimeSourceProjection(t), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	projection := testRuntimeSourceProjection(t)
+	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(cfg, projection, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend: %v", err)
 	}
 	manager, ok := lifecycle.(*workspace.HostManager)
 	if !ok {
 		t.Fatalf("lifecycle = %T, want *workspace.HostManager", lifecycle)
+	}
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
 	}
 	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
@@ -1494,7 +1497,7 @@ func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testi
 
 func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	_, err := ConfiguredWorkspaceLifecycleForBackend(cfg, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
 	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend error = %v, want retired config rejection", err)
 	}
@@ -4216,15 +4219,14 @@ func TestSummarizeServeSchemaPlansZeroPlans(t *testing.T) {
 }
 
 type serveDevModeSpec struct {
-	ImplementedBy        string   `yaml:"implemented_by"`
-	Flag                 string   `yaml:"flag"`
-	Owner                string   `yaml:"owner"`
-	Composition          []string `yaml:"composition"`
-	ConflictRules        []string `yaml:"conflict_rules"`
-	ShutdownOrdering     string   `yaml:"shutdown_ordering"`
-	CleanupScope         string   `yaml:"cleanup_scope"`
-	PreservationBoundary string   `yaml:"preservation_boundary"`
-	SiblingBoundaries    string   `yaml:"sibling_boundaries"`
+	ImplementedBy           string   `yaml:"implemented_by"`
+	Flag                    string   `yaml:"flag"`
+	Owner                   string   `yaml:"owner"`
+	Composition             []string `yaml:"composition"`
+	ConflictRules           []string `yaml:"conflict_rules"`
+	ShutdownOrdering        string   `yaml:"shutdown_ordering"`
+	EntityCleanupRetirement string   `yaml:"entity_cleanup_retirement"`
+	SiblingBoundaries       string   `yaml:"sibling_boundaries"`
 }
 
 type serveUnifiedListenerSpec struct {

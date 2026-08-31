@@ -18,7 +18,6 @@ import (
 	runtimerunstalled "github.com/division-sh/swarm/internal/runtime/runstalled"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -32,7 +31,6 @@ func (o *Owner) RuntimeDeps() runtime.RuntimeDeps {
 }
 
 func (o *Owner) Schema() store.SchemaBootstrapper                { return o.required.schema }
-func (o *Owner) WorkspaceLookup() workspace.Lookup               { return o.required.workspace }
 func (o *Owner) Pinger() apiv1.Pinger                            { return o.required.pinger }
 func (o *Owner) AuthorActivity() runtimeauthoractivity.Reader    { return o.required.authorActivity }
 func (o *Owner) OperatorChannels() operatorchannel.Store         { return o.required.operatorChannels }
