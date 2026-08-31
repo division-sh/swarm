@@ -57,6 +57,40 @@ func TestStageGateVerificationRejectsProgrammaticNonExactCanonicalInputType(t *t
 	t.Fatalf("stage gate verification findings = %#v, want exact canonical-spelling blocker", report.Errors())
 }
 
+func TestStageGateEmitDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Path:  ".",
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"review.completed": {},
+		},
+		Children: []runtimecontracts.FlowContractView{{
+			Path:  "child",
+			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: root.Events,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
+				"child": &root.Children[0],
+			},
+		},
+	}
+	c := &checkerContext{source: semanticview.Wrap(bundle)}
+	findings := validateStageGateEmit(c,
+		runtimecontracts.WorkflowGatePlan{FlowID: "child"},
+		"approve",
+		runtimecontracts.WorkflowGateOutcomePlan{Emit: runtimecontracts.EmitSpec{Event: "review.completed"}},
+		"child gate",
+	)
+	if len(findings) != 1 || !strings.Contains(findings[0].Message, "emits unknown event review.completed") {
+		t.Fatalf("stage gate cross-flow event findings = %#v, want unknown-event blocker", findings)
+	}
+}
+
 func TestStageGateVerificationRejectsProgrammaticNonCanonicalMapIdentities(t *testing.T) {
 	tests := []struct {
 		name string

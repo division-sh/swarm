@@ -458,7 +458,7 @@ func TestFlowScopedEventPublishDescriptorUsesCanonicalAuthoredIdentity(t *testin
 	if err != nil {
 		t.Fatalf("AuthorActivityEventDescriptors: %v", err)
 	}
-	proof := semanticview.ResolveFlowEventProof(source, "", eventName)
+	proof := semanticview.ResolveFlowEventProof(source, "repo-scaffold", eventName)
 	if !proof.HasSchema || !proof.IsAuthored(source) {
 		t.Fatalf("publication proof = %#v, authored catalog = %#v", proof, source.AuthoredResolvedEventCatalog())
 	}

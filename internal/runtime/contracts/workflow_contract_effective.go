@@ -255,6 +255,15 @@ func EffectiveSystemNodeExecutionType(node SystemNodeContract) string {
 	return SystemNodeExecutionType
 }
 
+func IsIntrinsicWorkflowRuntimeEvent(eventType string) bool {
+	switch eventidentity.Normalize(eventType) {
+	case "platform.join_timeout", "platform.join_complete":
+		return true
+	default:
+		return false
+	}
+}
+
 func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(node.SubscribesTo)+len(node.EventHandlers)+1)

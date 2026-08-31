@@ -353,11 +353,16 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 			"observer": {ID: "observer", Subscriptions: append([]string(nil), agentSubscriptions...)},
 		}
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Path:     ".",
+		Children: []runtimecontracts.FlowContractView{flow},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			Root:   &root,
+			ByID:   map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			ByPath: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
 		},
 	}
 	if len(agentSubscriptions) > 0 {
@@ -1154,57 +1159,47 @@ func routeMaterializationAgentRoute(
 	return identity, admission
 }
 
-func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInstance(t *testing.T) {
+func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := t.TempDir()
-
-	writeRoutingFixtureFile(t, root, "schema.yaml", "name: template-output-observer\n")
-	writeRoutingFixtureFile(t, root, "nodes.yaml", `
-operating-accumulator:
-  id: operating-accumulator
-  execution_type: system_node
-  subscribes_to: ["component-scaffold/*/component.scaffolded"]
-  event_handlers:
-    "component-scaffold/*/component.scaffolded": {}
-`)
-	writeRoutingFixtureFile(t, root, "component-scaffold/schema.yaml", `
-name: component-scaffold
-mode: template
-pins:
-  outputs:
-    events: [component.scaffolded]
-`)
-	writeRoutingFixtureFile(t, root, "component-scaffold/events.yaml", "component.scaffolded: {}\n")
+	root := canonicalrouting.CopyTemplateOutputRootConnect(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
 		t.Fatalf("load template-output observer fixture: %v", err)
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	plans, issues := compiledConnectPlans(source)
+	if len(issues) != 0 || len(plans) != 1 {
+		t.Fatalf("template output connect plans = %#v issues = %#v, want one valid plan", plans, issues)
+	}
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	identity := runtimeflowidentity.DeriveRoute("component-scaffold", "component-a")
+	identity := runtimeflowidentity.DeriveRoute("producer", "component-a")
 	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
-	got := rt.Resolve("component-scaffold/component-a/component.scaffolded")
-	if len(got) != 1 {
-		t.Fatalf("resolved subscribers = %#v, want one operating-accumulator route", got)
+	if got := rt.Resolve("producer/component-a/deploy.done"); len(got) != 0 {
+		t.Fatalf("direct template output subscribers = %#v, connect dispatch must own the boundary edge", got)
 	}
-	if got[0].Recipient.LocalID() != "operating-accumulator" || !got[0].Recipient.IsNode() || got[0].MatchPattern != "component-scaffold/*/component.scaffolded" {
-		t.Fatalf("resolved subscriber = %#v, want operating-accumulator wildcard route", got[0])
+	got := rt.Resolve("deploy.done")
+	if len(got) != 1 {
+		t.Fatalf("receiver-local subscribers = %#v, want one root-receiver route", got)
+	}
+	if got[0].Recipient.LocalID() != "root-receiver" || !got[0].Recipient.IsNode() {
+		t.Fatalf("resolved subscriber = %#v, want root-receiver connect route", got[0])
 	}
 
 	if err := rt.RemoveFlowInstanceRoute(identity); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
 	}
-	if got := rt.Resolve("component-scaffold/component-a/component.scaffolded"); len(got) != 0 {
-		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
+	if got := rt.Resolve("deploy.done"); len(got) != 1 {
+		t.Fatalf("receiver-local subscribers after remove = %#v, want root-receiver", got)
 	}
-	if got := rt.Resolve("component-scaffold/component-b/component.scaffolded"); len(got) != 0 {
+	if got := rt.Resolve("producer/component-b/deploy.done"); len(got) != 0 {
 		t.Fatalf("resolved subscribers for never-added instance = %#v, want none", got)
 	}
 }

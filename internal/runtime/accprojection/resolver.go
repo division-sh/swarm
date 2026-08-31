@@ -449,13 +449,7 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 }
 
 func validateEventTypedView(source semanticview.Source, types runtimecontracts.TypeCatalogDocument, binding Binding) []Issue {
-	entry, ok := source.EventEntry(binding.SourceEventType)
-	if !ok {
-		canonical := source.ResolveExecutableNodeEventReference(binding.SourceNode, binding.SourceEventType)
-		if canonical != "" {
-			entry, ok = source.EventEntry(canonical)
-		}
-	}
+	entry, _, ok := source.ResolveExecutableNodeEventCatalogEntry(binding.SourceNode, binding.SourceEventType)
 	if !ok {
 		return []Issue{scopedIssue(binding, "unknown_source_event", binding.SourceNode.Key(), fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType))}
 	}

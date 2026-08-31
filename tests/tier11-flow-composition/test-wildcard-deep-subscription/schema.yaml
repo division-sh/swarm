@@ -3,8 +3,12 @@ terminal_states: [done]
 states: [idle, done]
 pins:
   inputs:
-    events: [pipeline.start]
+    events: [pipeline.start, task.done]
   outputs:
     events:
       - event: pipeline.complete
         sink: harness
+connect:
+  - event: task.done
+    from: child
+    to: .

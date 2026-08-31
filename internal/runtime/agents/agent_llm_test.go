@@ -1060,7 +1060,15 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
 			},
 		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"campaign-flow": &root.Children[0],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"campaign-flow": &root.Children[0],
+			},
+		},
 	}
 	rt := &directiveFactoryRuntime{
 		steps: []*llm.Response{

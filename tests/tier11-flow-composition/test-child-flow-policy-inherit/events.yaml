@@ -1,3 +1,5 @@
 review.requested:
   score: integer?
 review.done: {}
+check.requested:
+  score: integer?

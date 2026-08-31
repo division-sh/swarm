@@ -20,10 +20,14 @@ func AdmitFlowIdentity(raw string) (FlowIdentity, error) {
 	if raw != strings.TrimSpace(raw) {
 		return FlowIdentity{}, fmt.Errorf("flow path is not canonical")
 	}
-	value := strings.ReplaceAll(raw, "\\", "/")
-	if value == "" || value == "." {
-		value = "."
-	} else if path.Clean(value) != value || strings.HasPrefix(value, "/") || value == ".." || strings.HasPrefix(value, "../") {
+	if raw == "" {
+		return FlowIdentity{}, fmt.Errorf("flow path is required; use %q for the selected root", ".")
+	}
+	if strings.Contains(raw, "\\") {
+		return FlowIdentity{}, fmt.Errorf("flow path %q is not canonical; use slash-separated spelling", raw)
+	}
+	value := raw
+	if value != "." && (path.Clean(value) != value || strings.HasPrefix(value, "/") || value == ".." || strings.HasPrefix(value, "../")) {
 		return FlowIdentity{}, fmt.Errorf("flow path %q is not canonical", raw)
 	}
 	segments := strings.Split(value, "/")

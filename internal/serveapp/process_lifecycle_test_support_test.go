@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
@@ -131,7 +132,10 @@ func (s stubWorkspaceLifecycle) EnsurePrereqs(context.Context) error { return s.
 func (s stubWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error {
 	return s.systemErr
 }
-func (stubWorkspaceLifecycle) SetBundleScope(string)                                {}
+func (stubWorkspaceLifecycle) BindSourceProjection(*sourceartifact.RuntimeProjection) error {
+	return nil
+}
+func (stubWorkspaceLifecycle) ReleaseSourceProjection(context.Context) error        { return nil }
 func (stubWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error  { return nil }
 func (stubWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error    { return nil }
 func (stubWorkspaceLifecycle) SetDataProjectionProvider(runtimedataaccess.Provider) {}

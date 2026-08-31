@@ -144,11 +144,9 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 		t.Fatalf("unsupported select resolution mode %d", opts.Mode)
 	}
 	root := CopyExample(t, TemplateSelectExisting)
-	rootSchema := filepath.Join(root, "schema.yaml")
 	accountSchema := filepath.Join(root, "account", "schema.yaml")
 	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
 		"  id: account-node\n", "  id: account-node-{instance_id}\n")
-	applyClosedReplacement(t, rootSchema, "  - event: account.setup\n    from: producer\n    to: account\n", "")
 	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
 		"      - event: account.ready\n        resolution:\n          mode: select\n",
@@ -191,9 +189,11 @@ func CopyNestedProducerTemplateSelectResolution(t testing.TB, opts TemplateSelec
 	if err := os.Rename(filepath.Join(root, "producer"), nestedProducer); err != nil {
 		t.Fatalf("move producer into nested flow: %v", err)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"    from: producer\n    to: account\n",
-		"    from: left/child/producer\n    to: account\n")
+	for _, event := range []string{"account.setup", "account.ready"} {
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+			"  - event: "+event+"\n    from: producer\n    to: account\n",
+			"  - event: "+event+"\n    from: left/child/producer\n    to: account\n")
+	}
 	return root
 }
 

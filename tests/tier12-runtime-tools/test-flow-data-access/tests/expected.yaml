@@ -1,5 +1,5 @@
 trigger:
-  event: support.requested
+  event: support/support.requested
   payload:
 expected:
 

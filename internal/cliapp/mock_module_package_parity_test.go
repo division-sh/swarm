@@ -9,13 +9,11 @@ import (
 	"testing"
 )
 
-func TestVerifyCommandLoadsPackageRelativeMockModuleStandaloneAndImported(t *testing.T) {
+func TestVerifyCommandLoadsFlowRelativeMockModuleStandaloneAndNested(t *testing.T) {
 	root := t.TempDir()
 	child := filepath.Join(root, "bot")
 
-	writeVerifyMockPackageFile(t, filepath.Join(root, "events.yaml"), "assistant.requested:\n  message: text?\n")
-
-	writeVerifyMockPackageFile(t, filepath.Join(child, "agents.yaml"), `assistant:
+	writeVerifyMockFlowFile(t, filepath.Join(child, "agents.yaml"), `assistant:
   id: assistant
   role: helper
   model: regular
@@ -26,10 +24,10 @@ func TestVerifyCommandLoadsPackageRelativeMockModuleStandaloneAndImported(t *tes
     kind: python
     module: mocks/assistant.py
 `)
-	writeVerifyMockPackageFile(t, filepath.Join(child, "events.yaml"), `assistant.requested:
+	writeVerifyMockFlowFile(t, filepath.Join(child, "events.yaml"), `assistant.requested:
   message: text?
 `)
-	writeVerifyMockPackageFile(t, filepath.Join(child, "mocks", "assistant.py"), "def handle(input):\n    return {'text': 'verified'}\n")
+	writeVerifyMockFlowFile(t, filepath.Join(child, "mocks", "assistant.py"), "def handle(input):\n    return {'text': 'verified'}\n")
 	config := writeTestVerifyRuntimeConfig(t)
 	for _, sourceRoot := range []string{child, root} {
 		t.Run(filepath.Base(sourceRoot), func(t *testing.T) {
@@ -48,7 +46,7 @@ func TestVerifyCommandLoadsPackageRelativeMockModuleStandaloneAndImported(t *tes
 	}
 }
 
-func writeVerifyMockPackageFile(t *testing.T, path, content string) {
+func writeVerifyMockFlowFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

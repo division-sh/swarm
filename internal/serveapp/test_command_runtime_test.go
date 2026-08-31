@@ -96,7 +96,7 @@ func TestSwarmTestConsumesLiveSourceArtifactAcrossSupportedBackendsAndModes(t *t
 				t.Setenv("ANTHROPIC_API_KEY", "")
 				t.Setenv("TELEGRAM_BOT_TOKEN", "")
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-				sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+				sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 				testsDir := filepath.Join(sourceRoot, "tests")
 				if err := os.MkdirAll(testsDir, 0o755); err != nil {
 					t.Fatalf("create authored scenario directory: %v", err)

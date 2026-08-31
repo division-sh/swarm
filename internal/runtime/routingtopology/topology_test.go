@@ -421,7 +421,7 @@ func TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge(t *testing.T
 	})
 }
 
-func TestBuildProjectsImportedWildcardConsumerAsTypedPubSub(t *testing.T) {
+func TestBuildRejectsImportedWildcardAsTypedPubSub(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -435,53 +435,8 @@ func TestBuildProjectsImportedWildcardConsumerAsTypedPubSub(t *testing.T) {
 	topology := Build(semanticview.Wrap(bundle))
 	for _, edge := range topology.Edges {
 		if edge.Event.Canonical == "child/grandchild/task.done" && edge.Consumer.NodeID == "collector" && edge.Consumer.Pattern {
-			if edge.Scope != DeliveryScopeTypedPubSub {
-				t.Fatalf("wildcard edge scope = %q, want typed pub/sub", edge.Scope)
-			}
-			if edge.TypedPubSub == nil || edge.TypedPubSub.Match != "pattern" || edge.TypedPubSub.Boundary != "flow_tree" || edge.TypedPubSub.Authorization != nil {
-				t.Fatalf("wildcard edge proof = %#v, want direct flow-tree pattern without retired import authorization", edge.TypedPubSub)
-			}
-			return
+			t.Fatalf("topology edge = %#v, cross-flow wildcard must not become typed pub/sub authority", edge)
 		}
-	}
-	t.Fatalf("topology edges = %#v, want imported wildcard consumer", topology.Edges)
-}
-
-func TestIssueViewsProjectsTypedPubSubAmbiguityWithoutEdgeAuthority(t *testing.T) {
-	issues := issueViews(nil, []semanticview.TypedPubSubConsumerIssue{{
-		Failure:  semanticview.TypedPubSubFailureAuthorizationAmbiguous,
-		Producer: semanticview.AuthoredEventEndpoint{ID: "producer"},
-		Consumer: semanticview.AuthoredEventEndpoint{ID: "consumer"},
-		Authorizations: []semanticview.TypedPubSubAuthorizationProof{
-			{SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant"},
-			{SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant"},
-		},
-	}})
-	if len(issues) != 1 || issues[0].Failure != semanticview.TypedPubSubFailureAuthorizationAmbiguous || issues[0].From != "producer" || issues[0].To != "consumer" {
-		t.Fatalf("issues = %#v, want one typed ambiguity projection", issues)
-	}
-}
-
-func TestEdgeIDIncludesTypedPubSubAuthorizationProof(t *testing.T) {
-	base := Edge{
-		Scope:    DeliveryScopeTypedPubSub,
-		Event:    EventIdentity{Canonical: "producer/task.done"},
-		Producer: Endpoint{ID: "producer"},
-		Consumer: Endpoint{ID: "consumer"},
-		TypedPubSub: &TypedPubSub{
-			Match:    "pattern",
-			Boundary: "import_boundary",
-			Authorization: &TypedPubSubAuthorizationProof{
-				SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "first", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant",
-			},
-		},
-	}
-	changed := base
-	changed.TypedPubSub = &TypedPubSub{Match: base.TypedPubSub.Match, Boundary: base.TypedPubSub.Boundary, Authorization: &TypedPubSubAuthorizationProof{
-		SourceFlowPath: ".", TargetFlowPath: "consumer", RouteLabel: "second", EventPattern: "producer/task.done", MatchPattern: "**/task.done", LocalizedEvent: "task.done", RouteSource: "flow_tree_wildcard_grant",
-	}}
-	if edgeID(base) == edgeID(changed) {
-		t.Fatal("edge identity hid a distinct import authorization proof")
 	}
 }
 

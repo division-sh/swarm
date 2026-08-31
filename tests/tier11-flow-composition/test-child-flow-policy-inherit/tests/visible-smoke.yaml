@@ -1,6 +1,6 @@
 name: test-child-flow-policy-inherit visible smoke
 steps:
-  - publish: child/check.requested
+  - publish: check.requested
     payload:
       score: 55
 expect:

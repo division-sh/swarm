@@ -3,4 +3,8 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [review.requested]
+    events: [review.requested, check.requested]
+connect:
+  - event: check.requested
+    from: .
+    to: child

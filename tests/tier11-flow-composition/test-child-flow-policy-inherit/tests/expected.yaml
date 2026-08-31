@@ -1,5 +1,5 @@
 trigger:
-  event: child/check.requested
+  event: check.requested
   payload:
     score: 55
 

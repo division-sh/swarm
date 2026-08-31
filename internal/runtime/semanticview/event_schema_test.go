@@ -139,8 +139,8 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 	if proof.Local != "child.done" {
 		t.Fatalf("Local = %q, want child.done", proof.Local)
 	}
-	if proof.CatalogKey != "child.done" {
-		t.Fatalf("CatalogKey = %q, want child.done", proof.CatalogKey)
+	if proof.CatalogKey != "child/child.done" {
+		t.Fatalf("CatalogKey = %q, want child/child.done", proof.CatalogKey)
 	}
 	if proof.EventKey() != "child/inst-1/child.done" {
 		t.Fatalf("EventKey = %q, want concrete event identity", proof.EventKey())

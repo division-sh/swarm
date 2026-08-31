@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -201,7 +200,6 @@ var bootCheckRegistry = []Check{
 	{ID: "declared_agent_name_valid", Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
 	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
-	{ID: semanticview.TypedPubSubFailureAuthorizationAmbiguous, Severity: SeverityHardInvalidity, Run: checkTypedPubSubAuthorization},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "legacy_qualified_subscription", Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
@@ -1510,48 +1508,6 @@ func normalizeStringSliceLocal(items []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func eventExists(source semanticview.Source, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return false
-	}
-	if runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), eventType) || strings.HasPrefix(eventType, "platform.") {
-		return true
-	}
-	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
-		return true
-	}
-	if _, ok := source.EventEntry(eventType); ok {
-		return true
-	}
-	if !strings.Contains(eventType, "*") {
-		return false
-	}
-	for _, candidate := range runtimecontracts.PlatformEventCatalogNames(source.PlatformSpec()) {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	for candidate := range source.ResolvedEventCatalog() {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	for candidate := range source.EventEntries() {
-		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
-			return true
-		}
-	}
-	return false
-}
-
-func routeMatchesLocal(pattern, eventType string) bool {
-	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func stringValueLocal(v any) string {

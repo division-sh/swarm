@@ -401,6 +401,10 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 			order = append(order, "cleanup")
 			return runtimedestructivereset.ContainerResetResult{}, cleanupErr
 		},
+		release: func(context.Context) error {
+			order = append(order, "release_projection")
+			return nil
+		},
 	}
 
 	err := closeServeRuntime(context.Background(), supervisor, cliapp.ServeOptions{
@@ -410,8 +414,8 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) || !strings.Contains(err.Error(), cleanupErr.Error()) {
 		t.Fatalf("closeServeRuntime err = %v, want joined shutdown and cleanup errors", err)
 	}
-	if got := strings.Join(order, ","); got != "shutdown,cleanup" {
-		t.Fatalf("order = %s, want shutdown,cleanup", got)
+	if got := strings.Join(order, ","); got != "shutdown,cleanup,release_projection" {
+		t.Fatalf("order = %s, want shutdown,cleanup,release_projection", got)
 	}
 	if got := supervisor.CurrentRuntime(); got != nil {
 		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
@@ -8577,15 +8581,24 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 type serveRuntimeWorkspaceStub struct {
 	stubWorkspaceLifecycle
 	cleanup           func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
+	release           func(context.Context) error
 	managedContainers []runtimedestructivereset.ContainerRef
 	stoppedContainers *[]string
 	bundleScopes      *[]string
 }
 
-func (s serveRuntimeWorkspaceStub) SetBundleScope(bundleHash string) {
+func (s serveRuntimeWorkspaceStub) BindSourceProjection(projection *sourceartifact.RuntimeProjection) error {
 	if s.bundleScopes != nil {
-		*s.bundleScopes = append(*s.bundleScopes, bundleHash)
+		*s.bundleScopes = append(*s.bundleScopes, projection.BundleHash())
 	}
+	return nil
+}
+
+func (s serveRuntimeWorkspaceStub) ReleaseSourceProjection(ctx context.Context) error {
+	if s.release != nil {
+		return s.release(ctx)
+	}
+	return nil
 }
 
 func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {

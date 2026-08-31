@@ -167,7 +167,7 @@ func deadEventTypedConsumerMatches(source semanticview.Source, census semanticvi
 		FlowID:    strings.TrimSpace(decl.FlowID),
 	}
 	producer.Event = semanticview.ResolveFlowEventProof(source, decl.FlowID, decl.Canonical)
-	matches, _ := census.ResolveTypedPubSubConsumerMatches(producer)
+	matches := census.ResolveTypedPubSubConsumerMatches(producer)
 	return matches
 }
 

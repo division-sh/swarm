@@ -241,12 +241,13 @@ func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.
 		t.Fatal(err)
 	}
 	bootTarget := &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}
-	options, err := bindSelectedContractWorkspaceProjection(LoadedSelectedContractSource{
+	options, projectionLease, err := bindSelectedContractWorkspaceProjection(LoadedSelectedContractSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), SourceArtifactFact: sourceFact, RuntimeProjection: projection,
 	}, SelectedContractAgentRuntimeOptions{Workspace: selectedForkWorkspaceLifecycle{target: bootTarget}})
 	if err != nil {
 		t.Fatalf("bindSelectedContractWorkspaceProjection: %v", err)
 	}
+	t.Cleanup(func() { _ = projectionLease.Release() })
 	target, err := options.Workspace.ResolveWorkspace(context.Background(), runtimeactors.AgentConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +259,7 @@ func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.
 		target.Mounts[0].HostPath != projection.PrivateRoot() || target.Mounts[0].Access != workspace.MountAccessReadOnly {
 		t.Fatalf("selected source mounts = %#v", target.Mounts)
 	}
-	_, err = bindSelectedContractWorkspaceProjection(LoadedSelectedContractSource{
+	_, _, err = bindSelectedContractWorkspaceProjection(LoadedSelectedContractSource{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), SourceArtifactFact: sourceFact,
 	}, SelectedContractAgentRuntimeOptions{Workspace: selectedForkWorkspaceLifecycle{
 		target: bootTarget, bundleHash: "bundle-v2:sha256:" + strings.Repeat("f", 64),
@@ -266,6 +267,123 @@ func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.
 	if err == nil || !strings.Contains(err.Error(), "selected source requires") {
 		t.Fatalf("mismatched boot source binding error = %v", err)
 	}
+}
+
+func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionRoot := projection.PrivateRoot()
+	t.Cleanup(func() { _ = projection.Release() })
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := selectedContractTestRootAgentIdentity(t, "missing-agent")
+	planning := runfork.RunForkSelectedContractRecipientPlanning{
+		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
+		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
+			Recipients: []runfork.RunForkContractFrontierRecipient{
+				testAgentFrontierRecipient("missing-agent", "", "", agent),
+			},
+		}},
+	}
+	_, err = prepareSelectedContractAgentRuntimeMaterialization(context.Background(), LoadedSelectedContractSource{
+		Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		SourceArtifactFact: sourceFact,
+		RuntimeProjection:  projection,
+	}, planning, SelectedContractAgentRuntimeOptions{Workspace: workspace.NewHostManager()})
+	if err == nil || !strings.Contains(err.Error(), "process topology capability") {
+		t.Fatalf("planning error = %v, want missing process topology capability", err)
+	}
+	if err := projection.Release(); err != nil {
+		t.Fatalf("release loader projection: %v", err)
+	}
+	if _, err := os.Stat(projectionRoot); !os.IsNotExist(err) {
+		t.Fatalf("rebound workspace retained projection after planning failure: stat error = %v", err)
+	}
+}
+
+func TestSelectedContractAgentRuntimeShutdownReleasesReboundProjection(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionRoot := projection.PrivateRoot()
+	t.Cleanup(func() { _ = projection.Release() })
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, projectionLease, err := bindSelectedContractWorkspaceProjection(LoadedSelectedContractSource{
+		Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		SourceArtifactFact: sourceFact,
+		RuntimeProjection:  projection,
+	}, SelectedContractAgentRuntimeOptions{Workspace: workspace.NewHostManager()})
+	if err != nil {
+		t.Fatalf("bindSelectedContractWorkspaceProjection: %v", err)
+	}
+	runtime := &selectedContractAgentRuntime{workspaceProjection: projectionLease}
+	if err := runtime.Shutdown(); err != nil {
+		t.Fatalf("shutdown selected-contract runtime: %v", err)
+	}
+	if err := runtime.Shutdown(); err != nil {
+		t.Fatalf("repeat selected-contract runtime shutdown: %v", err)
+	}
+	if err := projection.Release(); err != nil {
+		t.Fatalf("release loader projection: %v", err)
+	}
+	if _, err := os.Stat(projectionRoot); !os.IsNotExist(err) {
+		t.Fatalf("rebound workspace retained projection after runtime shutdown: stat error = %v", err)
+	}
+}
+
+func TestSelectedContractAgentRuntimeShutdownRetriesUncertainProjectionRelease(t *testing.T) {
+	probe := &selectedContractWorkspaceReleaseProbe{releaseFailures: 1}
+	runtime := &selectedContractAgentRuntime{workspaceProjection: &selectedContractWorkspaceProjection{lifecycle: probe}}
+	if err := runtime.Shutdown(); err == nil || !strings.Contains(err.Error(), "release acknowledgment uncertain") {
+		t.Fatalf("first shutdown error = %v, want uncertain release", err)
+	}
+	if err := runtime.Shutdown(); err != nil {
+		t.Fatalf("retry selected-contract runtime shutdown: %v", err)
+	}
+	if err := runtime.Shutdown(); err != nil {
+		t.Fatalf("repeat successful selected-contract runtime shutdown: %v", err)
+	}
+	if probe.releaseCalls != 2 {
+		t.Fatalf("workspace projection release calls = %d, want one failed attempt and one successful retry", probe.releaseCalls)
+	}
+}
+
+type selectedContractWorkspaceReleaseProbe struct {
+	workspace.Lifecycle
+	releaseCalls    int
+	releaseFailures int
+}
+
+func (p *selectedContractWorkspaceReleaseProbe) ReleaseSourceProjection(context.Context) error {
+	p.releaseCalls++
+	if p.releaseCalls <= p.releaseFailures {
+		return errors.New("release acknowledgment uncertain")
+	}
+	return nil
 }
 
 func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutation(t *testing.T) {
@@ -1935,7 +2053,7 @@ fi
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			Config: cfg, ProviderCredentials: providerCredentials, ProcessCapability: processCapability,
-			Workspace: selectedForkWorkspaceLifecycle{bundleHash: loaded.SourceArtifactFact.BundleHash(), target: &workspace.Target{
+			Workspace: selectedForkWorkspaceLifecycle{bundleHash: loaded.SourceArtifactFact.BundleHash(), projectionIdentity: "runtime-projection-v1:test", target: &workspace.Target{
 				Backend: workspace.BackendDocker, Container: "swarm-agent-selected-fork", Workdir: "/workspace",
 			}},
 			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
@@ -2030,8 +2148,9 @@ func capturedSelectedForkArgValue(t testing.TB, raw []byte, name string) string 
 }
 
 type selectedForkWorkspaceLifecycle struct {
-	target     *workspace.Target
-	bundleHash string
+	target             *workspace.Target
+	bundleHash         string
+	projectionIdentity string
 }
 
 func (s selectedForkWorkspaceLifecycle) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, _ semanticview.Source) (workspace.Lifecycle, error) {
@@ -2046,10 +2165,13 @@ func (s selectedForkWorkspaceLifecycle) RebindSourceProjection(projection *sourc
 		Access:      workspace.MountAccessReadOnly,
 	})
 	target.Mounts = mounts
-	return selectedForkWorkspaceLifecycle{target: &target, bundleHash: projection.BundleHash()}, nil
+	return selectedForkWorkspaceLifecycle{target: &target, bundleHash: projection.BundleHash(), projectionIdentity: projection.Identity()}, nil
 }
 
 func (s selectedForkWorkspaceLifecycle) SourceProjectionBundleHash() string { return s.bundleHash }
+func (s selectedForkWorkspaceLifecycle) SourceProjectionIdentity() string {
+	return s.projectionIdentity
+}
 
 func (s selectedForkWorkspaceLifecycle) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return s.target, nil
@@ -2062,9 +2184,12 @@ func (s selectedForkWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(c
 func (selectedForkWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }
-func (selectedForkWorkspaceLifecycle) SetBundleScope(string)                        {}
-func (selectedForkWorkspaceLifecycle) EnsurePrereqs(context.Context) error          { return nil }
-func (selectedForkWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error { return nil }
+func (selectedForkWorkspaceLifecycle) BindSourceProjection(*sourceartifact.RuntimeProjection) error {
+	return nil
+}
+func (selectedForkWorkspaceLifecycle) ReleaseSourceProjection(context.Context) error { return nil }
+func (selectedForkWorkspaceLifecycle) EnsurePrereqs(context.Context) error           { return nil }
+func (selectedForkWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error  { return nil }
 func (selectedForkWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error {
 	return nil
 }

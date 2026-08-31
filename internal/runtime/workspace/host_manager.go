@@ -17,19 +17,21 @@ import (
 )
 
 type HostConfig struct {
-	WorkspaceRoot    string
-	SharedDataSource string
-	DataMountPoint   string
-	SourceProjection *sourceartifact.RuntimeProjection
-	SourceMountPoint string
-	BundleHash       string
-	BundleScope      string
+	WorkspaceRoot      string
+	SharedDataSource   string
+	DataMountPoint     string
+	SourceProjection   *sourceartifact.RuntimeProjection
+	SourceMountPoint   string
+	BundleHash         string
+	BundleScope        string
+	SourceProjectionID string
 }
 
 type HostManager struct {
-	cfg    HostConfig
-	source semanticview.Source
-	data   runtimedataaccess.Provider
+	cfg             HostConfig
+	source          semanticview.Source
+	data            runtimedataaccess.Provider
+	ownedProjection *sourceartifact.RuntimeProjection
 }
 
 func DefaultHostConfig() HostConfig {
@@ -95,7 +97,9 @@ func (m *HostManager) RebindSourceProjection(projection *sourceartifact.RuntimeP
 	clone.SetConfig(cfg)
 	clone.SetSemanticSource(source)
 	clone.SetDataProjectionProvider(m.data)
-	clone.SetBundleScope(projection.BundleHash())
+	if err := clone.BindSourceProjection(projection); err != nil {
+		return nil, err
+	}
 	return clone, nil
 }
 
@@ -106,14 +110,50 @@ func (m *HostManager) SourceProjectionBundleHash() string {
 	return m.cfg.SourceProjection.BundleHash()
 }
 
-func (m *HostManager) SetBundleScope(bundleHash string) {
+func (m *HostManager) SourceProjectionIdentity() string {
 	if m == nil {
-		return
+		return ""
+	}
+	return strings.TrimSpace(m.cfg.SourceProjectionID)
+}
+
+func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimeProjection) error {
+	if m == nil {
+		return fmt.Errorf("host workspace manager is required")
+	}
+	if projection == nil {
+		return fmt.Errorf("runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return err
+	}
+	if strings.TrimSpace(projection.Identity()) == "" {
+		return fmt.Errorf("runtime source projection identity is required")
+	}
+	if m.ownedProjection != nil {
+		return fmt.Errorf("host workspace source projection is already bound")
+	}
+	ownedProjection, err := projection.Retain()
+	if err != nil {
+		return fmt.Errorf("retain runtime source projection: %w", err)
 	}
 	cfg := m.cfg
-	cfg.BundleHash = strings.TrimSpace(bundleHash)
-	cfg.BundleScope = bundleScopeKey(bundleHash)
+	cfg.SourceProjection = projection
+	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
+	cfg.SourceProjectionID = strings.TrimSpace(projection.Identity())
+	cfg.BundleScope = projectionScopeKey(cfg.BundleHash, cfg.SourceProjectionID)
 	m.cfg = cfg
+	m.ownedProjection = ownedProjection
+	return nil
+}
+
+func (m *HostManager) ReleaseSourceProjection(context.Context) error {
+	if m == nil || m.ownedProjection == nil {
+		return nil
+	}
+	projection := m.ownedProjection
+	m.ownedProjection = nil
+	return projection.Release()
 }
 
 func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Source) error {

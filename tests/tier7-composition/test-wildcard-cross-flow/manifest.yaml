@@ -1,4 +1,4 @@
 name: test-wildcard-cross-flow
 version: 1.0.0
-description: Wildcard subscription matches events from multiple flow instances.
+description: Retired wildcard-cross-flow fixture preserved as an explicit-connect protocol companion.
 platform_version: ">=0.7.0 <0.8.0"

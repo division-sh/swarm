@@ -152,7 +152,7 @@ func appendExternalMetadataEvidence(source Source, flowID, eventType string, app
 
 func appendInternalTopologyEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	census := BuildAuthoredEventEndpointCensus(source)
-	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
 		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
 		}
@@ -162,18 +162,6 @@ func appendInternalTopologyEvidence(source Source, flowID, eventType string, app
 			FlowID:    endpoint.FlowID,
 			EventType: eventType,
 			Detail:    detail,
-		})
-	}
-	for _, endpoint := range census.MatchingOutputPinsAcrossFlows(flowID, eventType) {
-		if strings.TrimSpace(endpoint.FlowID) == strings.TrimSpace(flowID) {
-			continue
-		}
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-			FlowID:    endpoint.FlowID,
-			EventType: eventType,
-			Pin:       endpoint.PinName,
-			Detail:    fmt.Sprintf("sibling flow %s output pin %s", endpoint.FlowID, endpoint.PinName),
 		})
 	}
 }

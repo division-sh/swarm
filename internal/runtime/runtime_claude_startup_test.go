@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func testToolGatewayBinding(hostURL, workspaceURL, token string) toolgateway.Binding {
@@ -84,9 +85,12 @@ func (s claudeStartupWorkspaceStub) ResolveWorkspaceForCapabilityAdmission(ctx c
 func (s claudeStartupWorkspaceStub) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }
-func (s claudeStartupWorkspaceStub) EnsurePrereqs(context.Context) error                 { return nil }
-func (s claudeStartupWorkspaceStub) EnsureSystemWorkspaces(context.Context) error        { return nil }
-func (s claudeStartupWorkspaceStub) SetBundleScope(string)                               {}
+func (s claudeStartupWorkspaceStub) EnsurePrereqs(context.Context) error          { return nil }
+func (s claudeStartupWorkspaceStub) EnsureSystemWorkspaces(context.Context) error { return nil }
+func (s claudeStartupWorkspaceStub) BindSourceProjection(*sourceartifact.RuntimeProjection) error {
+	return nil
+}
+func (s claudeStartupWorkspaceStub) ReleaseSourceProjection(context.Context) error       { return nil }
 func (s claudeStartupWorkspaceStub) EnsureEntityWorkspace(context.Context, string) error { return nil }
 func (s claudeStartupWorkspaceStub) StopEntityWorkspace(context.Context, string) error   { return nil }
 

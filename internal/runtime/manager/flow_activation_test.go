@@ -4734,10 +4734,10 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
 			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}})
 			namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
-			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
-			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
 			}
 		})

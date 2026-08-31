@@ -2,12 +2,30 @@ package destructivereset
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestPreservedResourcesJSONUsesOnlySourceArtifacts(t *testing.T) {
+	raw, err := json.Marshal(PreservedResources{SourceArtifacts: true})
+	if err != nil {
+		t.Fatalf("marshal preserved resources: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode preserved resources: %v", err)
+	}
+	if got, ok := decoded["source_artifacts"]; !ok || got != true {
+		t.Fatalf("source_artifacts = %#v, present %v, want true", got, ok)
+	}
+	if _, exists := decoded["bundle_contracts"]; exists {
+		t.Fatalf("retired bundle_contracts key survived in %s", raw)
+	}
+}
 
 func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testing.T) {
 	reader := &recordingInventoryReader{}

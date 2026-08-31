@@ -24,7 +24,6 @@ const (
 	AuthoredSubscriptionLocalExact          AuthoredSubscriptionAdmissionClass = "local_exact"
 	AuthoredSubscriptionSameScopeAgentExact AuthoredSubscriptionAdmissionClass = "same_scope_agent_exact"
 	AuthoredSubscriptionLocalPattern        AuthoredSubscriptionAdmissionClass = "local_pattern"
-	AuthoredSubscriptionImportedPattern     AuthoredSubscriptionAdmissionClass = "imported_pattern"
 )
 
 type AuthoredSubscriptionFailure string
@@ -97,7 +96,7 @@ func (a AuthoredSubscriptionAdmission) Message() string {
 }
 
 func (a AuthoredSubscriptionAdmission) Pattern() bool {
-	return a.class == AuthoredSubscriptionLocalPattern || a.class == AuthoredSubscriptionImportedPattern
+	return a.class == AuthoredSubscriptionLocalPattern
 }
 
 func (a AuthoredSubscriptionAdmission) Matches(eventType string) bool {
@@ -136,7 +135,7 @@ func (a AuthoredSubscriptionAdmission) Matches(eventType string) bool {
 }
 
 func (a AuthoredSubscriptionAdmission) MatchesReceiverInput(eventType, flowPath string, inputEvents []string) bool {
-	if !a.Admitted() || a.class == AuthoredSubscriptionImportedPattern {
+	if !a.Admitted() {
 		return false
 	}
 	localized := eventidentity.LocalizeForFlow(flowPath, inputEvents, eventType)
@@ -179,6 +178,10 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureTimerPatternForbidden,
 				fmt.Sprintf("timer %q event reference %q must be an exact local event name", req.ConsumerID, req.Authored))
 		}
+		if strings.Contains(req.Authored, "/") {
+			return failedAuthoredSubscription(result, AuthoredSubscriptionFailurePatternUnauthorized,
+				fmt.Sprintf("%s %q wildcard subscription %q must use a flow-local event pattern; declare output/input pins and connect in the nearest common ancestor schema.yaml for cross-flow delivery", req.ConsumerKind, req.ConsumerID, req.Authored))
+		}
 		pattern := ""
 		if req.ConsumerKind == AuthoredSubscriptionConsumerAgent {
 			resolved, err := admitNonImportAgentPattern(req.FlowPath, req.Authored)
@@ -188,7 +191,7 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			}
 			pattern = resolved
 		} else {
-			pattern = admitNonImportNodePattern(source, req)
+			pattern = admitNonImportNodePattern(req)
 		}
 		if pattern == "" {
 			return failedAuthoredSubscription(result, AuthoredSubscriptionFailurePatternUnauthorized,
@@ -234,16 +237,11 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	return result
 }
 
-func admitNonImportNodePattern(source Source, req AuthoredSubscriptionRequest) string {
-	if req.FlowPath != "" && !strings.Contains(req.Authored, "/") {
+func admitNonImportNodePattern(req AuthoredSubscriptionRequest) string {
+	if req.FlowPath != "" {
 		return req.FlowPath + "/" + req.Authored
 	}
-	scope := eventidentity.Scope{
-		Path:        req.FlowPath,
-		LocalEvents: sortedSubscriptionEventSet(req.LocalEvents),
-		InputEvents: append([]string(nil), req.InputEvents...),
-	}
-	return scope.ResolveSubscriptionPattern(req.Authored, authoredSubscriptionDescendants(source, req.FlowID))
+	return req.Authored
 }
 
 func ClassifyExecutableNodeSubscription(source Source, node runtimeidentity.ExecutableNode, authored string) AuthoredSubscriptionAdmission {
@@ -406,26 +404,6 @@ func authoredSubscriptionScopeEvents(scope FlowScope) (map[string]struct{}, []st
 		local[eventType] = struct{}{}
 	}
 	return local, append([]string(nil), scope.InputEvents...)
-}
-
-func authoredSubscriptionDescendants(source Source, flowID string) []eventidentity.DescendantScope {
-	if source == nil || strings.TrimSpace(flowID) == "" {
-		return nil
-	}
-	parentPath := eventidentity.Normalize(source.FlowPath(flowID))
-	if parentPath == "" {
-		return nil
-	}
-	out := make([]eventidentity.DescendantScope, 0)
-	for _, scope := range source.FlowScopes() {
-		path := eventidentity.Normalize(scope.Path)
-		if path == "" || !strings.HasPrefix(path, parentPath+"/") {
-			continue
-		}
-		local, _ := authoredSubscriptionScopeEvents(scope)
-		out = append(out, eventidentity.DescendantScope{Path: path, LocalEvents: sortedSubscriptionEventSet(local)})
-	}
-	return out
 }
 
 func sourceFlowPath(source Source, flowID string) string {

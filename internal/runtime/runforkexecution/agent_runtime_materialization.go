@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -76,14 +77,45 @@ type SelectedContractAgentRuntimeMaterialization struct {
 }
 
 type selectedContractAgentRuntimePlan struct {
-	Proof   SelectedContractAgentRuntimeMaterialization
-	Records []runtimemanager.PersistedAgent
-	Options SelectedContractAgentRuntimeOptions
+	Proof               SelectedContractAgentRuntimeMaterialization
+	Records             []runtimemanager.PersistedAgent
+	Options             SelectedContractAgentRuntimeOptions
+	workspaceProjection *selectedContractWorkspaceProjection
 }
 
 type selectedContractAgentRuntime struct {
-	manager *runtimemanager.AgentManager
-	cleanup func()
+	manager             *runtimemanager.AgentManager
+	cleanup             func()
+	workspaceProjection *selectedContractWorkspaceProjection
+}
+
+type selectedContractWorkspaceProjection struct {
+	lifecycle workspace.Lifecycle
+	mu        sync.Mutex
+	released  bool
+}
+
+func (p *selectedContractWorkspaceProjection) Release() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.released {
+		return nil
+	}
+	if err := p.lifecycle.ReleaseSourceProjection(context.Background()); err != nil {
+		return err
+	}
+	p.released = true
+	return nil
+}
+
+func (p *selectedContractAgentRuntimePlan) releaseWorkspaceProjection() error {
+	if p == nil {
+		return nil
+	}
+	return p.workspaceProjection.Release()
 }
 
 type selectedContractAgentRuntimeFactory struct {
@@ -119,7 +151,7 @@ func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, 
 	return options
 }
 
-func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loaded LoadedSelectedContractSource, planning runfork.RunForkSelectedContractRecipientPlanning, options SelectedContractAgentRuntimeOptions) (selectedContractAgentRuntimePlan, error) {
+func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loaded LoadedSelectedContractSource, planning runfork.RunForkSelectedContractRecipientPlanning, options SelectedContractAgentRuntimeOptions) (_ selectedContractAgentRuntimePlan, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
@@ -142,10 +174,15 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if len(agents) == 0 {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, nil
 	}
-	options, err = bindSelectedContractWorkspaceProjection(loaded, options)
+	options, workspaceProjection, err := bindSelectedContractWorkspaceProjection(loaded, options)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
 	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, workspaceProjection.Release())
+		}
+	}()
 	records, err := selectedContractStaticAgentRecords(loaded.Source)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
@@ -216,25 +253,25 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		return selectedContractAgentRuntimePlan{Proof: proof, Records: selected, Options: options}, selectedContractAgentRuntimeUnsupportedError(agents, "missing selected-fork agent factory/runtime configuration")
 	}
 	proof.MaterializationSupported = true
-	return selectedContractAgentRuntimePlan{Proof: proof, Records: selected, Options: options}, nil
+	return selectedContractAgentRuntimePlan{Proof: proof, Records: selected, Options: options, workspaceProjection: workspaceProjection}, nil
 }
 
-func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource, options SelectedContractAgentRuntimeOptions) (SelectedContractAgentRuntimeOptions, error) {
+func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource, options SelectedContractAgentRuntimeOptions) (SelectedContractAgentRuntimeOptions, *selectedContractWorkspaceProjection, error) {
 	if options.Workspace == nil {
-		return options, nil
+		return options, nil, nil
 	}
 	if loaded.RuntimeProjection == nil {
 		if err := workspace.RequireSourceProjectionBinding(options.Workspace, loaded.SourceArtifactFact.BundleHash()); err != nil {
-			return options, fmt.Errorf("prove selected-contract workspace source projection: %w", err)
+			return options, nil, fmt.Errorf("prove selected-contract workspace source projection: %w", err)
 		}
-		return options, nil
+		return options, nil, nil
 	}
 	rebound, err := workspace.RebindSourceProjection(options.Workspace, loaded.RuntimeProjection, loaded.Source)
 	if err != nil {
-		return options, fmt.Errorf("bind selected-contract workspace source projection: %w", err)
+		return options, nil, fmt.Errorf("bind selected-contract workspace source projection: %w", err)
 	}
 	options.Workspace = rebound
-	return options, nil
+	return options, &selectedContractWorkspaceProjection{lifecycle: rebound}, nil
 }
 
 func selectedContractStaticAgentRecords(source semanticview.Source) ([]runtimemanager.PersistedAgent, error) {
@@ -298,7 +335,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			ReceiverExecution:  req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
 		}, bus, ports, pipeline)
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
-		return &selectedContractAgentRuntime{manager: manager}, admission, nil
+		return &selectedContractAgentRuntime{manager: manager, workspaceProjection: req.AgentRuntime.workspaceProjection}, admission, nil
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus, pipeline)
 	if err != nil {
@@ -389,7 +426,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		return nil, managedexecution.Admission{}, err
 	}
 	started = true
-	return &selectedContractAgentRuntime{manager: manager, cleanup: builder.cleanup}, admission, nil
+	return &selectedContractAgentRuntime{manager: manager, cleanup: builder.cleanup, workspaceProjection: req.AgentRuntime.workspaceProjection}, admission, nil
 }
 
 func selectedContractManagedExecutionAuthority(ctx context.Context) (managedexecution.Admission, runtimeeffects.Authority, error) {
@@ -587,14 +624,18 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 }
 
 func (r *selectedContractAgentRuntime) Shutdown() error {
-	if r == nil || r.manager == nil {
+	if r == nil {
 		return nil
 	}
-	err := r.manager.Shutdown()
+	var err error
+	if r.manager != nil {
+		err = r.manager.Shutdown()
+	}
 	if r.cleanup != nil {
 		r.cleanup()
 		r.cleanup = nil
 	}
+	err = errors.Join(err, r.workspaceProjection.Release())
 	return err
 }
 

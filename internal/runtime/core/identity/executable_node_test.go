@@ -25,6 +25,18 @@ func TestExecutableNodeDeclarationAndStrictHydration(t *testing.T) {
 	}
 }
 
+func TestFlowIdentityRequiresExactAuthoredSpelling(t *testing.T) {
+	root, err := AdmitFlowIdentity(".")
+	if err != nil || root.String() != "." {
+		t.Fatalf("admit exact root flow = %#v, %v", root, err)
+	}
+	for _, hostile := range []string{"", `orders\review`, " orders", "orders ", "./orders"} {
+		if _, err := AdmitFlowIdentity(hostile); err == nil {
+			t.Fatalf("accepted alternate flow path spelling %q", hostile)
+		}
+	}
+}
+
 func TestExecutableNodeJSONIsStrict(t *testing.T) {
 	ref, err := ParseExecutableNode("orders", "shared")
 	if err != nil {
@@ -41,6 +53,9 @@ func TestExecutableNodeJSONIsStrict(t *testing.T) {
 	for _, hostile := range []string{
 		`{"flow_path":"orders","node_id":"shared","extra":true}`,
 		`{"flow_path":"orders//child","node_id":"shared"}`,
+		`{"flow_path":"orders\\child","node_id":"shared"}`,
+		`{"flow_path":"","node_id":"shared"}`,
+		`{"node_id":"shared"}`,
 		`{"flow_path":"orders","node_id":""}`,
 		`{"flow_path":"orders","flow_id":"orders","node_id":"shared"}`,
 	} {

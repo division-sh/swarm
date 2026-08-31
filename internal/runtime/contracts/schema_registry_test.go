@@ -476,17 +476,8 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		t.Fatalf("review priority enum = %#v, want [urgent]", got)
 	}
 
-	absoluteSchema, absoluteKey, ok := EventSchemaForFlowEvent(bundle, "", "review/task.requested")
-	if !ok {
-		t.Fatal("missing absolute review event schema")
-	}
-	if absoluteKey != "review/task.requested" {
-		t.Fatalf("absolute key = %q, want review/task.requested", absoluteKey)
-	}
-	absoluteProps, _ := absoluteSchema.Schema["properties"].(map[string]any)
-	absolutePriority, _ := absoluteProps["priority"].(map[string]any)
-	if got := absolutePriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "urgent" {
-		t.Fatalf("absolute priority enum = %#v, want [urgent]", got)
+	if _, _, ok := EventSchemaForFlowEvent(bundle, "", "review/task.requested"); ok {
+		t.Fatal("root schema lookup must not search a child declaration by qualified name")
 	}
 
 	instanceSchema, instanceKey, ok := EventSchemaForFlowEvent(bundle, "review", "review/inst-1/task.requested")
@@ -503,7 +494,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	}
 }
 
-func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *testing.T) {
+func TestEventSchemaForFlowEvent_RejectsAncestorDeclarationForChildOutput(t *testing.T) {
 	childFlow := FlowContractView{
 		Paths: FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
@@ -557,21 +548,8 @@ func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *t
 
 	for _, eventType := range []string{"handoff.completed", "child/handoff.completed"} {
 		t.Run(eventType, func(t *testing.T) {
-			schema, key, ok := EventSchemaForFlowEvent(bundle, "child", eventType)
-			if !ok {
-				t.Fatal("missing child output event schema")
-			}
-			if key != "handoff.completed" {
-				t.Fatalf("schema key = %q, want root declaration handoff.completed", key)
-			}
-			props, _ := schema.Schema["properties"].(map[string]any)
-			evidence, _ := props["evidence"].(map[string]any)
-			evidenceProps, _ := evidence["properties"].(map[string]any)
-			if _, ok := evidenceProps["root_field"]; !ok {
-				t.Fatalf("evidence properties = %#v, want root_field", evidenceProps)
-			}
-			if _, ok := evidenceProps["child_field"]; ok {
-				t.Fatalf("evidence properties = %#v, must not use child Evidence override for root-declared event", evidenceProps)
+			if _, _, ok := EventSchemaForFlowEvent(bundle, "child", eventType); ok {
+				t.Fatal("child output must not inherit an ancestor event declaration without compiled connect ownership")
 			}
 		})
 	}

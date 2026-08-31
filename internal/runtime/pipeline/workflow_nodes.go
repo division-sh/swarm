@@ -63,7 +63,7 @@ func workflowNodePolicyForDelivery(ctx context.Context, source semanticview.Sour
 			return policy, true, nil
 		}
 	}
-	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey), true, nil
+	return deriveWorkflowEventPolicy(source, node.Node, resolved.HandlerEventKey), true, nil
 }
 
 func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
@@ -345,7 +345,7 @@ func buildWorkflowNodePolicies(source semanticview.Source, node runtimeidentity.
 		if _, ok := subscribed[eventType]; !ok {
 			continue
 		}
-		policy := deriveWorkflowEventPolicy(source, eventType)
+		policy := deriveWorkflowEventPolicy(source, node, eventType)
 		policies[eventType] = policy
 	}
 	if len(policies) == 0 {
@@ -412,9 +412,9 @@ func workflowNodeExternalEventType(source semanticview.Source, node runtimeident
 	return source.ResolveExecutableNodeEventReference(node, eventType)
 }
 
-func deriveWorkflowEventPolicy(source semanticview.Source, eventType string) WorkflowEventPolicy {
+func deriveWorkflowEventPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) WorkflowEventPolicy {
 	eventType = strings.TrimSpace(eventType)
-	entry, ok := source.EventEntry(eventType)
+	entry, _, ok := source.ResolveExecutableNodeEventCatalogEntry(node, eventType)
 	if !ok {
 		return WorkflowEventPolicy{}
 	}

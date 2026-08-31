@@ -18,6 +18,7 @@ func writeNovelDerivedScenarioBundle(t testing.TB, rootInput bool) string {
 	t.Helper()
 	root := t.TempDir()
 	rootSchema := "\nname: derived-novel-flow\n"
+	rootEvents := ""
 	if rootInput {
 		rootSchema = `
 name: derived-novel-flow
@@ -25,6 +26,10 @@ pins:
   inputs:
     events:
       - {event: fulfillment.requested, source: external}
+`
+		rootEvents = `
+fulfillment.requested:
+  order_id: text
 `
 	}
 	files := map[string]string{
@@ -50,6 +55,9 @@ complete-request:
   event_handlers:
     fulfillment.requested: {}
 `,
+	}
+	if rootEvents != "" {
+		files["events.yaml"] = rootEvents
 	}
 	for relative, body := range files {
 		writeClosedVariantFile(t, root, relative, body)

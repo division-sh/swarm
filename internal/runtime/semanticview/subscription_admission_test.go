@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -52,7 +53,7 @@ func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 }
 
 func TestClassifyAuthoredSubscriptionScopesNonRootNodePatterns(t *testing.T) {
-	for _, authored := range []string{"task.*", "*.done", "*", "missing.*", "*/task.done", "**/task.done"} {
+	for _, authored := range []string{"task.*", "*.done", "*", "missing.*"} {
 		t.Run(authored, func(t *testing.T) {
 			admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
 				ConsumerKind: AuthoredSubscriptionConsumerNode,
@@ -71,6 +72,23 @@ func TestClassifyAuthoredSubscriptionScopesNonRootNodePatterns(t *testing.T) {
 			}
 		})
 	}
+	for _, authored := range []string{"*/task.done", "**/task.done", "child/task.*"} {
+		t.Run("reject_"+authored, func(t *testing.T) {
+			admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+				ConsumerKind: AuthoredSubscriptionConsumerNode,
+				ConsumerID:   "listener",
+				FlowID:       "child",
+				FlowPath:     "child",
+				Authored:     authored,
+			})
+			if admission.Admitted() || admission.Failure() != AuthoredSubscriptionFailurePatternUnauthorized {
+				t.Fatalf("admission = class %q failure %q, want pattern_unauthorized", admission.Class(), admission.Failure())
+			}
+			if !strings.Contains(admission.Message(), "connect in the nearest common ancestor schema.yaml") {
+				t.Fatalf("message = %q, want connect teaching error", admission.Message())
+			}
+		})
+	}
 
 	root := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerNode,
@@ -79,20 +97,6 @@ func TestClassifyAuthoredSubscriptionScopesNonRootNodePatterns(t *testing.T) {
 	})
 	if got := root.RoutePatterns(); len(got) != 1 || got[0] != "*.done" {
 		t.Fatalf("root route patterns = %#v, want existing root wildcard behavior", got)
-	}
-}
-
-func TestAuthoredSubscriptionAdmissionMatchesOnlyAuthorizedPatternProjection(t *testing.T) {
-	admission := AuthoredSubscriptionAdmission{
-		authored:      "producer/**/task.done",
-		routePatterns: []string{"worker/**/task.done"},
-		class:         AuthoredSubscriptionImportedPattern,
-	}
-	if admission.Matches("producer/task.done") {
-		t.Fatal("raw authored wildcard bypassed the authorized route projection")
-	}
-	if !admission.Matches("worker/instance-1/task.done") {
-		t.Fatal("authorized route projection did not match its admitted event")
 	}
 }
 

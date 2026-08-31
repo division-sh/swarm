@@ -377,6 +377,23 @@ func TestFilesystemSourceAuthorityPublishesOnlyAdmittedArtifactRuntimeMethods(t 
 	}
 }
 
+func TestRoutingDerivationRequiresExactFlowOrCompiledConnectProducerProof(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	eventSchema := mustMappingValue(t, mustMappingValue(t, root, "contract_formats"), "event_schema")
+	routing := mustMappingValue(t, eventSchema, "routing_derivation")
+	inputSource := mustMappingValue(t, routing, "input_source_resolution")
+
+	for _, fragment := range []string{
+		"exact-flow-local",
+		"producer or output pin in any other flow cannot",
+		"immutable compiled parent-connect edge",
+		"regardless of matching event spelling",
+	} {
+		assertScalarContains(t, mappingValue(inputSource, "rule"), fragment)
+	}
+	assertScalarContains(t, mappingValue(inputSource, "retired_paths"), "unconnected root/sibling emit inference")
+}
+
 func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	entityFull, ok := api.Components.Schemas["EntityFull"].(map[string]any)

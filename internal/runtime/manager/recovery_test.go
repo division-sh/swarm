@@ -309,7 +309,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 			}, store)
 			installRecoveryTestStaticTopology(t, am, store)
 			err := am.hydratePersistedAgentExecutions(context.Background())
-			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("Recover error = %v, want admission rejection", err)
 			}
 			if am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {

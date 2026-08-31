@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
@@ -65,7 +66,8 @@ func ResolveForCapabilityAdmission(ctx context.Context, resolver Resolver, actor
 
 type Lifecycle interface {
 	CapabilityAdmissionResolver
-	SetBundleScope(bundleHash string)
+	BindSourceProjection(*sourceartifact.RuntimeProjection) error
+	ReleaseSourceProjection(context.Context) error
 	ValidateSource(ctx context.Context, source semanticview.Source) error
 	EnsurePrereqs(ctx context.Context) error
 	EnsureSystemWorkspaces(ctx context.Context) error
@@ -81,6 +83,7 @@ type SourceProjectionRebinder interface {
 
 type SourceProjectionBinding interface {
 	SourceProjectionBundleHash() string
+	SourceProjectionIdentity() string
 }
 
 func RebindSourceProjection(lifecycle Lifecycle, projection *sourceartifact.RuntimeProjection, source semanticview.Source) (Lifecycle, error) {
@@ -108,6 +111,9 @@ func RequireSourceProjectionBinding(lifecycle Lifecycle, bundleHash string) erro
 	}
 	if actual := strings.TrimSpace(binding.SourceProjectionBundleHash()); actual != expected {
 		return fmt.Errorf("workspace source projection is bound to %q, selected source requires %q", actual, expected)
+	}
+	if strings.TrimSpace(binding.SourceProjectionIdentity()) == "" {
+		return fmt.Errorf("workspace source projection process identity is required")
 	}
 	return nil
 }
@@ -161,6 +167,7 @@ type DockerConfig struct {
 	EntityWorkdir         string
 	BundleHash            string
 	BundleScope           string
+	SourceProjectionID    string
 }
 
 func DefaultDockerConfig() DockerConfig {
@@ -186,12 +193,17 @@ func DefaultDockerConfig() DockerConfig {
 }
 
 type DockerManager struct {
-	lookup      Lookup
-	cfg         DockerConfig
-	baseCfg     DockerConfig
-	source      semanticview.Source
-	data        runtimedataaccess.Provider
-	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
+	lookup               Lookup
+	cfg                  DockerConfig
+	baseCfg              DockerConfig
+	source               semanticview.Source
+	data                 runtimedataaccess.Provider
+	projectionMu         sync.Mutex
+	projectionOps        sync.WaitGroup
+	projectionContainers map[string]struct{}
+	projectionReleased   bool
+	ownedProjection      *sourceartifact.RuntimeProjection
+	RunDockerFn          func(ctx context.Context, args ...string) (string, error) // test seam
 }
 
 type PrerequisiteError struct {
@@ -235,9 +247,10 @@ fi`
 func NewDockerManager(lookup Lookup) *DockerManager {
 	cfg := DefaultDockerConfig()
 	return &DockerManager{
-		lookup:  lookup,
-		cfg:     cfg,
-		baseCfg: cfg,
+		lookup:               lookup,
+		cfg:                  cfg,
+		baseCfg:              cfg,
+		projectionContainers: map[string]struct{}{},
 	}
 }
 
@@ -277,7 +290,9 @@ func (m *DockerManager) RebindSourceProjection(projection *sourceartifact.Runtim
 	clone.SetSemanticSource(source)
 	clone.SetDataProjectionProvider(m.data)
 	clone.SetRunDockerFnForTest(m.RunDockerFn)
-	clone.SetBundleScope(projection.BundleHash())
+	if err := clone.BindSourceProjection(projection); err != nil {
+		return nil, err
+	}
 	return clone, nil
 }
 
@@ -286,6 +301,13 @@ func (m *DockerManager) SourceProjectionBundleHash() string {
 		return ""
 	}
 	return m.cfg.SourceProjection.BundleHash()
+}
+
+func (m *DockerManager) SourceProjectionIdentity() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.cfg.SourceProjectionID)
 }
 
 func (m *DockerManager) DockerBin() string {
@@ -380,13 +402,35 @@ func (m *DockerManager) SystemWorkspaceContainers() []string {
 	return out
 }
 
-func (m *DockerManager) SetBundleScope(bundleHash string) {
+func (m *DockerManager) BindSourceProjection(projection *sourceartifact.RuntimeProjection) error {
 	if m == nil {
-		return
+		return fmt.Errorf("workspace manager is required")
+	}
+	if projection == nil {
+		return fmt.Errorf("runtime source projection is required")
+	}
+	if _, err := validateSourceProjection(projection, projection.BundleHash()); err != nil {
+		return err
+	}
+	projectionID := strings.TrimSpace(projection.Identity())
+	if projectionID == "" {
+		return fmt.Errorf("runtime source projection identity is required")
+	}
+	ownedProjection, err := projection.Retain()
+	if err != nil {
+		return fmt.Errorf("retain runtime source projection: %w", err)
+	}
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased || m.ownedProjection != nil || len(m.projectionContainers) != 0 {
+		_ = ownedProjection.Release()
+		return fmt.Errorf("workspace source projection is already bound or released")
 	}
 	cfg := m.baseCfg
-	cfg.BundleHash = strings.TrimSpace(bundleHash)
-	cfg.BundleScope = bundleScopeKey(bundleHash)
+	cfg.SourceProjection = projection
+	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
+	cfg.SourceProjectionID = projectionID
+	cfg.BundleScope = projectionScopeKey(cfg.BundleHash, projectionID)
 	if cfg.BundleScope != "" {
 		cfg.ScaffoldContainer = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldContainer, "scaffold")
 		cfg.SystemContainer = scopedRuntimeName(cfg.BundleScope, cfg.SystemContainer, "system")
@@ -396,6 +440,48 @@ func (m *DockerManager) SetBundleScope(bundleHash string) {
 		cfg.SystemSystemdVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemSystemdVolume, "systemd")
 	}
 	m.cfg = cfg
+	m.ownedProjection = ownedProjection
+	return nil
+}
+
+func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.projectionMu.Lock()
+	m.projectionReleased = true
+	m.projectionMu.Unlock()
+	m.projectionOps.Wait()
+	m.projectionMu.Lock()
+	names := make([]string, 0, len(m.projectionContainers))
+	for name := range m.projectionContainers {
+		names = append(names, name)
+	}
+	m.projectionMu.Unlock()
+	sort.Strings(names)
+	var releaseErr error
+	for _, name := range names {
+		if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil && !dockerContainerAbsent(err) {
+			exists, _, inspectErr := m.InspectContainer(ctx, name)
+			if inspectErr != nil || exists {
+				releaseErr = errors.Join(releaseErr, fmt.Errorf("release source projection container %s: %w", name, errors.Join(err, inspectErr)))
+				continue
+			}
+		}
+		m.projectionMu.Lock()
+		delete(m.projectionContainers, name)
+		m.projectionMu.Unlock()
+	}
+	if releaseErr == nil {
+		m.projectionMu.Lock()
+		ownedProjection := m.ownedProjection
+		m.ownedProjection = nil
+		m.projectionMu.Unlock()
+		if ownedProjection != nil {
+			releaseErr = ownedProjection.Release()
+		}
+	}
+	return releaseErr
 }
 
 func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
@@ -489,15 +575,16 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 	}
 
 	return m.EnsureContainerRunningWithIdentity(ctx, container, runtimecontaineridentity.Identity{
-		Owner:          runtimecontaineridentity.OwnerRuntime,
-		Kind:           runtimecontaineridentity.KindEntity,
-		ResetEligible:  true,
-		CreationSource: "workspace.EnsureEntityWorkspace",
-		ContainerName:  container,
-		WorkspaceScope: "entity",
-		BundleHash:     m.bundleHashLabel(),
-		RunID:          runID,
-		EntityID:       strings.TrimSpace(entityID),
+		Owner:            runtimecontaineridentity.OwnerRuntime,
+		Kind:             runtimecontaineridentity.KindEntity,
+		ResetEligible:    true,
+		CreationSource:   "workspace.EnsureEntityWorkspace",
+		ContainerName:    container,
+		WorkspaceScope:   "entity",
+		BundleHash:       m.bundleHashLabel(),
+		SourceProjection: m.sourceProjectionLabel(),
+		RunID:            runID,
+		EntityID:         strings.TrimSpace(entityID),
 	}, append(m.standardMountArgs(),
 		[]string{
 			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
@@ -863,13 +950,14 @@ func (m *DockerManager) systemContainerIdentity(source, kind string) runtimecont
 		scope = runtimecontaineridentity.KindSystem
 	}
 	return runtimecontaineridentity.Identity{
-		Owner:          runtimecontaineridentity.OwnerRuntime,
-		Kind:           strings.TrimSpace(kind),
-		ResetEligible:  false,
-		CreationSource: strings.TrimSpace(source),
-		ContainerName:  name,
-		WorkspaceScope: scope,
-		BundleHash:     m.bundleHashLabel(),
+		Owner:            runtimecontaineridentity.OwnerRuntime,
+		Kind:             strings.TrimSpace(kind),
+		ResetEligible:    false,
+		CreationSource:   strings.TrimSpace(source),
+		ContainerName:    name,
+		WorkspaceScope:   scope,
+		BundleHash:       m.bundleHashLabel(),
+		SourceProjection: m.sourceProjectionLabel(),
 	}
 }
 
@@ -879,14 +967,15 @@ func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, containe
 		return runtimecontaineridentity.Identity{}, err
 	}
 	identity := runtimecontaineridentity.Identity{
-		Owner:          runtimecontaineridentity.OwnerRuntime,
-		ResetEligible:  true,
-		CreationSource: "workspace.ResolveWorkspace",
-		ContainerName:  strings.TrimSpace(container),
-		WorkspaceScope: strings.TrimSpace(scope),
-		BundleHash:     m.bundleHashLabel(),
-		RunID:          runID,
-		DataProjection: projectionID,
+		Owner:            runtimecontaineridentity.OwnerRuntime,
+		ResetEligible:    true,
+		CreationSource:   "workspace.ResolveWorkspace",
+		ContainerName:    strings.TrimSpace(container),
+		WorkspaceScope:   strings.TrimSpace(scope),
+		BundleHash:       m.bundleHashLabel(),
+		SourceProjection: m.sourceProjectionLabel(),
+		RunID:            runID,
+		DataProjection:   projectionID,
 	}
 	switch strings.TrimSpace(scope) {
 	case "per-flow-instance":
@@ -1101,6 +1190,18 @@ func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string,
 }
 
 func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, name string, identity runtimecontaineridentity.Identity, createArgs []string) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	m.projectionMu.Lock()
+	if m.projectionReleased && strings.TrimSpace(m.cfg.SourceProjectionID) != "" {
+		projectionID := m.cfg.SourceProjectionID
+		m.projectionMu.Unlock()
+		return fmt.Errorf("runtime source projection %s is released", projectionID)
+	}
+	m.projectionOps.Add(1)
+	m.projectionMu.Unlock()
+	defer m.projectionOps.Done()
 	exists, running, err := m.InspectContainer(ctx, name)
 	if err != nil {
 		return err
@@ -1129,6 +1230,9 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 			running = false
 		}
 	}
+	if exists {
+		m.recordProjectionContainer(name, identity)
+	}
 	if !exists {
 		args := []string{"create", "--name", name}
 		if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
@@ -1138,6 +1242,7 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 			args = append(args, runtimecontaineridentity.DockerCreateLabelArgs(labels)...)
 		}
 		args = append(args, createArgs...)
+		m.recordProjectionContainer(name, identity)
 		if _, err := m.RunDocker(ctx, args...); err != nil {
 			return fmt.Errorf("create container %s: %w", name, err)
 		}
@@ -1147,6 +1252,7 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 		if err := m.EnsureContainerNetwork(ctx, name); err != nil {
 			return err
 		}
+		m.recordProjectionContainer(name, identity)
 		return nil
 	}
 	if _, err := m.RunDocker(ctx, "start", name); err != nil {
@@ -1158,7 +1264,22 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 	if err := m.EnsureContainerNetwork(ctx, name); err != nil {
 		return err
 	}
+	m.recordProjectionContainer(name, identity)
 	return nil
+}
+
+func (m *DockerManager) recordProjectionContainer(name string, identity runtimecontaineridentity.Identity) {
+	if m == nil || strings.TrimSpace(identity.SourceProjection) == "" || identity.SourceProjection != strings.TrimSpace(m.cfg.SourceProjectionID) {
+		return
+	}
+	m.projectionMu.Lock()
+	m.projectionContainers[strings.TrimSpace(name)] = struct{}{}
+	m.projectionMu.Unlock()
+}
+
+func dockerContainerAbsent(err error) bool {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "no such container") || strings.Contains(message, "not found")
 }
 
 func (m *DockerManager) inspectRuntimeContainerIdentity(ctx context.Context, name string) (runtimecontaineridentity.Identity, bool, error) {
@@ -1437,6 +1558,13 @@ func (m *DockerManager) bundleHashLabel() string {
 	return strings.TrimSpace(m.cfg.BundleHash)
 }
 
+func (m *DockerManager) sourceProjectionLabel() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.cfg.SourceProjectionID)
+}
+
 func bundleScopeKey(bundleHash string) string {
 	bundleHash = strings.TrimSpace(bundleHash)
 	if bundleHash == "" {
@@ -1448,6 +1576,18 @@ func bundleScopeKey(bundleHash string) string {
 		hash = hash[:12]
 	}
 	return "bundle-" + hash
+}
+
+func projectionScopeKey(bundleHash, projectionID string) string {
+	bundle := bundleScopeKey(bundleHash)
+	projectionID = strings.TrimPrefix(strings.TrimSpace(projectionID), "runtime-projection-v1:")
+	if len(projectionID) > 12 {
+		projectionID = projectionID[:12]
+	}
+	if bundle == "" || projectionID == "" {
+		return ""
+	}
+	return bundle + "-projection-" + projectionID
 }
 
 func volumeScopeKey(raw string) string {

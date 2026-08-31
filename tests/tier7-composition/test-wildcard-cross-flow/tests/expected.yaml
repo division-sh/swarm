@@ -1,5 +1,5 @@
 trigger:
-  event: flow-alpha/trigger.alpha
+  event: trigger.alpha
   payload:
 expected:
 
