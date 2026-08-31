@@ -620,7 +620,10 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		"emit_payload_contract_violation",
 		"runtime.engine",
 		"fan_out.emit",
-		map[string]any{"event": "company.registered", "path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+		map[string]any{
+			"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		},
 	))
 	if !ok {
 		t.Fatal("construct API fan-out semantic rejection")

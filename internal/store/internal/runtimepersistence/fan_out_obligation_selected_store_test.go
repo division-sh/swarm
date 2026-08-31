@@ -187,6 +187,80 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 	}
 }
 
+func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var (
+				owner    selectedFanOutOwner
+				db       *sql.DB
+				postgres bool
+			)
+			if backend == "postgres" {
+				_, db, _ = testutil.StartPostgres(t)
+				owner = newPostgresStoreWithBackend(mustPostgresBackend(db))
+				postgres = true
+			} else {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db = store.backend.ConstructionHandle()
+				owner = store
+			}
+
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, now)
+			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+				Owner: "closed-evidence-worker", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
+			})
+			if err != nil || !found {
+				t.Fatalf("claim fan-out intent: found=%v err=%v", found, err)
+			}
+
+			for _, test := range []struct {
+				name    string
+				failure error
+			}{
+				{
+					name: "authorization",
+					failure: runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "fan_out_authorization_denied", "test", "commit_fan_out_chunk", map[string]any{
+						"action": "publish",
+					}),
+				},
+				{
+					name:    "conflicting duplicate",
+					failure: runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "fan_out_conflict", "test", "commit_fan_out_chunk", nil),
+				},
+				{
+					name:    "forged emit code",
+					failure: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "commit_fan_out_chunk", nil),
+				},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					envelope, ok := runtimefailures.EnvelopeFromError(test.failure)
+					if !ok {
+						t.Fatal("construct hostile failure envelope")
+					}
+					raw, err := runtimefailures.MarshalEnvelope(envelope)
+					if err != nil {
+						t.Fatal(err)
+					}
+					command := pipeline.FanOutChunkCommand{
+						Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: 0, Failure: raw}}, Now: now.Add(2 * time.Second),
+					}
+					if _, err := owner.CommitFanOutChunk(ctx, command); err == nil || !strings.Contains(err.Error(), "emit-contract") {
+						t.Fatalf("hostile selected-store commit error = %v", err)
+					}
+					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
+				})
+			}
+
+			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, now.Add(3*time.Second))); err != nil {
+				t.Fatalf("commit exact emit-contract rejection after hostile attempts: %v", err)
+			}
+			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+		})
+	}
+}
+
 func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -760,8 +834,12 @@ func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t
 			for index := len(intents) - 1; index >= 0; index-- {
 				fixture := intents[index]
 				failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
-					runtimefailures.ClassSchemaInvalid, "fan_out_sample_invalid", "test", "semantic_rejection",
-					map[string]any{"marker": fixture.elementID},
+					runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "semantic_rejection",
+					map[string]any{
+						"event": "fan-out.sample", "kind": "schema_mismatch", "path": "$.item",
+						"constraint": "type", "expected": "declared item", "actual": "invalid item",
+						"detail": "fan-out sample item is invalid", "marker": fixture.elementID,
+					},
 				))
 				if !ok {
 					t.Fatal("construct semantic rejection sample failure")
@@ -1973,11 +2051,11 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 }
 
 func rejectedFanOutChunk(claim fanoutobligation.Claim, start, count int, at time.Time) pipeline.FanOutChunkCommand {
-	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit_fan_out_chunk", nil))
-	if !ok {
-		panic("construct fan-out test failure")
-	}
-	failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+		Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+		Path: "$.item", Constraint: "type", Expected: "declared item", Actual: "invalid item", Detail: "fan-out test item is invalid",
+	}, "test", "commit_fan_out_chunk")
+	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {
 		panic(err)
 	}

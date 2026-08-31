@@ -2179,8 +2179,11 @@ type_system:
       equal_to: |
         `equal_to: <sibling_field>` declares pure same-object field equality.
         The target must be a declared sibling field with the same resolved
-        type. Non-equality predicates, provenance checks, external file
-        checks, rule IDs, and failure routing are not schema refinements.
+        type. Equality compares admitted semantic values rather than runtime
+        carrier types, so numerically equal integer, decimal, and exponent
+        representations agree. Non-equality predicates, provenance checks,
+        external file checks, rule IDs, and failure routing are not schema
+        refinements.
     runtime_consumption: |
       Event payload validators, entity materialization/write normalization,
       and generated entity/tool schemas that derive from the shared
@@ -3890,11 +3893,13 @@ handler_specification:
           aggregate error is bisected lower-half first. Retryable infrastructure errors advance nothing.
           Outcome-uncertain results are read back by structured operation identity before retry. Unknown errors, raw
           database strings, invariants, and internal failures block the intent with typed diagnosis; they are never
-          parsed into rejection or blindly retried.
+          parsed into rejection or blindly retried. Chunk-command and persisted-outcome validation revalidate the
+          complete typed emit-contract envelope; direct store callers and corrupted records cannot bypass this owner.
         semantic_rejection_evidence: >-
           Every semantic_rejected ordinal persists one deterministic non-retryable FailureEnvelope produced from a typed
           emit-contract error. The error retains event, rejection kind, path, constraint, expected, actual, and stable
-          detail. Run diagnostics expose the count as semantic_rejected and exactly one nullable sample selected by
+          detail. Schema validation selects the first violation by canonical field order, independent of map iteration.
+          Run diagnostics expose the count as semantic_rejected and exactly one nullable sample selected by
           triggering_delivery_id, package_key, element_id, then ordinal. The sample is null exactly when the count is zero.
         lifecycle: >-
           Open or blocked owed suffix prevents normal run completion and test quiescence. Run stop/cancel atomically

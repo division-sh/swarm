@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -244,11 +245,11 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 		runID, deliveryID, "root", elementID, "bundle-v1:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
 		t.Fatal(err)
 	}
-	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit", nil))
-	if !ok {
-		t.Fatal("construct fan-out readback failure")
-	}
-	failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+		Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+		Path: "$.item", Constraint: "type", Expected: "declared item", Actual: "invalid item", Detail: "fan-out test item is invalid",
+	}, "test", "commit")
+	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {
 		t.Fatal(err)
 	}

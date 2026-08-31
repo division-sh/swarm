@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -211,7 +210,8 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 	}
 	props := schemaProperties(schema["properties"])
 	allowAdditional, additionalSchema := schemaAdditionalProperties(schema["additionalProperties"])
-	for k, v := range payload {
+	for _, k := range sortedMapKeys(payload) {
+		v := payload[k]
 		propSchema, known := props[k]
 		if !known {
 			if additionalSchema != nil {
@@ -229,7 +229,8 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 			return err
 		}
 	}
-	for key, propSchema := range props {
+	for _, key := range sortedMapKeys(props) {
+		propSchema := props[key]
 		target := strings.TrimSpace(asString(propSchema["x-swarm-equalTo"]))
 		if target == "" {
 			continue
@@ -242,11 +243,29 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 		if !ok {
 			return violation(path+"."+key, "x-swarm-equalTo", path+"."+target, "target missing", "%s.%s must equal %s.%s, but target is missing", path, key, path, target)
 		}
-		if !reflect.DeepEqual(value, other) {
+		if !semanticValuesEqual(value, other) {
 			return violation(path+"."+key, "x-swarm-equalTo", path+"."+target, "different value", "%s.%s must equal %s.%s", path, key, path, target)
 		}
 	}
 	return nil
+}
+
+func sortedMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func semanticValuesEqual(left, right any) bool {
+	leftValue, err := canonicaljson.FromGo(left)
+	if err != nil {
+		return false
+	}
+	rightValue, err := canonicaljson.FromGo(right)
+	return err == nil && leftValue.Equal(rightValue)
 }
 
 func validateValue(path string, schema map[string]any, value any) error {

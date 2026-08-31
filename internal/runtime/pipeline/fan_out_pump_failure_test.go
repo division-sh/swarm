@@ -282,6 +282,13 @@ func TestFanOutPrecommitFailureAdmissionIsClosedToEmitContractEvidence(t *testin
 	}{
 		{name: "typed emit contract", err: emitErr, want: fanOutFailureItemSemantic},
 		{name: "exact normalized emit envelope", err: normalizedEmit, want: fanOutFailureItemSemantic},
+		{name: "incomplete typed emit contract", err: &runtimeengine.EmitPayloadContractError{
+			Event: "portfolio/account.registered", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+		}, want: fanOutFailureBlock},
+		{name: "unknown typed emit kind", err: &runtimeengine.EmitPayloadContractError{
+			Event: "portfolio/account.registered", Kind: runtimeengine.EmitPayloadContractKind("other"),
+			Path: "$.score", Constraint: "type", Expected: "number", Actual: "string", Detail: "not a recognized typed emit violation",
+		}, want: fanOutFailureBlock},
 		{name: "forged emit code without typed attributes", err: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "plan", nil), want: fanOutFailureBlock},
 		{name: "forged emit kind", err: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "plan", map[string]any{
 			"event": "portfolio/account.registered", "kind": "other", "path": "$.score", "constraint": "type",

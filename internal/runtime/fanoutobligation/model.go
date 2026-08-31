@@ -332,10 +332,22 @@ func ValidateSemanticRejection(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("semantic rejection requires a typed failure envelope: %w", err)
 	}
-	if failure.Retryable || !failure.Deterministic || failure.Class == runtimefailures.ClassInternalFailure || failure.Class == runtimefailures.ClassOutcomeUncertain {
-		return errors.New("semantic rejection requires deterministic non-retryable item failure evidence")
+	if failure.Class != runtimefailures.ClassSchemaInvalid || failure.Detail.Code != "emit_payload_contract_violation" || failure.Retryable || !failure.Deterministic {
+		return errors.New("semantic rejection requires exact emit-contract failure evidence")
 	}
-	return nil
+	attributes := failure.Detail.Attributes
+	for _, name := range []string{"event", "kind", "path", "constraint", "expected", "actual", "detail"} {
+		value, present := attributes[name].(string)
+		if !present || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("semantic rejection emit-contract attribute %q is required", name)
+		}
+	}
+	switch attributes["kind"] {
+	case "schema_unresolved", "schema_mismatch", "authored_envelope_field":
+		return nil
+	default:
+		return errors.New("semantic rejection requires a recognized emit-contract rejection kind")
+	}
 }
 
 type RunSummary struct {

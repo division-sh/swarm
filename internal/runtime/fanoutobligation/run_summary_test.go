@@ -9,10 +9,53 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestValidateSemanticRejectionRequiresExactEmitContractEvidence(t *testing.T) {
+	exactAttributes := map[string]any{
+		"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+		"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+	}
+	for _, test := range []struct {
+		name       string
+		class      failures.Class
+		code       string
+		attributes map[string]any
+		valid      bool
+	}{
+		{name: "exact emit contract", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: exactAttributes, valid: true},
+		{name: "authorization", class: failures.ClassAuthorizationDenied, code: "fan_out_authorization_denied", attributes: map[string]any{"action": "publish"}},
+		{name: "forged emit code", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation"},
+		{name: "unknown emit kind", class: failures.ClassSchemaInvalid, code: "emit_payload_contract_violation", attributes: map[string]any{
+			"event": "company.registered", "kind": "other", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope, ok := failures.EnvelopeFromError(failures.New(test.class, test.code, "test", "semantic_rejection", test.attributes))
+			if !ok {
+				t.Fatal("construct semantic rejection evidence")
+			}
+			raw, err := failures.MarshalEnvelope(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = ValidateSemanticRejection(raw)
+			if test.valid && err != nil {
+				t.Fatalf("exact semantic rejection rejected: %v", err)
+			}
+			if !test.valid && err == nil {
+				t.Fatal("non-emit semantic rejection validated")
+			}
+		})
+	}
+}
+
 func TestRunSummarySemanticRejectionEvidenceIsClosedAndExplicit(t *testing.T) {
 	failure, ok := failures.EnvelopeFromError(failures.New(
 		failures.ClassSchemaInvalid, "emit_payload_contract_violation", "runtime.engine", "fan_out.emit",
-		map[string]any{"event": "company.registered", "path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+		map[string]any{
+			"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		},
 	))
 	if !ok {
 		t.Fatal("construct typed semantic rejection")

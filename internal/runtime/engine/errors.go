@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
 var (
@@ -83,25 +84,24 @@ func (e *EmitPayloadContractError) Attributes() map[string]any {
 func IsEmitPayloadContractFailure(err error) bool {
 	var typed *EmitPayloadContractError
 	if errors.As(err, &typed) && typed != nil {
-		return true
+		constructed := failures.New(
+			failures.ClassSchemaInvalid,
+			"emit_payload_contract_violation",
+			"runtime.engine",
+			"validate_emit_payload_contract_failure",
+			typed.Attributes(),
+		)
+		normalized, ok := failures.As(constructed)
+		return ok && isExactEmitPayloadContractEnvelope(normalized.Failure)
 	}
 	normalized, ok := failures.As(err)
-	if !ok || normalized == nil || normalized.Failure.Class != failures.ClassSchemaInvalid ||
-		normalized.Failure.Detail.Code != "emit_payload_contract_violation" ||
-		!normalized.Failure.Deterministic || normalized.Failure.Retryable {
+	if !ok || normalized == nil {
 		return false
 	}
-	attributes := normalized.Failure.Detail.Attributes
-	for _, name := range []string{"event", "kind", "path", "constraint", "expected", "actual", "detail"} {
-		value, present := attributes[name].(string)
-		if !present || strings.TrimSpace(value) == "" {
-			return false
-		}
-	}
-	switch EmitPayloadContractKind(attributes["kind"].(string)) {
-	case EmitPayloadSchemaUnresolved, EmitPayloadSchemaMismatch, EmitPayloadEnvelopeField:
-		return true
-	default:
-		return false
-	}
+	return isExactEmitPayloadContractEnvelope(normalized.Failure)
+}
+
+func isExactEmitPayloadContractEnvelope(envelope failures.Envelope) bool {
+	raw, err := failures.MarshalEnvelope(envelope)
+	return err == nil && fanoutobligation.ValidateSemanticRejection(raw) == nil
 }

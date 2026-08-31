@@ -270,7 +270,10 @@ func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
 	elementID := "33333333-3333-4333-8333-333333333333"
 	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
 		runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "runtime.engine", "fan_out.emit",
-		map[string]any{"event": "company.registered", "path": "$.gem_score", "constraint": "type", "expected": "number", "actual": "string"},
+		map[string]any{
+			"event": "company.registered", "kind": "schema_mismatch", "path": "$.gem_score",
+			"constraint": "type", "expected": "number", "actual": "string", "detail": "$.gem_score must be number",
+		},
 	))
 	if !ok {
 		t.Fatal("construct typed semantic rejection")
