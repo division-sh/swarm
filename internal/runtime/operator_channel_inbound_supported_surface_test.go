@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -74,7 +75,22 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	channelService, err := operatorchannel.NewService(selected, proofs, []operatorchannel.InterfaceIdentity{identity}, operatorchannel.NewOperationID())
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.Set(ctx, "channel.telegram.provider", "telegram-provider-token"); err != nil {
+		t.Fatal(err)
+	}
+	credentialOwner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerEvidence, err := credentialOwner.SealCurrentValue(ctx, "channel.telegram.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	channelService, err := operatorchannel.NewService(selected, proofs, credentialOwner, []operatorchannel.InterfaceIdentity{identity}, operatorchannel.NewOperationID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +101,8 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		OperationID: operatorchannel.NewOperationID(), Kind: operatorchannel.OperationConnect,
 		PrincipalID: principal.ID, Interface: identity, ExpectedRevision: 0,
 		RequestKeyHash: "signed-telegram-connect-key", RequestHash: "signed-telegram-connect-body",
-		RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+		ProviderCredential: providerEvidence,
+		RequestedAt:        now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +189,8 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		if index > 0 {
 			operation, err = selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
 				OperationID: operatorchannel.NewOperationID(), Kind: claim.kind,
-				PrincipalID: principal.ID, Interface: identity, ExpectedRevision: int64(index),
+				ProviderCredential: providerEvidence,
+				PrincipalID:        principal.ID, Interface: identity, ExpectedRevision: int64(index),
 				RequestKeyHash: fmt.Sprintf("signed-telegram-rebind-key-%d", index), RequestHash: fmt.Sprintf("signed-telegram-rebind-body-%d", index),
 				RequestedAt: now.Add(time.Duration(index) * time.Minute), ExpiresAt: now.Add(time.Duration(index)*time.Minute + operatorchannel.DefaultChallengeTTL),
 			})

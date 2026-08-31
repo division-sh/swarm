@@ -16,9 +16,9 @@ type CredentialWriteRequest struct {
 }
 
 type CredentialWriteResult struct {
-	StoreKey string
-	Receipt  string
-	Epoch    string
+	StoreKey  string
+	Receipt   string
+	ValueSeal runtimecredentials.ValueSeal
 }
 
 type CredentialWriter struct {
@@ -26,9 +26,13 @@ type CredentialWriter struct {
 	observer  runtimecredentials.ReceiptObserver
 	deleter   runtimecredentials.ReceiptDeleter
 	snapshots *runtimecredentials.SnapshotOwner
+	values    runtimecredentials.Store
 }
 
 func NewCredentialWriter(store runtimecredentials.Store) (*CredentialWriter, error) {
+	if err := runtimecredentials.RequireDurableValueSealKeyHome(store); err != nil {
+		return nil, err
+	}
 	receiptWriter, ok := store.(runtimecredentials.ReceiptWriter)
 	if !ok || receiptWriter == nil {
 		return nil, fmt.Errorf("channel onboarding requires a receipt-capable credential store")
@@ -45,7 +49,7 @@ func NewCredentialWriter(store runtimecredentials.Store) (*CredentialWriter, err
 	if !ok || receiptObserver == nil {
 		return nil, fmt.Errorf("channel onboarding requires receipt-capable credential observation")
 	}
-	return &CredentialWriter{store: receiptWriter, observer: receiptObserver, deleter: receiptDeleter, snapshots: snapshots}, nil
+	return &CredentialWriter{store: receiptWriter, observer: receiptObserver, deleter: receiptDeleter, snapshots: snapshots, values: store}, nil
 }
 
 func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmission) (bool, error) {
@@ -58,15 +62,22 @@ func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmi
 	if admission.Kind != CredentialAdmissionWritten {
 		return false, nil
 	}
-	return w.deleter.DeleteWithReceipt(ctx, admission.StoreKey, admission.Receipt, admission.Epoch)
+	return w.deleter.DeleteWithReceipt(ctx, admission.StoreKey, admission.Receipt)
 }
 
 // ReleaseOperation reconciles both checkpointed admissions and deterministic
 // operation writes that may exist before their selected-store checkpoint.
-func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation) error {
+func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation, retained ...runtimecredentials.ValueEvidence) error {
 	operationID := strings.TrimSpace(op.OperationID)
 	if operationID == "" {
 		return fmt.Errorf("channel onboarding credential cleanup requires an operation identity")
+	}
+	retainedEvidence := make(map[string]struct{}, len(retained))
+	for _, evidence := range retained {
+		if err := evidence.Validate(); err != nil {
+			return fmt.Errorf("retain channel credential evidence: %w", err)
+		}
+		retainedEvidence[evidence.Key+"\x00"+evidence.Seal.String()] = struct{}{}
 	}
 	type expectedOccurrence struct {
 		storeKey string
@@ -91,8 +102,9 @@ func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation) e
 
 	releases := make([]CredentialAdmission, 0, len(op.CredentialAdmissions)+len(expectedByRole))
 	seen := make(map[string]struct{}, cap(releases))
+	retainedRoles := make(map[string]struct{}, len(retainedEvidence))
 	addRelease := func(admission CredentialAdmission) {
-		occurrence := credentialAdmissionOccurrence(admission)
+		occurrence := credentialCleanupIdentity(admission)
 		if _, duplicate := seen[occurrence]; duplicate {
 			return
 		}
@@ -112,9 +124,16 @@ func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation) e
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("written channel credential %q is not owned by operation %s", admission.StoreKey, operationID))
 			continue
 		}
+		if _, keep := retainedEvidence[credentialAdmissionCurrentness(admission)]; keep {
+			retainedRoles[admission.Role] = struct{}{}
+			continue
+		}
 		addRelease(admission)
 	}
 	for role, expected := range expectedByRole {
+		if _, keep := retainedRoles[role]; keep {
+			continue
+		}
 		written, found, err := w.ObserveWritten(ctx, expected.storeKey, expected.receipt)
 		if err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("observe operation credential %q: %w", expected.storeKey, err))
@@ -131,7 +150,7 @@ func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation) e
 		}
 		addRelease(CredentialAdmission{
 			Role: role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
-			Receipt: written.Receipt, Epoch: written.Epoch,
+			Receipt: written.Receipt, ValueSeal: written.ValueSeal,
 		})
 	}
 	for _, admission := range releases {
@@ -165,17 +184,18 @@ func (w *CredentialWriter) Admit(ctx context.Context, req CredentialWriteRequest
 	if err != nil {
 		return CredentialWriteResult{}, err
 	}
-	if written.Key != key || written.Receipt != receipt || strings.TrimSpace(written.Epoch) == "" {
+	if written.Key != key || written.Receipt != receipt {
 		return CredentialWriteResult{}, fmt.Errorf("credential store returned a contradictory write receipt")
 	}
-	observed, err := w.snapshots.ObserveSecretBinding(ctx, key)
+	evidence, err := runtimecredentials.SealCurrentValue(ctx, w.values, key)
 	if err != nil {
 		return CredentialWriteResult{}, err
 	}
-	if !observed.Bound() || observed.Epoch() != written.Epoch {
-		return CredentialWriteResult{}, fmt.Errorf("credential write receipt does not match the current credential occurrence")
+	current, found, err := w.observer.ObserveReceipt(ctx, key, receipt)
+	if err != nil || !found || current.Key != key || current.Receipt != receipt {
+		return CredentialWriteResult{}, errors.Join(fmt.Errorf("credential write receipt does not own the sealed current value"), err)
 	}
-	return CredentialWriteResult{StoreKey: key, Receipt: receipt, Epoch: observed.Epoch()}, nil
+	return CredentialWriteResult{StoreKey: key, Receipt: receipt, ValueSeal: evidence.Seal}, nil
 }
 
 func (w *CredentialWriter) Observe(ctx context.Context, storeKey string) (CredentialWriteResult, error) {
@@ -186,14 +206,11 @@ func (w *CredentialWriter) Observe(ctx context.Context, storeKey string) (Creden
 	if key == "" || key != strings.TrimSpace(key) {
 		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential key is required")
 	}
-	observed, err := w.snapshots.ObserveSecretBinding(ctx, key)
+	evidence, err := runtimecredentials.SealCurrentValue(ctx, w.values, key)
 	if err != nil {
 		return CredentialWriteResult{}, err
 	}
-	if !observed.Bound() {
-		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential %q is missing", key)
-	}
-	return CredentialWriteResult{StoreKey: key, Epoch: observed.Epoch()}, nil
+	return CredentialWriteResult{StoreKey: key, ValueSeal: evidence.Seal}, nil
 }
 
 func (w *CredentialWriter) ObserveWritten(ctx context.Context, storeKey, receipt string) (CredentialWriteResult, bool, error) {
@@ -204,16 +221,27 @@ func (w *CredentialWriter) ObserveWritten(ctx context.Context, storeKey, receipt
 	if key == "" || key != strings.TrimSpace(key) || receipt == "" {
 		return CredentialWriteResult{}, false, fmt.Errorf("channel onboarding credential key and receipt are required")
 	}
-	written, found, err := w.observer.ObserveReceipt(ctx, key, receipt)
+	_, found, err := w.observer.ObserveReceipt(ctx, key, receipt)
 	if err != nil || !found {
 		return CredentialWriteResult{}, found, err
 	}
-	observed, err := w.snapshots.ObserveSecretBinding(ctx, key)
+	evidence, err := runtimecredentials.SealCurrentValue(ctx, w.values, key)
 	if err != nil {
 		return CredentialWriteResult{}, false, err
 	}
-	if !observed.Bound() || observed.Epoch() != written.Epoch {
-		return CredentialWriteResult{}, false, fmt.Errorf("credential write receipt does not match the current credential occurrence")
+	current, stillFound, err := w.observer.ObserveReceipt(ctx, key, receipt)
+	if err != nil || !stillFound || current.Key != key || current.Receipt != receipt {
+		return CredentialWriteResult{}, false, errors.Join(fmt.Errorf("credential write receipt does not own the sealed current value"), err)
 	}
-	return CredentialWriteResult{StoreKey: key, Receipt: receipt, Epoch: observed.Epoch()}, true, nil
+	return CredentialWriteResult{StoreKey: key, Receipt: receipt, ValueSeal: evidence.Seal}, true, nil
+}
+
+func (w *CredentialWriter) Current(ctx context.Context, admission CredentialAdmission) (bool, error) {
+	if w == nil || w.values == nil {
+		return false, fmt.Errorf("channel onboarding credential writer is required")
+	}
+	if err := admission.Validate(); err != nil {
+		return false, err
+	}
+	return runtimecredentials.CurrentValueMatchesSeal(ctx, w.values, runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 }

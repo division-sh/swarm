@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,11 +18,25 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
 )
 
 const operatorChannelSupportedSurfaceToken = "operator-channel-supported-surface-token"
+
+type operatorChannelCredentialCurrentness struct{}
+
+func (operatorChannelCredentialCurrentness) CurrentValueMatchesSeal(_ context.Context, evidence runtimecredentials.ValueEvidence) (bool, error) {
+	return evidence.Validate() == nil, nil
+}
+
+func operatorChannelProviderEvidence() runtimecredentials.ValueEvidence {
+	return runtimecredentials.ValueEvidence{
+		Key:  "channel.telegram.provider",
+		Seal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64)),
+	}
+}
 
 var (
 	errInjectedOperatorChannelProofWrite      = errors.New("injected operator channel proof write failure")
@@ -97,14 +112,14 @@ func seedUnresolvedOperatorChannelProof(t *testing.T, fixture operatorChannelCon
 	} else {
 		serviceProofs = &failOnceOperatorChannelProofStore{delegate: proofs}
 	}
-	service, err := operatorchannel.NewService(serviceStore, serviceProofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	service, err := operatorchannel.NewService(serviceStore, serviceProofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := service.Bootstrap(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "unresolved-"+string(mode)+"-key", "unresolved-"+string(mode)+"-request", true, now)
+	op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "unresolved-"+string(mode)+"-key", "unresolved-"+string(mode)+"-request", operatorChannelProviderEvidence(), true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,9 +137,6 @@ func seedUnresolvedOperatorChannelProof(t *testing.T, fixture operatorChannelCon
 
 func TestServedParityHarnessOperatorChannelLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
-		servedparity.MustScenario(servedparity.ScenarioOperatorChannelConnectLifecycle),
-		servedparity.MustScenario(servedparity.ScenarioOperatorChannelReconnectLifecycle),
-		servedparity.MustScenario(servedparity.ScenarioOperatorChannelRebindLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioOperatorChannelConfirmLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioOperatorChannelUnbindLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioOperatorChannelProofRevokeLifecycle),
@@ -143,7 +155,7 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 				t.Fatal(err)
 			}
 			failingProofs := &failOnceOperatorChannelProofStore{delegate: proofs}
-			service, err := operatorchannel.NewService(fixture.store, failingProofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+			service, err := operatorchannel.NewService(fixture.store, failingProofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +164,7 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			if err != nil {
 				t.Fatal(err)
 			}
-			op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-recovery-key", "proof-recovery-request", true, now)
+			op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-recovery-key", "proof-recovery-request", operatorChannelProviderEvidence(), true, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -168,12 +180,18 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			if err != nil || len(responsibilities) != 1 || responsibilities[0].Operation.OperationID != op.OperationID || responsibilities[0].Operation.ProofStatus != operatorchannel.ProofFailed {
 				t.Fatalf("pending proof responsibilities = %#v, %v", responsibilities, err)
 			}
+			responsibility := responsibilities[0]
+			if responsibility.Operation.ProviderCredential != operatorChannelProviderEvidence() ||
+				responsibility.Binding.ProviderCredential != responsibility.Operation.ProviderCredential ||
+				responsibility.Proof.ProviderCredential != responsibility.Operation.ProviderCredential {
+				t.Fatalf("proof responsibility provider evidence diverged: %#v", responsibility)
+			}
 			replayed, replayedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
 			if err != nil || replayed.State != operatorchannel.StateBound || replayed.ProofStatus != operatorchannel.ProofActive || replayedBinding.Revision != binding.Revision {
 				t.Fatalf("same-service confirmation replay = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
 			}
 
-			recovered, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+			recovered, err := operatorchannel.NewService(fixture.store, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +204,7 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 				t.Fatalf("remaining proof responsibilities = %#v, %v", responsibilities, err)
 			}
 			proof, found, err := proofs.Get(ctx, identity)
-			if err != nil || !found || proof.Status != operatorchannel.ProofActive || proof.Revision != 1 {
+			if err != nil || !found || proof.Status != operatorchannel.ProofActive || proof.Revision != 1 || proof.ProviderCredential != operatorChannelProviderEvidence() {
 				t.Fatalf("recovered proof = %#v found=%v err=%v", proof, found, err)
 			}
 			readback, err := recovered.Readback(ctx)
@@ -194,6 +212,155 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 				t.Fatalf("recovered readback = %#v, %v", readback, err)
 			}
 		})
+	}
+}
+
+func TestOperatorChannelProviderCredentialRotationSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, source := range []string{"file", "env_overlay"} {
+			for _, saveProof := range []bool{false, true} {
+				name := fmt.Sprintf("%s/%s/save_proof_%t", backend, source, saveProof)
+				t.Run(name, func(t *testing.T) {
+					ctx := context.Background()
+					fixture := openOperatorChannelContractFixture(t, backend)
+					identity := operatorChannelContractIdentity("provider-rotation-" + strings.ReplaceAll(name, "/", "-"))
+					proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+					if err != nil {
+						t.Fatal(err)
+					}
+					credentialPath := filepath.Join(t.TempDir(), "provider-credentials.json")
+					writableCredentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var credentialStore runtimecredentials.Store = writableCredentialStore
+					setCredential := writableCredentialStore.Set
+					if source == "env_overlay" {
+						t.Setenv("channel.telegram.provider", "provider-a")
+						t.Setenv("channel.telegram.signing", "signing-a")
+						credentialStore = runtimecredentials.NewOverlayStore(runtimecredentials.EnvStore{}, writableCredentialStore)
+						setCredential = func(_ context.Context, key, value string) error { return os.Setenv(key, value) }
+					}
+					if err := setCredential(ctx, "channel.telegram.provider", "provider-a"); err != nil {
+						t.Fatal(err)
+					}
+					if err := setCredential(ctx, "channel.telegram.signing", "signing-a"); err != nil {
+						t.Fatal(err)
+					}
+					credentialOwner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+					if err != nil {
+						t.Fatal(err)
+					}
+					providerA, err := credentialOwner.SealCurrentValue(ctx, "channel.telegram.provider")
+					if err != nil {
+						t.Fatal(err)
+					}
+					service, err := operatorchannel.NewService(fixture.store, proofs, credentialOwner, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+					if err != nil {
+						t.Fatal(err)
+					}
+					now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+					if _, _, err := service.Bootstrap(ctx, now); err != nil {
+						t.Fatal(err)
+					}
+					op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "rotation-connect-key", "rotation-connect-request", providerA, saveProof, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					settlement, err := fixture.settle(ctx, operatorChannelContractClaim(op, operatorchannel.ConversationScopeDirect, "account-a", "conversation-a", uuid.NewString()), now.Add(time.Second))
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, binding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(2*time.Second))
+					if err != nil || binding.ProviderCredential != providerA {
+						t.Fatalf("initial binding = %#v, %v", binding, err)
+					}
+
+					if err := setCredential(ctx, "channel.telegram.signing", "signing-b"); err != nil {
+						t.Fatal(err)
+					}
+					if current, err := service.CurrentBinding(ctx, identity); err != nil || current.Revision != 1 {
+						t.Fatalf("signing rotation changed identity = %#v, %v", current, err)
+					}
+					if err := setCredential(ctx, "channel.telegram.provider", "provider-a"); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := service.CurrentBinding(ctx, identity); err != nil {
+						t.Fatalf("same-value reset invalidated identity: %v", err)
+					}
+					if err := setCredential(ctx, "channel.telegram.provider", "provider-b"); err != nil {
+						t.Fatal(err)
+					}
+					stale, err := service.CurrentBinding(ctx, identity)
+					if !errors.Is(err, operatorchannel.ErrCredentialStale) || stale.Revision != 1 {
+						t.Fatalf("provider rotation current binding = %#v, %v", stale, err)
+					}
+					providerB, err := credentialOwner.SealCurrentValue(ctx, "channel.telegram.provider")
+					if err != nil {
+						t.Fatal(err)
+					}
+					reconnect, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationReconnect, stale.Revision, "rotation-reconnect-key", "rotation-reconnect-request", providerB, saveProof, now.Add(3*time.Second))
+					if err != nil {
+						t.Fatal(err)
+					}
+					settlement, err = fixture.settle(ctx, operatorChannelContractClaim(reconnect, operatorchannel.ConversationScopeDirect, "account-a", "conversation-a", uuid.NewString()), now.Add(4*time.Second))
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, binding, err = service.Confirm(ctx, reconnect.OperationID, settlement.Operation.Revision, true, now.Add(5*time.Second))
+					if err != nil || binding.Revision != 2 || binding.ProviderCredential != providerB {
+						t.Fatalf("reverified binding = %#v, %v", binding, err)
+					}
+					if saveProof {
+						proof, found, err := proofs.Get(ctx, identity)
+						if err != nil || !found || proof.ProviderCredential != providerB || proof.Revision != 2 {
+							t.Fatalf("reverified proof = %#v found=%v err=%v", proof, found, err)
+						}
+					} else if _, found, err := proofs.Get(ctx, identity); err != nil || found {
+						t.Fatalf("proofless binding created proof found=%v err=%v", found, err)
+					}
+
+					reopenedWritable, err := runtimecredentials.NewFileStore(credentialPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var reopenedStore runtimecredentials.Store = reopenedWritable
+					if source == "env_overlay" {
+						reopenedStore = runtimecredentials.NewOverlayStore(runtimecredentials.EnvStore{}, reopenedWritable)
+					}
+					reopenedOwner, err := runtimecredentials.NewSnapshotOwner(reopenedStore)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restarted, err := operatorchannel.NewService(fixture.store, proofs, reopenedOwner, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, _, err := restarted.Bootstrap(ctx, now.Add(6*time.Second)); err != nil {
+						t.Fatal(err)
+					}
+					if current, err := restarted.CurrentBinding(ctx, identity); err != nil || current.ProviderCredential != providerB {
+						t.Fatalf("restart binding = %#v, %v", current, err)
+					}
+
+					resetFixture := openOperatorChannelContractFixture(t, backend)
+					resetService, err := operatorchannel.NewService(resetFixture.store, proofs, reopenedOwner, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, resetBindings, err := resetService.Bootstrap(ctx, now.Add(7*time.Second))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if saveProof && (len(resetBindings) != 1 || resetBindings[0].ProviderCredential != providerB) {
+						t.Fatalf("proof-backed reset bindings = %#v", resetBindings)
+					}
+					if !saveProof && len(resetBindings) != 0 {
+						t.Fatalf("proofless reset recovered authority: %#v", resetBindings)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -212,14 +379,14 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 				}
 				completionStore := &failOnceOperatorChannelProofCompletionStore{Store: fixture.store}
 				mintingDeploymentID := uuid.NewString()
-				service, err := operatorchannel.NewService(completionStore, proofs, []operatorchannel.InterfaceIdentity{identity}, mintingDeploymentID)
+				service, err := operatorchannel.NewService(completionStore, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, mintingDeploymentID)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if _, _, err := service.Bootstrap(ctx, now); err != nil {
 					t.Fatal(err)
 				}
-				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-file-first-key", "proof-file-first-request", true, now)
+				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-file-first-key", "proof-file-first-request", operatorChannelProviderEvidence(), true, now)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -236,7 +403,7 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 					t.Fatalf("written proof = %#v found=%v err=%v", written, found, err)
 				}
 
-				recovered, err := operatorchannel.NewService(completionStore, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				recovered, err := operatorchannel.NewService(completionStore, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -265,14 +432,14 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 					t.Fatal(err)
 				}
 				failingProofs := &failOnceOperatorChannelProofStore{delegate: proofs}
-				service, err := operatorchannel.NewService(fixture.store, failingProofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				service, err := operatorchannel.NewService(fixture.store, failingProofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 				if err != nil {
 					t.Fatal(err)
 				}
 				if _, _, err := service.Bootstrap(ctx, now.Add(10*time.Minute)); err != nil {
 					t.Fatal(err)
 				}
-				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-mismatch-key", "proof-mismatch-request", true, now.Add(10*time.Minute))
+				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-mismatch-key", "proof-mismatch-request", operatorChannelProviderEvidence(), true, now.Add(10*time.Minute))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -293,7 +460,7 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 				if err := proofs.Put(ctx, conflicting); err != nil {
 					t.Fatal(err)
 				}
-				recovered, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				recovered, err := operatorchannel.NewService(fixture.store, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -331,7 +498,7 @@ func TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelect
 				for index, attempt := range attempts {
 					_, err := seed.service.Begin(ctx, identity.Selector, attempt.kind, seed.binding.Revision,
 						fmt.Sprintf("blocked-%s-%s", attempt.name, mode), fmt.Sprintf("blocked-request-%s-%s", attempt.name, mode),
-						attempt.saveProof, now.Add(time.Duration(index+3)*time.Second))
+						operatorChannelProviderEvidence(), attempt.saveProof, now.Add(time.Duration(index+3)*time.Second))
 					if !errors.Is(err, operatorchannel.ErrConflict) {
 						t.Fatalf("%s overtook unresolved %s responsibility: %v", attempt.name, mode, err)
 					}
@@ -346,7 +513,7 @@ func TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelect
 					t.Fatalf("responsibility recovery replay = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
 				}
 				later, err := seed.service.Begin(ctx, identity.Selector, operatorchannel.OperationReconnect, seed.binding.Revision,
-					"later-"+string(mode)+"-key", "later-"+string(mode)+"-request", false, now.Add(8*time.Second))
+					"later-"+string(mode)+"-key", "later-"+string(mode)+"-request", operatorChannelProviderEvidence(), false, now.Add(8*time.Second))
 				if err != nil {
 					t.Fatalf("later operation remained fenced: %v", err)
 				}
@@ -397,7 +564,7 @@ func TestOperatorChannelUnbindDischargesUnresolvedProofResponsibilitySelectedSto
 					t.Fatalf("discharged predecessor = %#v", predecessor)
 				}
 
-				recovered, err := operatorchannel.NewService(fixture.store, seed.proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				recovered, err := operatorchannel.NewService(fixture.store, seed.proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -432,7 +599,7 @@ func TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedS
 				go func() {
 					<-start
 					_, err := seed.service.Begin(ctx, identity.Selector, operatorchannel.OperationReconnect, seed.binding.Revision,
-						"concurrent-begin-key", "concurrent-begin-request", false, now.Add(3*time.Second))
+						"concurrent-begin-key", "concurrent-begin-request", operatorChannelProviderEvidence(), false, now.Add(3*time.Second))
 					beginErr <- err
 				}()
 				close(start)
@@ -509,7 +676,7 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 					ExternalAccountRef: fmt.Sprintf("retained-account-%d", index), ConversationRef: fmt.Sprintf("retained-conversation-%d", index),
 					ConversationScope: operatorchannel.ConversationScopeDirect, AccountPresentation: "@retained",
 					Revision: 1, Status: operatorchannel.BindingCurrent, Source: operatorchannel.BindingSourceLiveVerification,
-					OperationID: uuid.NewString(), UpdatedAt: now,
+					OperationID: uuid.NewString(), UpdatedAt: now, ProviderCredential: operatorChannelProviderEvidence(),
 				}
 				proof := operatorChannelContractProof(identity, binding, now)
 				proof.Challenge = []string{"SWARM-BBBBBBBBBBBBBBBB", "SWARM-CCCCCCCCCCCCCCCC"}[index]
@@ -518,7 +685,7 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 				}
 			}
 
-			service, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{boundIdentity, operationIdentity}, uuid.NewString())
+			service, err := operatorchannel.NewService(fixture.store, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{boundIdentity, operationIdentity}, uuid.NewString())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -526,7 +693,7 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 			if err != nil || principal.ID == "" || len(bindings) != 1 || bindings[0].Interface.Key() != boundIdentity.Key() {
 				t.Fatalf("retained bootstrap principal=%#v bindings=%#v err=%v", principal, bindings, err)
 			}
-			pending, err := service.Begin(ctx, operationIdentity.Selector, operatorchannel.OperationConnect, 0, "retained-operation-key", "retained-operation-request", false, now.Add(2*time.Minute))
+			pending, err := service.Begin(ctx, operationIdentity.Selector, operatorchannel.OperationConnect, 0, "retained-operation-key", "retained-operation-request", operatorChannelProviderEvidence(), false, now.Add(2*time.Minute))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -598,7 +765,7 @@ func TestOperatorChannelProofBootPreservesExactScopeSelectedStoreParity(t *testi
 					ExternalAccountRef: fmt.Sprintf("account-proof-%d", index), ConversationRef: fmt.Sprintf("conversation-proof-%d", index),
 					ConversationScope: wantScopes[identity.Key()], AccountPresentation: "@operator",
 					Revision: 1, Status: operatorchannel.BindingCurrent, Source: operatorchannel.BindingSourceLiveVerification,
-					OperationID: uuid.NewString(), UpdatedAt: now,
+					OperationID: uuid.NewString(), UpdatedAt: now, ProviderCredential: operatorChannelProviderEvidence(),
 				}
 				proof := operatorChannelContractProof(identity, binding, now)
 				proof.Challenge = []string{"SWARM-AAAAAAAAAAAAAAAA", "SWARM-AAAAAAAAAAAAAAAB"}[index]
@@ -606,7 +773,7 @@ func TestOperatorChannelProofBootPreservesExactScopeSelectedStoreParity(t *testi
 					t.Fatal(err)
 				}
 			}
-			service, err := operatorchannel.NewService(fixture.store, proofs, identities, uuid.NewString())
+			service, err := operatorchannel.NewService(fixture.store, proofs, operatorChannelCredentialCurrentness{}, identities, uuid.NewString())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -645,11 +812,11 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	service, err := operatorchannel.NewService(fixture.store, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 8, 24, 14, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	principal, _, err := service.Bootstrap(context.Background(), now)
 	if err != nil {
 		t.Fatal(err)
@@ -667,13 +834,12 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 
 	bindingRevision := int64(0)
 	proofRevision := int64(0)
-	var rejectedBegin struct {
-		Operation operatorchannel.Operation `json:"operation"`
+	rejectedOperation, err := service.Begin(context.Background(), identity.Selector, operatorchannel.OperationConnect, 0,
+		"reject-"+string(backend), "reject-request-"+string(backend), operatorChannelProviderEvidence(), false, now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, "channel.connect", map[string]any{
-		"interface": identity.Selector, "expected_revision": 0, "save_proof": false, "idempotency_key": "reject-" + string(backend),
-	}, &rejectedBegin)
-	rejectedSettlement, err := fixture.settle(context.Background(), operatorChannelContractClaim(rejectedBegin.Operation, operatorchannel.ConversationScopeDirect, "rejected-account", "rejected-conversation", uuid.NewString()), now.Add(30*time.Second))
+	rejectedSettlement, err := fixture.settle(context.Background(), operatorChannelContractClaim(rejectedOperation, operatorchannel.ConversationScopeDirect, "rejected-account", "rejected-conversation", uuid.NewString()), now.Add(30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,17 +861,19 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		{method: "channel.rebind", account: "account-b", conversation: "conversation-b", scope: operatorchannel.ConversationScopeShared},
 	}
 	for index, lifecycle := range lifecycles {
-		var begun struct {
-			Operation operatorchannel.Operation `json:"operation"`
+		kind := map[string]operatorchannel.OperationKind{
+			"channel.connect": operatorchannel.OperationConnect, "channel.reconnect": operatorchannel.OperationReconnect, "channel.rebind": operatorchannel.OperationRebind,
+		}[lifecycle.method]
+		begun, err := service.Begin(context.Background(), identity.Selector, kind, bindingRevision,
+			fmt.Sprintf("%s-%s", backend, lifecycle.method), fmt.Sprintf("%s-%s-request", backend, lifecycle.method),
+			operatorChannelProviderEvidence(), true, now.Add(time.Duration(index+1)*time.Second))
+		if err != nil {
+			t.Fatal(err)
 		}
-		operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, lifecycle.method, map[string]any{
-			"interface": identity.Selector, "expected_revision": bindingRevision, "save_proof": true,
-			"idempotency_key": fmt.Sprintf("%s-%s", backend, lifecycle.method),
-		}, &begun)
-		if begun.Operation.State != operatorchannel.StateAwaitingClaim || begun.Operation.Interface.Selector != identity.Selector {
-			t.Fatalf("%s %s begin = %#v", backend, lifecycle.method, begun.Operation)
+		if begun.State != operatorchannel.StateAwaitingClaim || begun.Interface.Selector != identity.Selector {
+			t.Fatalf("%s %s begin = %#v", backend, lifecycle.method, begun)
 		}
-		claim := operatorChannelContractClaim(begun.Operation, lifecycle.scope, lifecycle.account, lifecycle.conversation, uuid.NewString())
+		claim := operatorChannelContractClaim(begun, lifecycle.scope, lifecycle.account, lifecycle.conversation, uuid.NewString())
 		settlement, err := fixture.settle(context.Background(), claim, now.Add(time.Duration(index+1)*time.Minute))
 		if err != nil || settlement.Disposition != operatorchannel.DispositionConsumedBinding || settlement.Operation.State != operatorchannel.StateAwaitingConfirmation {
 			t.Fatalf("%s %s claim = %#v, %v", backend, lifecycle.method, settlement, err)
@@ -759,7 +927,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	if statuses[identity.Selector] != operatorchannel.BindingStale || !strings.Contains(reasons[identity.Selector], "semantic generation changed") || statuses[successorIdentity.Selector] != operatorchannel.BindingUnbound {
 		t.Fatalf("%s replacement readback statuses=%#v reasons=%#v", backend, statuses, reasons)
 	}
-	if _, err := service.Begin(context.Background(), identity.Selector, operatorchannel.OperationReconnect, bindingRevision, "stale-key", "stale-request", true, now.Add(9*time.Minute)); !errors.Is(err, operatorchannel.ErrNotFound) {
+	if _, err := service.Begin(context.Background(), identity.Selector, operatorchannel.OperationReconnect, bindingRevision, "stale-key", "stale-request", operatorChannelProviderEvidence(), true, now.Add(9*time.Minute)); !errors.Is(err, operatorchannel.ErrNotFound) {
 		t.Fatalf("%s stale predecessor begin error = %v", backend, err)
 	}
 	if err := service.ReplaceInterfaces([]operatorchannel.InterfaceIdentity{identity}); err != nil {
@@ -771,7 +939,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	}
 
 	recoveredFixture := openOperatorChannelContractFixture(t, operatorChannelBackendName(backend))
-	recoveredService, err := operatorchannel.NewService(recoveredFixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	recoveredService, err := operatorchannel.NewService(recoveredFixture.store, proofs, operatorChannelCredentialCurrentness{}, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}

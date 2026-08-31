@@ -69,7 +69,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 
 	rejectedIdentity := operatorChannelContractIdentity("generation-rejected")
-	rejectedBegin := operatorchannel.BeginRequest{
+	rejectedBegin := operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: rejectedIdentity, ExpectedRevision: 0, RequestKeyHash: "rejected-key", RequestHash: "rejected-body",
 		RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -100,7 +100,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 
 	concurrentIdentity := operatorChannelContractIdentity("generation-concurrent-claim")
-	concurrentOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+	concurrentOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: concurrentIdentity, ExpectedRevision: 0, RequestKeyHash: "concurrent-claim-key", RequestHash: "concurrent-claim-body",
 		RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -153,7 +153,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	}
 
 	identity := operatorChannelContractIdentity("generation-a")
-	begin := operatorchannel.BeginRequest{
+	begin := operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: identity, ExpectedRevision: 0, RequestKeyHash: "connect-key", RequestHash: "connect-body",
 		RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -161,6 +161,9 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	op, err := fixture.store.BeginChannelBinding(ctx, begin)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if op.ProviderCredential != begin.ProviderCredential {
+		t.Fatalf("operation provider evidence = %#v, want %#v", op.ProviderCredential, begin.ProviderCredential)
 	}
 	replay := begin
 	replay.OperationID = uuid.NewString()
@@ -200,6 +203,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	})
 	if err != nil || confirmed.State != operatorchannel.StateBound || confirmed.ProofStatus != operatorchannel.ProofSkipped || binding.Revision != 1 || binding.ConversationScope != operatorchannel.ConversationScopeDirect ||
 		binding.ProofID != "" || binding.ProofRevision != 0 ||
+		binding.ProviderCredential != begin.ProviderCredential ||
 		binding.ExternalAccountRef != `{"principal":"account-a"}` || binding.ConversationRef != `{"room":"conversation-a"}` {
 		t.Fatalf("confirm = op:%#v binding:%#v err:%v", confirmed, binding, err)
 	}
@@ -213,14 +217,14 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	if err != nil || replayedConfirm.Revision != confirmed.Revision || replayedBinding.Revision != binding.Revision {
 		t.Fatalf("confirmation replay = op:%#v binding:%#v err:%v", replayedConfirm, replayedBinding, err)
 	}
-	if _, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+	if _, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: identity, ExpectedRevision: 1, RequestKeyHash: "connect-current-key", RequestHash: "connect-current-body",
 		RequestedAt: now.Add(5 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 	}); !errors.Is(err, operatorchannel.ErrConflict) {
 		t.Fatalf("connect replaced current binding: %v", err)
 	}
-	if _, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+	if _, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationRebind, PrincipalID: principal.ID,
 		Interface: operatorChannelContractIdentity("generation-unbound-rebind"), ExpectedRevision: 0,
 		RequestKeyHash: "rebind-unbound-key", RequestHash: "rebind-unbound-body",
@@ -229,7 +233,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("rebind admitted unbound interface: %v", err)
 	}
 
-	reconnectOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+	reconnectOp, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationReconnect, PrincipalID: principal.ID,
 		Interface: identity, ExpectedRevision: 1, RequestKeyHash: "reconnect-changed-scope-key", RequestHash: "reconnect-changed-scope-body",
 		RequestedAt: now.Add(5 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -248,7 +252,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("reconnect changed conversation scope: %v", err)
 	}
 
-	sameClaimantRebind, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+	sameClaimantRebind, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationRebind, PrincipalID: principal.ID,
 		Interface: identity, ExpectedRevision: 1, RequestKeyHash: "rebind-same-key", RequestHash: "rebind-same-body",
 		RequestedAt: now.Add(5 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -273,7 +277,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("unbind admitted stale expected revision: %v", err)
 	}
 
-	rebind := operatorchannel.BeginRequest{
+	rebind := operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationRebind, PrincipalID: principal.ID,
 		Interface: identity, ExpectedRevision: 1, RequestKeyHash: "rebind-key", RequestHash: "rebind-body",
 		RequestedAt: now.Add(6 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
@@ -307,7 +311,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("proof bypassed unbind fence: %v", err)
 	}
 
-	expiredBegin := operatorchannel.BeginRequest{
+	expiredBegin := operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: operatorChannelContractIdentity("generation-expired"), ExpectedRevision: 0,
 		RequestKeyHash: "expired-key", RequestHash: "expired-body", RequestedAt: now, ExpiresAt: now.Add(time.Second),
@@ -342,7 +346,7 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("expired settlement = %#v, %v", expiredSettlement, err)
 	}
 
-	confirmExpiryBegin := operatorchannel.BeginRequest{
+	confirmExpiryBegin := operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: operatorChannelContractIdentity("generation-confirm-expired"), ExpectedRevision: 0,
 		RequestKeyHash: "confirm-expired-key", RequestHash: "confirm-expired-body", RequestedAt: now, ExpiresAt: now.Add(time.Second),
@@ -459,6 +463,7 @@ func operatorChannelContractProof(identity operatorchannel.InterfaceIdentity, bi
 		ConversationScope: binding.ConversationScope, AccountPresentation: binding.AccountPresentation,
 		Method: string(operatorchannel.OperationRebind), Challenge: "SWARM-AAAAAAAAAAAAAAAA", OriginalOperationID: binding.OperationID,
 		MintingStoreID: binding.PrincipalID, MintingDeploymentID: uuid.NewString(), VerifiedAt: at, OperatorConfirmed: true,
-		ConsentScopes: []operatorchannel.ConsentScope{operatorchannel.ConsentNotify, operatorchannel.ConsentDecide},
+		ConsentScopes:      []operatorchannel.ConsentScope{operatorchannel.ConsentNotify, operatorchannel.ConsentDecide},
+		ProviderCredential: binding.ProviderCredential,
 	}
 }
