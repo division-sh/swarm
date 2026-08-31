@@ -1175,8 +1175,8 @@ func TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers(t *testing.T) {
 func TestEntityContractsDocumentDecode_RejectsOptionalTopLevelFieldUntil2397(t *testing.T) {
 	var doc EntityContractsDocument
 	err := yaml.Unmarshal([]byte("item:\n  label: text?\n"), &doc)
-	if err == nil || !strings.Contains(err.Error(), "#2397") {
-		t.Fatalf("yaml.Unmarshal error = %v, want #2397 entity-presence boundary", err)
+	if err == nil || !strings.Contains(err.Error(), "top-level entity fields do not support typed omission") {
+		t.Fatalf("yaml.Unmarshal error = %v, want entity-presence boundary", err)
 	}
 }
 

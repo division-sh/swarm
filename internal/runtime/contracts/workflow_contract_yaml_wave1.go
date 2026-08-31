@@ -1331,7 +1331,7 @@ func projectEntityFieldDecl(value yamlsource.Value) (EntityFieldDecl, error) {
 		return EntityFieldDecl{}, err
 	}
 	if parsed.IsOptional {
-		return EntityFieldDecl{}, fmt.Errorf("entity field optionality belongs to #2397; top-level entity fields remain required")
+		return EntityFieldDecl{}, fmt.Errorf("top-level entity fields do not support typed omission; declare a required field")
 	}
 	return EntityFieldDecl{
 		Type: parsed.Type, Initial: parsed.Initial, Indexed: parsed.Indexed,
