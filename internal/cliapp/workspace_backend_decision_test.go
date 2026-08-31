@@ -401,7 +401,7 @@ func workspaceBackendTestSource(agents map[string]runtimecontracts.AgentRegistry
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
-	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
+	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend: %v", err)
 	}

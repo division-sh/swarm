@@ -30,16 +30,16 @@ func TestCompositeInventoryReaderCapturesManagedContainersAtPlanTime(t *testing.
 	if err != nil {
 		t.Fatalf("ReadResetInventory: %v", err)
 	}
-	if len(inventory.EntityContainers) != 1 || inventory.EntityContainers[0].Name != "swarm-agent-agent-a" {
-		t.Fatalf("entity containers = %#v, want plan-time managed container refs", inventory.EntityContainers)
+	if len(inventory.ManagedContainers) != 1 || inventory.ManagedContainers[0].Name != "swarm-agent-agent-a" {
+		t.Fatalf("managed containers = %#v, want plan-time managed container refs", inventory.ManagedContainers)
 	}
-	inventory.EntityContainers[0].Name = "tampered"
+	inventory.ManagedContainers[0].Name = "tampered"
 	again, err := (CompositeInventoryReader{Reader: base, Containers: containers}).ReadResetInventory(context.Background())
 	if err != nil {
 		t.Fatalf("ReadResetInventory again: %v", err)
 	}
-	if again.EntityContainers[0].Name != "swarm-agent-agent-a" {
-		t.Fatalf("inventory leaked mutable container refs: %#v", again.EntityContainers)
+	if again.ManagedContainers[0].Name != "swarm-agent-agent-a" {
+		t.Fatalf("inventory leaked mutable container refs: %#v", again.ManagedContainers)
 	}
 }
 
@@ -62,7 +62,7 @@ func TestManagedContainerStopperDryRunSelectsOnlyResetEligibleLabeledContainers(
 			OperationName: DefaultOperationName,
 			DryRun:        true,
 			PlannedAt:     now.Add(-time.Minute),
-			Plan: Plan{EntityContainers: []ContainerRef{
+			Plan: Plan{ManagedContainers: []ContainerRef{
 				{Name: "swarm-agent-agent-a", Action: ContainerActionStop},
 				{Name: "swarm-system", Action: ContainerActionStop},
 				{Name: "swarm-unlabeled", Action: ContainerActionStop},
@@ -107,7 +107,7 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 			OperationName: DefaultOperationName,
 			DryRun:        false,
 			PlannedAt:     now.Add(-2 * time.Minute),
-			Plan: Plan{EntityContainers: []ContainerRef{
+			Plan: Plan{ManagedContainers: []ContainerRef{
 				{Name: "swarm-agent-agent-a", Action: ContainerActionStop},
 				{Name: "swarm-flow-flow-a", Action: ContainerActionStop},
 				{Name: "swarm-entity-a", Action: ContainerActionStop},
@@ -185,7 +185,6 @@ func managedInspection(name, kind string, resetEligible, running bool) ManagedCo
 			ContainerName:  name,
 			WorkspaceScope: kind,
 			RunID:          "11111111-1111-1111-1111-111111111111",
-			EntityID:       "entity-a",
 			AgentIdentity:  testManagedAgentIdentity(),
 			FlowInstance:   "flow/a",
 		},

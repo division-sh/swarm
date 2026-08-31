@@ -28,7 +28,6 @@ import (
 	runtimerunstalled "github.com/division-sh/swarm/internal/runtime/runstalled"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -74,7 +73,6 @@ type Owner struct {
 
 type requiredPorts struct {
 	schema                 store.SchemaBootstrapper
-	workspace              workspace.Lookup
 	pinger                 apiv1.Pinger
 	authorActivity         runtimeauthoractivity.Reader
 	operatorChannels       operatorchannel.Store
@@ -279,7 +277,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			ScenarioExecutionProfiles: selected,
 		},
 		required: requiredPorts{
-			schema: selected, workspace: selected, pinger: selected, authorActivity: selected,
+			schema: selected, pinger: selected, authorActivity: selected,
 			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
@@ -333,7 +331,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			ScenarioExecutionProfiles: selected,
 		},
 		required: requiredPorts{
-			schema: selected, workspace: selected, pinger: selected, authorActivity: selected,
+			schema: selected, pinger: selected, authorActivity: selected,
 			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,

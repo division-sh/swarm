@@ -19265,6 +19265,12 @@ workspace_model:
     portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
       Mount paths are invariant. Only the backing storage implementation changes.
     process_projection_separation: Docker container names are process-projection-scoped. Docker writable volumes and host workspace roots are bundle-plus-semantic-workspace-scoped and never include the process projection identity. Bundle-owned scaffold/system support volumes are retained when a projection is released; source-projection release removes only the containers bound to that projection.
+    durable_backing_identity:
+      owner: internal/runtime/workspace durable workspace key owner
+      tuple: full validated bundle_hash, closed workspace kind, exact typed semantic identity
+      rule: Every writable Docker volume and Host workspace directory is named by one SHA-256 projection of the canonical length-framed tuple. Bundle identity is never truncated; per-agent identity consumes the exact concrete-agent fingerprint; per-flow-instance identity consumes the exact canonical flow-instance path. Display slugs, normalized paths, container names, and process projection IDs are never durable storage authority. Host and Docker consume the same backing key for the same tuple, and distinct values such as a/b, a-b, and a_b remain distinct.
+      kinds: scaffold, system, system-entities, system-nginx, system-systemd, agent, flow
+      lifecycle: Process replacement reuses the same backing key for the same tuple. Different bundles, kinds, agents, or flow instances cannot share writable state. No compatibility lookup, old-name migration, or alias exists.
   managed_container_identity:
     status: internal_only
     owner: internal/runtime/containeridentity plus internal/runtime/workspace creation paths
@@ -19272,17 +19278,16 @@ workspace_model:
       consume this identity rather than inferring ownership from container names, prefixes, or raw Docker listings.
     labels:
       owner: dev.swarm.owner = runtime
-      kind: dev.swarm.container.kind = scaffold | system | entity | agent | flow
+      kind: dev.swarm.container.kind = scaffold | system | agent | flow
       reset_eligibility: dev.swarm.reset.eligible = true | false
       creation_source: dev.swarm.creation_source names the workspace creation owner
       container_name: dev.swarm.container.name records the exact container name stamped at creation
-      workspace_scope: dev.swarm.workspace.scope records scaffold, system, entity, per-agent, or per-flow-instance scope
-      lineage: dev.swarm.run_id, dev.swarm.entity_id, dev.swarm.agent_id, dev.swarm.flow_instance, and
-        dev.swarm.data_projection_id are stamped when that lineage/projection is available to the creation owner. Flow-scoped
+      workspace_scope: dev.swarm.workspace.scope records scaffold, system, per-agent, or per-flow-instance scope
+      lineage: dev.swarm.run_id, dev.swarm.agent_id, dev.swarm.flow_instance, and dev.swarm.data_projection_id are stamped when that lineage/projection is available to the creation owner. Flow-scoped
         containers always carry the concrete actor because /data authority is actor-specific.
     reset_policy:
     - Destructive reset may stop only containers whose typed identity proves owner=runtime, reset_eligible=true, and kind
-      is entity, agent, or flow.
+      is agent or flow.
     - scaffold and system containers are platform-created but reset_eligible=false and must be preserved by destructive reset.
     - Unlabeled, unregistered, operator-managed, postgres/tool-gateway, name-only, and ambiguous containers are preserved
       fail-closed. A Swarm-looking container name is not ownership proof.
@@ -20089,7 +20094,7 @@ test_specification:
       - fixture-local routing, lifecycle, replay, or settlement interpretation
       - SQL or logs as behavioral proof
       - provider credentials or discovery of Claude, Docker, or Podman executables
-      - project-local Go-module authority or absolute config, contracts, or token operands
+      - project-local Go-module authority or absolute config, source-root, or token operands
       - reduced payload assertions, deadline-as-success, or a non-race burst substitute
     compiled_process_full_lifecycle_profile:
       promoted_by: '#2008'
@@ -20103,7 +20108,7 @@ test_specification:
         public convergence without interpreting any production semantic inside the harness.
       invocation_boundary: >
         Every journey builds the current swarm binary once per test group and runs real verify and Cobra serve from an
-        authored YAML-only child beneath a hostile ancestor go.mod. Config, contracts, and token operands are relative
+        authored YAML-only child beneath a hostile ancestor go.mod. Config, source-root, and token operands are relative
         to that child. Selected stores begin empty; secrets are set through the public command; RPC and webhook traffic
         use public listeners. Provider credentials and discoverable Claude, Docker, or Podman executables are absent.
       journeys:
@@ -20118,7 +20123,7 @@ test_specification:
         J4_postgres_crash_intrinsic_recover: J3 against an isolated host-PostgreSQL database.
         J5_sqlite_dev_fresh_epoch: >
           Project-local serve --dev reaches the same public paused/pending checkpoint and is killed. Its next invocation
-          uses a fresh SQLite scratch epoch. The same authored package/flow may rederive identical service, generation-one
+          uses a fresh SQLite scratch epoch. The same authored filesystem flow may rederive identical service, generation-one
           run, and standing ingress entity IDs; freshness requires a strictly later public run started_at and absence of every predecessor
           exact event, delivery, and card fact before one new ingress converges exactly once. PostgreSQL, authored-path,
           borrowed-project, custom-store dev behavior, and production identity salting are outside this profile.
@@ -20130,12 +20135,12 @@ test_specification:
         independently resolves exactly that receipt child. run.diagnose must report paused status with exactly one active
         delivery. A deadline is failure, not success.
       manifestations:
-        M1: Every package root below the dedicated fixture root has exactly one executable or support classification.
+        M1: The explicit fixture source is one finite admitted filesystem flow tree; child flows are discovered directly from directories, and package.yaml or flows/ topology is absent.
         M2: Verify and serve use the same production-shaped YAML-only relative invocation root.
         M3: Exact authored connector mock response admission succeeds and a missing response fails verify.
         M4: Cold plain serve reaches committed readiness on both selected stores with recovery omitted.
         M5: Signed ingress proves the exact ordered receipt from its raw standing-entity event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target, with no dead letter.
-        M6: The package-owned mock agent executes without external provider or container discovery and exposes mock provenance.
+        M6: The filesystem-flow-owned mock agent executes without external provider or container discovery and exposes mock provenance.
         M7: One workflow timer advances once with exact platform.stage_timer event cardinality.
         M8: One decision card is listed, read, approved, and read back as decided through public RPC.
         M9: One mocked connector activity settles once without live transport.
@@ -20152,7 +20157,7 @@ test_specification:
         M20: Both recovery journeys compare baseline, checkpoint, and post-recovery standing receipt entity identity while separately retaining exact service, run, generation, bundle, downstream target, and delivery authority.
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
-        M23: The lifecycle executable/support registry and canonical-routing overlay registry remain distinct total owners.
+        M23: The release fixture's finite-source guard and canonical-routing overlay independently prove the same explicit source root without introducing a second topology owner.
         M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
       supported_surfaces:
       - compiled swarm verify --json
@@ -20161,8 +20166,8 @@ test_specification:
       - signed provider webhook ingress
       - run.list, run.get, run.pause, and run.diagnose
       - event.list, mailbox.list, mailbox.get, and mailbox.decide
-      registries:
-        lifecycle: A dedicated typed registry classifies every package root below the profile source as exactly one executable or support fixture and rejects missing, duplicate, unknown, stale, or multiply executable registration.
+      proof_owners:
+        lifecycle: The release profile names one explicit source root and admits it through sourceartifact. A fixture guard rejects package.yaml and flows/ and proves the required child-flow members; no executable/support package registry exists.
         canonical_routing: The existing canonical-routing artifact registry classifies the executable source as one canonical-overlay and proves exact production loading and boot verification.
       profiles:
         pull_request: pr-common and pr-escalated execute J1 as the bounded SQLite smoke.
@@ -20171,7 +20176,7 @@ test_specification:
       - runtime or store semantic changes made to satisfy the evidence profile
       - seeded runs, entities, instances, schedules, deliveries, cards, or direct store writes
       - fixture-local lifecycle, recovery, routing, timer, card, mock, effect, or settlement interpretation
-      - child go.mod files or absolute config, contracts, or token operands
+      - child go.mod files or absolute config, source-root, or token operands
       - fresh-dev ID inequality, identity salting, PostgreSQL dev, custom-store dev, borrowed-project dev, or direct abandon claims
       - an omitted-recovery refusal/config-toggle path, a second post-crash restart, or an ordinary-run fixture added to retain generic recovery-policy evidence
       - sleeps, deadline-as-success, SQL/log behavioral proof, weakened rows, or hidden backend skips
@@ -21085,7 +21090,8 @@ cli_specification:
       serve_dev_mode_lifecycle:
         classification: required_current_contract
         reason: >
-          Platform spec carries exact `--dev` composition and dev entity-container cleanup semantics from #830.
+          Platform spec carries exact `--dev` scratch-epoch and concise-output composition from #830. The former
+          dev entity-workspace cleanup path is retired by #2320 because no production owner creates that container class.
       serve_unified_listener_bind_contract:
         classification: superseded_migration_evidence
         reason: >
@@ -24509,7 +24515,7 @@ cli_specification:
         destructive_reset_separation: >
           Destructive reset/runtime.nuke consumes the same active-run quiescence owner with `runtime_nuke_cancelled` reasons and
           must retain its existing run-scoped cleanup and managed-container deletion semantics. `--abandon-active-runs` does not
-          delete source rows, truncate tables, stop managed entity containers, or reuse nuke-specific reason codes.
+          delete source rows, truncate tables, stop managed workspace containers, or reuse nuke-specific reason codes.
       shutdown_grace_drain_budget:
         implemented_by: '#825'
         flag: --shutdown-grace <duration>
@@ -24533,40 +24539,31 @@ cli_specification:
           or terminalize event deliveries as `interrupted_by_shutdown`; those semantics remain split until promoted by a
           merge-bearing spec contract.
         sibling_boundaries: >
-          `--dev`, dev entity-container shutdown cleanup, `platform.shutdown` event persistence, and persisted delivery/receipt
-          interruption reasons remain outside this owner and under #750 unless a later child promotes them.
+          `--dev`, `platform.shutdown` event persistence, and persisted delivery/receipt interruption reasons remain outside
+          this owner and under #750 unless a later child promotes them.
       dev_mode_lifecycle_composition:
-        implemented_by: '#830/#2010/#2360/#2364'
+        implemented_by: '#830/#2010/#2320/#2360/#2364'
         flag: --dev
         owner: >
           `internal/cliapp` owns command-line composition; internal/store/devscratch.EpochAuthority owns replacement with a
           fresh project-local SQLite scratch epoch before store open; existing internal/serveapp startup owners perform
-          bundle-match admission and concise lifecycle presentation; `internal/runtime/workspace` plus
-          `internal/runtime/containeridentity` own dev entity-container cleanup and preservation.
+          source-artifact admission and concise lifecycle presentation.
         composition:
-        - sets `--no-require-bundle-match`
         - replaces the predecessor project-local SQLite scratch epoch before opening the selected store
         - recreates deterministic standing semantic IDs when the same flow_path is authored, while predecessor event,
           delivery, card, and other durable history remains absent and the fresh run has a later started_at
         - does not imply `--abandon-active-runs`; an explicit abandon flag is evaluated only against the fresh epoch
         - consumes concise serve boot/readiness presentation without setting `--verbose`
-        - enables dev entity-container cleanup after runtime shutdown/drain
         conflict_rules:
-        - '`--dev --require-bundle-match` or `--dev --require-bundle-match=true` fails before runtime boot because dev mode disables bundle-match admission.'
-        - '`--dev --require-bundle-match=false` and `--dev --no-require-bundle-match` are redundant but valid.'
         - '`--dev --abandon-active-runs` is explicit and valid, but the fresh epoch contains no predecessor runs to abandon.'
         - '`--dev --verbose` is valid and selects explicit 22-step presentation; it is not redundant.'
         shutdown_ordering: >
-          On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. Dev cleanup runs
-          only after that shutdown attempt reaches its completion point. Cleanup still runs after a shutdown timeout/error and
-          the serve path reports joined shutdown and cleanup errors.
-        cleanup_scope: >
-          Dev cleanup stops only identity-proven runtime-owned, reset-eligible, `kind=entity` containers. The cleanup owner
-          consumes typed managed-container identity and MUST NOT infer ownership from names, raw Docker listings, or
-          `RuntimeWorkspaceContainers` alone.
-        preservation_boundary: >
-          Scaffold/system containers, operator-managed containers, unlabeled containers, malformed identity rows, name-mismatched
-          containers, unrelated containers, and runtime-owned `kind=agent` or `kind=flow` containers are preserved fail-closed.
+          On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. The ordinary
+          source-projection owner then removes its process-scoped containers before releasing the projection filesystem.
+        entity_cleanup_retirement: >
+          Dev mode has no entity-workspace container cleanup. The former `kind=entity` container identity, selected-store slug
+          lookup, creation path, and shutdown cleanup are removed with no compatibility or migration behavior because no live
+          production owner created that workspace class. Destructive reset separately owns typed agent/flow container cleanup.
         sibling_boundaries: >
           `platform.shutdown` event persistence, persisted `interrupted_by_shutdown` delivery/receipt terminalization,
           destructive reset/runtime.nuke behavior, and `swarm run start` foreground behavior remain outside this owner unless a later
@@ -26170,7 +26167,7 @@ cli_specification:
       - '#802/#804 serve verbose boot output and platform.boot payload'
       - '#808/#811 serve active-run abandon quiescence'
       - '#825/#827 serve shutdown-grace drain budget'
-      - '#830 serve dev-mode lifecycle composition and dev entity-container cleanup'
+      - '#830 serve dev-mode lifecycle composition; its former entity-workspace cleanup seam is retired by #2320'
       listener_topology_authority: >
         #884 promotes final CLI v2.1 separate API/MCP listen-address topology as source-of-truth repair only. #992
         implements the runtime bind slice for `swarm serve --api-listen-addr` and `--mcp-listen-addr`, route
@@ -30665,7 +30662,7 @@ api_specification:
           containers:
             type: object
             additionalProperties: true
-            description: Exact result from the managed entity-container selection/stop owner.
+            description: Exact result from the managed workspace-container selection/stop owner.
           partial_failure:
             type: boolean
           errors:
@@ -34837,7 +34834,7 @@ api_specification:
     runtime.nuke:
       tier: should_have
       description: |
-        Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
+        Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
         `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner; false preserves source artifact rows. In DB-loaded RuntimeContextManager mode, successful or partial apply-mode runtime.nuke requests with `include_source_artifacts=true` also mark loaded BundleContext entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_source_artifacts=false` must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.
       scope:
@@ -36109,7 +36106,7 @@ filesystem_source_model:
     owner: internal/sourceartifact projection lifecycle
     mount: /opt/swarm/source
     rule: |
-      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by exact owned-name removal and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: Docker named volumes and host workspace roots retain their bundle plus workspace-class semantic scope across same-bundle process replacement. Per-agent, per-flow-instance, and entity volumes therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
+      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by exact owned-name removal and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
   retired_surface:
     behavior: fail_closed_with_teaching_error_or_absent_public_surface
     no_compatibility: true

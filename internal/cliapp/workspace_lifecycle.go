@@ -15,13 +15,12 @@ var ConfiguredWorkspaceLifecycleForServe = ConfiguredWorkspaceLifecycleForBacken
 
 type ServeWorkspaceLifecycle interface {
 	workspace.Lifecycle
-	workspace.DevEntityContainerCleaner
 	runtimedestructivereset.ManagedContainerInventoryReader
 	runtimedestructivereset.ManagedContainerRuntime
 }
 
-func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
-	manager := workspace.NewDockerManager(lookup)
+func configuredWorkspaceLifecycle(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
+	manager := workspace.NewDockerManager()
 	workspaceCfg, err := dockerWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -35,7 +34,7 @@ func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, p
 	return manager, nil
 }
 
-func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
+func ConfiguredWorkspaceLifecycleForBackend(cfg *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
 	selected := strings.TrimSpace(backend.Backend)
 	if selected == "" {
 		return nil, fmt.Errorf("workspace backend decision is required")
@@ -44,7 +43,7 @@ func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config
 	case WorkspaceBackendNone:
 		return nil, nil
 	case workspace.BackendDocker:
-		return configuredWorkspaceLifecycle(lookup, cfg, projection, source, mountSources)
+		return configuredWorkspaceLifecycle(cfg, projection, source, mountSources)
 	case workspace.BackendHost:
 		return configuredHostWorkspaceLifecycle(cfg, projection, source, mountSources)
 	default:

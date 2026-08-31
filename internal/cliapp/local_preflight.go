@@ -519,7 +519,7 @@ func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 		return
 	}
 	defer projection.Release()
-	workspaces, err := ConfiguredWorkspaceLifecycleForServe(nil, cfg, projection, source, mountSources, backend)
+	workspaces, err := ConfiguredWorkspaceLifecycleForServe(cfg, projection, source, mountSources, backend)
 	if err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_config_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix workspace backend or mount configuration")
 		return

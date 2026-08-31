@@ -57,7 +57,7 @@ type releaseProcessSpec struct {
 	BinaryPath           string
 	WorkingDir           string
 	ConfigPath           string
-	Contracts            string
+	Source               string
 	Store                string
 	Dev                  bool
 	APIPort              int
@@ -95,8 +95,8 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if options.ConfigPath != "" {
 		args = append(args, "--config", options.ConfigPath)
 	}
-	if options.Contracts != "" {
-		args = append(args, options.Contracts)
+	if options.Source != "" {
+		args = append(args, options.Source)
 	}
 	if options.Store != "" {
 		args = append(args, "--store", options.Store)

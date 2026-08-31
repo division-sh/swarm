@@ -49,6 +49,31 @@ func testRuntimeSourceProjectionNamed(t *testing.T, name string) (*sourceartifac
 	return projection, projection.PrivateRoot()
 }
 
+func bindTestDockerProjection(t *testing.T, manager *DockerManager, projection *sourceartifact.RuntimeProjection) {
+	t.Helper()
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
+}
+
+func bindTestHostProjection(t *testing.T, manager *HostManager, projection *sourceartifact.RuntimeProjection) {
+	t.Helper()
+	if err := manager.BindSourceProjection(projection); err != nil {
+		t.Fatalf("BindSourceProjection: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.ReleaseSourceProjection(context.Background()) })
+}
+
+func durableWorkspaceKeyForTest(t *testing.T, bundleHash string, kind durableWorkspaceKind, semanticIdentity string) string {
+	t.Helper()
+	key, err := durableWorkspaceBackingKey(bundleHash, kind, semanticIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
 func TestBundleScopedSystemWorkspacesDoNotReusePriorSourceMount(t *testing.T) {
 	first, firstRoot := testRuntimeSourceProjectionNamed(t, "first-source")
 	second, secondRoot := testRuntimeSourceProjectionNamed(t, "second-source")
@@ -70,7 +95,7 @@ func TestBundleScopedSystemWorkspacesDoNotReusePriorSourceMount(t *testing.T) {
 		return "", nil
 	}
 	start := func(projection *sourceartifact.RuntimeProjection) *DockerManager {
-		manager := NewDockerManager(nil)
+		manager := NewDockerManager()
 		cfg := DefaultDockerConfig()
 		cfg.SourceProjection = projection
 		cfg.WorkspaceNetwork = ""
@@ -124,7 +149,6 @@ func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStopp
 			if first.BundleHash() != second.BundleHash() || first.Identity() == second.Identity() {
 				t.Fatalf("same artifact projection identities = first %s/%s second %s/%s", first.BundleHash(), first.Identity(), second.BundleHash(), second.Identity())
 			}
-			const entityID = "22222222-2222-2222-2222-222222222222"
 			semanticSource := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 					"workspace_classes": {Value: map[string]any{
@@ -135,7 +159,7 @@ func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStopp
 			})
 			var calls []projectionDockerCall
 			bind := func(name string, projection *sourceartifact.RuntimeProjection) *DockerManager {
-				manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
+				manager := NewDockerManager()
 				cfg := DefaultDockerConfig()
 				cfg.SourceProjection = projection
 				cfg.WorkspaceNetwork = ""
@@ -201,14 +225,6 @@ func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStopp
 				}
 				assertSameDurableVolumeAttachment(t, calls, workspace.name, firstTarget.Container, secondTarget.Container)
 			}
-			if err := firstManager.EnsureEntityWorkspace(ctx, entityID); err != nil {
-				t.Fatalf("first entity workspace: %v", err)
-			}
-			if err := secondManager.EnsureEntityWorkspace(ctx, entityID); err != nil {
-				t.Fatalf("second entity workspace: %v", err)
-			}
-			assertSameDurableVolumeAttachment(t, calls, "entity", firstManager.EntityContainerName("acme"), secondManager.EntityContainerName("acme"))
-
 			if err := firstManager.EnsureSystemWorkspaces(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -272,7 +288,7 @@ func assertSameDurableVolumeAttachment(t *testing.T, calls []projectionDockerCal
 
 func TestDockerManagerRejectsRepeatedSourceProjectionBinding(t *testing.T) {
 	projection, projectionRoot := testRuntimeSourceProjection(t)
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	if err := manager.BindSourceProjection(projection); err != nil {
 		t.Fatalf("first BindSourceProjection: %v", err)
 	}
@@ -289,7 +305,7 @@ func TestDockerManagerRejectsRepeatedSourceProjectionBinding(t *testing.T) {
 
 func TestReleaseSourceProjectionRemovesOwnedContainersAfterPartialLaunch(t *testing.T) {
 	projection, _ := testRuntimeSourceProjection(t)
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.SourceProjection = projection
 	cfg.WorkspaceNetwork = ""
@@ -325,7 +341,7 @@ func TestReleaseSourceProjectionRemovesOwnedContainersAfterPartialLaunch(t *test
 
 func TestReleaseSourceProjectionWaitsForAdmittedContainerLaunchBeforeTeardown(t *testing.T) {
 	projection, _ := testRuntimeSourceProjection(t)
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.SourceProjection = projection
 	cfg.WorkspaceNetwork = ""
@@ -389,7 +405,7 @@ func TestReleaseSourceProjectionWaitsForAdmittedContainerLaunchBeforeTeardown(t 
 
 func TestReleaseSourceProjectionReconcilesCreateAndRemoveAcknowledgmentLoss(t *testing.T) {
 	projection, projectionRoot := testRuntimeSourceProjection(t)
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.SourceProjection = projection
 	cfg.WorkspaceNetwork = ""
@@ -428,7 +444,7 @@ func TestReleaseSourceProjectionReconcilesCreateAndRemoveAcknowledgmentLoss(t *t
 
 func TestReleaseSourceProjectionRetainsFilesystemWhileContainerRemovalIsUncertain(t *testing.T) {
 	projection, projectionRoot := testRuntimeSourceProjection(t)
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.SourceProjection = projection
 	cfg.WorkspaceNetwork = ""
@@ -480,7 +496,7 @@ func TestReleaseSourceProjectionRetainsFilesystemWhileContainerRemovalIsUncertai
 func TestReboundDockerManagerLazySystemWorkspacesMountSelectedSource(t *testing.T) {
 	projection, projectionRoot := testRuntimeSourceProjection(t)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.WorkspaceNetwork = ""
 	manager.SetConfig(cfg)
@@ -551,7 +567,7 @@ func TestWorkspaceManagersRebindSelectedSourceWithoutMutatingBootLifecycle(t *te
 	})
 
 	t.Run("docker", func(t *testing.T) {
-		manager := NewDockerManager(nil)
+		manager := NewDockerManager()
 		bootCfg := DefaultDockerConfig()
 		manager.SetConfig(bootCfg)
 

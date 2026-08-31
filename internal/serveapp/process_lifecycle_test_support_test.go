@@ -136,8 +136,6 @@ func (stubWorkspaceLifecycle) BindSourceProjection(*sourceartifact.RuntimeProjec
 	return nil
 }
 func (stubWorkspaceLifecycle) ReleaseSourceProjection(context.Context) error        { return nil }
-func (stubWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error  { return nil }
-func (stubWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error    { return nil }
 func (stubWorkspaceLifecycle) SetDataProjectionProvider(runtimedataaccess.Provider) {}
 
 type processIngressCredentialStore map[string]string

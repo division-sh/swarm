@@ -258,11 +258,43 @@ func TestServeCompositionProvidesExactRuntimePorts(t *testing.T) {
 	assertOwnershipSourceContains(t, projectionSource,
 		"deps: owner.RuntimeDeps()",
 		"schema: owner.Schema()",
-		"workspace: owner.WorkspaceLookup()",
 	)
 	assertOwnershipSourceExcludes(t, mainSource+selectedSource+projectionSource,
 		"runtime.Stores", ".runtimeStores(", "predecessor.Stores", "selectedRuntimeStoreFacade",
 	)
+}
+
+func TestEntityWorkspacePersistenceSeamIsRetired(t *testing.T) {
+	root := persistenceOwnershipRepoRoot(t)
+	var source strings.Builder
+	for _, rel := range []string{
+		"internal/runtime/workspace/manager.go",
+		"internal/runtime/workspace/host_manager.go",
+		"internal/runtime/containeridentity/identity.go",
+		"internal/runtime/manager/runtime.go",
+		"internal/cliapp/workspace_lifecycle.go",
+		"internal/store/selected/selected.go",
+		"internal/store/selected/accessors.go",
+		"internal/store/internal/runtimepersistence/composition.go",
+		"internal/serveapp/main.go",
+		"internal/serveapp/store_runtime.go",
+	} {
+		source.WriteString(readOwnershipSource(t, root, rel))
+	}
+	assertOwnershipSourceExcludes(t, source.String(),
+		"EnsureEntityWorkspace", "StopEntityWorkspace", "LookupWorkspaceEntity",
+		"ListRuntimeWorkspaceContainers", "WorkspaceLookup", "workspaceLookups",
+		"CleanupDevEntityContainers", "KindEntity", "dev.swarm.entity_id",
+	)
+	for _, rel := range []string{
+		"internal/runtime/workspace/persistence.go",
+		"internal/store/internal/runtimepersistence/workspace_lookup.go",
+		"internal/store/internal/workspace/lookup.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); !os.IsNotExist(err) {
+			t.Fatalf("retired entity workspace persistence file %s still exists: %v", rel, err)
+		}
+	}
 }
 
 func TestRuntimeSemanticModelsHaveSingleConsumerOwner(t *testing.T) {

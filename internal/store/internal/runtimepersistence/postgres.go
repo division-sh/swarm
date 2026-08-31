@@ -41,7 +41,6 @@ import (
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
-	storeworkspace "github.com/division-sh/swarm/internal/store/internal/workspace"
 )
 
 type PostgresStore struct {
@@ -82,7 +81,6 @@ type PostgresStore struct {
 	runBundles            *storerunbundle.Postgres
 	workflowEntityQueries *storeworkflowentityquery.Postgres
 	workflowRoutes        *storeworkflowroute.Postgres
-	workspaceLookups      *storeworkspace.Postgres
 	schemaOwner           *storeschema.Postgres
 
 	runLifecycleCandidates *storerunhandoff.CandidateCoordinator

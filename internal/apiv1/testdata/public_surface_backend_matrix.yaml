@@ -235,7 +235,7 @@ store_parity:
       risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule]
       evidence:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule], proof_ids: [store-infrastructure-sqlite, runtime-open-postgres, schema-ddl]}
-      required_ports: [schema, workspace, pinger]
+      required_ports: [schema, pinger]
       platform_tables: [runtime_store_metadata]
       public_methods: [health.check]
     - id: resource_data

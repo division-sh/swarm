@@ -39,7 +39,6 @@ import (
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
-	storeworkspace "github.com/division-sh/swarm/internal/store/internal/workspace"
 )
 
 func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresStore, error) {
@@ -63,10 +62,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	workspaceLookups, err := storeworkspace.NewPostgres(backend)
-	if err != nil {
-		return nil, err
-	}
 	candidates := storerunhandoff.NewCandidateCoordinator()
 	store := &PostgresStore{
 		backend:                backend,
@@ -74,7 +69,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		runLifecycleCandidates: candidates,
 		workflowEntityQueries:  workflowEntityQueries,
 		workflowRoutes:         workflowRoutes,
-		workspaceLookups:       workspaceLookups,
 		schemaOwner:            schemaOwner,
 	}
 	store.timerObligationPostgresReader = timerObligations
@@ -313,10 +307,6 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	workspaceLookups, err := storeworkspace.NewSQLite(backend)
-	if err != nil {
-		return nil, err
-	}
 	candidates := storerunhandoff.NewCandidateCoordinator()
 	store := &SQLiteRuntimeStore{
 		schema:                 schema,
@@ -325,7 +315,6 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		runLifecycleCandidates: candidates,
 		workflowEntityQueries:  workflowEntityQueries,
 		workflowRoutes:         workflowRoutes,
-		workspaceLookups:       workspaceLookups,
 		nowFn:                  time.Now,
 	}
 	store.timerObligationSQLiteReader = timerObligations

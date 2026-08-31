@@ -135,12 +135,12 @@ func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash release E2E full lifecycle fixture: %v", err)
 	}
-	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("create release E2E full lifecycle source fact: %v", err)
 	}
 	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
-		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
+		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("admit release E2E full lifecycle effective source: %v", err)

@@ -1352,12 +1352,6 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		hasPlatformResetEvent = true
 	}
 
-	entities := map[string]struct{}{}
-	for _, cfg := range am.lifecycle.executionConfigs() {
-		if entityID := cfg.EffectiveEntityID(); entityID != "" {
-			entities[entityID] = struct{}{}
-		}
-	}
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[poisonPanicKey]int)
 	am.poisonMu.Unlock()
@@ -1366,11 +1360,6 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		am.resetRuntimeOwnedState()
 	}
 
-	for entityID := range entities {
-		if am.workspaces != nil {
-			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), entityID)
-		}
-	}
 	if hasPlatformResetEvent {
 		if err := am.bus.Publish(am.runtimeContext(), platformResetEvent); err != nil {
 			return stateCleared, fmt.Errorf("publish platform.reset: %w", err)

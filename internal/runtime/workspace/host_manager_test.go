@@ -24,6 +24,7 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 		SourceProjection: sourceProjection,
 		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindTestHostProjection(t, manager, sourceProjection)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(context.Background(), source); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
@@ -31,9 +32,17 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
 		t.Fatalf("EnsureSystemWorkspaces: %v", err)
 	}
-	for _, rel := range []string{"scaffold", "system"} {
-		if info, err := os.Stat(filepath.Join(root, rel)); err != nil || !info.IsDir() {
-			t.Fatalf("host workspace %s stat = info:%#v err:%v, want directory", rel, info, err)
+	hostRoot, err := manager.hostRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystem} {
+		key, err := durableWorkspaceBackingKey(sourceProjection.BundleHash(), kind, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info, err := os.Stat(filepath.Join(hostRoot, key)); err != nil || !info.IsDir() {
+			t.Fatalf("host workspace %s stat = info:%#v err:%v, want directory", kind, info, err)
 		}
 	}
 }
@@ -41,7 +50,6 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	sourceProjection, _ := testRuntimeSourceProjection(t)
 	root := filepath.Join(t.TempDir(), "host-workspaces")
-	canonicalRoot := canonicalTestPath(t, root)
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:    root,
@@ -49,6 +57,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 		SourceProjection: sourceProjection,
 		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindTestHostProjection(t, manager, sourceProjection)
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
@@ -72,8 +81,16 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	if dedicated == nil || dedicated.Enabled() || !dedicated.HostBackend() {
 		t.Fatalf("dedicated target = %#v, want host target without container", dedicated)
 	}
-	if !strings.HasPrefix(filepath.Clean(dedicated.Workdir), filepath.Join(canonicalRoot, "agents")) {
-		t.Fatalf("dedicated workdir = %q, want under agents root %q", dedicated.Workdir, filepath.Join(canonicalRoot, "agents"))
+	dedicatedFingerprint, err := runtimeagentidentitytest.RootDeclared(t, "Dedicated Agent", "test/agents.yaml").Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dedicatedKey, err := durableWorkspaceBackingKey(sourceProjection.BundleHash(), durableWorkspaceAgent, dedicatedFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(dedicated.Workdir) != dedicatedKey {
+		t.Fatalf("dedicated workdir = %q, want durable key %q", dedicated.Workdir, dedicatedKey)
 	}
 
 	shared, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
@@ -89,8 +106,12 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	if shared == nil || shared.Enabled() || !shared.HostBackend() {
 		t.Fatalf("shared target = %#v, want host target without container", shared)
 	}
-	if !strings.HasPrefix(filepath.Clean(shared.Workdir), filepath.Join(canonicalRoot, "flows")) {
-		t.Fatalf("shared workdir = %q, want under flows root %q", shared.Workdir, filepath.Join(canonicalRoot, "flows"))
+	sharedKey, err := durableWorkspaceBackingKey(sourceProjection.BundleHash(), durableWorkspaceFlow, "acme/review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(shared.Workdir) != sharedKey {
+		t.Fatalf("shared workdir = %q, want durable key %q", shared.Workdir, sharedKey)
 	}
 }
 
@@ -175,13 +196,7 @@ func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.
 func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 	sourceProjection, _ := testRuntimeSourceProjection(t)
 	root := filepath.Join(t.TempDir(), "host-workspaces")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatalf("mkdir root: %v", err)
-	}
 	escapeDir := t.TempDir()
-	if err := os.Symlink(escapeDir, filepath.Join(root, "agents")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:    root,
@@ -189,20 +204,40 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 		SourceProjection: sourceProjection,
 		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindTestHostProjection(t, manager, sourceProjection)
+	hostRoot, err := manager.hostRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hostRoot, 0o700); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	identity := runtimeagentidentitytest.RootDeclared(t, "agent-1", "test/agents.yaml")
+	fingerprint, err := identity.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := durableWorkspaceBackingKey(sourceProjection.BundleHash(), durableWorkspaceAgent, fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escapeDir, filepath.Join(hostRoot, key)); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	if err := manager.ValidateSource(context.Background(), source); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
 	}
 	manager.SetSemanticSource(source)
-	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+	_, err = manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
-		Identity:      runtimeagentidentitytest.RootDeclared(t, "agent-1", "test/agents.yaml"),
+		Identity:      identity,
 	})
 	if err == nil || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("ResolveWorkspace error = %v, want symlink child escape rejection", err)
 	}
-	if _, err := os.Stat(filepath.Join(escapeDir, "agent-1")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(escapeDir, key)); !os.IsNotExist(err) {
 		t.Fatalf("symlinked workspace child created outside workspace root: %v", err)
 	}
 }
@@ -220,6 +255,7 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 		SourceProjection: sourceProjection,
 		SourceMountPoint: "/opt/swarm/source",
 	})
+	bindTestHostProjection(t, manager, sourceProjection)
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 
 	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
@@ -258,13 +294,6 @@ func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
 	}
 	if len(inventory) != 0 {
 		t.Fatalf("inventory = %#v, want empty host container inventory", inventory)
-	}
-	result, err := manager.CleanupDevEntityContainers(context.Background())
-	if err != nil {
-		t.Fatalf("CleanupDevEntityContainers: %v", err)
-	}
-	if result.OperationName != DevEntityCleanupOperationName {
-		t.Fatalf("cleanup operation = %q, want %q", result.OperationName, DevEntityCleanupOperationName)
 	}
 }
 
