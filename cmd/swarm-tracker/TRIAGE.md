@@ -26,8 +26,8 @@ Score is **value only** — what delivering the issue is worth to the program.
 | 60 | arc contributor | advances a live arc; the arc survives without it but is poorer |
 | 50 | **must-line** | the check threshold: everything ≥50 must have an owner and must not go stale |
 | 40 | worthwhile | real value, no arc pressure |
-| 25 | nice-to-have | opportunistic; do when adjacent |
-| 10 | recorded | kept for the record; may be closed if it rots |
+| 25 | important debt | real debt worth paying down; opportunistic or adjacent scheduling |
+| 10 | hygiene / recorded | kept for the record; may be closed if it rots |
 
 Floors and rules:
 
