@@ -1,0 +1,18 @@
+telegram-responder:
+  execution_type: system_node
+  subscribes_to: [telegram.reply_requested]
+  event_handlers:
+    telegram.reply_requested:
+      activity:
+        id: telegram_send_message
+        tool: telegram.send_message
+        approval: {decision: send_telegram_message}
+        input:
+          chat_id: {cel: payload.chat_id}
+          text: {cel: payload.text}
+
+telegram-revision:
+  execution_type: system_node
+  subscribes_to: [telegram_send_message.revision_requested]
+  event_handlers:
+    telegram_send_message.revision_requested: {}

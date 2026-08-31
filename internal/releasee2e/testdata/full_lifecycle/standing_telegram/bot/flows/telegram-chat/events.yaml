@@ -1,0 +1,3 @@
+telegram.reply_requested:
+  chat_id: text?
+  text: text?

@@ -8,10 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -113,6 +116,39 @@ func TestReleaseE2EChannelOnboardingFixtureIsRegistered(t *testing.T) {
 
 func TestReleaseE2EGoldenAgentWorkloadFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/golden_agent_workload"))
+}
+
+func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
+	const fixture = ArtifactID("internal/releasee2e/testdata/full_lifecycle/standing_telegram")
+	Prove(t, ArtifactID("internal/releasee2e/testdata/full_lifecycle/standing_telegram"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repo,
+		filepath.Join(repo, filepath.FromSlash(string(fixture))),
+		runtimecontracts.DefaultPlatformSpecFile(repo),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
+	if err != nil {
+		t.Fatalf("load release E2E full lifecycle fixture: %v", err)
+	}
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("hash release E2E full lifecycle fixture: %v", err)
+	}
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("create release E2E full lifecycle source fact: %v", err)
+	}
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
+	})
+	if err != nil {
+		t.Fatalf("admit release E2E full lifecycle effective source: %v", err)
+	}
+	report := runtimebootverify.Run(context.Background(), projection.Source(), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("release E2E full lifecycle fixture hard invalidities: %#v", findings)
+	}
 }
 
 func TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies(t *testing.T) {
