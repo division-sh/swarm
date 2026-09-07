@@ -82,6 +82,13 @@ factory-cto:
   flow_data_access: [exclusions.yaml]
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "data", "exclusions.yaml"), "blocked: root\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), `
+factory-cto:
+  role: factory_cto
+  intent: {inline: "Read the child flow's declared data."}
+  memory: false
+  flow_data_access: [exclusions.yaml]
+`)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "child", "data", "exclusions.yaml"), "blocked: child\n")
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -102,8 +109,15 @@ factory-cto:
 	if got := strings.TrimSpace(asString(out.(map[string]any)["content"])); got != "blocked: root" {
 		t.Fatalf("root flow read = %q", got)
 	}
-	if _, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", map[string]any{"relative_path": "child/data/exclusions.yaml"}); err == nil {
-		t.Fatal("root flow accessed undeclared child resource")
+	child := actor
+	child.FlowID, child.FlowPath = "child", "child"
+	childInput := flowDataToolInput(t, source, child, "exclusions.yaml")
+	childOut, err := exec.Execute(flowDataToolContext(child), "read_flow_data", childInput)
+	if err != nil || strings.TrimSpace(asString(childOut.(map[string]any)["content"])) != "blocked: child" {
+		t.Fatalf("healthy child read = %v, error = %v", childOut, err)
+	}
+	if _, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", childInput); err == nil {
+		t.Fatal("root flow accessed a valid child-owned static ID")
 	}
 }
 
