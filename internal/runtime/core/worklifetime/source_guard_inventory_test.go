@@ -75,11 +75,17 @@ func TestAsyncSiteInventoryKeepsFunctionsAndReceiversDistinct(t *testing.T) {
 func launch() { go work() }
 func (a *First) launch() { go work(); go work() }
 func (b Second) launch() { go work() }
+func (c Third[T]) launch() { go work() }
+func (d *Fourth[T]) launch() { go work() }
+func (e Fifth[T, U]) launch() { go work() }
 `)
 	ledger := map[string]asyncSiteLedgerEntry{
 		"go|fixture.go|launch":        {1, asyncSiteSynchronousJoin, "function joins worker"},
 		"go|fixture.go|First.launch":  {2, asyncSiteCanonicalOwner, "First owns both workers"},
 		"go|fixture.go|Second.launch": {1, asyncSiteCanonicalOwner, "Second owns worker"},
+		"go|fixture.go|Third.launch":  {1, asyncSiteCanonicalOwner, "Third owns worker"},
+		"go|fixture.go|Fourth.launch": {1, asyncSiteCanonicalOwner, "Fourth owns worker"},
+		"go|fixture.go|Fifth.launch":  {1, asyncSiteCanonicalOwner, "Fifth owns worker"},
 	}
 	if err := compareAsyncSiteLedger(found, ledger); err != nil {
 		t.Fatal(err)
