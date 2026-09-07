@@ -329,6 +329,8 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 			placeholder = "$" + strconv.Itoa(len(args))
 			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND anchor->>'entity_id' = "+placeholder+") OR (anchor_kind IN ('human_task', 'proposed_effect') AND anchor->'scope'->>'entity_id' = "+placeholder+"))")
 		} else {
+			// Each anonymous SQLite placeholder consumes its own argument.
+			args = append(args, value)
 			clauses = append(clauses, "((anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = "+placeholder+") OR (anchor_kind IN ('human_task', 'proposed_effect') AND json_extract(anchor, '$.scope.entity_id') = "+placeholder+"))")
 		}
 	}
