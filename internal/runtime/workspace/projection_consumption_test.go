@@ -212,6 +212,9 @@ func TestMissingProjectionHostControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Rename(moved, root)
+	if mounts, err := manager.hostExecutionMounts(t.TempDir(), ""); err == nil || mounts != nil {
+		t.Fatalf("missing source advertised by Host mount descriptor: mounts=%v err=%v", mounts, err)
+	}
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err == nil {
 		t.Fatal("missing source accepted by eager Host")
 	}

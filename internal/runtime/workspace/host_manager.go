@@ -361,14 +361,18 @@ func (m *HostManager) hostTarget(rel, dataRoot string) (*Target, error) {
 	if err != nil {
 		return nil, err
 	}
+	mounts, err := m.hostExecutionMounts(workdir, dataRoot)
+	if err != nil {
+		return nil, err
+	}
 	return &Target{
 		Workdir: workdir,
 		Backend: BackendHost,
-		Mounts:  m.hostExecutionMounts(workdir, dataRoot),
+		Mounts:  mounts,
 	}, nil
 }
 
-func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionMount {
+func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) ([]ExecutionMount, error) {
 	dataMount := strings.TrimSpace(m.cfg.DataMountPoint)
 	if dataMount == "" {
 		dataMount = LogicalDataMount
@@ -377,7 +381,10 @@ func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionM
 	if sourceMount == "" {
 		sourceMount = LogicalSourceMount
 	}
-	sourceProjectionPath, _ := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	sourceProjectionPath, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	if err != nil {
+		return nil, err
+	}
 	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, HostPath: strings.TrimSpace(workdir), Access: MountAccessReadWrite},
 		{LogicalPath: sourceMount, HostPath: sourceProjectionPath, Access: MountAccessReadOnly},
@@ -385,7 +392,7 @@ func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionM
 	if strings.TrimSpace(dataRoot) != "" {
 		out = append(out, ExecutionMount{LogicalPath: dataMount, HostPath: strings.TrimSpace(dataRoot), Access: MountAccessReadOnly})
 	}
-	return out
+	return out, nil
 }
 
 func (m *HostManager) ensureHostWorkspaceDir(rel string) (string, error) {

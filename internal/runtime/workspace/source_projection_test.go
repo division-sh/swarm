@@ -676,7 +676,10 @@ func TestWorkspaceManagersRebindSelectedSourceWithoutMutatingBootLifecycle(t *te
 		if selected.cfg.SourceProjection != selected.ownedProjection || selected.cfg.SourceProjection == projection || selected.cfg.BundleHash != projection.BundleHash() {
 			t.Fatalf("selected host source binding = %#v", selected.cfg)
 		}
-		mounts := selected.hostExecutionMounts(t.TempDir(), "")
+		mounts, err := selected.hostExecutionMounts(t.TempDir(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(mounts) != 2 || mounts[1].LogicalPath != LogicalSourceMount || mounts[1].HostPath != projectionRoot || mounts[1].Access != MountAccessReadOnly {
 			t.Fatalf("selected host mounts = %#v", mounts)
 		}
