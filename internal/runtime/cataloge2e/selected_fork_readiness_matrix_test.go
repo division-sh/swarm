@@ -352,7 +352,7 @@ func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecut
 func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
-			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "agent", "mixed", "mixed_progress"} {
+			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "agent", "mixed", "mixed_progress"} {
 				activityFrontier := strings.HasPrefix(frontier, "activity")
 				if declarations == 0 && frontier != "node" && !activityFrontier {
 					continue
@@ -365,7 +365,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 								activityCalls.Add(1)
 								w.Header().Set("Content-Type", "application/json")
-								if frontier == "activity_failure" {
+								if strings.HasSuffix(frontier, "failure") {
 									w.WriteHeader(http.StatusBadRequest)
 								}
 								_, _ = w.Write([]byte(`{}`))
@@ -374,6 +374,9 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							tools, err := os.ReadFile(filepath.Join("testdata", "terminal-retirement", "activity-tools.yaml"))
 							if err != nil {
 								t.Fatal(err)
+							}
+							if strings.HasPrefix(frontier, "activity_write") {
+								tools = []byte(strings.ReplaceAll(string(tools), "read_only", "non_idempotent_write"))
 							}
 							if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(strings.ReplaceAll(string(tools), "http://terminal-proof.invalid", server.URL)), 0600); err != nil {
 								t.Fatal(err)
@@ -545,7 +548,10 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 								t.Fatalf("fork activity calls = %d, want %d", got, wantCalls)
 							}
 							if !refused && !fenced {
-								assertCatalogActivityLineage(t, activityLineageEvents(t, ctx, h, forkRun), frontier == "activity_failure")
+								assertCatalogActivityLineage(t, activityLineageEvents(t, ctx, h, forkRun), strings.HasSuffix(frontier, "failure"))
+								if strings.HasPrefix(frontier, "activity_write") {
+									assertCatalogActivityJournal(t, ctx, h, forkRun, strings.HasSuffix(frontier, "failure"))
+								}
 							}
 							if !refused {
 								beforeRetry := activityLineageStateSnapshot(t, ctx, h, forkRun)
@@ -671,7 +677,7 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		node = "mixed-node.yaml"
 	case "mixed_progress":
 		node = "mixed-progress-node.yaml"
-	case "activity", "activity_failure", "activity_rejected":
+	case "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure":
 		node = "inspect-activity-node.yaml"
 	}
 	for path, fixture := range map[string]string{
@@ -682,7 +688,7 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		if err != nil {
 			t.Fatal(err)
 		}
-		if frontier == "activity_failure" && path == "worker-flow/nodes.yaml" {
+		if strings.HasSuffix(frontier, "failure") && path == "worker-flow/nodes.yaml" {
 			addition = []byte(strings.ReplaceAll(string(addition), "terminal_probe.succeeded", "terminal_probe.failed"))
 		}
 		file := filepath.Join(root, path)

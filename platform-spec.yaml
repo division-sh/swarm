@@ -16679,8 +16679,9 @@ run_model:
       canonical activity decoder and constructor identity, its same-fork causal event, and that event''s completed
       exact node delivery, including handler, flow instance and entity. The admitted immutable execution source must
       match the persisted fork bundle; activity site, tool, generated result names, retry facts and any carried contract
-      pin must agree with that source. The currently supported fresh path is the already admitted read-only node
-      activity without a new approval continuation. Historical source eligibility, selected-root read reexecution,
+      pin must agree with that source. Fresh node activities consume the existing supported effect classification,
+      including journaled writes already admitted by execution; lineage must not impose a second read-only policy.
+      No new approval continuation is introduced. Historical source eligibility, selected-root read reexecution,
       recorded success/failure/uncertain reuse, manual-confirmation refusal, timers and effect permission remain owned
       by their existing admission authorities. No fresh write or historical non-agent replay permission is added.
       Selected-tree traversal consumes exact validated fresh request IDs and still requires their parent to belong
@@ -17171,6 +17172,12 @@ agent_identity_model:
         Declaration-owned compile-time and startup planning carries one runless agent plan containing the exact name and
         route facts. It is not live authority. Only run admission composes that plan with a required run_id. Empty,
         optional, ambient, inferred, or fabricated runs and runless live-identity constructors are forbidden.
+      committed_static_readiness: >
+        First committed delivery composes an admitted static declaration plan with its exact run and finalizes agent
+        readiness before dispatch. Same-flow and connect delivery planning preserve that declaration authority from
+        the route table; absence of a live agent is not evidence that a new flow instance is being created. A connect
+        recipient may consume an existing entity only through its exact static declaration plan. Newly materializing
+        flows still require materializing_entity ownership; speculative node creation cannot grant agent readiness.
       repeated_template_instances: >
         Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
         No ownership-bearing consumer may collapse those siblings to the display slug.

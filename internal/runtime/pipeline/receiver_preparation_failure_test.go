@@ -243,7 +243,7 @@ func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
 						if _, err := store.testDB().Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
 							t.Fatal(err)
 						}
-						if _, err := store.testDB().Exec(`DELETE FROM flow_instances WHERE instance_id=$1`, runID); err != nil {
+						if _, err := store.testDB().Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, runID); err != nil {
 							t.Fatal(err)
 						}
 					}
