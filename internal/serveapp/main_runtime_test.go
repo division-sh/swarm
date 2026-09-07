@@ -2271,13 +2271,16 @@ func setServedConversationForkExpiry(t *testing.T, db *sql.DB, backend, forkID s
 }
 
 func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+	return startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, writeServedTestSetupFixture(t))
+}
+
+func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		sourceRoot := writeServedTestSetupFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		var servedDB *sql.DB
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
@@ -2301,7 +2304,6 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
-		sourceRoot := writeServedTestSetupFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),

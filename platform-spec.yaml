@@ -2272,8 +2272,8 @@ criteria_contracts:
     rules:
     - '`criteria:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and MUST
       NOT appear as `policy.criteria`, agent-intent interpolation, or arbitrary policy object data.'
-    - Criteria sets are flow-local in this slice. Root/project policy criteria, project-shared packs, team packs, and
-      marketplace distribution are not implemented.
+    - Criteria sets are flow-local, including the selected root FlowNode `.`. Project-shared packs, team packs, and
+      marketplace distribution are not implemented; there is no separate project criteria scope.
     - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
       emitted; this slice does not add a separate criteria-versioning subsystem.
     - Each set MUST declare at least one class, every class MUST have a disposition, every rule MUST have id/class/text,
@@ -2287,7 +2287,7 @@ criteria_contracts:
     rules:
     - Agent criteria refs are short set names resolved against the agent's owning flow policy.criteria section. Dotted paths,
       path separators, duplicates, empty refs, and unresolved refs fail static validation.
-    - Root/project-scoped agents cannot declare criteria in this slice.
+    - Selected-root agents resolve criteria against the root FlowNode's policy.criteria, under the same local rules as child agents.
   delivery:
     generated_context: |
       Agents that declare criteria receive a deterministic generated "Contract Criteria" prompt/context section rendered from
@@ -2368,7 +2368,7 @@ policy_validation_contracts:
     rules:
     - '`validation:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and
       MUST NOT appear as `policy.validation`, agent-intent interpolation, or arbitrary policy object data.'
-    - Validation sets are flow-local in this slice. Root/project policy validation, shared validation packs, team packs,
+    - Validation sets are flow-local, including the selected root FlowNode `.`. Shared validation packs, team packs,
       marketplace distribution, file-backed rule sets, and external data reads are not implemented.
     - Rule IDs are stable and never reused within a set. Every set MUST declare at least one class, at least one typed input,
       and at least one rule.
@@ -2492,8 +2492,9 @@ compute_module_contracts:
     rules:
     - '`modules:` is a closed typed policy section. It is decoded separately from generic PolicyDocument.Values and MUST NOT
       appear as a generic policy expression object or agent-intent interpolation.'
-    - Module declarations are flow-local in this slice. Root/project modules, shared module packs, source compilation,
-      public build tooling, artifact repositories, and remote module loading are separate gates.
+    - Module declarations are flow-local, including the selected root FlowNode `.`. There is no separate project module
+      scope. Shared module packs, source compilation, public build tooling, artifact repositories, and remote module loading
+      remain separate gates.
     - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
     - Module bytes MUST live inside the owning contracts root and MUST be regular files. Ambient filesystem lookup,
       symlinks, out-of-tree paths, network fetches, and runtime-generated module bytes fail closed.
@@ -6811,13 +6812,13 @@ engine:
       - Old selected-store schemas fail admission with fresh-store remediation.
     flow_data_access:
       description: Optional flow-scoped agent contract field. Declares immutable deploy-time reference files under the
-        owning flow package's data/ subtree that the agent may read with the generated read_flow_data tool. This is static
+        owning FlowNode's data/ subtree that the agent may read with the generated read_flow_data tool. This is static
         contract data, not entity state, policy scalar config, native file I/O, or a mutable artifact surface.
       contract_field:
         field: flow_data_access
         type: array of strings
-        location: Flow-scoped agent declaration in agents.yaml. Root/project-scoped agents cannot declare this field unless
-          a future spec adds project-scoped data semantics.
+        location: Flow-local agent declaration in agents.yaml, including the selected root FlowNode `.`. Root data is
+          owned by that flow's data/ branch; there is no separate project data scope or cross-flow data grant.
         default: omitted or empty means no flow-data read surface and no read_flow_data tool.
         example: "flow_data_access:\n  - exclusions.yaml\n  - templates/review.md"
       data_root:
@@ -6855,8 +6856,7 @@ engine:
       contract_field:
         field: criteria
         type: array of short set names
-        location: Flow-scoped agent declaration in agents.yaml. Root/project-scoped agents cannot declare this field in
-          the #1717 slice.
+        location: Flow-local agent declaration in agents.yaml, including the selected root FlowNode `.`.
         default: omitted or empty means no generated criteria context and no criteria citation authority.
         example: "criteria:\n  - feasibility_exclusions"
       validation:
@@ -7979,8 +7979,8 @@ engine:
     - id: flow_data_access_validation
       severity: error
       scope: per-agent
-      trigger: A flow-scoped agent's flow_data_access declaration references an invalid, missing, non-regular, escaping, or
-        outside-flow data file; or a root/project-scoped agent declares flow_data_access.
+      trigger: An agent's flow_data_access declaration references an invalid, missing, non-regular, escaping, or
+        outside-flow data file. The same owning-flow checks apply at the selected root `.` and child flows.
       when: boot-only
     - id: criteria_contract_validation
       severity: error
@@ -36077,6 +36077,7 @@ filesystem_source_model:
       - Formatting-only edits and source-generation changes preserve identity.
       - Moving a declaration or changing its semantic path is delete plus add.
       - Runtime run, entity, activation, generation, attempt, occurrence, and instance-route identities remain distinct dynamic facts.
+      - Scenario setup translates authored root `.` to an omitted root flow_instance; the persistence owner derives the run ID. Returned root aliases carry that run ID and cannot be used as child-flow publish targets.
       - Every deterministic runtime identifier consumes typed declaration identity and never a declaration identity, authored UUID, map index, display label, or inferred local key.
   platform_pack_separation:
     authored_project_packs: |

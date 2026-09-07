@@ -600,6 +600,48 @@ func TestValidateWorkflowCriteriaContractsAllowsFlowLocalCriteriaAndCitation(t *
 	}
 }
 
+func TestValidateWorkflowCriteriaContractsAllowsSelectedRootCriteriaAndCitation(t *testing.T) {
+	bundle := criteriaValidationTestBundle(t)
+	root := bundle.FlowTree.ByID["validation"]
+	root.Paths.FlowPath = "."
+	bundle.FlowTree = FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}
+	bundle.FlowSchemas = map[string]FlowSchemaDocument{".": {Name: "root-criteria"}}
+	for key, source := range bundle.scopedAgentSources {
+		source.FlowPath = "."
+		bundle.scopedAgentSources[key] = source
+	}
+	for key, source := range bundle.scopedEventSources {
+		source.FlowPath = "."
+		bundle.scopedEventSources[key] = source
+	}
+	if errs := validateWorkflowCriteriaContracts(bundle); len(errs) != 0 {
+		t.Fatalf("root criteria/citation errors: %v", errs)
+	}
+}
+
+func TestValidateWorkflowPolicyValidationContractsAllowsSelectedRoot(t *testing.T) {
+	pinCandidate := false
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Policy: PolicyDocument{
+		Validation: map[string]PolicyValidationSet{"equal_values": {
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "invalid"}},
+			Inputs:  map[string]string{"left": "string", "right": "string"},
+			Rules: []PolicyValidationRule{{ID: "equal", Class: "invalid", Text: "Values must match.", PinCandidate: &pinCandidate,
+				Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+			}},
+		}},
+	}}
+	bundle := &WorkflowContractBundle{FlowTree: FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}}
+	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) != 0 {
+		t.Fatalf("root validation errors: %v", errs)
+	}
+	set := root.Policy.Validation["equal_values"]
+	set.Rules[0].Check.Equal.Right = "input.missing"
+	root.Policy.Validation["equal_values"] = set
+	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) == 0 {
+		t.Fatal("root validation skipped an invalid input reference")
+	}
+}
+
 func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testing.T) {
 	tests := []struct {
 		name      string
