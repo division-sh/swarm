@@ -168,6 +168,10 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 	compact := compactSQLForLifecycleGuard(value)
 	switch relative {
+	case "internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":
+		// Deliberate persisted-source corruption and restoration at final fork
+		// validation, not a semantic run constructor or lifecycle transition.
+		return compact == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2"
 	case "internal/store/internal/runtimepersistence/schema_compatibility_bootstrap_test.go":
 		for _, legacyRunID := range []string{
 			"00000000-0000-0000-0000-000000002055",

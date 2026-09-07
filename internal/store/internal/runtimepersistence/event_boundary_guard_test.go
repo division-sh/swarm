@@ -49,6 +49,7 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/operatorsurface/pending_delivery_read_surface.go":                            {},
 	"internal/store/internal/backend/pipelinepersistence/helpers.go":                                      {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go":                {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_activity_lineage.go":                     {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":      {},
 	"internal/store/internal/backend/runlifecycle/standalone_runtime.go":                                  {},
