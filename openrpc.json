@@ -18882,7 +18882,7 @@
             "type": "integer"
           },
           "semantic_rejection_sample": {
-            "description": "Deterministic first semantic rejection by triggering_delivery_id, package_key, element_id, and ordinal; null exactly when semantic_rejected is zero.",
+            "description": "Deterministic first semantic rejection by triggering_delivery_id, flow_path, family, semantic_path, and ordinal; null exactly when semantic_rejected is zero.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/FanOutSemanticRejectionSample"
@@ -18930,17 +18930,23 @@
         "additionalProperties": false,
         "description": "Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.",
         "properties": {
-          "element_id": {
-            "type": "string"
-          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
+          },
+          "family": {
+            "enum": [
+              "fan_out"
+            ],
+            "type": "string"
+          },
+          "flow_path": {
+            "type": "string"
           },
           "ordinal": {
             "minimum": 0,
             "type": "integer"
           },
-          "package_key": {
+          "semantic_path": {
             "type": "string"
           },
           "triggering_delivery_id": {
@@ -18949,8 +18955,9 @@
         },
         "required": [
           "triggering_delivery_id",
-          "package_key",
-          "element_id",
+          "flow_path",
+          "family",
+          "semantic_path",
           "ordinal",
           "failure"
         ],

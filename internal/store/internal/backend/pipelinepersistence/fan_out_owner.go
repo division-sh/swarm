@@ -968,8 +968,8 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if summary.SemanticRejected > 0 {
 		var sample fanoutobligation.FanOutSemanticRejectionSample
 		var failureRaw any
-		if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,package_key,element_id,ordinal,failure FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='semantic_rejected' ORDER BY triggering_delivery_id,package_key,element_id,ordinal LIMIT 1`, summary.RunID).Scan(
-			&sample.TriggeringDeliveryID, &sample.PackageKey, &sample.ElementID, &sample.Ordinal, &failureRaw,
+		if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,failure FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='semantic_rejected' ORDER BY triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal LIMIT 1`, summary.RunID).Scan(
+			&sample.TriggeringDeliveryID, &sample.FlowPath, &sample.Family, &sample.SemanticPath, &sample.Ordinal, &failureRaw,
 		); err != nil {
 			return summary, err
 		}

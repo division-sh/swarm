@@ -651,7 +651,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 					RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
 					SemanticRejectionSample: &fanoutobligation.FanOutSemanticRejectionSample{
 						TriggeringDeliveryID: "22222222-2222-4222-8222-222222222222",
-						PackageKey:           "root", ElementID: "33333333-3333-4333-8333-333333333333", Ordinal: 0, Failure: semanticRejection,
+						FlowPath:             ".", Family: "fan_out", SemanticPath: `nodes["fan"].handlers["start"].fan_out`, Ordinal: 0, Failure: semanticRejection,
 					},
 					BlockedIntents: []fanoutobligation.BlockedIntentDiagnosis{}, MinNextChunk: fanoutobligation.InitialChunkSize, MaxNextChunk: fanoutobligation.InitialChunkSize,
 				},

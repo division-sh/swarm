@@ -283,7 +283,7 @@ func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
 		"run_id": runID, "intents": 1, "open": 0, "blocked": 0, "blocked_intents": []any{},
 		"cardinality": 1, "cursor": 1, "owed": 0, "committed": 0, "semantic_rejected": 1,
 		"semantic_rejection_sample": map[string]any{
-			"triggering_delivery_id": deliveryID, "package_key": "root", "element_id": elementID, "ordinal": 0, "failure": failure,
+			"triggering_delivery_id": deliveryID, "flow_path": ".", "family": "fan_out", "semantic_path": elementID, "ordinal": 0, "failure": failure,
 		},
 		"canceled": 0, "settled": 0, "unsettled": 0,
 		"barrier_armed": 0, "barrier_closed_pending": 0, "barrier_terminal": 0,

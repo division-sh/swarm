@@ -525,7 +525,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 
 			validRunID := uuid.NewString()
 			validCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), validRunID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, validCtx, "numeric-fan-out-reporter", runtime.bundleSourceFact)); err != nil {
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, validCtx, "numeric-fan-out-reporter", runtime.sourceArtifactFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 			publishNotifyAllChildrenRunCreatingEvent(t, validCtx, runtime, source, validRunID, "portfolio.opened", map[string]any{
@@ -679,7 +679,7 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 			})
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.bundleSourceFact)); err != nil {
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-internal-settlement", runtime.sourceArtifactFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
@@ -750,7 +750,7 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{maintenanceInterval: 10 * time.Millisecond})
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.bundleSourceFact)); err != nil {
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.sourceArtifactFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-numeric-template", "threshold": 75})
@@ -2463,7 +2463,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 
 func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, db *sql.DB, runID string, cardinality int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.bundleSourceFact), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Minute)
 	defer cancel()
 	query := `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1::uuid`
 	if _, ok := runtime.selected.(*store.SQLiteRuntimeStore); ok {

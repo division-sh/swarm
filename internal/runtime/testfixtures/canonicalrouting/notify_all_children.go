@@ -171,13 +171,13 @@ portfolio.notify.completed:
 `)
 	}
 	if opts.NumericRegistrationRows {
-		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
   portfolio_id: text
 `, `portfolio.opened:
   portfolio_id: text
   threshold: integer
 `)
-		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
 `, `  account_ids: "[json]"
 `)
 		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
@@ -226,7 +226,7 @@ portfolio.notify.completed:
           fields:
             account_id: account.account_id
 `)
-		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
   key: account_id
   account_id: text
 `, `account.registered:
@@ -265,11 +265,11 @@ portfolio.notify.completed:
   last_command: text
 `)
 		if opts.NumericReporterSink {
-			applyClosedReplacement(t, packageFile, `  - event: account.registered
+			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
     to: account
 `, "")
-			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
   key: account_id
 `, `account.registered:
   swarm:
@@ -278,7 +278,7 @@ portfolio.notify.completed:
 `)
 		}
 		if opts.NumericInternalSettlement {
-			applyClosedReplacement(t, packageFile, `  - event: account.registered
+			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
     to: account
 `, "")
@@ -299,7 +299,7 @@ portfolio-coordinator:
             external_id: account.external_id
             eligible: entity.threshold >= 70
 `)
-			applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
+			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
   eligible: boolean
 `, `  gem_score: number
   external_id: uuid

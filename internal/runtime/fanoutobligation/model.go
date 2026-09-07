@@ -395,17 +395,21 @@ type RunSummary struct {
 
 type FanOutSemanticRejectionSample struct {
 	TriggeringDeliveryID string                   `json:"triggering_delivery_id"`
-	PackageKey           string                   `json:"package_key"`
-	ElementID            string                   `json:"element_id"`
+	FlowPath             string                   `json:"flow_path"`
+	Family               string                   `json:"family"`
+	SemanticPath         string                   `json:"semantic_path"`
 	Ordinal              int                      `json:"ordinal"`
 	Failure              runtimefailures.Envelope `json:"failure"`
 }
 
 func (s FanOutSemanticRejectionSample) Validate() error {
+	if s.Family != "fan_out" {
+		return errors.New("fan-out semantic rejection sample requires fan_out declaration family")
+	}
 	if _, err := uuid.Parse(strings.TrimSpace(s.TriggeringDeliveryID)); err != nil {
 		return errors.New("fan-out semantic rejection sample requires triggering delivery identity")
 	}
-	if _, err := (runtimecontracts.FanOutElementRef{PackageKey: s.PackageKey, ElementID: s.ElementID}).ContractElementRef(); err != nil {
+	if _, err := (runtimecontracts.FanOutElementRef{FlowPath: s.FlowPath, Family: s.Family, SemanticPath: s.SemanticPath}).DeclarationIdentity(); err != nil {
 		return err
 	}
 	if s.Ordinal < 0 {

@@ -1502,10 +1502,11 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 	semanticRejections := []string{}
 	if sample := result.FanOut.SemanticRejectionSample; sample != nil {
 		semanticRejections = append(semanticRejections, fmt.Sprintf(
-			"delivery %s, element %s/%s, ordinal %d, %s",
+			"delivery %s, element %s/%s/%s, ordinal %d, %s",
 			sample.TriggeringDeliveryID,
-			sample.PackageKey,
-			sample.ElementID,
+			sample.FlowPath,
+			sample.Family,
+			sample.SemanticPath,
 			sample.Ordinal,
 			fanOutSemanticRejectionFailureSummary(sample.Failure),
 		))

@@ -98,6 +98,44 @@ func TestSchemaViolationActualUsesStableSemanticCategories(t *testing.T) {
 	}
 }
 
+func TestEnumViolationPreservesTextAndUsesSemanticCategories(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{
+		"value": map[string]any{"type": "string", "enum": []any{"accepted"}},
+	}}
+	for _, test := range []struct {
+		name   string
+		value  any
+		actual string
+	}{
+		{"object", map[string]any{"value": 1}, "object"},
+		{"array", []any{1, "two"}, "array"},
+		{"boolean", true, "boolean"},
+		{"integer", int64(7), "number"},
+		{"float", float64(7), "number"},
+		{"lexical integer", json.Number("7"), "number"},
+		{"lexical decimal", json.Number("7.0"), "number"},
+		{"lexical exponent", json.Number("7e0"), "number"},
+		{"null", nil, "null"},
+		{"text", "rejected", "rejected"},
+		{"empty", "", ""},
+		{"whitespace", "  ", "  "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePayloadAgainstSchema(schema, map[string]any{"value": test.value})
+			var got *Violation
+			if !errors.As(err, &got) || got.Constraint != "enum" || got.Path != "$.value" || got.Actual != test.actual {
+				t.Fatalf("enum violation = %#v, want actual %q", got, test.actual)
+			}
+			if _, text := test.value.(string); !text && got.Detail != "$.value has invalid enum value of type "+test.actual {
+				t.Fatalf("enum detail leaked carrier formatting: %q", got.Detail)
+			}
+		})
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"value": "accepted"}); err != nil {
+		t.Fatalf("valid enum member rejected: %v", err)
+	}
+}
+
 func TestValidatePayloadAgainstSchemaComparesEqualToBySemanticValue(t *testing.T) {
 	schema := map[string]any{
 		"type": "object",

@@ -3663,9 +3663,12 @@ handler_specification:
           detail. Every required emit-contract attribute is present and string-typed. A schema-mismatch actual is either a stable semantic
           category or the exact rejected textual scalar; the latter may be empty or whitespace-only, and key presence
           distinguishes that value from missing evidence. Other evidence attributes remain non-blank. Schema validation
+          reports non-string enum mismatches using the semantic category in both actual and detail; rejected strings
+          retain their exact text rather than being formatted as a Go carrier.
+          Schema validation
           selects the first violation by canonical field order, independent of map iteration.
           Run diagnostics expose the count as semantic_rejected and exactly one nullable sample selected by
-          triggering_delivery_id, package_key, element_id, then ordinal. The sample is null exactly when the count is zero.
+          triggering_delivery_id, flow_path, family, semantic_path, then ordinal. The sample is null exactly when the count is zero.
         lifecycle: >-
           Open or blocked owed suffix prevents normal run completion and test quiescence. Run stop/cancel atomically
           preserves the issued prefix and terminalizes the suffix. An armed or closed-unfired delivery barrier also
@@ -27458,7 +27461,7 @@ api_specification:
           committed: {type: integer, minimum: 0}
           semantic_rejected: {type: integer, minimum: 0}
           semantic_rejection_sample:
-            description: Deterministic first semantic rejection by triggering_delivery_id, package_key, element_id, and ordinal; null exactly when semantic_rejected is zero.
+            description: Deterministic first semantic rejection by triggering_delivery_id, flow_path, family, semantic_path, and ordinal; null exactly when semantic_rejected is zero.
             oneOf:
             - {$ref: '#/components/schemas/FanOutSemanticRejectionSample'}
             - {type: 'null'}
@@ -27476,11 +27479,12 @@ api_specification:
         description: Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.
         type: object
         additionalProperties: false
-        required: [triggering_delivery_id, package_key, element_id, ordinal, failure]
+        required: [triggering_delivery_id, flow_path, family, semantic_path, ordinal, failure]
         properties:
           triggering_delivery_id: {type: string}
-          package_key: {type: string}
-          element_id: {type: string}
+          flow_path: {type: string}
+          family: {type: string, enum: [fan_out]}
+          semantic_path: {type: string}
           ordinal: {type: integer, minimum: 0}
           failure: {$ref: '#/components/schemas/FailureEnvelope'}
       FanOutBlockedIntentDiagnosis:

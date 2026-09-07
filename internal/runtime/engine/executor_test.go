@@ -5029,12 +5029,8 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 
 func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T) {
 	node := testRootExecutableNode(t, "numeric-fan-out-node")
-	elementID, err := contractelementidentity.ParseContractElementID("518dadf9-0ebd-418d-a904-53d3a849b7df")
-	if err != nil {
-		t.Fatal(err)
-	}
 	handler := runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-		ElementID: elementID, ItemsFrom: "payload.items", As: "company", Identity: "company.id",
+		ItemsFrom: "payload.items", As: "company", Identity: "company.id",
 		Emit: runtimecontracts.EmitSpec{Event: "company.registered", Fields: map[string]runtimecontracts.ExpressionValue{
 			"id":             runtimecontracts.CELExpression("company.id"),
 			"eng_roles":      runtimecontracts.CELExpression("company.eng_roles"),
@@ -5043,7 +5039,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 			"exponent_score": runtimecontracts.CELExpression("company.exponent_score"),
 		}},
 	}}
-	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
 	if err != nil {
 		t.Fatal(err)
 	}

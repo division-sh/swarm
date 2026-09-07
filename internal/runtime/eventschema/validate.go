@@ -286,7 +286,11 @@ func validateValue(path string, schema map[string]any, value any) error {
 	}
 	if enumRaw, ok := schema["enum"]; ok {
 		if !valueInEnum(value, enumRaw) {
-			return violation(path, "enum", "declared enum member", fmt.Sprint(value), "%s has invalid enum value %v", path, value)
+			if text, ok := value.(string); ok {
+				return violation(path, "enum", "declared enum member", text, "%s has invalid enum value %q", path, text)
+			}
+			actual := schemaValueType(value)
+			return violation(path, "enum", "declared enum member", actual, "%s has invalid enum value of type %s", path, actual)
 		}
 	}
 	switch st {

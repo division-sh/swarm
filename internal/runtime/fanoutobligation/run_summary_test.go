@@ -87,18 +87,34 @@ func TestRunSummarySemanticRejectionEvidenceIsClosedAndExplicit(t *testing.T) {
 	summary := RunSummary{
 		RunID: uuid.NewString(), Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
 		SemanticRejectionSample: &FanOutSemanticRejectionSample{
-			TriggeringDeliveryID: uuid.NewString(), PackageKey: "root", ElementID: uuid.NewString(), Ordinal: 0, Failure: failure,
+			TriggeringDeliveryID: uuid.NewString(), FlowPath: ".", Family: "fan_out", SemanticPath: `nodes["fan"].handlers["start"].fan_out`, Ordinal: 0, Failure: failure,
 		},
 		BlockedIntents: []BlockedIntentDiagnosis{}, MinNextChunk: InitialChunkSize, MaxNextChunk: InitialChunkSize,
 	}
 	if err := summary.Validate(); err != nil {
 		t.Fatalf("RunSummary.Validate: %v", err)
 	}
+	for _, mutate := range []func(*FanOutSemanticRejectionSample){
+		func(s *FanOutSemanticRejectionSample) { s.FlowPath = "" },
+		func(s *FanOutSemanticRejectionSample) { s.Family = "rule" },
+		func(s *FanOutSemanticRejectionSample) { s.SemanticPath = "" },
+	} {
+		invalid := *summary.SemanticRejectionSample
+		mutate(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("invalid declaration sample accepted: %#v", invalid)
+		}
+	}
 	raw, err := json.Marshal(summary)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(raw)
+	for _, retired := range []string{`"package_key"`, `"element_id"`} {
+		if strings.Contains(text, retired) {
+			t.Fatalf("sample retained retired identity %s: %s", retired, text)
+		}
+	}
 	if !strings.Contains(text, `"semantic_rejected":1`) || !strings.Contains(text, `"semantic_rejection_sample":{`) || strings.Contains(text, `"rejected":`) {
 		t.Fatalf("run summary JSON = %s", text)
 	}
@@ -116,8 +132,9 @@ func TestRunSummarySemanticRejectionEvidenceIsClosedAndExplicit(t *testing.T) {
 	outOfRange := summary
 	outOfRange.SemanticRejectionSample = &FanOutSemanticRejectionSample{
 		TriggeringDeliveryID: summary.SemanticRejectionSample.TriggeringDeliveryID,
-		PackageKey:           summary.SemanticRejectionSample.PackageKey,
-		ElementID:            summary.SemanticRejectionSample.ElementID,
+		FlowPath:             summary.SemanticRejectionSample.FlowPath,
+		Family:               summary.SemanticRejectionSample.Family,
+		SemanticPath:         summary.SemanticRejectionSample.SemanticPath,
 		Ordinal:              summary.Cardinality,
 		Failure:              failure,
 	}

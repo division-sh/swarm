@@ -26,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -36,8 +37,8 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -196,21 +197,8 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
-			var (
-				owner    selectedFanOutOwner
-				db       *sql.DB
-				postgres bool
-			)
-			if backend == "postgres" {
-				_, db, _ = testutil.StartPostgres(t)
-				owner = newPostgresStoreWithBackend(mustPostgresBackend(db))
-				postgres = true
-			} else {
-				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db = store.backend.ConstructionHandle()
-				owner = store
-			}
 
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, now)
@@ -270,6 +258,79 @@ func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *
 			actual, present := summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"].(string)
 			if !present || actual != "" {
 				t.Fatalf("persisted empty actual = %#v, want present empty string", summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"])
+			}
+		})
+	}
+}
+
+func TestFanOutEnumEvidenceSurvivesBothStoresAndReadback(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			first, second, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			for _, test := range []struct {
+				name   string
+				value  any
+				actual string
+			}{
+				{"object", map[string]any{"value": 1}, "object"},
+				{"array", []any{1}, "array"},
+				{"boolean", true, "boolean"},
+				{"integer", int64(7), "number"},
+				{"float", float64(7), "number"},
+				{"decimal", json.Number("7.0"), "number"},
+				{"empty string", "", ""},
+				{"whitespace string", "  ", "  "},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					now := time.Now().UTC().Truncate(time.Microsecond)
+					fixture := seedFanOutOwnerFixture(t, ctx, db, first, postgres, 1, now)
+					_, claim, found, err := first.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+						Owner: "enum-evidence", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
+					})
+					if err != nil || !found {
+						t.Fatalf("claim: found=%v err=%v", found, err)
+					}
+					schema := map[string]any{"type": "object", "properties": map[string]any{
+						"value": map[string]any{"type": "string", "enum": []any{"accepted"}},
+					}}
+					var violation *eventschema.Violation
+					if err := eventschema.ValidatePayloadAgainstSchema(schema, map[string]any{"value": test.value}); !errors.As(err, &violation) {
+						t.Fatalf("expected enum violation: %v", err)
+					}
+					failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+						Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+						Path: violation.Path, Constraint: violation.Constraint, Expected: violation.Expected,
+						Actual: violation.Actual, Detail: violation.Detail, Cause: violation,
+					}, "test", "fan_out.emit")
+					raw, err := runtimefailures.MarshalEnvelope(failure.Failure)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := first.CommitFanOutChunk(ctx, pipeline.FanOutChunkCommand{
+						Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: 0, Failure: raw}}, Now: now.Add(2 * time.Second),
+					}); err != nil {
+						t.Fatal(err)
+					}
+					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+					for _, owner := range []selectedFanOutOwner{first, second} {
+						report, err := owner.(selectedFanOutDiagnosticOwner).LoadRunDebugReport(ctx, fixture.runID, operatorread.RunDebugQueryOptions{})
+						if err != nil {
+							t.Fatal(err)
+						}
+						sample := report.FanOut.SemanticRejectionSample
+						if sample == nil || report.FanOut.SemanticRejected != 1 {
+							t.Fatalf("missing rejection: %#v", report.FanOut)
+						}
+						attrs := sample.Failure.Detail.Attributes
+						if attrs["actual"] != test.actual || attrs["constraint"] != "enum" || attrs["path"] != "$.value" || attrs["detail"] != violation.Detail {
+							t.Fatalf("enum evidence changed: %#v", attrs)
+						}
+						if sample.FlowPath != fixture.flowPath || sample.Family != "fan_out" || sample.SemanticPath != fixture.semanticPath {
+							t.Fatalf("sample lost declaration identity: %#v", sample)
+						}
+					}
+				})
 			}
 		})
 	}
@@ -798,7 +859,7 @@ func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t
 			firstIntent := seedFanOutOwnerFixture(t, ctx, db, first, postgres, 1, now)
 			secondIntent := seedFanOutOwnerIntent(t, ctx, db, firstIntent, 1, now.Add(time.Second))
 			intents := []fanOutOwnerFixture{firstIntent, secondIntent}
-			sort.Slice(intents, func(i, j int) bool { return intents[i].elementID < intents[j].elementID })
+			sort.Slice(intents, func(i, j int) bool { return intents[i].semanticPath < intents[j].semanticPath })
 
 			// Insert in reverse semantic order; selection must ignore row order and time.
 			for index := len(intents) - 1; index >= 0; index-- {
@@ -808,7 +869,7 @@ func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t
 					map[string]any{
 						"event": "fan-out.sample", "kind": "schema_mismatch", "path": "$.item",
 						"constraint": "type", "expected": "declared item", "actual": "invalid item",
-						"detail": "fan-out sample item is invalid", "marker": fixture.elementID,
+						"detail": "fan-out sample item is invalid", "marker": fixture.semanticPath,
 					},
 				))
 				if !ok {
@@ -818,17 +879,17 @@ func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t
 				if err != nil {
 					t.Fatal(err)
 				}
-				update := `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND package_key=$4 AND element_id=$5`
-				insert := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,0,'semantic_rejected',$5,$6)`
+				update := `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`
+				insert := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,'fan_out',$4,0,'semantic_rejected',$5,$6)`
 				failureValue := any(string(failureJSON))
 				if postgres {
-					update = `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2::uuid AND triggering_delivery_id=$3::uuid AND package_key=$4 AND element_id=$5`
-					insert = `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,failure,created_at) VALUES ($1::uuid,$2::uuid,$3,$4,0,'semantic_rejected',$5::jsonb,$6)`
+					update = `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2::uuid AND triggering_delivery_id=$3::uuid AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`
+					insert = `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1::uuid,$2::uuid,$3,'fan_out',$4,0,'semantic_rejected',$5::jsonb,$6)`
 				}
-				if _, err := db.ExecContext(ctx, update, now.Add(time.Duration(index+2)*time.Second), fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID); err != nil {
+				if _, err := db.ExecContext(ctx, update, now.Add(time.Duration(index+2)*time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 					t.Fatalf("close semantic rejection intent: %v", err)
 				}
-				if _, err := db.ExecContext(ctx, insert, fixture.runID, fixture.deliveryID, fixture.packageKey, fixture.elementID, failureValue, now.Add(time.Duration(index+2)*time.Second)); err != nil {
+				if _, err := db.ExecContext(ctx, insert, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, failureValue, now.Add(time.Duration(index+2)*time.Second)); err != nil {
 					t.Fatalf("insert semantic rejection outcome: %v", err)
 				}
 			}
@@ -843,7 +904,7 @@ func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t
 					t.Fatalf("fan-out semantic rejection diagnosis = %#v", report.FanOut)
 				}
 				want := intents[0]
-				if sample.TriggeringDeliveryID != want.deliveryID || sample.PackageKey != want.packageKey || sample.ElementID != want.elementID || sample.Ordinal != 0 || sample.Failure.Detail.Attributes["marker"] != want.elementID {
+				if sample.TriggeringDeliveryID != want.deliveryID || sample.FlowPath != want.flowPath || sample.Family != "fan_out" || sample.SemanticPath != want.semanticPath || sample.Ordinal != 0 || sample.Failure.Detail.Attributes["marker"] != want.semanticPath {
 					t.Fatalf("deterministic semantic rejection sample = %#v, want intent %#v", sample, want)
 				}
 			}
