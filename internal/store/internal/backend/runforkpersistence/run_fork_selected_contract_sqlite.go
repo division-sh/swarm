@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -229,7 +230,7 @@ func insertSQLiteRunForkSelectedContractBranchDivergence(ctx context.Context, tx
 	return nil
 }
 
-func ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string) error {
+func ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
 		return ensureRunForkActivationNoForkReplayState(ctx, tx, sqliteDeliveryAdapter, forkRunID)
@@ -290,6 +291,11 @@ func ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, 
 	allowedJSON, _ := json.Marshal(allowedEvents)
 	platformJSON, _ := json.Marshal(runForkSelectedContractForkLocalRuntimePlatformEventNames())
 	agentsJSON, _ := json.Marshal(selectedAgents)
+	activityIDs, err := selectedContractActivityLineage(ctx, tx, false, forkRunID, allowedEvents, source)
+	if err != nil {
+		return err
+	}
+	activityJSON, _ := json.Marshal(activityIDs)
 	var strayEvents int
 	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
@@ -316,12 +322,12 @@ func ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, 
 			  AND json_extract(e.payload, '$.details.runtime_lineage_selected_fork_context') = 1
 			UNION
 			SELECT child.event_id FROM events child JOIN selected_tree parent ON child.source_event_id = parent.event_id
-			WHERE child.run_id = $1 AND (child.event_name NOT LIKE 'platform.%' OR child.event_name IN (SELECT value FROM json_each($3)))
+			WHERE child.run_id = $1 AND (child.event_name NOT LIKE 'platform.%' OR child.event_name IN (SELECT value FROM json_each($3)) OR child.event_id IN (SELECT value FROM json_each($7)))
 		)
 		SELECT COUNT(*), COALESCE(group_concat(e.event_name || ':' || e.event_id, ','), '')
 		FROM events e
 		WHERE e.run_id = $1 AND NOT EXISTS (SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id)
-	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, string(activityJSON)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {

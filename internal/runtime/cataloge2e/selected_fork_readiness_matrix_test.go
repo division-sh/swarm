@@ -352,18 +352,22 @@ func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecut
 func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
-			for _, frontier := range []string{"node", "activity", "agent", "mixed", "mixed_progress"} {
-				if declarations == 0 && frontier != "node" && frontier != "activity" {
+			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "agent", "mixed", "mixed_progress"} {
+				activityFrontier := strings.HasPrefix(frontier, "activity")
+				if declarations == 0 && frontier != "node" && !activityFrontier {
 					continue
 				}
 				for _, stage := range []string{"initial", "staged"} {
 					t.Run(fmt.Sprintf("%s/declared_%d/%s/%s", backend, declarations, frontier, stage), func(t *testing.T) {
 						root := selectedForkReadinessCatalogFixture(t, declarations, frontier)
 						var activityCalls atomic.Int32
-						if frontier == "activity" {
+						if activityFrontier {
 							server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 								activityCalls.Add(1)
 								w.Header().Set("Content-Type", "application/json")
+								if frontier == "activity_failure" {
+									w.WriteHeader(http.StatusBadRequest)
+								}
 								_, _ = w.Write([]byte(`{}`))
 							}))
 							defer server.Close()
@@ -384,7 +388,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						eventName := "worker.inspect"
-						if frontier != "node" && frontier != "activity" {
+						if frontier != "node" && !activityFrontier {
 							eventName = "worker.ready"
 						}
 						event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/"+eventName), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
@@ -434,6 +438,12 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							}
 						}
 						executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
+						if activityFrontier && stage == "initial" {
+							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, &activityLineageProofStore{
+								SelectedContractForkLifecycle: forkStore, t: t, h: h, calls: &activityCalls,
+								hostile: declarations == 0 && frontier == "activity", rejectFinal: frontier == "activity_rejected",
+							})
+						}
 						if stage == "staged" {
 							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, stopAfterSelectedForkCommit{forkStore})
 						}
@@ -470,6 +480,10 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 									t.Fatalf("refused activation mutated fork on attempt %d:\nbefore=%s\nafter=%s", attempt, beforeActivation, afterActivation)
 								}
 							}
+						} else if frontier == "activity_rejected" {
+							if err == nil || !strings.Contains(err.Error(), "fork activity lineage") || result.ExecutedEventCount != 1 || activityCalls.Load() != 1 {
+								t.Fatalf("failed final validation lost execution evidence: count=%d calls=%d err=%v", result.ExecutedEventCount, activityCalls.Load(), err)
+							}
 						} else if frontier == "mixed" {
 							if err == nil || !strings.Contains(err.Error(), "authoritative_delivery_incomplete") || result.ExecutedEventCount != 0 || fencedAgentCalls.Load() != 0 {
 								t.Fatalf("terminal-node fence must refuse agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, fencedAgentCalls.Load(), err)
@@ -504,7 +518,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						forkState, found, err := h.workflow.Load(ctx, forkOwner)
-						fenced := frontier == "mixed" && stage == "initial"
+						fenced := (frontier == "mixed" || frontier == "activity_rejected") && stage == "initial"
 						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Config["worker_id"] != "worker-001")) {
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
 						}
@@ -522,13 +536,30 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 						if !refused && !fenced && forkState.CurrentState != "complete" {
 							t.Fatalf("fork did not execute to terminal state: %#v", forkState)
 						}
-						if frontier == "activity" {
+						if activityFrontier {
 							wantCalls := int32(1)
 							if refused {
 								wantCalls = 0
 							}
 							if got := activityCalls.Load(); got != wantCalls {
 								t.Fatalf("fork activity calls = %d, want %d", got, wantCalls)
+							}
+							if !refused && !fenced {
+								assertCatalogActivityLineage(t, activityLineageEvents(t, ctx, h, forkRun), frontier == "activity_failure")
+							}
+							if !refused {
+								beforeRetry := activityLineageStateSnapshot(t, ctx, h, forkRun)
+								for attempt := 0; attempt < 2; attempt++ {
+									_, retryErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
+										ForkRunID: forkRun, Store: selected, ConfirmSourceFreeze: true, ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
+									})
+									if retryErr == nil || activityCalls.Load() != wantCalls {
+										t.Fatalf("repeated final verification executed: calls=%d err=%v", activityCalls.Load(), retryErr)
+									}
+								}
+								if afterRetry := activityLineageStateSnapshot(t, ctx, h, forkRun); afterRetry != beforeRetry {
+									t.Fatal("repeated verification changed terminal fork")
+								}
 							}
 						}
 						after, found, err := h.workflow.Load(ctx, owner)
@@ -640,7 +671,7 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		node = "mixed-node.yaml"
 	case "mixed_progress":
 		node = "mixed-progress-node.yaml"
-	case "activity":
+	case "activity", "activity_failure", "activity_rejected":
 		node = "inspect-activity-node.yaml"
 	}
 	for path, fixture := range map[string]string{
@@ -650,6 +681,9 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		addition, err := os.ReadFile(filepath.Join("testdata", "terminal-retirement", fixture))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if frontier == "activity_failure" && path == "worker-flow/nodes.yaml" {
+			addition = []byte(strings.ReplaceAll(string(addition), "terminal_probe.succeeded", "terminal_probe.failed"))
 		}
 		file := filepath.Join(root, path)
 		data, err := os.ReadFile(file)

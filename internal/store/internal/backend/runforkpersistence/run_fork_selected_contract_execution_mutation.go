@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -1014,7 +1015,7 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 	return admission
 }
 
-func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string) error {
+func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
 		return ensureRunForkActivationNoForkReplayState(ctx, tx, postgresDeliveryAdapter, forkRunID)
@@ -1084,6 +1085,10 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		}
 	}
 
+	activityIDs, err := selectedContractActivityLineage(ctx, tx, true, forkRunID, allowedEvents, source)
+	if err != nil {
+		return err
+	}
 	var strayEvents int
 	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
@@ -1128,6 +1133,7 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			  AND (
 				child.event_name NOT LIKE 'platform.%'
 				OR child.event_name = ANY($3::text[])
+				OR child.event_id = ANY($9::uuid[])
 			  )
 		)
 		SELECT COUNT(*), COALESCE(string_agg(e.event_name || ':' || e.event_id::text, ',' ORDER BY e.event_name, e.event_id), '')
@@ -1136,7 +1142,7 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, pq.Array(activityIDs)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {

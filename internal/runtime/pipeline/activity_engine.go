@@ -641,13 +641,13 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 		detail = map[string]any{}
 	}
 	requestEventID := activityRequestEventID(intent)
-	detail["request_event_id"] = requestEventID
 	lineageEventID := requestEventID
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok && inbound.Type() == activityRequestEventType {
 		lineageEventID = inbound.ID()
 	} else if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok && lineage.SubjectEventType == string(activityRequestEventType) && lineage.SubjectEventID != "" {
 		lineageEventID = lineage.SubjectEventID
 	}
+	detail["request_event_id"] = lineageEventID
 	if intent.Generation.Valid() {
 		detail["loop_generation"] = intent.Generation.PayloadValue()
 		detail["loop_stage"] = intent.LoopStage
@@ -657,7 +657,7 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 		Component: "activity",
 		Action:    action,
 		EventID:   lineageEventID,
-		EventType: intent.SuccessEvent,
+		EventType: string(activityRequestEventType),
 		EntityID:  intent.EntityID.String(),
 		Detail:    detail,
 	})

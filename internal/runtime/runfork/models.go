@@ -28,6 +28,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -1121,6 +1122,7 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
+	ExecutionSource       semanticview.Source
 	ForkRunID             string
 	ConfirmSourceFreeze   bool
 	AllowedSourceEventIDs []string

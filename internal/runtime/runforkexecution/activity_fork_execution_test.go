@@ -46,6 +46,13 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 
 	tests := []selectedContractActivityForkCase{
 		{
+			name:            "manual confirmation does not authorize another write",
+			effectClass:     runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+			forkPolicy:      runtimecontracts.ActivityForkRequireConfirmation,
+			resultEventType: "flow_a/connector.succeeded",
+			wantError:       "fork policy \"require_manual_confirmation\" is not executable",
+		},
+		{
 			name:               "read-only reexecutes exactly once",
 			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
 			forkPolicy:         runtimecontracts.ActivityForkReexecuteRead,
@@ -147,6 +154,12 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Owner: selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader: loader, ContractSelection: selection,
 			})
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) || connectorCalls.Load() != beforeCalls || result.Activation.Activated {
+					t.Fatalf("unsupported root executed: calls=%d result=%+v err=%v", connectorCalls.Load()-beforeCalls, result, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 			}
@@ -223,6 +236,7 @@ type selectedContractActivityForkCase struct {
 	failureCode           string
 	wantConnectorCalls    int64
 	wantForkAttemptStatus string
+	wantError             string
 }
 
 type selectedContractActivityRequestPayload struct {
