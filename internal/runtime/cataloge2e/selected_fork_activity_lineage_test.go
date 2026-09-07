@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/google/uuid"
@@ -74,6 +75,7 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 			{"malformed_result", result.EventID, "", nil},
 			{"fabricated_diagnostic_subject", diagnostic.EventID, "details", map[string]any{"component": "activity", "event_id": uuid.NewString()}},
 			{"conflicting_diagnostic_subject", diagnostic.EventID, "details", map[string]any{"component": "activity", "event_id": request.EventID, "request_event_id": uuid.NewString()}},
+			{"missing_diagnostic_component", diagnostic.EventID, "details", map[string]any{"event_id": request.EventID, "request_event_id": request.EventID}},
 		}
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
@@ -244,7 +246,37 @@ func assertCatalogActivityLineage(t *testing.T, observed map[string]operatorread
 	if failure {
 		wantDiagnostics = 3
 	}
+	if request.Payload["effect_class"] == "non_idempotent_write" {
+		wantDiagnostics = 1 // Journaled execution emits result_published, not read-attempt diagnostics.
+	}
 	if !reflect.DeepEqual([]int{requests, results, diagnostics}, []int{1, 1, wantDiagnostics}) {
 		t.Fatal(fmt.Sprintf("activity facts = %d requests, %d results, %d diagnostics; want 1,1,%d", requests, results, diagnostics, wantDiagnostics))
 	}
+}
+
+func assertCatalogActivityJournal(t *testing.T, ctx context.Context, h *runtimeHarness, runID string, failure bool) {
+	t.Helper()
+	var journal pipeline.ActivityAttemptJournal = h.sqlite
+	if h.pg != nil {
+		journal = h.pg
+	}
+	observed := activityLineageEvents(t, ctx, h, runID)
+	for _, event := range observed {
+		if event.EventName != "platform.activity_requested" {
+			continue
+		}
+		record, found, err := journal.LoadActivityAttempt(ctx, event.EventID)
+		wantStatus := pipeline.ActivityAttemptStatusSucceeded
+		if failure {
+			wantStatus = pipeline.ActivityAttemptStatusFailed
+		}
+		result, resultFound := observed[record.ResultEventID]
+		if err != nil || !found || !resultFound || record.Status != wantStatus || record.Attempt != 1 ||
+			record.RunID != runID || record.SourceEventID != event.SourceEventID || record.CompletedAt == nil ||
+			record.ResultEventType != result.EventName || record.EffectClass != "non_idempotent_write" {
+			t.Fatalf("journal/public readback differs: record=%+v found=%t result=%+v err=%v", record, found, result, err)
+		}
+		return
+	}
+	t.Fatal("journal proof requires a persisted activity request")
 }

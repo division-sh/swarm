@@ -98,7 +98,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has no completed exact parent delivery")
 	}
 	tool, ok := source.ToolEntries()[intent.Tool]
-	if !ok || tool.Effect() != intent.EffectClass || intent.EffectClass != runtimecontracts.ActivityEffectClassReadOnly {
+	if !ok || tool.Effect() != intent.EffectClass || !runtimecontracts.SupportedActivityEffectClass(intent.EffectClass) {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity effect is not admitted")
 	}
 	if intent.BundleHash != "" {
@@ -180,6 +180,9 @@ func ActivityDiagnosticSubject(event events.Event) (string, bool, error) {
 	}
 	var component string
 	if err := json.Unmarshal(payload.Details["component"], &component); err != nil {
+		if _, present := payload.Details["request_event_id"]; present {
+			return "", true, fmt.Errorf("activity diagnostic has invalid component")
+		}
 		return "", false, nil
 	}
 	if component != "activity" {

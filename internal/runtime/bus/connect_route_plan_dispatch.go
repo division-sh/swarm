@@ -335,7 +335,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 			return out, nil
 		}
-		intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan)
+		intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan, r.routeTable.staticAgentDeclarationPlans())
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -920,7 +920,7 @@ func connectRoutePlanLiveRecipients(runID string, routes []runtimepinrouting.Con
 	return normalizeRoutePlanLiveRecipients(out), nil
 }
 
-func connectRoutePlanDeliveryIntents(runID string, plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []runtimepinrouting.ConnectDeliveryRoute, routeCreatedInPlan bool) ([]RoutePlanDeliveryIntent, error) {
+func connectRoutePlanDeliveryIntents(runID string, plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []runtimepinrouting.ConnectDeliveryRoute, routeCreatedInPlan bool, staticPlans map[agentidentity.Plan]struct{}) ([]RoutePlanDeliveryIntent, error) {
 	planID, err := runtimepinrouting.ConnectPlanIdentity(plan)
 	if err != nil {
 		return nil, err
@@ -948,6 +948,9 @@ func connectRoutePlanDeliveryIntents(runID string, plan runtimepinrouting.Connec
 		}
 		if _, live := liveAgents[plan]; !live {
 			intent.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
+			if _, declared := staticPlans[plan.Normalize()]; declared && !routeCreatedInPlan {
+				intent.AgentLifecycle = agentLifecycleAdmissionStaticDeclaration
+			}
 		}
 	}
 	return intents, nil

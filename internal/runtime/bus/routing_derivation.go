@@ -224,6 +224,22 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	return rt.ResolveForRun("", eventType)
 }
 
+func (rt *RouteTable) staticAgentDeclarationPlans() map[agentidentity.Plan]struct{} {
+	plans := make(map[agentidentity.Plan]struct{})
+	if rt == nil {
+		return plans
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	for _, pattern := range rt.patterns {
+		subscriber := pattern.Subscriber
+		if pattern.RunID == "" && subscriber.agentLifecycle == agentLifecycleAdmissionStaticDeclaration {
+			plans[subscriber.AgentPlan.Normalize()] = struct{}{}
+		}
+	}
+	return plans
+}
+
 func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 	if rt == nil {
 		return nil
