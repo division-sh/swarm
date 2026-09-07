@@ -4,8 +4,67 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
+
+func TestRuntimeProjectionHandleReadsAndReleaseAreSynchronized(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer projection.Release()
+	retained, err := projection.Retain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer retained.Release()
+	projectionRoot := retained.PrivateRoot()
+	started := make(chan struct{}, 8)
+	var readers sync.WaitGroup
+	for range 8 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			started <- struct{}{}
+			for range 100 {
+				_ = projection.Identity()
+				_ = projection.BundleHash()
+				_ = projection.PrivateRoot()
+				if handle, err := projection.Retain(); err == nil {
+					if err := handle.Release(); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+		}()
+	}
+	<-started
+	if err := projection.Release(); err != nil {
+		t.Fatal(err)
+	}
+	readers.Wait()
+	if projection.Identity() != "" || projection.BundleHash() != "" || projection.PrivateRoot() != "" {
+		t.Fatal("released handle still exposes its projection")
+	}
+	if retained.BundleHash() != artifact.BundleHash() || retained.PrivateRoot() != projectionRoot {
+		t.Fatal("peer handle release invalidated the retained owner")
+	}
+	if err := retained.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(projectionRoot); !os.IsNotExist(err) {
+		t.Fatalf("final release did not remove the tree: %v", err)
+	}
+}
 
 func TestRuntimeProjectionOwnsExactGenerationAndLifetime(t *testing.T) {
 	root := t.TempDir()

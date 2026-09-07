@@ -344,27 +344,43 @@ func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Conte
 }
 
 func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindScaffold), m.scaffoldContainerArgs()); err != nil {
+	scaffoldArgs, err := m.scaffoldContainerArgs()
+	if err != nil {
+		return err
+	}
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindScaffold), scaffoldArgs); err != nil {
 		return fmt.Errorf("ensure scaffold workspace: %w", err)
 	}
 
-	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindSystem), m.systemContainerArgs()); err != nil {
+	systemArgs, err := m.systemContainerArgs()
+	if err != nil {
+		return err
+	}
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindSystem), systemArgs); err != nil {
 		return fmt.Errorf("ensure system workspace: %w", err)
 	}
 	return nil
 }
 
-func (m *DockerManager) scaffoldContainerArgs() []string {
-	return append(m.standardMountArgs(),
+func (m *DockerManager) scaffoldContainerArgs() ([]string, error) {
+	mounts, err := m.standardMountArgs()
+	if err != nil {
+		return nil, err
+	}
+	return append(mounts,
 		"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
 		"-w", m.cfg.ScaffoldWorkdir,
 		m.cfg.WorkspaceImage,
 		"sleep", "infinity",
-	)
+	), nil
 }
 
-func (m *DockerManager) systemContainerArgs() []string {
-	return append(m.standardMountArgs(),
+func (m *DockerManager) systemContainerArgs() ([]string, error) {
+	mounts, err := m.standardMountArgs()
+	if err != nil {
+		return nil, err
+	}
+	return append(mounts,
 		"--privileged",
 		"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
 		"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
@@ -372,7 +388,7 @@ func (m *DockerManager) systemContainerArgs() []string {
 		"-w", m.cfg.SystemWorkdir,
 		m.cfg.WorkspaceImage,
 		"sleep", "infinity",
-	)
+	), nil
 }
 
 func (m *DockerManager) SystemWorkspaceContainers() []string {
@@ -415,7 +431,7 @@ func (m *DockerManager) BindSourceProjection(projection *sourceartifact.RuntimeP
 		return fmt.Errorf("workspace source projection is already bound or released")
 	}
 	cfg := m.baseCfg
-	cfg.SourceProjection = projection
+	cfg.SourceProjection = ownedProjection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = projectionID
 	cfg.BundleScope, err = durableBundleScopeKey(cfg.BundleHash)
@@ -628,7 +644,11 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindScaffold), m.scaffoldContainerArgs()); err != nil {
+		args, err := m.scaffoldContainerArgs()
+		if err != nil {
+			return nil, err
+		}
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindScaffold), args); err != nil {
 			return nil, err
 		}
 		return &Target{
@@ -638,7 +658,11 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 			Mounts:    dockerExecutionMounts(m.cfg, false),
 		}, nil
 	case "system":
-		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), m.systemContainerArgs()); err != nil {
+		args, err := m.systemContainerArgs()
+		if err != nil {
+			return nil, err
+		}
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), args); err != nil {
 			return nil, err
 		}
 		return &Target{
@@ -649,6 +673,10 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 		}, nil
 	}
 	scope, scopeKey, err := m.workspaceScopeForActor(actor)
+	if err != nil {
+		return nil, err
+	}
+	mounts, err := m.standardMountArgs()
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +698,6 @@ func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.Agent
 	if err != nil {
 		return nil, err
 	}
-	mounts := m.standardMountArgs()
 	if projection.Root != "" {
 		mounts = append(mounts, "-v", fmt.Sprintf("%s:%s:ro", projection.Root, strings.TrimSpace(m.cfg.DataMountPoint)))
 	}
@@ -888,15 +915,23 @@ func workspaceRunID(ctx context.Context) (string, error) {
 	return runID, nil
 }
 
-func (m *DockerManager) standardMountArgs() []string {
+func (m *DockerManager) standardMountArgs() ([]string, error) {
 	if m == nil {
-		return nil
+		return nil, fmt.Errorf("workspace manager is required")
 	}
-	args := []string{}
-	if source, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash); err == nil {
-		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.SourceMountPoint)))
+	m.projectionMu.Lock()
+	defer m.projectionMu.Unlock()
+	if m.projectionReleased {
+		return nil, fmt.Errorf("workspace source projection is released")
 	}
-	return args
+	if m.ownedProjection == nil {
+		return nil, fmt.Errorf("workspace source projection binding is required")
+	}
+	source, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
+	if err != nil {
+		return nil, err
+	}
+	return []string{"-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.SourceMountPoint))}, nil
 }
 
 func (m *DockerManager) ensureDockerAvailable(ctx context.Context) error {

@@ -563,10 +563,12 @@ func TestResolveWorkspace_PerFlowInstanceIsolatesActorDataAndSharesWorkspaceVolu
 }
 
 func TestResolveWorkspaceRejectsMalformedProjectionBeforeDockerMutation(t *testing.T) {
+	projection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.WorkspaceNetwork = ""
 	manager.SetConfig(cfg)
+	bindTestDockerProjection(t, manager, projection)
 	manager.SetDataProjectionProvider(workspaceProjectionProviderFunc(func(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
 		return runtimedataaccess.Projection{
 			ID:   runtimedataaccess.ProjectionID("data-projection-v1:sha256:deadbeef"),
@@ -862,11 +864,13 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *tes
 }
 
 func TestEnsureSystemWorkspaces_CreatesScaffoldAndSystemContainers(t *testing.T) {
+	projection, projectionRoot := testRuntimeSourceProjection(t)
 	manager := NewDockerManager()
 	cfg := DefaultDockerConfig()
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
+	bindTestDockerProjection(t, manager, projection)
 
 	var calls [][]string
 	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
@@ -887,8 +891,9 @@ func TestEnsureSystemWorkspaces_CreatesScaffoldAndSystemContainers(t *testing.T)
 
 	joined := flattenDockerCalls(calls)
 	for _, expected := range []string{
-		"create --name swarm-scaffold",
-		"create --name swarm-system",
+		"create --name " + manager.cfg.ScaffoldContainer,
+		"create --name " + manager.cfg.SystemContainer,
+		projectionRoot + ":" + LogicalSourceMount + ":ro",
 		"--label dev.swarm.container.kind=scaffold",
 		"--label dev.swarm.container.kind=system",
 		"--label dev.swarm.reset.eligible=false",

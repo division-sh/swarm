@@ -73,47 +73,50 @@ func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimePro
 // shared by retained handles and differs for separate materializations even
 // when their admitted bundle hashes are equal.
 func (p *RuntimeProjection) Identity() string {
-	if p == nil || p.state == nil || p.released {
+	if p == nil || p.state == nil {
 		return ""
 	}
 	p.state.mu.Lock()
 	defer p.state.mu.Unlock()
-	if p.state.removed {
+	if p.released || p.state.removed {
 		return ""
 	}
 	return p.state.identity
 }
 
 func (p *RuntimeProjection) BundleHash() string {
-	if p == nil || p.state == nil || p.released {
+	if p == nil || p.state == nil {
 		return ""
 	}
 	p.state.mu.Lock()
 	defer p.state.mu.Unlock()
-	if p.state.removed {
+	if p.released || p.state.removed {
 		return ""
 	}
 	return p.state.bundleHash
 }
 
 func (p *RuntimeProjection) PrivateRoot() string {
-	if p == nil || p.state == nil || p.released {
+	if p == nil || p.state == nil {
 		return ""
 	}
 	p.state.mu.Lock()
 	defer p.state.mu.Unlock()
-	if p.state.removed {
+	if p.released || p.state.removed {
 		return ""
 	}
 	return p.state.root
 }
 
 func (p *RuntimeProjection) Retain() (*RuntimeProjection, error) {
-	if p == nil || p.state == nil || p.released {
+	if p == nil || p.state == nil {
 		return nil, errors.New("runtime source projection is released")
 	}
 	p.state.mu.Lock()
 	defer p.state.mu.Unlock()
+	if p.released {
+		return nil, errors.New("runtime source projection is released")
+	}
 	if p.state.removed || p.state.refs == 0 {
 		return nil, errors.New("runtime source projection is removed")
 	}
@@ -122,7 +125,7 @@ func (p *RuntimeProjection) Retain() (*RuntimeProjection, error) {
 }
 
 func (p *RuntimeProjection) Release() error {
-	if p == nil || p.state == nil || p.released {
+	if p == nil || p.state == nil {
 		return nil
 	}
 	p.state.mu.Lock()
