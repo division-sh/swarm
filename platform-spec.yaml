@@ -1279,8 +1279,8 @@ contract_formats:
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
             entity state; it does not forbid an exact existing or admitted materializing receiver owner. No supported handler
-            class treats selected ownership as forbidden. An admitted structural current-delivery owner may supply shared
-            existing ownership. References to persisted platform entity identity, state, or gates are existing-entity
+            class treats selected ownership as forbidden. Compiled parent-to-child topology supplies source/causal context,
+            not ownership of the parent's state. References to persisted platform entity identity, state, or gates are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
             An exact admitted same-plan materializing owner may satisfy an entity-optional or existing-required handler and a
             later select handler in the same plan.
@@ -1319,7 +1319,8 @@ contract_formats:
             for selected ownership is forbidden.
             Once committed, later matching rows cannot redirect the delivery. Any non-active lifecycle companion, including
             draining or terminated, makes that exact receiver unavailable to delayed, retry, replay, and restart execution even when its
-            entity stage is non-terminal; every execution path fails before state, effect, or settlement mutation. Pipeline computes one immutable
+            entity stage is non-terminal; every execution path rejects before business state or effect mutation. A claimed
+            rejection MUST still use the canonical delivery failure settlement and continuation owner. Pipeline computes one immutable
             DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
             mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not
             select ownership. An exact selected entity_state row may predate its flow_instances lifecycle companion, including
@@ -1335,15 +1336,28 @@ contract_formats:
             when the exact typed active-agent descriptor already carries that entity fact and the selected owner agrees;
             runtime-created carriers remain targetless. Sharing only a flow instance, handler, recipient spelling, or
             publication is not ownership evidence. Node intents are classified
-            independently against the selected-run snapshot before their exact owners become eligible evidence for an agent
-            route, so intent order cannot create authority. Missing,
+            independently against the selected-run snapshot. A node's speculative materialization result is not receiving
+            activation evidence for an agent; only actual selected ownership or an admitted receiver activation plan supplies
+            that authority, so intent order cannot create it. Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
-            settlement, lifecycle, warning, or reply mutation. A nested static receiver without a distinct selected row may
-            consume only the already-admitted current DeliveryRoute target when compiled topology proves shared structural
-            ownership. That permission is one opaque proof minted by the compiled graph from the exact source endpoint,
-            receiver endpoint mode, edge, target blueprint, and current owner; a boolean, route-created fact, duplicate-intent
-            OR, path relationship, or source/current entity agreement cannot substitute for it. Exact equal proofs may
-            deduplicate, while absent or conflicting proofs fail closed. Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
+            settlement, lifecycle, warning, or reply mutation during publication admission. A nested static receiver uses
+            only its actual receiving-owned entity or receiving activation. Supported create and auto-materializing work
+            use the canonical receiving identity; optional work without a receiver entity is entityless; existing-required
+            work without a receiver entity or genuine receiving activation rejects. Source existing/materializing kind
+            never establishes receiving persistence. No parent entity is relabeled into a child route, no structural owner
+            descriptor is synthesized, and no implicit shared-state row or companion is created. Exact compiled source,
+            edge, recipient and target claims remain mandatory; topology does not transfer state ownership.
+            Independent optional and materializing recipients retain separate decisions even within one publication.
+            The evaluation ledger consumes exact compiled plan identity, not shared flow-instance text or another plan's owner.
+            Entityless child emissions use the child's execution scope and supported explicit-connect, typed-local or
+            external mechanisms; inbound parent context cannot repair absent onward routing authority. Exact receiver-owned
+            current-delivery output context and complete persisted ParentRoute remain separate supported mechanisms.
+            After a claim is acquired, stamped validation, target loading/decoding, declared-key disagreement and unavailable
+            state use the same failure settlement, heartbeat and continuation handoff as handler execution. A pipeline
+            receipt alone is not a delivery outcome. Deterministic rejection settles canonically; typed infrastructure,
+            cancellation, heartbeat or settlement failures preserve existing retry or accountable recovery authority.
+            Never fabricate terminal success, release newer claim authority, or add a second status writer.
+            Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
             identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
             public observation preserve the originally stamped target variant and AgentIdentity without current-owner
             re-resolution. Boot verification and runtime compile the same dependency/acquisition policy; unsupported explicit
@@ -2894,10 +2908,11 @@ handler_specification:
         All subsequent handler steps (guard, data_accumulation, advances_to, emit, etc.) operate on that canonical entity.
         The inbound event's entity_id is parent/source context only and is ignored for state ownership; the receiving-flow
         entity starts at the flow's initial_state with schema-declared initial values already materialized.
-      default: false — handler operates on the inbound event's entity_id (inherit)
+      default: false — handler consumes its admitted receiver ownership; inbound source entity identity is not inherited as state
       when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
-        Example — vertical.discovered arriving at scoring creates a new vertical entity for scoring. Without create_entity,
-        all discovered verticals would share the scan entity from discovery.
+        Example — vertical.discovered arriving at scoring creates scoring's canonical primary entity. Without create_entity,
+        receiver policy preserves actual receiving ownership, auto-materializes where permitted, executes entityless optional
+        work, or rejects missing required state; it never borrows discovery's scan entity.
       execution_position: First step in the dependency graph. Runs before query, guard, and all other steps. Establishes
         the entity context for the entire handler.
       entity_creation:
@@ -2932,7 +2947,7 @@ handler_specification:
       purpose: Resolve exactly one existing entity owned by the receiving flow before any other handler processing. This is
         the service-owned acquisition primitive for stateful typed input-pin handlers where the incoming cross-flow request
         addresses an existing target-flow resource by declared business key, not by source-provided entity identity.
-      default: absent — handler operates on the resolved inbound event entity context unless create_entity is declared
+      default: absent — handler consumes its admitted receiver ownership under the dependency/acquisition policy
       when_to_use: When an event arriving from outside the flow represents a request against an already-existing service
         entity owned by the receiving flow. Example — OpCo emits a typed spend event with vertical_id, and Treasury selects
         its own budget entity whose vertical_id matches the payload. The source flow must not provide the target entity_id,
@@ -11654,8 +11669,9 @@ flow_model:
       - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
       - '2. Destination flow handler receives the event through parent-owned connect / instance-key routing or another
         supported route owner.'
-      - '3. Destination updates its primary entity, contained state, usage-demanded singleton coordinator state, or child/template flow
-        instance. Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
+      - '3. Destination updates or canonically creates its own primary entity, contained state, usage-demanded singleton
+        coordinator state, or child/template flow instance. Optional work without receiving state executes entityless.
+        Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
       - '4. Data from the source entity is passed via the event payload or create_flow_instance
         config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
       service_request_pattern:
@@ -11663,8 +11679,8 @@ flow_model:
         entity_type, or flow_instance.'
       - '2. Destination declares a supported ownership model: mode: template with scalar instance/source/resolution, mode: singleton for one durable
         instance and exact typed coordinator consumers when shared state is used, one primary entity with contained data, or a child flow.'
-      - '3. Parent connect / route-plan authority supplies the target flow-instance context; static receiver-side
-        create_entity, select_entity, and select_or_create_entity are not repair paths.'
+      - '3. Parent connect / route-plan authority supplies the target flow-instance context, not source-state ownership.
+        Supported ordinary primary acquisition remains receiver-owned; retired static multi-row acquisition is not a repair path.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
       enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT declare create_entity,
         select_entity, or select_or_create_entity as static multi-row ownership. Boot verification fails closed with
@@ -11700,6 +11716,9 @@ flow_model:
         isolated from each other by instance ID in the current runtime.'
       - 'Parent flows do NOT own descendant flow instance writes. scoring does not own validation
         entities. Root does not own child flow entities.'
+      - 'Parent event identity is source/causal context only. A compiled structural relation cannot turn a parent row
+        or pending parent materialization into child-owned existing or materializing state. Exact child ownership,
+        canonical child acquisition, and entityless optional execution remain distinct.'
       - 'Sibling flows do NOT own each other. scoring and validation are peers — neither can write
         to the other''s entities.'
       - 'No prefix-based ownership inference. The runtime MUST NOT treat "scoring" as owning
@@ -19487,10 +19506,11 @@ static_analyzer:
         rule: Child-to-parent structural binding is valid only when no lowered parent connect route applies and only for
           child/template instances that will record full ParentRoute at create_flow_instance time.
       static_child_delivery_entity:
-        rule: Nested static child flows without a materialized instance row may use the current delivery entity as the only
-          implicit target route for pin-declared outputs; root static flows require a typed consumer, lowered root connect,
-          or accepted external boundary.
-          This path is not ParentRoute metadata and must not fall back to inbound event.source.
+        rule: Nested static child outputs may use an exact current receiver-owned entity-bearing delivery context as
+          the implicit entity target route for pin-declared outputs. Entityless child execution does not qualify and
+          requires explicit connect, typed-local consumption or an accepted external boundary; root static flows
+          likewise require their supported typed consumer, lowered root connect or external boundary.
+          This mechanism is distinct from complete persisted ParentRoute and never borrows inbound parent state or event.source.
       harness_sink:
         rule: A structured output pin may declare sink:harness only for explicit validation/catalog observation. Production
           admission rejects it, and it creates no runtime recipient or route fact.

@@ -917,6 +917,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/route_plan_test.go
+      - internal/runtime/bus/receiver_ledger_projection_test.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_routing.go
       - internal/runtime/bus/target_owner_projection.go

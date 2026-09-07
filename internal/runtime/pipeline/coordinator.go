@@ -669,9 +669,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		return false, fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
 	}
 	handlerFact = handlerFact.ForEvent(events.EventType(handlerEventKey))
-	if err := ValidateStampedDeliveryTargetOwnership(source, evt, route.Recipient, handlerFact, handler, route.Target); err != nil {
-		return false, fmt.Errorf("workflow node %s target ownership: %w", node.Key(), err)
-	}
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != node.Key()) {
 		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
@@ -699,28 +696,32 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress))
 		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
-		if err := pc.notifyTestWorkflowNodeHandlerStarting(attemptCtx, node.Key(), evt); err != nil {
-			return false, err
-		}
 		pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt)
 		started := time.Now()
 		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
+		defer heartbeat.Stop()
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
-		application, err := pc.prepareDeliveryTargetApplication(executionCtx, node.Key(), handlerFact, handler, evt, route.Target)
-		if err != nil {
-			_ = heartbeat.Stop()
-			return false, err
-		}
-		executionCtx = withDeliveryTargetApplication(executionCtx, application)
-		result, err := pc.executeNodeContractHandler(executionCtx, node, handler, workflowTriggerContext{
-			Event:           application.Event(),
-			HandlerEventKey: handlerEventKey,
-			State:           application.State(),
-		}, false, emissions != nil)
+		// Preparation is part of the claimed attempt. Its failure must use the
+		// same settlement and continuation handoff as a handler execution failure.
+		result, err := func() (contractHandlerExecutionResult, error) {
+			if err := pc.notifyTestWorkflowNodeHandlerStarting(executionCtx, node.Key(), evt); err != nil {
+				return contractHandlerExecutionResult{}, err
+			}
+			application, err := pc.prepareDeliveryTargetApplication(executionCtx, node.Key(), handlerFact, handler, evt, route.Target)
+			if err != nil {
+				return contractHandlerExecutionResult{}, err
+			}
+			executionCtx = withDeliveryTargetApplication(executionCtx, application)
+			return pc.executeNodeContractHandler(executionCtx, node, handler, workflowTriggerContext{
+				Event:           application.Event(),
+				HandlerEventKey: handlerEventKey,
+				State:           application.State(),
+			}, false, emissions != nil)
+		}()
 		if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
 			return false, fmt.Errorf("workflow node engine settled a different delivery claim")
 		}

@@ -38,7 +38,6 @@ type targetOwnerArcCase struct {
 	sourcePath   string
 	receiverMode string
 	receiverPath string
-	shared       bool
 	existing     bool
 	producerType events.EventProducerType
 	sourceEntity string
@@ -71,7 +70,7 @@ func TestEventBusCrossFlowMaterializingTargetOwnershipMatrix(t *testing.T) {
 func TestEventBusNestedCrossFlowTargetOwnershipMatrix(t *testing.T) {
 	for _, test := range []targetOwnerArcCase{
 		{name: "static parent to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result"},
-		{name: "singleton parent to nested static shares exact owner", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result", shared: true},
+		{name: "singleton parent to nested static selects distinct receiver", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeStatic, receiverPath: "left/worker/result", existing: true},
 		{name: "singleton parent to nested singleton is distinct", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result"},
 		{name: "existing singleton owner wins", sourceKind: targetOwnerArcStatic, sourcePath: "left/source", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/existing", existing: true},
 		{name: "concrete template to nested singleton is distinct", sourceKind: targetOwnerArcTemplate, sourcePath: "right/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "right/worker/result"},
@@ -241,13 +240,10 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 	if test.existing {
 		store.setTargetOwnerRoutes(wantRoute)
 		wantOwner = events.MustExistingEntityTarget(wantRoute)
-	} else if test.shared {
-		wantRoute.EntityID = sourceRoute.EntityID
-		wantOwner = events.MustExistingEntityTarget(wantRoute)
 	} else {
 		wantOwner = events.MustMaterializingEntityTarget(wantRoute)
 	}
-	if !test.shared && sourceRoute.EntityID == wantRoute.EntityID {
+	if sourceRoute.EntityID == wantRoute.EntityID {
 		t.Fatalf("source and receiver identities are not distinguishable: %#v", sourceRoute)
 	}
 
@@ -454,7 +450,7 @@ func targetOwnerArcHandler(mode string) runtimecontracts.SystemNodeEventHandler 
 }
 
 func TestEventBusCrossFlowTargetOwnerRejectsForeignSourceBeforePersistence(t *testing.T) {
-	t.Run("root source and current owner disagree", TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBeforePersistence)
+	t.Run("parent context cannot supply missing receiver", TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver)
 	t.Run("descendant has no compiled proof", TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence)
 	t.Run("repeated leaf under wrong full path", testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence)
 }
@@ -746,7 +742,8 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			{InstanceID: "right", EntityID: rightRoute.EntityID, FlowInstance: rightRoute.FlowInstance, FlowTemplate: "branch", AddressFields: map[string]string{"entity.branch_id": "right"}},
 		},
 	}}
-	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute)
+	staticRoute := events.RouteIdentity{FlowID: "branch/worker/result-static", FlowInstance: "branch/worker/result-static", EntityID: runtimeflowidentity.EntityID("branch/worker/result-static")}
+	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute, staticRoute)
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstanceActivator: store.Activate, Interceptors: []EventInterceptor{interceptor},
@@ -830,8 +827,8 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			}
 			if strings.Contains(route.Recipient.LocalID(), "static-result") {
 				staticSeen = true
-				if route.Target.Code() != "existing_entity" || route.Target.Route().EntityID != parent.route.EntityID || route.Target.Route().FlowInstance != "branch/worker/result-static" {
-					t.Fatalf("%s nested static target = %s %#v, want parent-shared existing owner %#v", parent.name, route.Target.Code(), route.Target.Route(), parent.route)
+				if !route.Target.ExistingEntity() || route.Target.Route() != staticRoute || route.Target.Route().EntityID == parent.route.EntityID {
+					t.Fatalf("%s nested static target = %s %#v, want exact receiver-owned state %#v", parent.name, route.Target.Code(), route.Target.Route(), staticRoute)
 				}
 			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true

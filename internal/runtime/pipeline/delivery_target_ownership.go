@@ -11,7 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -126,15 +125,14 @@ func AdmitDeliveryTargetHandler(source semanticview.Source, node runtimeidentity
 }
 
 type DeliveryTargetOwnershipRequest struct {
-	Context              context.Context
-	Source               semanticview.Source
-	Event                events.Event
-	Recipient            events.DeliveryRecipient
-	Blueprint            events.RouteIdentity
-	Handler              DeliveryTargetHandler
-	Candidates           []DeliveryTargetOwnerCandidate
-	WorkflowInstances    WorkflowInstancePersistenceReader
-	StructuralOwnerProof runtimepinrouting.StructuralTargetOwnerProof
+	Context           context.Context
+	Source            semanticview.Source
+	Event             events.Event
+	Recipient         events.DeliveryRecipient
+	Blueprint         events.RouteIdentity
+	Handler           DeliveryTargetHandler
+	Candidates        []DeliveryTargetOwnerCandidate
+	WorkflowInstances WorkflowInstancePersistenceReader
 }
 
 // DeliveryTargetEntityDependency is the closed execution-semantic state
@@ -268,32 +266,6 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	if len(existing)+len(materializing) == 0 && !req.StructuralOwnerProof.Empty() {
-		if err := req.StructuralOwnerProof.Validate(); err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		if req.StructuralOwnerProof.TargetBlueprint() != blueprint {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("compiled structural target-owner proof does not match receiver blueprint")
-		}
-		owner := req.StructuralOwnerProof.TargetOwner()
-		if owner.MaterializingEntity() {
-			present := false
-			for _, candidate := range materializing {
-				present = present || candidate == owner.Route()
-			}
-			if !present {
-				materializing = append(materializing, owner.Route())
-			}
-		} else if owner.ExistingEntity() {
-			present := false
-			for _, candidate := range existing {
-				present = present || candidate == owner.Route()
-			}
-			if !present {
-				existing = append(existing, owner.Route())
-			}
-		}
-	}
 	if len(existing)+len(materializing) > 1 {
 		return events.DeliveryTargetOwnership{}, ambiguousDeliveryTargetOwnerError(blueprint.FlowInstance, existing, materializing)
 	}
@@ -330,7 +302,9 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.NewMaterializingEntityTarget(planned)
 	}
 	if policy.Dependency == DeliveryTargetEntityOptional {
-		blueprint.EntityID = ""
+		if blueprint.EntityID != "" {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("exact receiver entity %q is missing for flow instance %q", blueprint.EntityID, blueprint.FlowInstance)
+		}
 		return events.NewEntitylessReceiverTarget(blueprint)
 	}
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", blueprint.FlowInstance)

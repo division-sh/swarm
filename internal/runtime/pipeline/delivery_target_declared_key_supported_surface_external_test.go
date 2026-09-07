@@ -34,7 +34,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 		{name: "postgres", open: openPostgresGateRecoveryStore},
 	} {
 		for _, acquisition := range []string{"select", "select_or_create"} {
-			for _, keyRelation := range []string{"agreement", "conflict"} {
+			for _, keyRelation := range []string{"agreement", "conflict", "later_match"} {
 				t.Run(storeCase.name+"/"+acquisition+"/"+keyRelation, func(t *testing.T) {
 					selected := storeCase.open(t)
 					runID := uuid.NewString()
@@ -77,7 +77,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						t.Fatal("declared-key execution context is missing bundle source fact")
 					}
 					bundleHash := sourceFact.BundleHash()
-					for _, instance := range []runtimepipeline.WorkflowInstance{
+					instances := []runtimepipeline.WorkflowInstance{
 						{
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
 							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
@@ -90,7 +90,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": payloadKey, "owner": "competing"},
 							EntityType: "review_entity",
 						},
-					} {
+					}
+					materialize := func(instance runtimepipeline.WorkflowInstance) {
 						readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 							Identity: runtimeflowidentity.Instance{
 								TemplateID: "review", ScopeKey: "review", InstanceID: instance.InstanceID,
@@ -109,6 +110,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}); err != nil {
 							t.Fatalf("publish %s route: %v", instance.Fields["owner"], err)
 						}
+					}
+					materialize(instances[0])
+					if keyRelation != "later_match" {
+						materialize(instances[1])
 					}
 
 					payload, err := json.Marshal(map[string]any{"account_id": payloadKey, "item": "accepted"})
@@ -135,6 +140,11 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
 						t.Fatalf("load targeted declared-key publication: found=%t routes=%#v err=%v", found, prepared.DeliveryRoutes, err)
 					}
+					if keyRelation == "later_match" {
+						// The second matching receiver is created only after the actual
+						// EventBus commit. Execution must validate, not rerun acquisition.
+						materialize(instances[1])
+					}
 					delivery, err := events.NewDeliveryEvent(prepared.Event.Event(), prepared.DeliveryRoutes[0])
 					if err != nil {
 						t.Fatalf("construct targeted declared-key delivery: %v", err)
@@ -149,7 +159,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					if exactErr != nil || !exactFound || competingErr != nil || !competingFound {
 						t.Fatalf("load declared-key owners: exact=%t/%v competing=%t/%v", exactFound, exactErr, competingFound, competingErr)
 					}
-					if keyRelation == "agreement" {
+					if keyRelation != "conflict" {
 						if executionErr != nil {
 							t.Fatalf("execute exact key agreement: %v", executionErr)
 						}
@@ -158,6 +168,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						}
 						if exact.Revision != 2 || competing.Revision != 1 || exact.Fields["owner"] != "exact" || competing.Fields["owner"] != "competing" {
 							t.Fatalf("agreement mutations: exact=%#v competing=%#v", exact, competing)
+						}
+						reloaded, found, err := selected.events.LoadPreparedPublishEvent(ctx, event.ID())
+						if err != nil || !found || len(reloaded.DeliveryRoutes) != 1 || reloaded.DeliveryRoutes[0].Target != prepared.DeliveryRoutes[0].Target {
+							t.Fatalf("execution changed persisted target: found=%t err=%v routes=%#v", found, err, reloaded.DeliveryRoutes)
 						}
 						return
 					}
