@@ -200,6 +200,30 @@ func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 	}
 }
 
+func TestDeliveryPayloadProjectionPreservesNumericKinds(t *testing.T) {
+	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
+		Type: "score.received", Producer: ProducerClaim{Type: EventProducerExternal, ID: "fixture"},
+		Payload: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), ExecutionMode: executionmode.Live,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := NewDeliveryPayloadProjection(map[string]string{"route": "selected"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := NewDeliveryEvent(event, DeliveryRoute{PayloadProjection: projection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(delivery.Event().Payload()), `{"decimal":75.0,"exponent":75.0,"integer":75,"route":"selected"}`; got != want {
+		t.Fatalf("delivery payload = %s, want %s", got, want)
+	}
+	if got := string(delivery.JournalEvent().Payload()); got != `{"integer":75,"decimal":75.0,"exponent":75e0}` {
+		t.Fatalf("journal payload changed: %s", got)
+	}
+}
+
 func TestDeliveryEventTargetlessRouteDoesNotConsumeJournalTargetSetProjection(t *testing.T) {
 	source := RouteIdentity{FlowID: "producer", FlowInstance: "producer/one", EntityID: "source-entity"}
 	target := RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "target-entity"}

@@ -18874,12 +18874,23 @@
             "minimum": 0,
             "type": "integer"
           },
-          "rejected": {
+          "run_id": {
+            "type": "string"
+          },
+          "semantic_rejected": {
             "minimum": 0,
             "type": "integer"
           },
-          "run_id": {
-            "type": "string"
+          "semantic_rejection_sample": {
+            "description": "Deterministic first semantic rejection by triggering_delivery_id, flow_path, family, semantic_path, and ordinal; null exactly when semantic_rejected is zero.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FanOutSemanticRejectionSample"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "settled": {
             "minimum": 0,
@@ -18900,7 +18911,8 @@
           "cursor",
           "owed",
           "committed",
-          "rejected",
+          "semantic_rejected",
+          "semantic_rejection_sample",
           "canceled",
           "settled",
           "unsettled",
@@ -18911,6 +18923,43 @@
           "max_next_chunk",
           "last_chunk_max_ms",
           "oldest_age_ms"
+        ],
+        "type": "object"
+      },
+      "FanOutSemanticRejectionSample": {
+        "additionalProperties": false,
+        "description": "Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.",
+        "properties": {
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
+          "family": {
+            "enum": [
+              "fan_out"
+            ],
+            "type": "string"
+          },
+          "flow_path": {
+            "type": "string"
+          },
+          "ordinal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "semantic_path": {
+            "type": "string"
+          },
+          "triggering_delivery_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "triggering_delivery_id",
+          "flow_path",
+          "family",
+          "semantic_path",
+          "ordinal",
+          "failure"
         ],
         "type": "object"
       },

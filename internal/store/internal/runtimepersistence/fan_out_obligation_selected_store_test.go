@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -35,6 +37,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -171,7 +174,7 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("summarize closed fan-out: %v", err)
 			}
-			if summary.BlocksCompletion() || summary.Rejected != 10 || summary.Committed != 0 || summary.Owed != 0 {
+			if summary.BlocksCompletion() || summary.SemanticRejected != 10 || summary.Committed != 0 || summary.Owed != 0 {
 				t.Fatalf("closed fan-out summary = %#v", summary)
 			}
 
@@ -186,6 +189,148 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 			}
 			if summary.Canceled != 25 || summary.BlocksCompletion() {
 				t.Fatalf("canceled fan-out summary = %#v", summary)
+			}
+		})
+	}
+}
+
+func TestFanOutChunkRejectsNonEmitSemanticEvidenceBeforeMutationOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx := testAuthorActivityContext()
+
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, now)
+			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+				Owner: "closed-evidence-worker", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
+			})
+			if err != nil || !found {
+				t.Fatalf("claim fan-out intent: found=%v err=%v", found, err)
+			}
+
+			for _, test := range []struct {
+				name    string
+				failure error
+			}{
+				{
+					name: "authorization",
+					failure: runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "fan_out_authorization_denied", "test", "commit_fan_out_chunk", map[string]any{
+						"action": "publish",
+					}),
+				},
+				{
+					name:    "conflicting duplicate",
+					failure: runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "fan_out_conflict", "test", "commit_fan_out_chunk", nil),
+				},
+				{
+					name:    "forged emit code",
+					failure: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "commit_fan_out_chunk", nil),
+				},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					envelope, ok := runtimefailures.EnvelopeFromError(test.failure)
+					if !ok {
+						t.Fatal("construct hostile failure envelope")
+					}
+					raw, err := runtimefailures.MarshalEnvelope(envelope)
+					if err != nil {
+						t.Fatal(err)
+					}
+					command := pipeline.FanOutChunkCommand{
+						Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: 0, Failure: raw}}, Now: now.Add(2 * time.Second),
+					}
+					if _, err := owner.CommitFanOutChunk(ctx, command); err == nil || !strings.Contains(err.Error(), "emit-contract") {
+						t.Fatalf("hostile selected-store commit error = %v", err)
+					}
+					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
+				})
+			}
+
+			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, now.Add(3*time.Second))); err != nil {
+				t.Fatalf("commit exact empty-value emit-contract rejection after hostile attempts: %v", err)
+			}
+			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+			summary, err := owner.FanOutRunSummary(ctx, fixture.runID, now.Add(4*time.Second))
+			if err != nil || summary.SemanticRejected != 1 || summary.SemanticRejectionSample == nil {
+				t.Fatalf("empty-value semantic rejection summary = %#v err=%v", summary, err)
+			}
+			actual, present := summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"].(string)
+			if !present || actual != "" {
+				t.Fatalf("persisted empty actual = %#v, want present empty string", summary.SemanticRejectionSample.Failure.Detail.Attributes["actual"])
+			}
+		})
+	}
+}
+
+func TestFanOutEnumEvidenceSurvivesBothStoresAndReadback(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			first, second, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			for _, test := range []struct {
+				name   string
+				value  any
+				actual string
+			}{
+				{"object", map[string]any{"value": 1}, "object"},
+				{"array", []any{1}, "array"},
+				{"boolean", true, "boolean"},
+				{"integer", int64(7), "number"},
+				{"float", float64(7), "number"},
+				{"decimal", json.Number("7.0"), "number"},
+				{"empty string", "", ""},
+				{"whitespace string", "  ", "  "},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					now := time.Now().UTC().Truncate(time.Microsecond)
+					fixture := seedFanOutOwnerFixture(t, ctx, db, first, postgres, 1, now)
+					_, claim, found, err := first.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+						Owner: "enum-evidence", BundleHash: fixture.bundleHash, Now: now.Add(time.Second), Lease: time.Minute,
+					})
+					if err != nil || !found {
+						t.Fatalf("claim: found=%v err=%v", found, err)
+					}
+					schema := map[string]any{"type": "object", "properties": map[string]any{
+						"value": map[string]any{"type": "string", "enum": []any{"accepted"}},
+					}}
+					var violation *eventschema.Violation
+					if err := eventschema.ValidatePayloadAgainstSchema(schema, map[string]any{"value": test.value}); !errors.As(err, &violation) {
+						t.Fatalf("expected enum violation: %v", err)
+					}
+					failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+						Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+						Path: violation.Path, Constraint: violation.Constraint, Expected: violation.Expected,
+						Actual: violation.Actual, Detail: violation.Detail, Cause: violation,
+					}, "test", "fan_out.emit")
+					raw, err := runtimefailures.MarshalEnvelope(failure.Failure)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := first.CommitFanOutChunk(ctx, pipeline.FanOutChunkCommand{
+						Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: 0, Failure: raw}}, Now: now.Add(2 * time.Second),
+					}); err != nil {
+						t.Fatal(err)
+					}
+					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+					for _, owner := range []selectedFanOutOwner{first, second} {
+						report, err := owner.(selectedFanOutDiagnosticOwner).LoadRunDebugReport(ctx, fixture.runID, operatorread.RunDebugQueryOptions{})
+						if err != nil {
+							t.Fatal(err)
+						}
+						sample := report.FanOut.SemanticRejectionSample
+						if sample == nil || report.FanOut.SemanticRejected != 1 {
+							t.Fatalf("missing rejection: %#v", report.FanOut)
+						}
+						attrs := sample.Failure.Detail.Attributes
+						if attrs["actual"] != test.actual || attrs["constraint"] != "enum" || attrs["path"] != "$.value" || attrs["detail"] != violation.Detail {
+							t.Fatalf("enum evidence changed: %#v", attrs)
+						}
+						if sample.FlowPath != fixture.flowPath || sample.Family != "fan_out" || sample.SemanticPath != fixture.semanticPath {
+							t.Fatalf("sample lost declaration identity: %#v", sample)
+						}
+					}
+				})
 			}
 		})
 	}
@@ -347,7 +492,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("summarize mixed-route fan-out in one transaction: %v", err)
 			}
-			if summary.Committed != 3 || summary.Rejected != 1 || summary.Settled != 1 || summary.Unsettled != 2 || summary.BlocksCompletion() {
+			if summary.Committed != 3 || summary.SemanticRejected != 1 || summary.Settled != 1 || summary.Unsettled != 2 || summary.BlocksCompletion() {
 				t.Fatalf("mixed-route fan-out settlement summary = %#v", summary)
 			}
 			var sameTransactionOutcomes int
@@ -698,6 +843,70 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			}
 			if !report.TestQuiescence.Ready || report.TestQuiescence.FanOutOwed != 0 {
 				t.Fatalf("canceled fan-out test quiescence = %#v, want ready", report.TestQuiescence)
+			}
+		})
+	}
+}
+
+func TestFanOutSemanticRejectionSampleIsDeterministicAcrossRestartOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			first, second, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			firstDiagnostics := first.(selectedFanOutDiagnosticOwner)
+			secondDiagnostics := second.(selectedFanOutDiagnosticOwner)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			firstIntent := seedFanOutOwnerFixture(t, ctx, db, first, postgres, 1, now)
+			secondIntent := seedFanOutOwnerIntent(t, ctx, db, firstIntent, 1, now.Add(time.Second))
+			intents := []fanOutOwnerFixture{firstIntent, secondIntent}
+			sort.Slice(intents, func(i, j int) bool { return intents[i].semanticPath < intents[j].semanticPath })
+
+			// Insert in reverse semantic order; selection must ignore row order and time.
+			for index := len(intents) - 1; index >= 0; index-- {
+				fixture := intents[index]
+				failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
+					runtimefailures.ClassSchemaInvalid, "emit_payload_contract_violation", "test", "semantic_rejection",
+					map[string]any{
+						"event": "fan-out.sample", "kind": "schema_mismatch", "path": "$.item",
+						"constraint": "type", "expected": "declared item", "actual": "invalid item",
+						"detail": "fan-out sample item is invalid", "marker": fixture.semanticPath,
+					},
+				))
+				if !ok {
+					t.Fatal("construct semantic rejection sample failure")
+				}
+				failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+				if err != nil {
+					t.Fatal(err)
+				}
+				update := `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`
+				insert := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,'fan_out',$4,0,'semantic_rejected',$5,$6)`
+				failureValue := any(string(failureJSON))
+				if postgres {
+					update = `UPDATE fan_out_intents SET cursor=1,status='closed',updated_at=$1 WHERE run_id=$2::uuid AND triggering_delivery_id=$3::uuid AND flow_path=$4 AND declaration_family='fan_out' AND semantic_path=$5`
+					insert = `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1::uuid,$2::uuid,$3,'fan_out',$4,0,'semantic_rejected',$5::jsonb,$6)`
+				}
+				if _, err := db.ExecContext(ctx, update, now.Add(time.Duration(index+2)*time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
+					t.Fatalf("close semantic rejection intent: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, insert, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, failureValue, now.Add(time.Duration(index+2)*time.Second)); err != nil {
+					t.Fatalf("insert semantic rejection outcome: %v", err)
+				}
+			}
+
+			for _, owner := range []selectedFanOutDiagnosticOwner{firstDiagnostics, secondDiagnostics} {
+				report, err := owner.LoadRunDebugReport(ctx, firstIntent.runID, operatorread.RunDebugQueryOptions{})
+				if err != nil {
+					t.Fatalf("load semantic rejection diagnosis: %v", err)
+				}
+				sample := report.FanOut.SemanticRejectionSample
+				if report.FanOut.SemanticRejected != 2 || sample == nil {
+					t.Fatalf("fan-out semantic rejection diagnosis = %#v", report.FanOut)
+				}
+				want := intents[0]
+				if sample.TriggeringDeliveryID != want.deliveryID || sample.FlowPath != want.flowPath || sample.Family != "fan_out" || sample.SemanticPath != want.semanticPath || sample.Ordinal != 0 || sample.Failure.Detail.Attributes["marker"] != want.semanticPath {
+					t.Fatalf("deterministic semantic rejection sample = %#v, want intent %#v", sample, want)
+				}
 			}
 		})
 	}
@@ -1183,6 +1392,11 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 	if err != nil || !found || intent.Request.Key.RunID != materialized.ForkRunID {
 		t.Fatalf("fair claim did not reach materialized fork fan-out: intent=%#v found=%v err=%v", intent, found, err)
 	}
+	integer, integerOK := intent.Request.Capsule.StateFields["integer"].(json.Number)
+	decimal, decimalOK := intent.Request.Capsule.StateFields["decimal"].(json.Number)
+	if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
+		t.Fatalf("materialized fork capsule numerics = integer:%#v decimal:%#v, want exact lexical carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
+	}
 	input, err := pg.LoadFanOutEvaluation(ctx, claim)
 	if err != nil {
 		t.Fatalf("load materialized fork fan-out evaluation: %v", err)
@@ -1343,7 +1557,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, createdAt)
-			entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, fixture.runID, `["own-000","own-001","own-002"]`, createdAt)
+			entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, fixture.runID, `[{"name":"own-000","score":7.25},{"name":"own-001","score":-2},{"name":"own-002","score":1e3}]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, fixture.runID, entityID, mutationID, createdAt)
 
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "own-run-source", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
@@ -1351,8 +1565,20 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 				t.Fatalf("claim own-run entity source: found=%v err=%v", found, err)
 			}
 			input, err := owner.LoadFanOutEvaluation(ctx, claim)
-			if err != nil || fmt.Sprint(input.Items) != "[own-000 own-001 own-002]" {
+			if err != nil {
 				t.Fatalf("own-run entity source = %#v err=%v", input.Items, err)
+			}
+			firstEntityItem, ok := input.Items[0].(map[string]any)
+			if !ok || firstEntityItem["score"] != json.Number("7.25") {
+				t.Fatalf("own-run entity numeric carrier = %#v", input.Items)
+			}
+			projectedEntityScore, err := workflowexpr.EvalValueExpressionWithOptions(
+				"item.score",
+				workflowexpr.ValueContext{FanOut: map[string]any{"item": input.Items[0]}},
+				workflowexpr.ValueExpressionOptions{AllowBareItem: true},
+			)
+			if err != nil || projectedEntityScore != float64(7.25) {
+				t.Fatalf("own-run entity projected score = %#v err=%v", projectedEntityScore, err)
 			}
 			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
@@ -1511,6 +1737,17 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			}
 			if len(input.Items) != 4 || input.Items[0].(map[string]any)["slug"] != "alpha" || input.Items[3].(map[string]any)["slug"] != "delta" {
 				t.Fatalf("canonical bounded resource items = %#v", input.Items)
+			}
+			if input.Items[0].(map[string]any)["score"] != json.Number("1") {
+				t.Fatalf("resource numeric carrier = %#v", input.Items[0])
+			}
+			projectedResourceScore, err := workflowexpr.EvalValueExpressionWithOptions(
+				"item.score",
+				workflowexpr.ValueContext{FanOut: map[string]any{"item": input.Items[0]}},
+				workflowexpr.ValueExpressionOptions{AllowBareItem: true},
+			)
+			if err != nil || projectedResourceScore != int64(1) {
+				t.Fatalf("resource projected score = %#v err=%v", projectedResourceScore, err)
 			}
 			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
@@ -1863,9 +2100,10 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 	capsule := fanoutobligation.Capsule{
 		NodeKey: "root.fan-out-source", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,
-		Lineage: events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
+		Lineage:     events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
+		StateFields: map[string]any{"integer": int64(75), "decimal": float64(75)},
 	}
-	capsuleJSON, err := json.Marshal(capsule)
+	capsuleJSON, err := fanoutobligation.MarshalCapsule(capsule)
 	if err != nil {
 		t.Fatalf("encode fan-out capsule: %v", err)
 	}
@@ -1877,11 +2115,11 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 }
 
 func rejectedFanOutChunk(claim fanoutobligation.Claim, start, count int, at time.Time) pipeline.FanOutChunkCommand {
-	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit_fan_out_chunk", nil))
-	if !ok {
-		panic("construct fan-out test failure")
-	}
-	failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+	failure := runtimeengine.NormalizeFailure(&runtimeengine.EmitPayloadContractError{
+		Event: "fan-out.test", Kind: runtimeengine.EmitPayloadSchemaMismatch,
+		Path: "$.external_id", Constraint: "format", Expected: "uuid", Actual: "", Detail: "fan-out test external_id must be uuid",
+	}, "test", "commit_fan_out_chunk")
+	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {
 		panic(err)
 	}

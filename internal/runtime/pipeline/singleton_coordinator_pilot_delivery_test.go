@@ -74,7 +74,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !ok {
 		t.Fatalf("lead_index[lead-42] = %#v, want map", leadIndex["lead-42"])
 	}
-	if lead["status"] != "active" || lead["score"] != float64(1) {
+	if lead["status"] != "active" || lead["score"] != int64(1) {
 		t.Fatalf("lead_index[lead-42] = %#v, want status active score 1", lead)
 	}
 	observations, ok := lead["observations"].([]any)

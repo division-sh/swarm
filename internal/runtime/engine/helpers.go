@@ -236,14 +236,6 @@ func evalWorkflowValueExpression(base BaseContext, state ExecutionState, express
 	}, opts)
 }
 
-func normalizeCELValue(value any) any {
-	return workflowexpr.NormalizeCELValue(value)
-}
-
-func normalizedCELInputMap(source map[string]any) map[string]any {
-	return workflowexpr.NormalizeCELInputMap(source)
-}
-
 func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	if len(spec.Fields) == 0 {
 		return nil, nil
@@ -421,15 +413,29 @@ type compiledExecutionCondition struct {
 	program    cel.Program
 }
 
-func newExecutionScope(item any, payload, event, entity, platformEntity, policy map[string]any) executionScope {
-	return executionScope{
-		Item:           normalizeCELValue(item),
-		Payload:        normalizedCELInputMap(payload),
-		Event:          normalizedCELInputMap(event),
-		Entity:         normalizedCELInputMap(entity),
-		PlatformEntity: normalizedCELInputMap(platformEntity),
-		Policy:         normalizedCELInputMap(policy),
+func newExecutionScope(item any, payload, event, entity, platformEntity, policy map[string]any) (executionScope, error) {
+	projected, err := workflowexpr.ProjectCELValue(map[string]any{
+		"item": item, "payload": payload, "event": event, "entity": entity, "_entity": platformEntity, "policy": policy,
+	})
+	if err != nil {
+		return executionScope{}, err
 	}
+	values := projected.(map[string]any)
+	return executionScope{
+		Item:           values["item"],
+		Payload:        executionProjectedMap(values["payload"]),
+		Event:          executionProjectedMap(values["event"]),
+		Entity:         executionProjectedMap(values["entity"]),
+		PlatformEntity: executionProjectedMap(values["_entity"]),
+		Policy:         executionProjectedMap(values["policy"]),
+	}, nil
+}
+
+func executionProjectedMap(value any) map[string]any {
+	if projected, ok := value.(map[string]any); ok && projected != nil {
+		return projected
+	}
+	return map[string]any{}
 }
 
 func (s executionScope) activation() map[string]any {
@@ -491,7 +497,10 @@ func (c *compiledExecutionCondition) Eval(scope executionScope) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	value := normalizeCELValue(out)
+	value, err := workflowexpr.ProjectCELValue(out)
+	if err != nil {
+		return false, err
+	}
 	boolean, ok := value.(bool)
 	if !ok {
 		return false, fmt.Errorf("condition %q did not evaluate to bool", c.expression)

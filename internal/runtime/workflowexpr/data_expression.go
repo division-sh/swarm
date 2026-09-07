@@ -1,16 +1,19 @@
 package workflowexpr
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	celtypes "github.com/google/cel-go/common/types"
@@ -419,28 +422,36 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if err != nil {
 		return nil, err
 	}
-	activation := map[string]any{
-		"entity":   NormalizeCELInputMap(ctx.Entity),
-		"_entity":  NormalizeCELInputMap(ctx.PlatformEntity),
-		"event":    NormalizeCELInputMap(ctx.Event),
-		"payload":  NormalizeCELInputMap(ctx.Payload),
-		"policy":   NormalizeCELInputMap(ctx.Policy),
-		"computed": NormalizeCELInputMap(ctx.Computed),
-		"fan_out":  NormalizeCELInputMap(ctx.FanOut),
-		"join":     NormalizeCELInputMap(ctx.Join),
-		"_loop":    NormalizeCELInputMap(ctx.Loop),
-	}
-	if opts.AllowBareItem {
-		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
-	}
-	if alias := strings.TrimSpace(opts.ItemAlias); alias != "" {
-		activation[alias] = NormalizeCELValue(ctx.FanOut["item"])
-	}
-	out, _, err := program.Eval(activation)
+	activation, err := ProjectCELValue(map[string]any{
+		"entity":   ctx.Entity,
+		"_entity":  ctx.PlatformEntity,
+		"event":    ctx.Event,
+		"payload":  ctx.Payload,
+		"policy":   ctx.Policy,
+		"computed": ctx.Computed,
+		"fan_out":  ctx.FanOut,
+		"join":     ctx.Join,
+		"_loop":    ctx.Loop,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return NormalizeCELValue(out), nil
+	activationMap := activation.(map[string]any)
+	fanOut, _ := activationMap["fan_out"].(map[string]any)
+	if fanOut == nil {
+		fanOut = map[string]any{}
+	}
+	if opts.AllowBareItem {
+		activationMap["item"] = fanOut["item"]
+	}
+	if alias := strings.TrimSpace(opts.ItemAlias); alias != "" {
+		activationMap[alias] = fanOut["item"]
+	}
+	out, _, err := program.Eval(activationMap)
+	if err != nil {
+		return nil, err
+	}
+	return ProjectCELValue(out)
 }
 
 func ExpressionReferencesRoot(expression, root string) bool {
@@ -992,57 +1003,193 @@ func MissingEntityReferences(expression string, entity map[string]any) []string 
 	return out
 }
 
-func NormalizeCELValue(value any) any {
-	switch typed := value.(type) {
-	case nil:
+type CELProjectionError struct {
+	Path        string
+	Cause       error
+	Remediation string
+}
+
+func (e *CELProjectionError) Error() string {
+	if e == nil {
+		return "workflow value projection failed"
+	}
+	message := fmt.Sprintf("workflow value projection failed at %s: %v", e.Path, e.Cause)
+	if strings.TrimSpace(e.Remediation) != "" {
+		message += "; " + strings.TrimSpace(e.Remediation)
+	}
+	return message
+}
+
+func (e *CELProjectionError) Unwrap() error {
+	if e == nil {
 		return nil
+	}
+	return e.Cause
+}
+
+// ProjectCELValue is the sole checked projection from persisted semantic JSON
+// carriers into workflow/CEL values. It preserves lexical integer intent while
+// keeping decimal and exponent spellings as CEL doubles.
+func ProjectCELValue(value any) (any, error) {
+	return projectCELValue("$", value)
+}
+
+func projectCELValue(path string, value any) (any, error) {
+	switch typed := value.(type) {
+	case nil, bool, string:
+		return typed, nil
 	case ref.Val:
-		return NormalizeCELValue(typed.Value())
+		return projectCELValue(path, typed.Value())
 	case []any:
 		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, NormalizeCELValue(item))
+		for index, item := range typed {
+			projected, err := projectCELValue(fmt.Sprintf("%s[%d]", path, index), item)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, projected)
 		}
-		return out
+		return out, nil
 	case []ref.Val:
 		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, NormalizeCELValue(item))
+		for index, item := range typed {
+			projected, err := projectCELValue(fmt.Sprintf("%s[%d]", path, index), item)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, projected)
 		}
-		return out
+		return out, nil
 	case map[ref.Val]ref.Val:
 		out := make(map[string]any, len(typed))
 		for key, item := range typed {
-			out[fmt.Sprint(NormalizeCELValue(key))] = NormalizeCELValue(item)
+			projectedKey, err := projectCELValue(path+".<key>", key)
+			if err != nil {
+				return nil, err
+			}
+			name := fmt.Sprint(projectedKey)
+			projected, err := projectCELValue(projectionChildPath(path, name), item)
+			if err != nil {
+				return nil, err
+			}
+			out[name] = projected
 		}
-		return out
+		return out, nil
 	case map[string]any:
 		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = NormalizeCELValue(item)
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
 		}
-		return out
-	case float64:
-		if math.Trunc(typed) == typed && typed <= math.MaxInt && typed >= math.MinInt {
-			return int(typed)
+		sort.Strings(keys)
+		for _, key := range keys {
+			item := typed[key]
+			projected, err := projectCELValue(projectionChildPath(path, key), item)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = projected
 		}
-		return typed
+		return out, nil
+	case json.Number:
+		number, err := canonicaljson.NormalizeNumber(typed)
+		if err != nil {
+			return nil, projectionNumberError(path, err)
+		}
+		if integer, err := typed.Int64(); err == nil {
+			return integer, nil
+		}
+		return number, nil
+	case int:
+		return projectCELInteger(path, int64(typed), typed)
+	case int8:
+		return projectCELInteger(path, int64(typed), typed)
+	case int16:
+		return projectCELInteger(path, int64(typed), typed)
+	case int32:
+		return projectCELInteger(path, int64(typed), typed)
 	case int64:
-		return int(typed)
+		return projectCELInteger(path, typed, typed)
+	case uint:
+		return projectCELUnsignedInteger(path, uint64(typed), typed)
+	case uint8:
+		return projectCELUnsignedInteger(path, uint64(typed), typed)
+	case uint16:
+		return projectCELUnsignedInteger(path, uint64(typed), typed)
+	case uint32:
+		return projectCELUnsignedInteger(path, uint64(typed), typed)
+	case uint64:
+		return projectCELUnsignedInteger(path, typed, typed)
+	case float32:
+		number, err := canonicaljson.NormalizeNumber(typed)
+		if err != nil {
+			return nil, projectionNumberError(path, err)
+		}
+		return number, nil
+	case float64:
+		number, err := canonicaljson.NormalizeNumber(typed)
+		if err != nil {
+			return nil, projectionNumberError(path, err)
+		}
+		return number, nil
+	case semanticvalue.Value:
+		number, isNumber := typed.Number()
+		if !isNumber {
+			return projectCELValue(path, typed.Interface())
+		}
+		projected, err := canonicaljson.NormalizeNumber(number)
+		if err != nil {
+			return nil, projectionNumberError(path, err)
+		}
+		return projected, nil
 	default:
-		return typed
+		return typed, nil
 	}
 }
 
-func NormalizeCELInputMap(source map[string]any) map[string]any {
-	if len(source) == 0 {
-		return map[string]any{}
+func projectCELInteger(path string, integer int64, original any) (any, error) {
+	if _, err := canonicaljson.NormalizeNumber(original); err != nil {
+		return nil, projectionNumberError(path, err)
 	}
-	normalized, _ := NormalizeCELValue(cloneStringAnyMap(source)).(map[string]any)
-	if normalized == nil {
-		return map[string]any{}
+	return integer, nil
+}
+
+func projectCELUnsignedInteger(path string, integer uint64, original any) (any, error) {
+	if _, err := canonicaljson.NormalizeNumber(original); err != nil {
+		return nil, projectionNumberError(path, err)
 	}
-	return normalized
+	return int64(integer), nil
+}
+
+func projectionNumberError(path string, err error) error {
+	projection := &CELProjectionError{Path: path, Cause: err}
+	if semanticvalue.IsNumberError(err, semanticvalue.NumberOutsideSafeRange) {
+		projection.Remediation = "declare the field as string when exact integers exceed the I-JSON safe range"
+	}
+	var admission *canonicaljson.AdmissionError
+	if errors.As(err, &admission) && semanticvalue.IsNumberError(admission, semanticvalue.NumberOutsideSafeRange) {
+		projection.Remediation = "declare the field as string when exact integers exceed the I-JSON safe range"
+	}
+	return projection
+}
+
+func projectionChildPath(parent, key string) string {
+	if projectionIdentifier(key) {
+		return parent + "." + key
+	}
+	return fmt.Sprintf("%s[%q]", parent, key)
+}
+
+func projectionIdentifier(value string) bool {
+	for index, r := range value {
+		if index == 0 && !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+		if index > 0 && !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) {

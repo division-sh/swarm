@@ -60,3 +60,48 @@ func TestNormalizeFailureRoutesTypedErrorsThroughCausePreservingOwner(t *testing
 		t.Fatalf("normalized chain does not retain caller, typed, and root causes: %v", normalized)
 	}
 }
+
+func TestNormalizeFailurePreservesTypedEmitContractEvidence(t *testing.T) {
+	cause := errors.New("$.rows[3].gem_score must be number")
+	err := &EmitPayloadContractError{
+		Event: "company.registered", Kind: EmitPayloadSchemaMismatch,
+		Path: "$.rows[3].gem_score", Constraint: "type", Expected: "number", Actual: "string",
+		Detail: "payload violates schema: $.rows[3].gem_score must be number", Cause: cause,
+	}
+
+	failure := NormalizeFailure(err, "runtime.engine", "fan_out.emit")
+	if failure.Failure.Class != failures.ClassSchemaInvalid || failure.Failure.Detail.Code != "emit_payload_contract_violation" {
+		t.Fatalf("normalized failure = %#v", failure.Failure)
+	}
+	want := err.Attributes()
+	if !reflect.DeepEqual(failure.Failure.Detail.Attributes, want) {
+		t.Fatalf("normalized attributes = %#v, want %#v", failure.Failure.Detail.Attributes, want)
+	}
+	if !errors.Is(failure, err) || !errors.Is(failure, cause) {
+		t.Fatalf("normalized failure lost typed cause chain: %v", failure)
+	}
+}
+
+func TestNormalizeFailureAdmitsPresentEmptySchemaMismatchActual(t *testing.T) {
+	err := &EmitPayloadContractError{
+		Event: "company.registered", Kind: EmitPayloadSchemaMismatch,
+		Path: "$.external_id", Constraint: "format", Expected: "uuid", Actual: "",
+		Detail: "payload violates schema: $.external_id must be uuid",
+	}
+
+	failure := NormalizeFailure(err, "runtime.engine", "fan_out.emit")
+	if !IsEmitPayloadContractFailure(err) || !IsEmitPayloadContractFailure(failure) {
+		t.Fatalf("present empty actual was not admitted as exact typed evidence: %#v", failure.Failure)
+	}
+	actual, present := failure.Failure.Detail.Attributes["actual"].(string)
+	if !present || actual != "" {
+		t.Fatalf("normalized actual = %#v, want present empty string", failure.Failure.Detail.Attributes["actual"])
+	}
+}
+
+func TestNormalizeFailureRejectsBareEmitContractSentinelAsSemanticEvidence(t *testing.T) {
+	failure := NormalizeFailure(ErrEmitPayloadContractViolation, "runtime.engine", "fan_out.emit")
+	if failure.Failure.Class != failures.ClassInternalFailure || failure.Failure.Detail.Code == "emit_payload_contract_violation" {
+		t.Fatalf("bare sentinel normalized as semantic evidence: %#v", failure.Failure)
+	}
+}

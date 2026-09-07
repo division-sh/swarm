@@ -1,6 +1,7 @@
 package fanoutobligation
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,39 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
 )
+
+func TestMarshalCapsulePreservesEveryDynamicNumericCarrier(t *testing.T) {
+	capsule := validIntentRequest(t).Capsule
+	for _, target := range []*map[string]any{
+		&capsule.Entity,
+		&capsule.PlatformEntity,
+		&capsule.Computed,
+		&capsule.Accumulated,
+		&capsule.Join,
+		&capsule.Loop,
+		&capsule.StateFields,
+		&capsule.StateBookkeeping,
+	} {
+		*target = map[string]any{
+			"integer": int64(75),
+			"double":  float64(75),
+			"nested":  []any{json.Number("75.0"), json.Number("75e0")},
+		}
+	}
+	raw, err := MarshalCapsule(capsule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"entity", "platform_entity", "computed", "accumulated", "join", "loop", "state_fields", "state_bookkeeping"} {
+		if got := string(decoded[field]); got != `{"double":75.0,"integer":75,"nested":[75.0,75.0]}` {
+			t.Fatalf("capsule %s = %s", field, got)
+		}
+	}
+}
 
 func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *testing.T) {
 	valid := validIntentRequest(t)

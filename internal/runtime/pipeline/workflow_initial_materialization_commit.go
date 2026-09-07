@@ -97,7 +97,7 @@ func workflowInitialMaterializationRecord(
 	projection workflowInitialMaterializationProjection,
 	readiness *DynamicFlowRuntimeReadinessPlan,
 ) (WorkflowInitialMaterializationRecord, error) {
-	projectionJSON, err := canonicaljson.Bytes(projection)
+	projectionJSON, err := canonicaljson.MarshalPreservingNumberKinds(projection)
 	if err != nil {
 		return WorkflowInitialMaterializationRecord{}, err
 	}
@@ -107,7 +107,7 @@ func workflowInitialMaterializationRecord(
 		if normalizeErr != nil {
 			return WorkflowInitialMaterializationRecord{}, fmt.Errorf("normalize workflow initial materialization readiness: %w", normalizeErr)
 		}
-		readinessJSON, err = canonicaljson.Bytes(normalizedReadiness)
+		readinessJSON, err = canonicaljson.MarshalPreservingNumberKinds(normalizedReadiness)
 		if err != nil {
 			return WorkflowInitialMaterializationRecord{}, err
 		}

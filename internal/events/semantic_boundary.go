@@ -1,10 +1,11 @@
 package events
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
 
 // AdmittedEvent is the only event value accepted by persistence operations.
@@ -127,7 +128,7 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 	payload := event.Payload()
 	if !projection.Empty() {
 		var fields map[string]any
-		if err := json.Unmarshal(payload, &fields); err != nil || fields == nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(payload, &fields); err != nil || fields == nil {
 			return DeliveryEvent{}, fmt.Errorf("delivery payload projection requires an object payload")
 		}
 		for field, value := range projection.Fields() {
@@ -136,7 +137,7 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 			}
 			fields[field] = value
 		}
-		payload, err = json.Marshal(fields)
+		payload, err = canonicaljson.MarshalPreservingNumberKinds(fields)
 		if err != nil {
 			return DeliveryEvent{}, fmt.Errorf("encode delivery payload projection: %w", err)
 		}
