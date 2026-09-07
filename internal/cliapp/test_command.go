@@ -1449,10 +1449,15 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 			return scenarioTestValidationError{err: err}
 		}
 		entityID := scenarioSetupEntityID(evaluator.seed, runID, evaluated)
+		flowInstance := evaluated.FlowID
+		if flowInstance == "." {
+			// Setup persistence owns the root runtime coordinate (the run ID), not the authored dot path.
+			flowInstance = ""
+		}
 		entities = append(entities, map[string]any{
 			"alias":         evaluated.Alias,
 			"entity_id":     entityID,
-			"flow_instance": evaluated.FlowID,
+			"flow_instance": flowInstance,
 			"entity_type":   evaluated.EntityType,
 			"current_state": evaluated.CurrentState,
 			"fields":        evaluated.Fields,
@@ -1748,7 +1753,7 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 		if !ok {
 			return fmt.Errorf("target alias %q is not declared in setup.entities", targetAlias)
 		}
-		if strings.TrimSpace(binding.FlowInstance) == "" {
+		if strings.TrimSpace(binding.FlowInstance) == "" || binding.FlowInstance == state.RunID {
 			return fmt.Errorf("target alias %q resolves to root entity; event.publish target requires a flow-scoped setup entity", targetAlias)
 		}
 		targetFlowText = binding.FlowInstance

@@ -71,6 +71,42 @@ func TestExecutorReadFlowDataReadsDeclaredFlowFile(t *testing.T) {
 	}
 }
 
+func TestExecutorReadFlowDataSelectedRootUsesLocalResourceOwner(t *testing.T) {
+	root := t.TempDir()
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-data\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+factory-cto:
+  role: factory_cto
+  intent: {inline: "Read the root flow's declared data."}
+  memory: false
+  flow_data_access: [exclusions.yaml]
+`)
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "data", "exclusions.yaml"), "blocked: root\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "child", "data", "exclusions.yaml"), "blocked: child\n")
+	repo := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	actor := flowDataActor()
+	actor.FlowID, actor.FlowPath = ".", "."
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
+	if !containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
+		t.Fatal("selected-root declaration did not generate read_flow_data")
+	}
+	out, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", flowDataToolInput(t, source, actor, "exclusions.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(asString(out.(map[string]any)["content"])); got != "blocked: root" {
+		t.Fatalf("root flow read = %q", got)
+	}
+	if _, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", map[string]any{"relative_path": "child/data/exclusions.yaml"}); err == nil {
+		t.Fatal("root flow accessed undeclared child resource")
+	}
+}
+
 func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing.T) {
 	source, _ := loadFlowDataToolSourceWithAccess(t, []string{"exclusions.yaml"})
 	actor := flowDataActor()

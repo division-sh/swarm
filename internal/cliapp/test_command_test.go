@@ -294,7 +294,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 			if want := runtimeflowidentity.EntityID(setupRunID); setupEntityID != want {
 				t.Fatalf("test.setup_entities root entity_id = %q, want canonical run root %q", setupEntityID, want)
 			}
-			if entity["alias"] != "widget" || entity["flow_instance"] != "." || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
+			if entity["alias"] != "widget" || entity["flow_instance"] != "" || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities root entity = %#v", entity)
 			}
 			if err := assertScenarioJSONEqual("test.setup_entities root fields", entity["fields"], map[string]any{"score": float64(5)}); err != nil {
@@ -305,7 +305,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 				"entities": []map[string]any{{
 					"alias":         "widget",
 					"entity_id":     setupEntityID,
-					"flow_instance": "",
+					"flow_instance": setupRunID,
 					"entity_type":   "widget",
 					"current_state": "waiting",
 				}},
