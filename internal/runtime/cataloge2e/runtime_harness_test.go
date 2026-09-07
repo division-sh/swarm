@@ -790,6 +790,11 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 
 func (h *runtimeHarness) waitForRunTerminal(timeout time.Duration) {
 	h.t.Helper()
+	h.waitForRunTerminalID(catalogRuntimeRunID, timeout)
+}
+
+func (h *runtimeHarness) waitForRunTerminalID(runID string, timeout time.Duration) {
+	h.t.Helper()
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -800,9 +805,9 @@ func (h *runtimeHarness) waitForRunTerminal(timeout time.Duration) {
 			err      error
 		)
 		if h.pg != nil {
-			snapshot, err = h.pg.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+			snapshot, err = h.pg.LoadRunLifecycleSnapshot(ctx, runID)
 		} else if h.sqlite != nil {
-			snapshot, err = h.sqlite.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+			snapshot, err = h.sqlite.LoadRunLifecycleSnapshot(ctx, runID)
 		} else {
 			err = errors.New("catalog selected store is required")
 		}

@@ -557,6 +557,17 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 								}
 							}
 							if !refused {
+								// Activation hands completion to the enclosing runtime; join its
+								// durable outcome before comparing refused reactivation attempts.
+								h.waitForRunTerminalID(forkRun, catalogRuntimePublishTimeout)
+								terminal, err := selected.LoadRunLifecycleSnapshot(ctx, forkRun)
+								wantStatus := "completed"
+								if fenced {
+									wantStatus = "cancelled"
+								}
+								if err != nil || terminal.Status != wantStatus {
+									t.Fatalf("terminal fork: %+v err=%v; want %s", terminal, err, wantStatus)
+								}
 								beforeRetry := activityLineageStateSnapshot(t, ctx, h, forkRun)
 								for attempt := 0; attempt < 2; attempt++ {
 									_, retryErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
