@@ -30,9 +30,9 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			assertArchetypeTreeEqual(t, source.Files, source.SourceRoot, destination)
 			requiredFiles := []string{"manifest.yaml"}
 			if archetype == "webhook-responder" {
-				requiredFiles = append(requiredFiles, "swarm.yaml", "swarm.live.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml", "bot/manifest.yaml", "bot/telegram-chat/schema.yaml", "telegram-ingress/schema.yaml")
+				requiredFiles = append(requiredFiles, "swarm.yaml", "swarm.live.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml", "telegram-chat/schema.yaml", "telegram-ingress/schema.yaml")
 			} else {
-				requiredFiles = append(requiredFiles, "automation/schema.yaml", "swarm.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml")
+				requiredFiles = append(requiredFiles, "schema.yaml", "nodes.yaml", "events.yaml", "swarm.yaml", ".swarm/swarm.yaml", "tests/smoke.yaml")
 			}
 			for _, required := range requiredFiles {
 				if _, err := os.Stat(filepath.Join(destination, required)); err != nil {
@@ -41,6 +41,11 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			}
 			if strings.Contains(out.String(), "cd ./bot") {
 				t.Fatalf("output %q retains the retired nested source-root handoff", out.String())
+			}
+			for _, wrapper := range []string{"bot", "automation"} {
+				if _, err := os.Stat(filepath.Join(destination, wrapper)); !os.IsNotExist(err) {
+					t.Fatalf("scaffold retains redundant %s wrapper: %v", wrapper, err)
+				}
 			}
 			for _, command := range []string{"swarm verify", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {

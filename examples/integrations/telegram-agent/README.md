@@ -1,6 +1,6 @@
 # Telegram Agent
 
-This example is one conversational Telegram bot. The selected root contains the signed standing ingress and its `bot/telegram-chat` child flow. The mock configuration runs the complete flow tree locally with deterministic responses.
+This example is one conversational Telegram bot. The selected root contains the signed standing ingress and its `telegram-chat` child flow. The mock configuration runs the complete flow tree locally with deterministic responses.
 
 ## Scaffold And Run
 
@@ -39,7 +39,7 @@ Mock turn 3: after restart
 
 ## Go Live
 
-Live graduation is one explicit source edit. In `bot/telegram-chat/agents.yaml`, change `phrase-bot` from:
+Live graduation is one explicit source edit. In `telegram-chat/agents.yaml`, change `phrase-bot` from:
 
 ```yaml
 phrase-bot:

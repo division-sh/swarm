@@ -788,7 +788,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'bot/telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
@@ -1023,7 +1023,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'bot/telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
 	if err := db.QueryRow(`

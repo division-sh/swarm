@@ -195,8 +195,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedEvent(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	sourceRoot := filepath.Join(exampleRoot, "bot")
+	sourceRoot := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
 	const eventName = "inbound.telegram.text_message"
 	if bare := semanticview.ResolveEventSchema(semanticview.Wrap(bundle), "telegram-chat", eventName); bare.HasSchema {
@@ -261,8 +260,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	sourceRoot := filepath.Join(exampleRoot, "bot")
+	sourceRoot := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	wantPayload := map[string]any{
 		"conversation_reference":     "123",
 		"conversation_scope":         "direct",
@@ -349,7 +347,7 @@ func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *te
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	sourceRoot := exampleRoot
 	configPath := filepath.Join(sourceRoot, "swarm.yaml")
-	scenarioPath := filepath.Join(sourceRoot, "bot", "telegram-chat", "tests", "generated-telegram.yaml")
+	scenarioPath := filepath.Join(sourceRoot, "telegram-chat", "tests", "generated-telegram.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: generated Telegram normalized input
 steps:
@@ -375,7 +373,7 @@ steps:
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash)
 		case eventPublishMethod:
-			if rpc.Params["event_name"] != "bot/telegram-chat/inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
+			if rpc.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", rpc.Params)
 			}
 			if !reflect.DeepEqual(rpc.Params["payload"], wantPayload) {
@@ -396,7 +394,7 @@ steps:
 		"--config", configPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-		filepath.ToSlash(filepath.Join("bot", "telegram-chat", "tests", "generated-telegram.yaml")),
+		filepath.ToSlash(filepath.Join("telegram-chat", "tests", "generated-telegram.yaml")),
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())

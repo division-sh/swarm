@@ -184,7 +184,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 
 func addCanonicalTelegramApprovalOverlay(t testing.TB, sourceRoot string) {
 	t.Helper()
-	path := filepath.Join(sourceRoot, "bot", "telegram-chat", "nodes.yaml")
+	path := filepath.Join(sourceRoot, "telegram-chat", "nodes.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read canonical Telegram nodes: %v", err)
@@ -460,7 +460,7 @@ func requireMockSessionShape(t testing.TB, sessions map[string]standingMemorySes
 	for _, session := range sessions {
 		counts[session.FlowTemplate]++
 	}
-	if len(sessions) != 1 || counts["bot/telegram-chat"] != 1 {
+	if len(sessions) != 1 || counts["telegram-chat"] != 1 {
 		t.Fatalf("mock sessions = %#v, want one memory-enabled Telegram chat owner", sessions)
 	}
 }

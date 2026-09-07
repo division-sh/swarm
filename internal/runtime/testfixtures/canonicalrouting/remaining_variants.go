@@ -504,7 +504,6 @@ func CopyProviderRollbackSyntheticProjection(t testing.TB, mint CreateMint) stri
 func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint, collision bool) string {
 	t.Helper()
 	root := CopyExample(t, TelegramAgent)
-	botRoot := filepath.Join(root, "bot")
 	var source string
 	switch mint {
 	case CreateMintUUID:
@@ -518,11 +517,11 @@ func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint,
 	if collision {
 		field = "conversation_reference"
 	}
-	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "schema.yaml"),
 		"instance: conversation_reference", "instance: "+field)
-	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "schema.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "schema.yaml"),
 		"          mode: select-or-create", "          mode: create\n          from: "+source)
-	applyClosedReplacement(t, filepath.Join(botRoot, "telegram-chat", "entities.yaml"),
+	applyClosedReplacement(t, filepath.Join(root, "telegram-chat", "entities.yaml"),
 		"  conversation_reference:\n    type: text", "  "+field+":\n    type: uuid")
 	return root
 }

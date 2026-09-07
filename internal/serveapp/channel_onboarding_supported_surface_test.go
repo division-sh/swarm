@@ -1057,7 +1057,7 @@ func enableChannelOnboardingRecoveryOnStartup(t *testing.T, configPath string) {
 
 func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) {
 	t.Helper()
-	if err := os.RemoveAll(filepath.Join(sourceRoot, "bot")); err != nil {
+	if err := os.RemoveAll(filepath.Join(sourceRoot, "telegram-chat")); err != nil {
 		t.Fatalf("remove onboarding business-consumer flow: %v", err)
 	}
 	if err := os.RemoveAll(filepath.Join(sourceRoot, "tests")); err != nil {

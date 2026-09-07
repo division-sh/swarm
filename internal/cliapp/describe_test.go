@@ -73,7 +73,7 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatalf("decode standing describe json: %v\n%s", err, stdout.String())
 	}
-	if len(view.Flows) != 3 {
+	if len(view.Flows) != 2 || view.Flows[0].ID != "telegram-chat" || view.Flows[1].ID != "telegram-ingress" {
 		t.Fatalf("standing describe flows = %#v", view.Flows)
 	}
 	var flow authoringview.FlowView
