@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -26,7 +27,7 @@ type runForkSelectedContractActivationPort struct {
 	lockFrontier   func(context.Context, *sql.Tx, *runForkActivationLineage) error
 	plan           func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	deliveries     *storedelivery.Adapter
-	ensureState    func(context.Context, *sql.Tx, string, []string) error
+	ensureState    func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
 	transition     func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runLifecycleCandidateHandoffReservation, runtimerunlifecycle.ActiveTransitionRequest) error
 	diverge        func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
 	freeze         func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects, runForkActivationLineage, time.Time, bool, *runLifecycleCandidateHandoffReservation) error
@@ -130,7 +131,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		sourceAdvancedFacts = append(sourceAdvancedFacts, runfork.ActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
 		sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
-		if err := port.ensureState(txctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs); err != nil {
+		if err := port.ensureState(txctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs, req.ExecutionSource); err != nil {
 			return addRunForkActivationBlocker(&result, err)
 		}
 

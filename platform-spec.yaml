@@ -16673,6 +16673,25 @@ run_model:
       source rows, suppress fork-local execution with source outcomes, own current-state/entity
       materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
       recovery.'
+    selected_contract_fresh_activity_lineage: 'Fresh platform.activity_requested descendants are verified by the
+      existing pipeline activity authority, shared by SQLite and PostgreSQL selected-contract activation. This is
+      lineage verification after admitted execution, not effect or replay admission. A fresh request must match the
+      canonical activity decoder and constructor identity, its same-fork causal event, and that event''s completed
+      exact node delivery, including handler, flow instance and entity. The admitted immutable execution source must
+      match the persisted fork bundle; activity site, tool, generated result names, retry facts and any carried contract
+      pin must agree with that source. The currently supported fresh path is the already admitted read-only node
+      activity without a new approval continuation. Historical source eligibility, selected-root read reexecution,
+      recorded success/failure/uncertain reuse, manual-confirmation refusal, timers and effect permission remain owned
+      by their existing admission authorities. No fresh write or historical non-agent replay permission is added.
+      Selected-tree traversal consumes exact validated fresh request IDs and still requires their parent to belong
+      to selected execution. A platform name, producer tag, canonical ID in isolation or diagnostic prose cannot
+      authorize a request. Results retain the activity owner''s existing deterministic result identity and initiating
+      event parent convention; success and typed failure payloads must match their request. Activity diagnostics use
+      the actual persisted request ID as both subject and causal parent, including directly selected roots whose
+      reminted activity identity is not itself a persisted request. A failed final verification must reject activation
+      and preserve truthful evidence that external execution already happened. Reverification and cleanup must not
+      redispatch that effect. Staged historical non-agent work still refuses with non_agent_delivery_replay_unsupported
+      before execution; no continuation framework, fallback or legacy-store path is introduced.'
     selected_contract_supported_execution: Selected-contract fork execution binds to an exact persisted bundle-v2 source artifact and canonical declaration identities. It never accepts a local source path or reconstructs declaration identitys.
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable

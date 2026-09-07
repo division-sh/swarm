@@ -273,6 +273,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+		ExecutionSource:       loadedSource.Source,
 		ForkRunID:             materialization.ForkRunID,
 		ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 		AllowedSourceEventIDs: sourceEventIDs,
