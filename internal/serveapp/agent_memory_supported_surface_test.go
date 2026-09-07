@@ -228,8 +228,8 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 		t.Fatalf("live graduation memory sessions = %#v, want one conversation owner", sessions)
 	}
 	for _, session := range sessions {
-		if session.AgentID != "phrase-bot" || session.FlowTemplate != "bot/telegram-chat" || session.TurnCount != 2 {
-			t.Fatalf("live graduation memory session = %#v, want phrase-bot bot/telegram-chat with two turns", session)
+		if session.AgentID != "phrase-bot" || session.FlowTemplate != "telegram-chat" || session.TurnCount != 2 {
+			t.Fatalf("live graduation memory session = %#v, want phrase-bot telegram-chat with two turns", session)
 		}
 	}
 }
@@ -281,8 +281,8 @@ func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any,
 
 func removeExactCanonicalTelegramAgentMock(t testing.TB, sourceRoot string) {
 	t.Helper()
-	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "bot", "telegram-chat", "agents.yaml")
-	derivedPath := filepath.Join(sourceRoot, "bot", "telegram-chat", "agents.yaml")
+	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "telegram-chat", "agents.yaml")
+	derivedPath := filepath.Join(sourceRoot, "telegram-chat", "agents.yaml")
 	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
 		t.Fatalf("checked canonical phrase-bot mock count = %d, want 1", got)
 	}
@@ -745,7 +745,7 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash,
 		"bundle_hash": bundleHash,
 		"limit":       500,
 	}, &runs)
-	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration("bot/telegram-chat", "telegram-responder")
+	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration("telegram-chat", "telegram-responder")
 	if err != nil {
 		t.Fatalf("admit package-backed responder identity: %v", err)
 	}
@@ -777,7 +777,7 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash,
 				}
 				matched++
 				target := delivery.Target
-				if target.Kind != "existing_entity" || target.FlowID != "bot/telegram-chat" || target.FlowInstance == "" || target.EntityID == "" ||
+				if target.Kind != "existing_entity" || target.FlowID != "telegram-chat" || target.FlowInstance == "" || target.EntityID == "" ||
 					target.EntityID != event.EntityID || delivery.Status != "delivered" || !delivery.Terminal {
 					t.Fatalf("reply event %s responder delivery = %#v event_entity=%q, want terminal exact existing owner", event.EventID, delivery, event.EntityID)
 				}
@@ -919,7 +919,7 @@ func requireStandingMemorySessionShape(t testing.TB, sessions map[string]standin
 	for _, row := range sessions {
 		counts[row.FlowTemplate]++
 	}
-	if len(sessions) != 2 || counts["bot/telegram-chat"] != 2 {
+	if len(sessions) != 2 || counts["telegram-chat"] != 2 {
 		t.Fatalf("memory sessions = %#v, want two isolated Telegram chat owners", sessions)
 	}
 }
@@ -937,7 +937,7 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 		switch delta {
 		case 0:
 		case 1:
-			if current.FlowTemplate != "bot/telegram-chat" {
+			if current.FlowTemplate != "telegram-chat" {
 				t.Fatalf("memory owner %q has unexpected flow template %q", key, current.FlowTemplate)
 			}
 			advancedTemplates++

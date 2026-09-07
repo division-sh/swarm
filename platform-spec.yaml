@@ -23792,6 +23792,8 @@ cli_specification:
         zero-agent-automation and webhook-responder. Every scaffold contains a complete contract, explicit mock-only runtime
         posture, and public swarm test smoke scenario. Existing destinations and unknown archetypes fail before mutation; no
         aliases, remote templates, fallback archetypes, or legacy layouts are accepted.
+        Zero-agent automation declares its flow at the selected root. The webhook responder has direct telegram-ingress
+        and telegram-chat children, separating standing ingress from conversation instances without an intermediate bot wrapper.
     workspace_build:
       command: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
       group: getting_started

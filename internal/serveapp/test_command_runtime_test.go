@@ -1112,8 +1112,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) string {
 	t.Helper()
 	_ = providerURL
-	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	root := filepath.Join(exampleRoot, "bot")
+	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	for _, name := range []string{
 		"telegram-chat/agents.yaml",
 		"telegram-chat/events.yaml",
@@ -1143,8 +1142,7 @@ steps:
 
 func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	t.Helper()
-	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	root := filepath.Join(exampleRoot, "bot")
+	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:
   id: telegram-responder

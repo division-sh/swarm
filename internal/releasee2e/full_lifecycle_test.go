@@ -874,7 +874,7 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 		delivery := event.Deliveries[0]
 		if delivery.SubscriberType != "agent" || delivery.Status != "pending" || delivery.Terminal ||
 			!strings.Contains(delivery.SubscriberID, "phrase-bot") || delivery.Target.Kind != "existing_entity" ||
-			delivery.Target.FlowID != "bot/telegram-chat" || delivery.Target.FlowInstance == "" {
+			delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" {
 			return false, fmt.Errorf("pending normalized route target is not exact: receipt=%#v event=%#v delivery=%#v", receipt, event, delivery)
 		}
 		checkpoint = fullLifecycleCrashCheckpoint{EventID: event.EventID, Delivery: delivery}
@@ -1044,7 +1044,7 @@ func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecyc
 	if delivery.SubscriberType != "agent" || !strings.Contains(delivery.SubscriberID, "phrase-bot") ||
 		delivery.Target.EntityID != normalized.EntityID ||
 		(delivery.Target.Kind != "existing_entity" && delivery.Target.Kind != "materializing_entity") ||
-		delivery.Target.FlowID != "bot/telegram-chat" || delivery.Target.FlowInstance == "" {
+		delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance == "" {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("normalized event/delivery target join is not exact: event=%#v delivery=%#v", normalized, delivery)
 	}
 	if len(transportMatches) != 1 || transportMatches[0].EventID != receipt.EventIDs[1] {

@@ -12,7 +12,7 @@ const fullLifecycleFixtureSource = "standing_telegram"
 func TestFullLifecycleFixtureIsFiniteFilesystemFlowTree(t *testing.T) {
 	root := fullLifecycleExecutableSource(t)
 	for _, label := range []string{
-		"bot/telegram-chat/schema.yaml",
+		"telegram-chat/schema.yaml",
 		"telegram-ingress/schema.yaml",
 	} {
 		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(label))); err != nil || !info.Mode().IsRegular() {
@@ -67,7 +67,7 @@ func fullLifecycleExecutableSource(t *testing.T) string {
 
 func mutateFullLifecycleFixtureWithoutExactConnectorResponse(t *testing.T, contracts string) {
 	t.Helper()
-	manifestPath := filepath.Join(contracts, "bot", "telegram-chat", "schema.yaml")
+	manifestPath := filepath.Join(contracts, "telegram-chat", "schema.yaml")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read lifecycle bot manifest: %v", err)
@@ -77,7 +77,7 @@ func mutateFullLifecycleFixtureWithoutExactConnectorResponse(t *testing.T, contr
 		t.Fatalf("lifecycle bot manifest has no exact Telegram connector import:\n%s", raw)
 	}
 	writeReleaseFile(t, manifestPath, strings.Replace(string(raw), connectorImport, "", 1))
-	writeReleaseFile(t, filepath.Join(contracts, "bot", "telegram-chat", "tools.yaml"), `telegram.send_message:
+	writeReleaseFile(t, filepath.Join(contracts, "telegram-chat", "tools.yaml"), `telegram.send_message:
   description: Deliberately unmocked transport for source-admission proof.
   handler_type: http
   effect_class: non_idempotent_write

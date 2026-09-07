@@ -114,6 +114,18 @@ func CopyExample(t testing.TB, id ArtifactID) string {
 	return target
 }
 
+// CopyTelegramChatWithoutIngress isolates conversation behavior from standing ingress.
+func CopyTelegramChatWithoutIngress(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TelegramAgent)
+	for _, branch := range []string{"telegram-ingress", "tests"} {
+		if err := os.RemoveAll(filepath.Join(root, branch)); err != nil {
+			t.Fatalf("remove Telegram %s branch: %v", branch, err)
+		}
+	}
+	return root
+}
+
 // Prove declares that the calling TestXxx entrypoint executes the checked-in
 // artifact. The ownership guard requires this call directly in the test body.
 func Prove(t testing.TB, ids ...ArtifactID) {

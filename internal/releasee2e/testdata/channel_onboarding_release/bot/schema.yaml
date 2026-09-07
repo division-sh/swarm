@@ -1,4 +1,0 @@
-imports:
-  provider_trigger_events:
-    - provider: telegram
-      event: inbound.telegram.text_message
