@@ -252,6 +252,12 @@ func declaredFunctionName(function *ast.FuncDecl) string {
 	if star, ok := receiver.(*ast.StarExpr); ok {
 		receiver = star.X
 	}
+	switch generic := receiver.(type) {
+	case *ast.IndexExpr:
+		receiver = generic.X
+	case *ast.IndexListExpr:
+		receiver = generic.X
+	}
 	if identifier, ok := receiver.(*ast.Ident); ok {
 		return identifier.Name + "." + name
 	}
