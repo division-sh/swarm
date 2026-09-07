@@ -908,6 +908,17 @@ seam_families:
       Direct delivery uses explicit caller recipients and delivery policy. It is
       a direct RoutePlan-backed producer/consumer path, not subscribed RoutePlan
       authority; #1496 removes its old eventDeliveryPlan compatibility crossing.
+  - id: committed_static_connect_readiness_proof
+    layer: route_plan_authority
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/connect_static_lifecycle_test.go
+    search_dimensions: [connect_route_plan, route_plan_source_reason]
+    notes: >
+      Test-only proof that compiled connect planning consumes the exact static
+      declaration lifecycle from RouteTable for an absent live agent. Missing
+      declaration evidence and newly created flows retain materializing-flow
+      admission; a speculative node does not grant agent entity ownership.
   - id: route_plan_source_reason_constants
     layer: route_plan_authority
     classification: canonical_owner
