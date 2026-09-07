@@ -6375,14 +6375,14 @@ engine:
         authoring:
           runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
           agent_performance:
-            shape: '{mock: {kind: python, module: <declaring-package-relative .py file>, post_tool_tail_latency_ms: <optional non-negative integer>}}'
+            shape: '{mock: {kind: python, module: <declaring-flow-relative mocks/ .py file>, post_tool_tail_latency_ms: <optional non-negative integer>}}'
             kind: python
             entrypoint: handle
             rule: >
               Every agent selected by the mock backend must declare exactly one Python performance. The module must be a
-              regular non-symlink file below the exact package that declares the containing agents.yaml and below the active
-              outer contracts root. The authored module path is package-relative authoring truth. Contract compilation reads
-              it once and captures the package-relative Module, canonical outer-contract-relative SourcePath, exact bytes, and
+              regular non-symlink member of the mocks/ resource branch of the FlowNode that declares the containing agents.yaml.
+              The authored module path is flow-relative authoring truth. Contract compilation consumes the admitted member
+              and captures the flow-relative Module, canonical artifact-relative SourcePath, exact bytes, and
               sha256 digest into the generation-owned agent descriptor; runtime execution never rereads the ambient file and
               no composition-root fallback or second path dialect exists. post_tool_tail_latency_ms deterministically delays
               response observation after a tool-result round
@@ -23517,7 +23517,7 @@ cli_specification:
       - API/runtime method semantics
     source_root_resolution:
       canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
-      rule: Source-aware local commands require one positional directory; `.` is the explicit current-directory spelling. Source-free modes never inspect a local root.
+      rule: Source-aware local commands use the captured invocation directory when the root operand is omitted or `.`; one positional directory selects an alternate root. The first positional slot of `test` is always the root. Source-free modes never inspect a local root.
   tiers:
     must_have: 'Closure-gate command set for the promoted CLI v2 catalog.'
     should_have: 'Subsequent slices and backlog commands; each still requires a gated implementation child before code changes.'
@@ -36078,7 +36078,7 @@ filesystem_source_model:
       - Moving a declaration or changing its semantic path is delete plus add.
       - Runtime run, entity, activation, generation, attempt, occurrence, and instance-route identities remain distinct dynamic facts.
       - Scenario setup translates authored root `.` to an omitted root flow_instance; the persistence owner derives the run ID. Returned root aliases carry that run ID and cannot be used as child-flow publish targets.
-      - Every deterministic runtime identifier consumes typed declaration identity and never a declaration identity, authored UUID, map index, display label, or inferred local key.
+      - Every deterministic runtime identifier that depends on an authored declaration consumes its typed declaration identity, never an authored UUID, map index, display label, or inferred local key. The generated runtime identifier remains distinct from its declaration input.
   platform_pack_separation:
     authored_project_packs: |
       selected-root packs/ definitions are ordinary admitted and hashed source. An absent packs/ branch means no project packs; any admitted member below packs/ requires strict packs/manifest.yaml membership, and a populated branch without that manifest fails closed.
