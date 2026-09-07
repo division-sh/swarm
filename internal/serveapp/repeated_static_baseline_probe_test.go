@@ -42,6 +42,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 					t.Fatalf("independent run %d failed static materialization before any transition history read\n%s", attempt, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 				}
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, seed.RunID, "completed")
 				for _, check := range []struct {
 					query string
 					want  int

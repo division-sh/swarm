@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -27,13 +29,34 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FreshActivityRequestLineage(request.Event, parent, source, []runtimedelivery.Snapshot{delivery}); err != nil {
+	lineage, err := FreshActivityRequestLineage(request.Event, parent, source, []ActivityParentExecution{{Delivery: delivery}}, nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= intent.RetryMaxAttempts; attempt++ {
+		copy := intent
+		copy.Attempt = attempt
+		emissions := &pipelineEmissionPlan{}
+		dispatcher := pipelineActivityDispatcher{emissions: emissions}
+		if err := dispatcher.publishActivitySuccess(context.Background(), copy, map[string]any{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := lineage.ValidateResult(emissions.immutableEvents()[0]); err != nil {
+			t.Fatalf("request phase restriction rejected result attempt %d: %v", attempt, err)
+		}
 	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*runtimeengine.ActivityIntent)
 	}{
+		{"request_attempt_2", func(i *runtimeengine.ActivityIntent) { i.Attempt = 2 }},
+		{"request_attempt_99", func(i *runtimeengine.ActivityIntent) { i.Attempt = 99 }},
+		{"non_loop_stage", func(i *runtimeengine.ActivityIntent) { i.LoopStage = "foreign" }},
+		{"non_loop_generation", func(i *runtimeengine.ActivityIntent) {
+			i.Generation = attemptgeneration.Generation{FlowID: "foreign", LoopID: "foreign", ActivationID: "foreign", RevisionField: "revision", RevisionID: "foreign", Attempt: 1}
+			i.LoopStage = "foreign"
+		}},
+		{"malformed_generation", func(i *runtimeengine.ActivityIntent) { i.Generation.LoopID = "partial" }},
 		{"source_run", func(i *runtimeengine.ActivityIntent) { i.SourceRunID = uuid.NewString() }},
 		{"causal_parent", func(i *runtimeengine.ActivityIntent) { i.SourceEventID = uuid.NewString() }},
 		{"grandparent", func(i *runtimeengine.ActivityIntent) { i.ParentEventID = uuid.NewString() }},
@@ -57,7 +80,7 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := FreshActivityRequestLineage(forged.Event, parent, source, []runtimedelivery.Snapshot{delivery}); err == nil {
+			if _, err := FreshActivityRequestLineage(forged.Event, parent, source, []ActivityParentExecution{{Delivery: delivery}}, nil); err == nil {
 				t.Fatal("canonical construction alone admitted foreign activity")
 			}
 		})
@@ -66,7 +89,7 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 		t.Run(string(status), func(t *testing.T) {
 			copy := delivery
 			copy.Status = status
-			if _, err := FreshActivityRequestLineage(request.Event, parent, source, []runtimedelivery.Snapshot{copy}); err == nil {
+			if _, err := FreshActivityRequestLineage(request.Event, parent, source, []ActivityParentExecution{{Delivery: copy}}, nil); err == nil {
 				t.Fatal("noncompleted parent admitted fresh request")
 			}
 		})
