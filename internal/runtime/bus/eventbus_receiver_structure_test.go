@@ -193,54 +193,21 @@ func TestEventBusReceiverOwnerAdmissionStructuralGuard(t *testing.T) {
 
 func TestDeliveryTargetOwnerAuthorityStructuralGuard(t *testing.T) {
 	forbidden := map[string]bool{
-		"AllowStructuralOwner":                                  false,
-		"StructuralTargetOwnerEligible":                         false,
-		"structuralDescriptor":                                  false,
-		"routedScopedNoTargetNodeDeliveryIntents":               false,
-		"routedStaticCrossFlowInstanceTarget":                   false,
-		"routedDescendantStaticFlowInstanceTarget":              false,
+		"AllowStructuralOwner": false, "StructuralTargetOwnerEligible": false,
+		"StructuralTargetOwnerProof": false, "ProveStructuralTargetOwner": false,
+		"structuralDescriptor": false, "routedScopedNoTargetNodeDeliveryIntents": false,
+		"routedStaticCrossFlowInstanceTarget": false, "routedDescendantStaticFlowInstanceTarget": false,
 		"routedWildcardStaticServiceNoTargetNodeDeliveryRoutes": false,
-	}
-	requiredCalls := map[string]bool{
-		"connectRoutePlanDeliveryIntents":                        false,
-		"selectedRunTargetOwnerProjection.pinRoutingDescriptors": false,
 	}
 	for path, file := range parseTargetOwnerAuthorityProductionFiles(t) {
 		ast.Inspect(file, func(node ast.Node) bool {
-			identifier, ok := node.(*ast.Ident)
-			if ok {
+			if identifier, ok := node.(*ast.Ident); ok {
 				if _, banned := forbidden[identifier.Name]; banned {
-					forbidden[identifier.Name] = true
 					t.Errorf("%s: retired target-owner authority %s returned", path, identifier.Name)
 				}
 			}
 			return true
 		})
-		for _, declaration := range file.Decls {
-			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			key := receiverFunctionKey(fn)
-			if _, guarded := requiredCalls[key]; !guarded {
-				if _, guarded = requiredCalls[fn.Name.Name]; !guarded {
-					continue
-				}
-				key = fn.Name.Name
-			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if ok && calledFunctionName(call) == "ProveStructuralTargetOwner" {
-					requiredCalls[key] = true
-				}
-				return true
-			})
-		}
-	}
-	for name, found := range requiredCalls {
-		if !found {
-			t.Errorf("structural target-owner guard lost compiled proof consumption in %s", name)
-		}
 	}
 }
 

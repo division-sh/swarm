@@ -1256,9 +1256,11 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	}
 }
 
-func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *testing.T) {
+func TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newTargetRouteMemoryStore()
+	childEntity := eventtest.UUID("distinct-child-owner")
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: childEntity})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1278,7 +1280,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 	want := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: "consumer", FlowInstance: "consumer", EntityID: rootTarget.EntityID,
+			FlowID: "consumer", FlowInstance: "consumer", EntityID: childEntity,
 		}),
 	}
 
@@ -1287,7 +1289,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 || !deliveryRoutesContain(preflight.DeliveryRoutes, want) {
-		t.Fatalf("preflight failure/routes = %q/%#v, want exact structurally proved route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, want)
+		t.Fatalf("preflight failure/routes = %q/%#v, want exact receiving route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, want)
 	}
 	if err := eb.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1308,15 +1310,15 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 	}
 	wantRecipientKey := want.Recipient.ID()
 	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
-		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want exact persisted structural owner", live, internal, replayRoutes)
+		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want exact persisted receiver owner", live, internal, replayRoutes)
 	}
 }
 
-func TestEventBusCompiledNestedStaticSharesExactStructuralOwner(t *testing.T) {
-	TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t)
+func TestEventBusCompiledNestedStaticPreservesSelectedReceiverOwner(t *testing.T) {
+	TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t)
 }
 
-func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBeforePersistence(t *testing.T) {
+func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newTargetRouteMemoryStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -1337,10 +1339,10 @@ func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBefore
 
 	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-		t.Fatalf("CheckPublishRecipientPlan result/error = %#v/%v, want unproved structural owner rejection", preflight, err)
+		t.Fatalf("CheckPublishRecipientPlan result/error = %#v/%v, want missing receiver rejection", preflight, err)
 	}
 	if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-		t.Fatalf("Publish error = %v, want unproved structural owner rejection", err)
+		t.Fatalf("Publish error = %v, want missing receiver rejection", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
 		t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",

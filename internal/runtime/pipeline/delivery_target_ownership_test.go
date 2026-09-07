@@ -392,6 +392,8 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 		{name: "select one ignores supplied path", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance}}, wantKind: "existing_entity", wantRoute: "review/one"},
 		{name: "select many", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance, withDeliveryTargetInstanceIdentity(instance, "two", eventtest.UUID("declared-key-second"))}}, wantError: "select_entity_ambiguous"},
 		{name: "select or create zero", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{}, wantKind: "materializing_entity"},
+		{name: "select or create one", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance}}, wantKind: "existing_entity", wantRoute: "review/one"},
+		{name: "select or create many", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance, withDeliveryTargetInstanceIdentity(instance, "two", eventtest.UUID("declared-key-second"))}}, wantError: "select_or_create_entity_ambiguous"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

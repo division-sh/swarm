@@ -262,10 +262,10 @@ type RoutePlanDeliveryIntent struct {
 	Context               events.DeliveryContext
 	PayloadProjection     events.DeliveryPayloadProjection
 	ConnectClaim          events.ConnectExecutionClaim
+	ConnectPlan           events.ConnectPlanIdentity
 	Producer              routeIntentProducer
 	Persist               bool
 	PendingAgentLifecycle bool
-	StructuralOwnerProof  runtimepinrouting.StructuralTargetOwnerProof
 }
 
 type DeliveryRouteBlueprint struct {
@@ -846,7 +846,7 @@ type deliveryIntentKey struct {
 	replyContextID string
 	projection     string
 	connectClaim   events.ConnectExecutionClaim
-	structural     runtimepinrouting.StructuralTargetOwnerProof
+	connectPlan    events.ConnectPlanIdentity
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -881,7 +881,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			replyContextID: intent.Context.ReplyContextID(),
 			projection:     intent.PayloadProjection.Fingerprint(),
 			connectClaim:   intent.ConnectClaim,
-			structural:     intent.StructuralOwnerProof,
+			connectPlan:    intent.ConnectPlan,
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist

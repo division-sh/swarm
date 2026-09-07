@@ -2274,8 +2274,15 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 	return startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, writeServedTestSetupFixture(t))
 }
 
-func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string) servedControlProofRuntime {
+func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	var handlerStart runtimepipeline.WorkflowNodeHandlerStartHook
+	if len(hooks) > 1 {
+		t.Fatal("at most one handler-start barrier is supported")
+	}
+	if len(hooks) == 1 {
+		handlerStart = hooks[0]
+	}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -2287,14 +2294,15 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			SourceRoot:                       sourceRoot,
+			TestWorkflowNodeHandlerStartHook: handlerStart,
+			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+			APIListenAddr:                    "127.0.0.1:0",
+			MCPListenAddr:                    "127.0.0.1:0",
+			SelfCheck:                        true,
+			Verbose:                          true,
+			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
@@ -2306,16 +2314,17 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 		})
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeServeRuntimeTestConfig(t),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			StoreMode:               "postgres",
-			StoreModeSet:            true,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                       writeServeRuntimeTestConfig(t),
+			SourceRoot:                       sourceRoot,
+			TestWorkflowNodeHandlerStartHook: handlerStart,
+			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+			StoreMode:                        "postgres",
+			StoreModeSet:                     true,
+			APIListenAddr:                    "127.0.0.1:0",
+			MCPListenAddr:                    "127.0.0.1:0",
+			SelfCheck:                        true,
+			Verbose:                          true,
+			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
 		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt}
 	default:

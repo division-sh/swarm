@@ -10,8 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -21,9 +19,6 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	staticOwner := eventtest.UUID("selected-static-owner")
 	singletonOwner := eventtest.UUID("selected-singleton-owner")
 	templateOwner := eventtest.UUID("selected-template-owner")
-	structuralOwner := eventtest.UUID("selected-structural-owner")
-	structuralProof := testRootStaticStructuralOwnerProof(t, structuralOwner)
-	structuralRoute := structuralProof.TargetOwner().Route()
 
 	projection := selectedRunTargetOwnerProjection{
 		required: true,
@@ -38,7 +33,6 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	tests := []struct {
 		name      string
 		blueprint events.RouteIdentity
-		proof     runtimepinrouting.StructuralTargetOwnerProof
 		want      events.RouteIdentity
 	}{
 		{
@@ -48,10 +42,6 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 		{
 			name: "static", blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review"},
 			want: events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: staticOwner},
-		},
-		{
-			name: "nested static", blueprint: structuralProof.TargetBlueprint(), proof: structuralProof,
-			want: structuralRoute,
 		},
 		{
 			name: "singleton coordinator", blueprint: events.RouteIdentity{FlowID: "portfolio", FlowInstance: "portfolio"},
@@ -65,7 +55,7 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := projection.resolveSelectedRoute(test.blueprint, test.proof)
+			got, err := projection.resolveSelectedRoute(test.blueprint)
 			if err != nil {
 				t.Fatalf("resolve owner: %v", err)
 			}
@@ -76,96 +66,21 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	}
 }
 
-func testRootStaticStructuralOwnerProof(t testing.TB, entityID string) runtimepinrouting.StructuralTargetOwnerProof {
-	t.Helper()
-	plans := runtimepinrouting.CompileConnectGraph(connectRoutePlanRootProducerStaticSource(t)).Plans()
-	if len(plans) != 1 {
-		t.Fatalf("compiled root-to-static plans = %d, want 1", len(plans))
+func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
+	blueprint := events.RouteIdentity{FlowID: "parent/child", FlowInstance: "parent/child"}
+	parent := ActiveTargetDescriptor{ID: "parent", FlowInstance: "parent", EntityID: eventtest.UUID("parent-owner")}
+	projection := selectedRunTargetOwnerProjection{required: true, descriptors: []ActiveTargetDescriptor{parent}}
+	if _, err := projection.resolveSelectedRoute(blueprint); err == nil {
+		t.Fatal("parent descriptor became receiver-owned state")
 	}
-	targets := plans[0].Readback().Targets
-	if len(targets) != 1 {
-		t.Fatalf("compiled root-to-static targets = %#v, want one", targets)
-	}
-	current := events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: "workflow", FlowInstance: eventtest.UUID("structural-proof-run"), EntityID: entityID,
-	})
-	routingSource, err := events.NewRootRoutingSource(entityID)
+	child := ActiveTargetDescriptor{ID: "child", FlowInstance: blueprint.FlowInstance, EntityID: eventtest.UUID("child-owner")}
+	projection.descriptors = append(projection.descriptors, child)
+	got, err := projection.resolveSelectedRoute(blueprint)
 	if err != nil {
-		t.Fatalf("root routing source: %v", err)
+		t.Fatal(err)
 	}
-	sourceEvent, err := runtimepinrouting.AdmitSourceEvent(events.EventType("root.ready"), routingSource)
-	if err != nil {
-		t.Fatalf("admit root source event: %v", err)
-	}
-	proof, ok, err := plans[0].ProveStructuralTargetOwner(targets[0], current, sourceEvent)
-	if err != nil {
-		t.Fatalf("prove root-to-static target owner: %v", err)
-	}
-	if !ok {
-		t.Fatal("compiled root-to-static plan did not issue structural target-owner proof")
-	}
-	return proof
-}
-
-func TestStructuralTargetOwnerProofDuplicateAgreementFailsClosed(t *testing.T) {
-	source := connectRoutePlanRootProducerStaticSource(t)
-	consumerNode := testFlowNode(t, "consumer", "consumer-node")
-	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, consumerNode)
-	if err != nil {
-		t.Fatalf("admit consumer handler: %v", err)
-	}
-	proof := testRootStaticStructuralOwnerProof(t, eventtest.UUID("structural-proof-owner-a"))
-	intent := RoutePlanDeliveryIntent{
-		Recipient: events.MustNodeDeliveryRecipient(consumerNode), TargetBlueprint: proof.TargetBlueprint(),
-		Handler: handler.ForEvent("root.ready"), Producer: routeIntentProducerConnectRoutePlan,
-		StructuralOwnerProof: proof, Persist: true,
-	}
-	evt := connectRoutePlanRootProducerEvent(
-		eventtest.UUID("structural-proof-event"), events.EventType("root.ready"), "", "", nil, 0,
-		eventtest.UUID("structural-proof-run"), "", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	projection := selectedRunTargetOwnerProjection{source: source, required: true}
-
-	identical := RoutePlan{Event: evt, DeliveryIntents: []RoutePlanDeliveryIntent{intent, intent}}
-	resolved, err := projection.resolveRoutePlan(identical)
-	if err != nil {
-		t.Fatalf("resolve identical proofs: %v", err)
-	}
-	if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].Target != proof.TargetOwner() {
-		t.Fatalf("identical proof routes = %#v, want one exact structural owner %#v", routes, proof.TargetOwner())
-	}
-
-	absent := intent
-	absent.StructuralOwnerProof = runtimepinrouting.StructuralTargetOwnerProof{}
-	if _, err := projection.resolveRoutePlan(RoutePlan{Event: evt, DeliveryIntents: []RoutePlanDeliveryIntent{intent, absent}}); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-		t.Fatalf("proof-plus-absent error = %v, want unproved duplicate rejection", err)
-	}
-
-	conflicting := intent
-	conflicting.StructuralOwnerProof = testRootStaticStructuralOwnerProof(t, eventtest.UUID("structural-proof-owner-b"))
-	if _, err := projection.resolveRoutePlan(RoutePlan{Event: evt, DeliveryIntents: []RoutePlanDeliveryIntent{intent, conflicting}}); err == nil || !strings.Contains(err.Error(), "conflicting compiled structural target-owner proofs") {
-		t.Fatalf("conflicting proof error = %v, want exact proof disagreement", err)
-	}
-}
-
-func TestSelectedTargetOwnerPrecedesStructuralFallback(t *testing.T) {
-	proof := testRootStaticStructuralOwnerProof(t, eventtest.UUID("structural-proof-selected-owner"))
-	selectedEntity := eventtest.UUID("distinct-selected-owner")
-	projection := selectedRunTargetOwnerProjection{
-		required: true,
-		descriptors: []ActiveTargetDescriptor{{
-			ID: "selected-owner", FlowInstance: proof.TargetBlueprint().FlowInstance, EntityID: selectedEntity,
-		}},
-	}
-	owner, err := projection.resolveSelectedRoute(proof.TargetBlueprint(), proof)
-	if err != nil {
-		t.Fatalf("resolve selected owner with structural fallback present: %v", err)
-	}
-	want := events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: proof.TargetBlueprint().FlowID, FlowInstance: proof.TargetBlueprint().FlowInstance, EntityID: selectedEntity,
-	})
-	if owner != want {
-		t.Fatalf("selected owner = %#v, want exact selected evidence %#v", owner, want)
+	if !got.ExistingEntity() || got.Route().EntityID != child.EntityID {
+		t.Fatalf("wrong child owner: %#v", got)
 	}
 }
 
@@ -214,7 +129,7 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 			}
 			before := plan
 			before.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
-			if _, err := test.projection.resolveSelectedRoute(plan.DeliveryIntents[0].TargetBlueprint, runtimepinrouting.StructuralTargetOwnerProof{}); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := test.projection.resolveSelectedRoute(plan.DeliveryIntents[0].TargetBlueprint); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("resolve error = %v, want %q", err, test.want)
 			}
 			if !reflect.DeepEqual(plan, before) {
@@ -497,6 +412,25 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 	projection.descriptors[0].Materializing = false
 	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
 		t.Fatalf("existing owner for pending lifecycle error = %v, want materializing ownership rejection", err)
+	}
+}
+
+func TestSpeculativeNodeOwnerCannotAuthorizePendingAgent(t *testing.T) {
+	identity := agentidentitytest.Runtime(t, "reviewer", "speculative-owner", "review", "one", "review/one")
+	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("future-node-owner")}
+	node := testFlowNode(t, "review", "materializer")
+	for _, agentFirst := range []bool{false, true} {
+		intents := []RoutePlanDeliveryIntent{
+			{Recipient: events.MustNodeDeliveryRecipient(node), TargetBlueprint: target, TargetOwnership: events.MustMaterializingEntityTarget(target), Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity, TargetBlueprint: target, PendingAgentLifecycle: true, Persist: true},
+		}
+		if agentFirst {
+			intents[0], intents[1] = intents[1], intents[0]
+		}
+		projection := selectedRunTargetOwnerProjection{agentsAvailable: true, targetsAvailable: true, required: true}
+		if _, err := projection.resolveRoutePlan(RoutePlan{DeliveryIntents: intents}); err == nil {
+			t.Fatalf("node's speculative future entity authorized agent lifecycle; agentFirst=%t", agentFirst)
+		}
 	}
 }
 
