@@ -158,7 +158,7 @@ func (m *HostManager) BindSourceProjection(projection *sourceartifact.RuntimePro
 		return fmt.Errorf("host workspace source projection is already bound")
 	}
 	cfg := m.cfg
-	cfg.SourceProjection = projection
+	cfg.SourceProjection = ownedProjection
 	cfg.BundleHash = strings.TrimSpace(projection.BundleHash())
 	cfg.SourceProjectionID = strings.TrimSpace(projection.Identity())
 	cfg.BundleScope, err = durableBundleScopeKey(cfg.BundleHash)

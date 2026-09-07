@@ -673,7 +673,7 @@ func TestWorkspaceManagersRebindSelectedSourceWithoutMutatingBootLifecycle(t *te
 		if manager.cfg.SourceProjection != nil || manager.cfg.BundleHash != "" {
 			t.Fatalf("boot manager was mutated: %#v", manager.cfg)
 		}
-		if selected.cfg.SourceProjection != projection || selected.cfg.BundleHash != projection.BundleHash() {
+		if selected.cfg.SourceProjection != selected.ownedProjection || selected.cfg.SourceProjection == projection || selected.cfg.BundleHash != projection.BundleHash() {
 			t.Fatalf("selected host source binding = %#v", selected.cfg)
 		}
 		mounts := selected.hostExecutionMounts(t.TempDir(), "")
@@ -699,13 +699,17 @@ func TestWorkspaceManagersRebindSelectedSourceWithoutMutatingBootLifecycle(t *te
 		if manager.cfg.SourceProjection != nil || manager.cfg.BundleHash != "" {
 			t.Fatalf("boot manager was mutated: %#v", manager.cfg)
 		}
-		if selected.cfg.SourceProjection != projection || selected.cfg.BundleHash != projection.BundleHash() {
+		if selected.cfg.SourceProjection != selected.ownedProjection || selected.cfg.SourceProjection == projection || selected.cfg.BundleHash != projection.BundleHash() {
 			t.Fatalf("selected Docker source binding = %#v", selected.cfg)
 		}
 		if selected.cfg.ProcessScope == "" || !strings.Contains(selected.cfg.ScaffoldContainer, selected.cfg.ProcessScope) {
 			t.Fatalf("selected Docker names are not bundle scoped: %#v", selected.cfg)
 		}
-		mountArgs := strings.Join(selected.standardMountArgs(), " ")
+		mounts, err := selected.standardMountArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mountArgs := strings.Join(mounts, " ")
 		if !strings.Contains(mountArgs, projectionRoot+":"+LogicalSourceMount+":ro") {
 			t.Fatalf("selected Docker source mount = %q", mountArgs)
 		}
