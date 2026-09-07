@@ -567,7 +567,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 									}
 								}
 								if afterRetry := activityLineageStateSnapshot(t, ctx, h, forkRun); afterRetry != beforeRetry {
-									t.Fatal("repeated verification changed terminal fork")
+									t.Fatalf("repeated verification changed terminal fork:\nbefore=%s\nafter=%s", beforeRetry, afterRetry)
 								}
 							}
 						}
