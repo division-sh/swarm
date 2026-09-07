@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -114,7 +115,22 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 			if readErr != nil {
 				return reject(id, readErr)
 			}
-			lineage, err = pipeline.FreshActivityRequestLineage(event, parent, source, snapshots)
+			executions := make([]pipeline.ActivityParentExecution, 0, len(snapshots))
+			for _, snapshot := range snapshots {
+				if snapshot.Status != runtimedelivery.StatusDelivered {
+					continue
+				}
+				selection, readErr := deliveries.HandlerRuleSelection(ctx, tx, snapshot.DeliveryID)
+				if readErr != nil {
+					return reject(id, readErr)
+				}
+				executions = append(executions, pipeline.ActivityParentExecution{Delivery: snapshot, RuleSelection: selection})
+			}
+			activations, readErr := loadRunForkEntityActivations(ctx, tx, runID, event.RoutingSource().Route().EntityID)
+			if readErr != nil {
+				return reject(id, readErr)
+			}
+			lineage, err = pipeline.FreshActivityRequestLineage(event, parent, source, executions, activations)
 			freshIDs = append(freshIDs, id)
 		}
 		if err != nil {

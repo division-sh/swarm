@@ -1,0 +1,19 @@
+mode: template
+instance: worker_id
+stages:
+  idle: {initial: true}
+  working: {}
+  executing: {}
+  complete: {terminal: true}
+loops:
+  inspection:
+    revision_field: revision_id
+    max_attempts: 3
+    escape: {advances_to: complete}
+pins:
+  inputs:
+    events:
+      - event: worker.ready
+        source: external
+  outputs:
+    events: [worker.observed]

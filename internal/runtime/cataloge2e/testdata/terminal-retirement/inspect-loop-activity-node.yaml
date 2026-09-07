@@ -1,0 +1,42 @@
+inspect-node:
+  id: inspect-node
+  execution_type: system_node
+  subscribes_to: [worker.inspect]
+  event_handlers:
+    worker.inspect:
+      loop: {start: inspection, from: idle}
+      advances_to: working
+      emit:
+        event: worker.execute
+        fields: {revision_id: "loop.revision_id"}
+activity-node:
+  id: activity-node
+  execution_type: system_node
+  subscribes_to: [worker.execute]
+  event_handlers:
+    worker.execute:
+      loop: {admit: inspection, from: working}
+      advances_to: executing
+      activity:
+        id: terminal_probe
+        tool: terminal_probe
+        input: {}
+activity-result-node:
+  id: activity-result-node
+  execution_type: system_node
+  subscribes_to: [terminal_probe.succeeded]
+  event_handlers:
+    terminal_probe.succeeded:
+      loop: {close: inspection, from: executing}
+      advances_to: complete
+activity-repeat-node:
+  id: activity-repeat-node
+  execution_type: system_node
+  subscribes_to: [worker.retry]
+  event_handlers:
+    worker.retry:
+      loop: {repeat: inspection, from: executing}
+      advances_to: working
+      emit:
+        event: worker.execute
+        fields: {revision_id: "loop.revision_id"}

@@ -9,9 +9,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -20,6 +23,11 @@ import (
 type ActivityRequestLineage struct {
 	request events.Event
 	intent  runtimeengine.ActivityIntent
+}
+
+type ActivityParentExecution struct {
+	Delivery      runtimedelivery.Snapshot
+	RuleSelection handlerselection.HandlerRuleSelectionFact
 }
 
 // SelectedActivityRequestLineage consumes a root already admitted by the
@@ -41,13 +49,16 @@ func SelectedActivityRequestLineage(request events.Event) (ActivityRequestLineag
 
 // FreshActivityRequestLineage verifies construction and the exact committed
 // parent delivery. This does not authorize replay or execution of an effect.
-func FreshActivityRequestLineage(request, parent events.Event, source semanticview.Source, deliveries []runtimedelivery.Snapshot) (ActivityRequestLineage, error) {
+func FreshActivityRequestLineage(request, parent events.Event, source semanticview.Source, executions []ActivityParentExecution, activations []loopruntime.Activation) (ActivityRequestLineage, error) {
 	if request.Type() != activityRequestEventType || source == nil {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity requires selected execution source")
 	}
 	intent, err := activityIntentFromRequestEvent(request)
 	if err != nil {
 		return ActivityRequestLineage{}, err
+	}
+	if intent.Attempt != 1 {
+		return ActivityRequestLineage{}, fmt.Errorf("fresh activity request must begin at attempt 1")
 	}
 	if parent.ID() == "" || request.RunID() != parent.RunID() || intent.SourceRunID != parent.RunID() ||
 		intent.SourceEventID != parent.ID() || intent.ParentEventID != parent.ParentEventID() ||
@@ -84,12 +95,18 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has conflicting execution route")
 	}
 	delivered := false
-	for _, delivery := range deliveries {
+	var selection handlerselection.HandlerRuleSelectionFact
+	for _, execution := range executions {
+		delivery := execution.Delivery
 		if delivery.EventID == parent.ID() && delivery.RunID == parent.RunID() && delivery.Status == runtimedelivery.StatusDelivered &&
 			delivery.Route.Recipient == events.MustNodeDeliveryRecipient(node) && delivery.Route.Target.Route() == route {
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), delivery.Route), source, node, parent)
 			delivered = resolved.Matched && resolved.HandlerEventKey == intent.HandlerEventKey
 			if delivered {
+				selection = execution.RuleSelection
+				if err := runtimeengine.ValidateActivityLoopLineage(intent, parent, source, resolved.Handler, execution.RuleSelection, activations); err != nil {
+					return ActivityRequestLineage{}, err
+				}
 				break
 			}
 		}
@@ -111,6 +128,9 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(intent.EffectClass)
 	matched := false
 	for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
+		if site.RuleRef.Valid() && (selection.Disposition() != handlerselection.DispositionSelected || site.RuleRef != selection.Ref()) {
+			continue
+		}
 		result := runtimecontracts.ActivityResultEventsForSite(site)
 		if site.HandlerEventKey == intent.HandlerEventKey && site.Spec.Tool == intent.Tool && site.Spec.Approval == nil &&
 			result.ActivityID == intent.ActivityID && result.SuccessEvent == intent.SuccessEvent && result.FailureEvent == intent.FailureEvent &&
@@ -156,6 +176,16 @@ func (l ActivityRequestLineage) ValidateResult(result events.Event) error {
 	if payload.ActivityID != intent.ActivityID || payload.Tool != intent.Tool || payload.EffectClass != string(intent.EffectClass) ||
 		payload.Attempt < 1 || payload.Attempt > activityRetryMaxAttempts(intent, intent.EffectClass) {
 		return fmt.Errorf("activity result has invalid request facts")
+	}
+	if intent.Generation.Valid() {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(result.Payload(), &fields); err != nil {
+			return err
+		}
+		var revision string
+		if json.Unmarshal(fields[intent.Generation.RevisionField], &revision) != nil || revision != intent.Generation.RevisionID {
+			return fmt.Errorf("activity result has foreign loop revision")
+		}
 	}
 	if string(result.Type()) == intent.SuccessEvent {
 		if len(payload.Result) == 0 || payload.Failure != nil {
@@ -217,6 +247,18 @@ func (l ActivityRequestLineage) ValidateDiagnostic(event events.Event) error {
 	}
 	if !activity || subject != l.request.ID() || event.ParentEventID() != l.request.ID() || event.RunID() != l.request.RunID() {
 		return fmt.Errorf("activity diagnostic has foreign request lineage")
+	}
+	var payload struct {
+		Details struct {
+			Generation attemptgeneration.Generation `json:"loop_generation"`
+			Stage      string                       `json:"loop_stage"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(event.Payload(), &payload); err != nil {
+		return err
+	}
+	if payload.Details.Generation != l.intent.Generation || payload.Details.Stage != l.intent.LoopStage {
+		return fmt.Errorf("activity diagnostic has foreign loop lineage")
 	}
 	return nil
 }

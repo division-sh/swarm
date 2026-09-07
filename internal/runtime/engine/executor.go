@@ -1981,10 +1981,7 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	if frame.transitionApplied {
 		return nil
 	}
-	next := strings.TrimSpace(frame.req.Handler.AdvancesTo)
-	if frame.rule != nil && strings.TrimSpace(frame.rule.AdvancesTo) != "" {
-		next = strings.TrimSpace(frame.rule.AdvancesTo)
-	}
+	next := selectedHandlerAdvancesTo(frame.req.Handler, frame.rule)
 	if next == "" || next == frame.result.CurrentState {
 		return nil
 	}

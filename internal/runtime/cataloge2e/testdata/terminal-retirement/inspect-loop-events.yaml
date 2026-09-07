@@ -1,0 +1,6 @@
+worker.execute:
+  revision_id: {type: text}
+worker.retry:
+  swarm:
+    source: external
+  revision_id: {type: text}

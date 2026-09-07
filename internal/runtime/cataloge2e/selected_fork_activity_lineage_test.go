@@ -10,6 +10,11 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -22,6 +27,7 @@ type activityLineageProofStore struct {
 	h           *runtimeHarness
 	calls       *atomic.Int32
 	hostile     bool
+	hostileLoop bool
 	rejectFinal bool
 }
 
@@ -48,7 +54,154 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 		p.writePayload(ctx, request.EventID, map[string]any{})
 		return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
 	}
+	if p.hostileLoop {
+		requestOwner, err := activityidentity.ParseOwnerKey(request.Payload["node_id"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, ok := requestOwner.Node()
+		if !ok {
+			t.Fatal("expected node activity")
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, req.ExecutionSource.ExecutableNodeEventHandlers(node)) {
+			if site.Spec.ID != "unselected_probe" {
+				continue
+			}
+			t.Run("reminted_unselected_rule_activity", func(t *testing.T) {
+				payload := make(map[string]any, len(request.Payload))
+				for key, value := range request.Payload {
+					payload[key] = value
+				}
+				result := runtimecontracts.ActivityResultEventsForSite(site)
+				payload["activity_id"], payload["success_event"], payload["failure_event"] = result.ActivityID, result.SuccessEvent, result.FailureEvent
+				payload["revision_event"], payload["rejected_event"] = result.RevisionRequested, result.Rejected
+				restore := p.remintRequest(ctx, request, payload)
+				defer restore()
+				p.requireRejected(t, ctx, req)
+			})
+		}
+		instancePath, ok := request.Payload["flow_instance"].(string)
+		if !ok {
+			t.Fatal("loop request has no concrete flow instance")
+		}
+		owner, err := flowidentity.NewRunScopedFlowInstance(req.ForkRunID, flowidentity.RouteForInstancePath(instancePath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance, found, err := p.h.workflow.Load(ctx, owner)
+		if err != nil || !found {
+			t.Fatalf("loop activity state: found=%t err=%v", found, err)
+		}
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, instance.StateBuckets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		activations, err := loopruntime.List(carrier.StateBuckets)
+		if err != nil || len(activations) != 1 || activations[0].Status != loopruntime.StatusClosed || activations[0].CurrentStage != "complete" {
+			t.Fatalf("result must close the real loop before activation: %+v err=%v", activations, err)
+		}
+		for _, test := range []struct {
+			name, key string
+			value     any
+		}{
+			{"loop_flow", "flow_id", "foreign"},
+			{"loop_id", "loop_id", "foreign"},
+			{"loop_activation", "activation_id", uuid.NewString()},
+			{"loop_revision", "revision_id", uuid.NewString()},
+			{"loop_revision_field", "revision_field", "foreign_revision"},
+			{"loop_attempt", "attempt", 2},
+			{"loop_attempt_zero", "attempt", 0},
+			{"loop_stage_foreign", "loop_stage", "foreign"},
+			{"loop_stage_before_transition", "loop_stage", "working"},
+			{"loop_stage_after_close", "loop_stage", "complete"},
+			{"loop_stage_absent", "loop_stage", ""},
+			{"loop_generation_absent", "", nil},
+		} {
+			t.Run("reminted_"+test.name, func(t *testing.T) {
+				payload := make(map[string]any, len(request.Payload))
+				for key, value := range request.Payload {
+					payload[key] = value
+				}
+				generation := map[string]any{}
+				original, ok := request.Payload["loop_generation"].(map[string]any)
+				if !ok {
+					t.Fatal("positive control did not execute a loop activity")
+				}
+				for key, value := range original {
+					generation[key] = value
+				}
+				payload["loop_generation"] = generation
+				switch test.key {
+				case "":
+					delete(payload, "loop_generation")
+				case "loop_stage":
+					payload["loop_stage"] = test.value
+				default:
+					generation[test.key] = test.value
+				}
+				restore := p.remintRequest(ctx, request, payload)
+				defer restore()
+				p.requireRejected(t, ctx, req)
+			})
+		}
+		t.Run("foreign_result_loop_revision", func(t *testing.T) {
+			payload := make(map[string]any, len(result.Payload))
+			for key, value := range result.Payload {
+				payload[key] = value
+			}
+			payload[activations[0].RevisionField] = uuid.NewString()
+			p.writePayload(ctx, result.EventID, payload)
+			defer p.writePayload(ctx, result.EventID, result.Payload)
+			p.requireRejected(t, ctx, req)
+		})
+		t.Run("foreign_diagnostic_loop_stage", func(t *testing.T) {
+			payload := make(map[string]any, len(diagnostic.Payload))
+			for key, value := range diagnostic.Payload {
+				payload[key] = value
+			}
+			details := map[string]any{}
+			for key, value := range diagnostic.Payload["details"].(map[string]any) {
+				details[key] = value
+			}
+			details["loop_stage"] = "foreign"
+			payload["details"] = details
+			p.writePayload(ctx, diagnostic.EventID, payload)
+			defer p.writePayload(ctx, diagnostic.EventID, diagnostic.Payload)
+			p.requireRejected(t, ctx, req)
+		})
+	}
 	if p.hostile {
+		for _, test := range []struct {
+			name       string
+			attempt    int
+			generation map[string]any
+			stage      string
+		}{
+			{name: "reminted_request_attempt_2", attempt: 2},
+			{name: "reminted_request_attempt_99", attempt: 99},
+			{name: "reminted_non_loop_stage", attempt: 1, stage: "foreign"},
+			{name: "reminted_non_loop_generation", attempt: 1, stage: "foreign", generation: map[string]any{
+				"flow_id": "foreign", "loop_id": "foreign", "activation_id": "foreign", "revision_field": "revision", "revision_id": "foreign", "attempt": 1,
+			}},
+			{name: "reminted_malformed_generation", attempt: 1, generation: map[string]any{"loop_id": "partial"}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				payload := make(map[string]any, len(request.Payload))
+				for key, value := range request.Payload {
+					payload[key] = value
+				}
+				payload["attempt"] = test.attempt
+				if test.generation != nil {
+					payload["loop_generation"] = test.generation
+				}
+				if test.stage != "" {
+					payload["loop_stage"] = test.stage
+				}
+				restore := p.remintRequest(ctx, request, payload)
+				defer restore()
+				p.requireRejected(t, ctx, req)
+			})
+		}
 		tests := []struct {
 			name, eventID, key string
 			value              any
@@ -127,6 +280,68 @@ func (p *activityLineageProofStore) ActivateRunForkForSelectedContractExecution(
 		})
 	}
 	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+}
+
+// Preserve every admitted envelope coordinate while reminting the request's
+// canonical ID. This catches forged construction, not just an ID mismatch.
+func (p *activityLineageProofStore) remintRequest(ctx context.Context, request operatorread.OperatorEventFull, payload map[string]any) func() {
+	t := p.t
+	t.Helper()
+	str := func(key string) string { value, _ := payload[key].(string); return value }
+	owner, err := activityidentity.ParseOwnerKey(str("node_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identityFacts struct {
+		Attempt    int `json:"attempt"`
+		Generation struct {
+			RevisionID string `json:"revision_id"`
+		} `json:"loop_generation"`
+	}
+	if err := json.Unmarshal(encoded, &identityFacts); err != nil {
+		t.Fatal(err)
+	}
+	id := activityidentity.RequestEventID(activityidentity.Fact{
+		RunID: str("source_run_id"), SourceEventID: str("source_event_id"), ParentEventID: str("parent_event_id"),
+		EntityID: str("entity_id"), ExecutionFlowID: str("flow_id"), Owner: owner, HandlerEventKey: str("handler_event_key"),
+		ActivityID: str("activity_id"), Tool: str("tool"), Attempt: identityFacts.Attempt, RevisionID: identityFacts.Generation.RevisionID,
+	})
+	if id == request.EventID {
+		p.writePayload(ctx, id, payload)
+		return func() { p.writePayload(ctx, id, request.Payload) }
+	}
+	rows, err := p.h.db.QueryContext(ctx, "SELECT * FROM events WHERE 1=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	columns, err := rows.Columns()
+	rows.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, selected := []string{}, []string{}
+	for _, column := range columns {
+		if column == "insertion_sequence" {
+			continue
+		}
+		retained = append(retained, column)
+		switch column {
+		case "event_id":
+			selected = append(selected, "$1")
+		case "payload":
+			selected = append(selected, "$2")
+		case "payload_bytes":
+			selected = append(selected, "$3")
+		default:
+			selected = append(selected, column)
+		}
+	}
+	p.update(ctx, "INSERT INTO events ("+strings.Join(retained, ",")+") SELECT "+strings.Join(selected, ",")+" FROM events WHERE event_id=$4", id, string(encoded), encoded, request.EventID)
+	return func() { p.update(ctx, "DELETE FROM events WHERE event_id=$1", id) }
 }
 
 func (p *activityLineageProofStore) requireRejected(t *testing.T, ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) {

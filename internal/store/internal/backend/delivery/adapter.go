@@ -1204,6 +1204,18 @@ func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, d
 	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition()), flowPath, family, semanticPath, fact.DisplayLabel()); err != nil {
 		return fmt.Errorf("persist delivery handler rule selection: %w", err)
 	}
+	persisted, err := a.HandlerRuleSelection(ctx, tx, deliveryID)
+	if err != nil {
+		return err
+	}
+	if !persisted.Equal(fact) {
+		return fmt.Errorf("%w: delivery handler rule selection contradicts the canonical fact", ErrConflict)
+	}
+	return nil
+}
+
+// HandlerRuleSelection reads the exact committed fact in the caller's snapshot.
+func (a *Adapter) HandlerRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
 	load := `
 		SELECT selection_context, disposition, COALESCE(flow_path, ''),
 			COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
@@ -1216,16 +1228,13 @@ func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, d
 	}
 	var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
 	if err := tx.QueryRowContext(ctx, load, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw); err != nil {
-		return fmt.Errorf("load delivery handler rule selection: %w", err)
+		return handlerselection.HandlerRuleSelectionFact{}, fmt.Errorf("load delivery handler rule selection: %w", err)
 	}
 	persisted, err := handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
 	if err != nil {
-		return fmt.Errorf("hydrate delivery handler rule selection: %w", err)
+		return handlerselection.HandlerRuleSelectionFact{}, fmt.Errorf("hydrate delivery handler rule selection: %w", err)
 	}
-	if !persisted.Equal(fact) {
-		return fmt.Errorf("%w: delivery handler rule selection contradicts the canonical fact", ErrConflict)
-	}
-	return nil
+	return persisted, nil
 }
 
 func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) error {

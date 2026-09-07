@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 )
 
 func TestActivationLifecycleAndForkIdentity(t *testing.T) {
@@ -32,6 +34,48 @@ func TestActivationLifecycleAndForkIdentity(t *testing.T) {
 	}
 	if activation.Status != StatusClosed || activation.CloseReason != CloseReasonCompleted {
 		t.Fatalf("closed activation = %#v", activation)
+	}
+}
+
+func TestActivationOwnsHistoricalGenerationAfterAdvanceRepeatAndClose(t *testing.T) {
+	now := time.Now().UTC()
+	a, err := New("run", "entity", "flow", "loop", "revision", "start", "working", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := a.Generation()
+	if err := a.AdvanceWithin("executing", "advance", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Repeat("working", "repeat", now); err != nil {
+		t.Fatal(err)
+	}
+	second := a.Generation()
+	future := a
+	if _, err := future.Repeat("working", "future", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close("complete", "close", now); err != nil {
+		t.Fatal(err)
+	}
+	if !a.OwnsGeneration(first) || !a.OwnsGeneration(second) || a.OwnsGeneration(future.Generation()) {
+		t.Fatal("closed activation must own exactly its accepted generation history")
+	}
+	for _, mutate := range []func(*attemptgeneration.Generation){
+		func(g *attemptgeneration.Generation) { g.FlowID = "foreign" },
+		func(g *attemptgeneration.Generation) { g.LoopID = "foreign" },
+		func(g *attemptgeneration.Generation) { g.ActivationID = "foreign" },
+		func(g *attemptgeneration.Generation) { g.RevisionField = "foreign" },
+		func(g *attemptgeneration.Generation) { g.RevisionID = second.RevisionID },
+		func(g *attemptgeneration.Generation) { g.Attempt = 2 },
+		func(g *attemptgeneration.Generation) { g.Attempt = 0 },
+		func(g *attemptgeneration.Generation) { g.LoopID += " " },
+	} {
+		g := first
+		mutate(&g)
+		if a.OwnsGeneration(g) {
+			t.Fatalf("owned foreign generation: %+v", g)
+		}
 	}
 }
 

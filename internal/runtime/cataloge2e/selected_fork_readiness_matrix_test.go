@@ -352,8 +352,11 @@ func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecut
 func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
-			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "agent", "mixed", "mixed_progress"} {
+			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed", "mixed_progress"} {
 				activityFrontier := strings.HasPrefix(frontier, "activity")
+				if strings.HasPrefix(frontier, "activity_loop") && declarations != 0 {
+					continue
+				}
 				if declarations == 0 && frontier != "node" && !activityFrontier {
 					continue
 				}
@@ -444,7 +447,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 						if activityFrontier && stage == "initial" {
 							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, &activityLineageProofStore{
 								SelectedContractForkLifecycle: forkStore, t: t, h: h, calls: &activityCalls,
-								hostile: declarations == 0 && frontier == "activity", rejectFinal: frontier == "activity_rejected",
+								hostile: declarations == 0 && frontier == "activity", hostileLoop: frontier == "activity_loop" || frontier == "activity_loop_rule", rejectFinal: frontier == "activity_rejected",
 							})
 						}
 						if stage == "staged" {
@@ -637,6 +640,9 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		if err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasPrefix(frontier, "activity_loop") {
+			data = append(data, []byte("  revision_id: {type: text}\n")...)
+		}
 		if err := os.WriteFile(eventsPath, data, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -679,6 +685,8 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		node = "mixed-progress-node.yaml"
 	case "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure":
 		node = "inspect-activity-node.yaml"
+	case "activity_loop", "activity_loop_rule", "activity_loop_failure":
+		node = "inspect-loop-activity-node.yaml"
 	}
 	for path, fixture := range map[string]string{
 		"worker-flow/events.yaml": "inspect-events.yaml",
@@ -691,13 +699,39 @@ func selectedForkReadinessCatalogFixture(t *testing.T, declarations int, frontie
 		if strings.HasSuffix(frontier, "failure") && path == "worker-flow/nodes.yaml" {
 			addition = []byte(strings.ReplaceAll(string(addition), "terminal_probe.succeeded", "terminal_probe.failed"))
 		}
+		if frontier == "activity_loop_rule" && path == "worker-flow/nodes.yaml" {
+			addition = []byte(strings.ReplaceAll(string(addition), "      advances_to: executing\n", "      advances_to: working\n      rules:\n        - condition: else\n          advances_to: executing\n"))
+			addition = []byte(strings.ReplaceAll(string(addition), "      activity:\n        id: terminal_probe\n        tool: terminal_probe\n        input: {}", "          activity:\n            id: terminal_probe\n            tool: terminal_probe\n            input: {}"))
+			addition = []byte(strings.ReplaceAll(string(addition), "            input: {}\n", "            input: {}\n        - condition: else\n          advances_to: executing\n          activity:\n            id: unselected_probe\n            tool: terminal_probe\n            input: {}\n"))
+		}
 		file := filepath.Join(root, path)
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasPrefix(frontier, "activity_loop") && path == "worker-flow/nodes.yaml" {
+			data = []byte(strings.ReplaceAll(string(data), "      advances_to: complete", "      loop: {close: inspection, from: executing}\n      advances_to: complete"))
+		}
 		if err := os.WriteFile(file, append(data, addition...), 0600); err != nil {
 			t.Fatal(err)
+		}
+	}
+	if strings.HasPrefix(frontier, "activity_loop") {
+		for path, fixture := range map[string]string{"worker-flow/schema.yaml": "inspect-loop-schema.yaml", "worker-flow/events.yaml": "inspect-loop-events.yaml"} {
+			data, err := os.ReadFile(filepath.Join("testdata", "terminal-retirement", fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasSuffix(path, "events.yaml") {
+				existing, err := os.ReadFile(filepath.Join(root, path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = append(existing, data...)
+			}
+			if err := os.WriteFile(filepath.Join(root, path), data, 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return root

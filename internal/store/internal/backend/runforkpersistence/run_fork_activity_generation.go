@@ -167,6 +167,18 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 }
 
 func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, entityID string) ([]attemptgeneration.Generation, error) {
+	activations, err := loadRunForkEntityActivations(ctx, tx, forkRunID, entityID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]attemptgeneration.Generation, 0, len(activations))
+	for _, activation := range activations {
+		out = append(out, activation.Generation())
+	}
+	return out, nil
+}
+
+func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, forkRunID, entityID string) ([]loopruntime.Activation, error) {
 	if strings.TrimSpace(entityID) == "" {
 		return nil, nil
 	}
@@ -188,15 +200,7 @@ func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, en
 	if err != nil {
 		return nil, err
 	}
-	activations, err := loopruntime.List(carrier.StateBuckets)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]attemptgeneration.Generation, 0, len(activations))
-	for _, activation := range activations {
-		out = append(out, activation.Generation())
-	}
-	return out, nil
+	return loopruntime.List(carrier.StateBuckets)
 }
 
 func remintRunForkPayload(raw json.RawMessage, forkRunID string, generations []attemptgeneration.Generation) (json.RawMessage, error) {

@@ -16679,7 +16679,15 @@ run_model:
       canonical activity decoder and constructor identity, its same-fork causal event, and that event''s completed
       exact node delivery, including handler, flow instance and entity. The admitted immutable execution source must
       match the persisted fork bundle; activity site, tool, generated result names, retry facts and any carried contract
-      pin must agree with that source. Fresh node activities consume the existing supported effect classification,
+      pin must agree with that source. Each fresh request has attempt=1; retry execution attempts belong to results and the activity journal,
+      not additional request identities. Non-loop handlers cannot carry a loop generation or loop stage. A loop
+      request must match the declared admit operation, the causal parent revision, and a generation owned by the
+      persisted entity activation. Its stage is the exact handler transition selected by the committed delivery
+      rule-selection fact, not any reachable stage. Historical generation validation consumes the loop lifecycle
+      owner and does not require an open activation or its current stage: a result may already have advanced,
+      repeated or closed that activation. Missing, malformed, foreign or mismatched loop facts fail closed even
+      when the request identity was canonically reminted. These checks do not authorize historical readmission.
+      Fresh node activities consume the existing supported effect classification,
       including journaled writes already admitted by execution; lineage must not impose a second read-only policy.
       No new approval continuation is introduced. Historical source eligibility, selected-root read reexecution,
       recorded success/failure/uncertain reuse, manual-confirmation refusal, timers and effect permission remain owned

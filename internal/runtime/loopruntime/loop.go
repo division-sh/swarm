@@ -129,6 +129,15 @@ func (a Activation) Generation() attemptgeneration.Generation {
 	}.Normalize()
 }
 
+// OwnsGeneration verifies history, not permission to execute. A later stage,
+// repeat or close cannot invalidate evidence of an already accepted generation.
+func (a Activation) OwnsGeneration(g attemptgeneration.Generation) bool {
+	return a.Validate() == nil && g.Valid() && g == g.Normalize() &&
+		g.FlowID == a.FlowID && g.LoopID == a.LoopID && g.RevisionField == a.RevisionField &&
+		g.ActivationID == a.ActivationID && g.Attempt <= a.Attempt &&
+		g.RevisionID == revisionID(a.ActivationID, g.Attempt)
+}
+
 func (a Activation) Admit(revisionID, fromStage string) AdmissionDisposition {
 	revisionID = strings.TrimSpace(revisionID)
 	if revisionID == "" {

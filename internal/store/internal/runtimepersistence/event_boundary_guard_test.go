@@ -69,6 +69,8 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Canonically reminted, never-executed requests must fail real fork activation.
+	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":                         1,
 	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,
 	"internal/store/internal/runtimepersistence/event_schema_contract_test.go":                   2,
 	"internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go": 1,
