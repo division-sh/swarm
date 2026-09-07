@@ -23,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -402,11 +403,11 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
-		run               func(*AgentManager, context.Context)
+		run               func(*AgentManager, context.Context) error
 		wantSubscriptions int
 	}{
-		{name: "standard", run: func(am *AgentManager, ctx context.Context) { am.Run(ctx) }, wantSubscriptions: 1},
-		{name: "authoritative_delivery_only", run: func(am *AgentManager, ctx context.Context) { am.RunAuthoritativeDeliveryOnly(ctx) }, wantSubscriptions: 0},
+		{name: "standard", run: (*AgentManager).Run, wantSubscriptions: 1},
+		{name: "authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly, wantSubscriptions: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := newProjectionTestBus()
@@ -431,13 +432,24 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			<-factory.secondStarted
 			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 			defer cancelRun()
-			runDone := make(chan struct{})
-			go func() { tc.run(am, managedExecutionTestContext(t, runCtx)); close(runDone) }()
+			runDone := make(chan error, 1)
+			go func() { runDone <- tc.run(am, managedExecutionTestContext(t, runCtx)) }()
 			close(releaseBuild)
 			if err := <-reconfigureDone; err != nil {
 				t.Fatalf("ReconfigureAgent: %v", err)
 			}
-			<-runDone
+			if err := <-runDone; err != nil {
+				failure, typed := runtimefailures.EnvelopeFromError(err)
+				if !typed || failure.Detail.Code != "agent_retirement_pending" {
+					t.Fatalf("unexpected concurrent start failure: %v", err)
+				}
+				// A start that enters during the retained predecessor join fails
+				// closed; it must not masquerade as successful route publication.
+				if _, live := bus.current(agentID); live || am.IsRunning() {
+					t.Fatal("rejected manager start retained live execution")
+				}
+				return
+			}
 			current, ok := bus.current(agentID)
 			if !ok {
 				t.Fatal("run did not install a route")
