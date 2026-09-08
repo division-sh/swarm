@@ -253,7 +253,7 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 			return nil, errors.New("durable lifecycle census returned a non-durable cell")
 		}
 		switch state.Topology.Authority.Kind {
-		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan:
+		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan, runtimeagenttopology.AuthoritySelectedForkDeclarationPlan:
 		default:
 			return nil, fmt.Errorf("durable lifecycle census returned unsupported authority %q", state.Topology.Authority.Kind)
 		}
@@ -398,6 +398,9 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, false); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -425,6 +428,9 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	}
 	req, err := normalizeLifecycleTransition(req)
 	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, true); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)

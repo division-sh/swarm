@@ -231,6 +231,16 @@ func (s *postgresSession) ProveSelectedForkGenerationGrant(ctx context.Context, 
 	})
 }
 
+func (s *postgresSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	var result runtimemanager.RunExecutionOwnership
+	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = storeagent.InspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, false)
+		return err
+	})
+	return result, err
+}
+
 func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -270,9 +280,6 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 func (s *postgresSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := storeagent.AuthorizeRetainedGrantLifecycleTx(txctx, tx, req, false); err != nil {
-			return err
-		}
 		var err error
 		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
 		return err
@@ -406,6 +413,16 @@ func (s *sqliteSession) ProveSelectedForkGenerationGrant(ctx context.Context, ev
 	})
 }
 
+func (s *sqliteSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	var result runtimemanager.RunExecutionOwnership
+	err := s.owner.backend.RunTransaction(ctx, "inspect run execution ownership", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = storeagent.InspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, true)
+		return err
+	})
+	return result, err
+}
+
 func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -434,9 +451,6 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(context.Context, runtimedes
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err := s.owner.backend.RunTransaction(ctx, "commit retained agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
-		if err := storeagent.AuthorizeRetainedGrantLifecycleTx(txctx, tx, req, true); err != nil {
-			return err
-		}
 		var err error
 		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
 		return err

@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/google/uuid"
 )
 
 // AuthorizeRetainedGrantLifecycleTx runs inside the retained session's named
@@ -36,13 +39,109 @@ func AuthorizeRetainedGrantLifecycleTx(ctx context.Context, tx *sql.Tx, req mana
 	if req.ProcessBinding != expected || evidence.State == startupownership.GrantRetired {
 		return errors.New("lifecycle generation grant is retired or differs from the retained process binding")
 	}
+	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, req.Identity.RunID, sqlite)
+	if err != nil {
+		return err
+	}
+	if ownership != manager.RunExecutionOwned {
+		// Complete-source-set reconciliation may terminalize a removed ordinary
+		// declaration across source coordinates, never acquire its execution.
+		// The topology owner below must still prove absence from the current plan.
+		if ownership == manager.RunExecutionOtherNormalSource && evidence.SelectedFork == nil && req.Agent == nil && req.TargetPhase == manager.AgentLifecycleTerminated &&
+			req.Topology.Authority.Kind == agenttopology.AuthorityStaticDeclarationPlan &&
+			(req.OperationKind == "source_set_retire" || req.OperationKind == "process_takeover") {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", manager.ErrRunExecutionNotOwned, req.Identity.RunID)
+	}
+	return nil
+}
+
+// InspectRunExecutionOwnershipTx verifies current grant evidence and classifies
+// the durable run binding in the same snapshot. A selected binding reserves the
+// child at materialization commit, before an execution or grant exists.
+func InspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	if tx == nil {
+		return 0, errors.New("run execution ownership requires a transaction")
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&raw); err != nil {
+		return 0, fmt.Errorf("load run execution generation grant: %w", err)
+	}
+	var current startupownership.GrantEvidence
+	if err := canonicaljson.DecodeInto(raw, &current); err != nil {
+		return 0, err
+	}
+	actual, err := canonicaljson.Bytes(current)
+	if err != nil {
+		return 0, err
+	}
+	expected, err := canonicaljson.Bytes(evidence)
+	if err != nil {
+		return 0, err
+	}
+	if string(actual) != string(expected) {
+		return 0, errors.New("run execution generation grant is no longer current")
+	}
+	return inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+}
+
+func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	if err := evidence.Validate(); err != nil {
+		return 0, err
+	}
+	if evidence.State == startupownership.GrantRetired {
+		return 0, errors.New("run execution generation grant is retired")
+	}
+	hash, bindingID, err := loadRunExecutionBindingTx(ctx, tx, runID, sqlite)
+	if err != nil {
+		return 0, err
+	}
 	if evidence.SelectedFork == nil {
-		return nil
+		if bindingID.Valid {
+			return manager.RunExecutionForeign, nil
+		}
+		if hash != evidence.BundleHash {
+			return manager.RunExecutionOtherNormalSource, nil
+		}
+		return manager.RunExecutionOwned, nil
 	}
-	if req.Identity.RunID != evidence.SelectedFork.ForkRunID {
-		return errors.New("selected-fork grant cannot mutate another run")
+	if err := ProveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite); err != nil {
+		return 0, err
 	}
-	return ProveSelectedForkGenerationGrantTx(ctx, tx, evidence, sqlite)
+	if runID != evidence.SelectedFork.ForkRunID || !bindingID.Valid || bindingID.String != evidence.SelectedFork.BindingID || hash != evidence.BundleHash {
+		return manager.RunExecutionForeign, nil
+	}
+	return manager.RunExecutionOwned, nil
+}
+
+func loadRunExecutionBindingTx(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) (string, sql.NullString, error) {
+	id, err := uuid.Parse(runID)
+	if err != nil || id == uuid.Nil || id.String() != runID {
+		return "", sql.NullString{}, errors.New("run execution ownership requires a canonical nonzero run UUID")
+	}
+	query := `SELECT run.bundle_hash, binding.binding_id
+		FROM runs AS run
+		LEFT JOIN run_fork_selected_contract_bindings AS binding ON binding.fork_run_id=run.run_id
+		WHERE run.run_id=$1`
+	if !sqlite {
+		query += ` FOR UPDATE OF run`
+	}
+	var hash string
+	var bindingID sql.NullString
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&hash, &bindingID); err != nil {
+		return "", sql.NullString{}, fmt.Errorf("load run execution binding: %w", err)
+	}
+	if err := bundleidentity.ValidateCanonicalHash(hash); err != nil {
+		return "", sql.NullString{}, err
+	}
+	if bindingID.Valid {
+		id, err := uuid.Parse(bindingID.String)
+		if err != nil || id == uuid.Nil || id.String() != bindingID.String {
+			return "", sql.NullString{}, errors.New("run execution binding contains an invalid binding UUID")
+		}
+	}
+	return hash, bindingID, nil
 }
 
 // ProveSelectedForkGenerationGrantTx joins the execution with its immutable
@@ -60,6 +159,7 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		execution.generation, execution.fence_generation, execution.execution_owner,
 		execution.admission_fingerprint, execution.container_plan_fingerprint,
 		execution.actor_census_fingerprint, execution.effective_config_fingerprint,
+		execution.declaration_plan_fingerprint, execution.declaration_plan,
 		run.bundle_hash
 		FROM run_fork_selected_contract_runtime_executions AS execution
 		JOIN run_fork_selected_contract_bindings AS binding ON binding.binding_id = execution.binding_id
@@ -79,11 +179,12 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 	}
 	actual := startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}
 	var bundleHash string
+	var declarationRaw []byte
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&actual.BindingID, &actual.ForkRunID, &actual.ExecutionGeneration,
 		&actual.FenceGeneration, &actual.ExecutionOwner, &actual.AdmissionFingerprint,
 		&actual.ContainerPlanFingerprint, &actual.ActorCensusFingerprint,
-		&actual.EffectiveConfigFingerprint, &bundleHash)
+		&actual.EffectiveConfigFingerprint, &actual.DeclarationPlanFingerprint, &declarationRaw, &bundleHash)
 	if err == sql.ErrNoRows {
 		return errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
 	}
@@ -92,6 +193,16 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 	}
 	if actual != *binding || bundleHash != evidence.BundleHash {
 		return errors.New("selected-fork grant binding, execution fence or fingerprints changed")
+	}
+	var declarations agenttopology.SelectedDeclarationPlan
+	if err := canonicaljson.DecodeInto(declarationRaw, &declarations); err != nil {
+		return err
+	}
+	if err := declarations.Validate(); err != nil {
+		return err
+	}
+	if declarations.Revision != actual.DeclarationPlanFingerprint || declarations.BundleHash != bundleHash {
+		return errors.New("selected-fork declaration plan differs from grant and target source")
 	}
 	return nil
 }

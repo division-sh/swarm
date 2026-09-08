@@ -791,7 +791,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 		LifecycleEpoch:      runtimebus.CurrentRuntimeEpoch(),
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
-	rec.Topology = managerTestTopologyAdmission(t)
+	rec.Topology = managerTestEphemeralTopologyAdmission(t)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 		t.Fatalf("hydrate persisted running agent: %v", err)
 	}

@@ -456,6 +456,10 @@ func sqliteRenderPredicate(raw string) (string, error) {
 	// Render longer bundle-hash column names before the generic bundle_hash
 	// spelling so a suffix match cannot leave an invalid identifier prefix.
 	predicate = strings.ReplaceAll(predicate,
+		"declaration_plan_fingerprint ~ '^sha256:[0-9a-f]{64}$'",
+		"(length(declaration_plan_fingerprint) = 71 AND substr(declaration_plan_fingerprint, 1, 7) = 'sha256:' AND substr(declaration_plan_fingerprint, 8) GLOB '"+strings.Repeat("[0-9a-f]", 64)+"')",
+	)
+	predicate = strings.ReplaceAll(predicate,
 		"lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("lifecycle_bundle_hash"),
 	)

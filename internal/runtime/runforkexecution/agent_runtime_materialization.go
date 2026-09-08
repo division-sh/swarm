@@ -83,6 +83,7 @@ type SelectedContractAgentRuntimeMaterialization struct {
 }
 
 type selectedContractAgentRuntimePlan struct {
+	Declarations        runtimeagenttopology.SelectedDeclarationPlan
 	Proof               SelectedContractAgentRuntimeMaterialization
 	Blueprints          []runtimemanager.AgentMaterializationBlueprint
 	Flows               []runtimemanager.TemplateFlowMaterializationPlan
@@ -97,6 +98,14 @@ func (p selectedContractAgentRuntimePlan) bindRun(runID string, committed []runf
 	if runID == "" {
 		return selectedContractAgentRuntimePlan{}, errors.New("selected-contract agent runtime requires fork run_id")
 	}
+	selectedTopology, err := runtimeagenttopology.SelectedDeclarationAdmission(runID, p.Declarations)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{}, err
+	}
+	declarations := make(map[agentidentity.Plan]struct{}, len(p.Declarations.Agents))
+	for _, desired := range p.Declarations.Agents {
+		declarations[desired.Identity] = struct{}{}
+	}
 	bindPlans := func(in []agentidentity.Plan) ([]agentidentity.Identity, error) {
 		out := make([]agentidentity.Identity, 0, len(in))
 		for _, plan := range in {
@@ -109,7 +118,6 @@ func (p selectedContractAgentRuntimePlan) bindRun(runID string, committed []runf
 		sortAgentIdentities(out)
 		return out, nil
 	}
-	var err error
 	p.Proof.AgentRecipients, err = bindPlans(p.Proof.AgentRecipientPlans)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
@@ -143,12 +151,12 @@ func (p selectedContractAgentRuntimePlan) bindRun(runID string, committed []runf
 		if identityErr != nil {
 			return selectedContractAgentRuntimePlan{}, identityErr
 		}
-		if err := record.Topology.Validate(); err != nil {
-			topology, ok := topologyByIdentity[identity]
-			if !ok {
-				return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent %s has no committed topology admission", identity.Description())
-			}
+		if topology, ok := topologyByIdentity[identity]; ok {
 			record.Topology = topology
+		} else if _, declared := declarations[blueprint.Identity]; declared {
+			record.Topology = selectedTopology
+		} else {
+			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent %s has no admitted declaration or committed readiness topology", identity.Description())
 		}
 		if err := record.Topology.Validate(); err != nil {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent %s topology: %w", identity.Description(), err)
@@ -288,6 +296,10 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
+	declarations, err := prepareSelectedContractDeclarations(loaded, blueprints)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{}, err
+	}
 	proof := SelectedContractAgentRuntimeMaterialization{
 		Owner:                    runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
 		RecipientPlanningOwner:   planning.Owner,
@@ -298,7 +310,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		EphemeralForkLocal:       true,
 	}
 	if len(agentPlans) == 0 {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, nil
+		return selectedContractAgentRuntimePlan{Declarations: declarations, Proof: proof, Options: options}, nil
 	}
 	options, workspaceProjection, err := bindSelectedContractWorkspaceProjection(loaded, options)
 	if err != nil {
@@ -309,47 +321,6 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 			resultErr = errors.Join(resultErr, workspaceProjection.Release())
 		}
 	}()
-	if options.ProcessCapability == nil {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration provenance requires the process topology capability")
-	}
-	plan, exists, err := options.ProcessCapability.CurrentSourceSet(ctx)
-	if err != nil {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("prove selected-contract source-set authority: %w", err)
-	}
-	if !exists {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration provenance requires an installed source-set plan")
-	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}.Normalize()
-	if err := coordinate.Validate(); err != nil {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract declaration source coordinate: %w", err)
-	}
-	sourceCurrent := false
-	for _, source := range plan.Sources {
-		if source.Normalize().Key() == coordinate.Key() {
-			sourceCurrent = true
-			break
-		}
-	}
-	if !sourceCurrent {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration source is not current in the process source-set plan")
-	}
-	staticTopology, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision,
-		coordinate.BundleHash,
-		runtimeagenttopology.LifetimeDurableManaged,
-	)
-	if err != nil {
-		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract static declaration topology: %w", err)
-	}
-	staticPlans := make(map[agentidentity.Plan]struct{}, len(plan.Agents))
-	for _, desired := range plan.Agents {
-		staticPlans[desired.Identity.Normalize()] = struct{}{}
-	}
-	for i := range blueprints {
-		if _, declared := staticPlans[blueprints[i].Identity.Normalize()]; declared {
-			blueprints[i].Topology = staticTopology
-		}
-	}
 	blueprintsByPlan := map[agentidentity.Plan]runtimemanager.AgentMaterializationBlueprint{}
 	configured := make([]agentidentity.Plan, 0, len(blueprints))
 	for _, blueprint := range blueprints {
@@ -387,7 +358,47 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		return selectedContractAgentRuntimePlan{Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options}, selectedContractAgentRuntimeUnsupportedPlanError(agentPlans, "missing selected-fork agent factory/runtime configuration")
 	}
 	proof.MaterializationSupported = true
-	return selectedContractAgentRuntimePlan{Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options, workspaceProjection: workspaceProjection}, nil
+	return selectedContractAgentRuntimePlan{Declarations: declarations, Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options, workspaceProjection: workspaceProjection}, nil
+}
+
+func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, blueprints []runtimemanager.AgentMaterializationBlueprint) (runtimeagenttopology.SelectedDeclarationPlan, error) {
+	static, err := runforkreadiness.StaticAgentBlueprints(loaded.Source)
+	if err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
+	configured := make(map[agentidentity.Plan]runtimemanager.AgentMaterializationBlueprint, len(blueprints))
+	for _, blueprint := range blueprints {
+		if previous, exists := configured[blueprint.Identity]; exists {
+			left, err := runtimemanager.AgentConfigPlanRevision(previous.Config, previous.Identity)
+			if err != nil {
+				return runtimeagenttopology.SelectedDeclarationPlan{}, err
+			}
+			right, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, blueprint.Identity)
+			if err != nil || left != right {
+				return runtimeagenttopology.SelectedDeclarationPlan{}, errors.New("selected declaration repeats a conflicting configuration")
+			}
+		}
+		configured[blueprint.Identity] = blueprint
+	}
+	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(static))
+	seen := make(map[agentidentity.Plan]struct{}, len(static))
+	for _, declaration := range static {
+		if _, exists := seen[declaration.Identity]; exists {
+			continue
+		}
+		seen[declaration.Identity] = struct{}{}
+		blueprint, exists := configured[declaration.Identity]
+		if !exists {
+			return runtimeagenttopology.SelectedDeclarationPlan{}, fmt.Errorf("selected declaration %s has no admitted configuration", declaration.Identity.Description())
+		}
+		revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, blueprint.Identity)
+		if err != nil {
+			return runtimeagenttopology.SelectedDeclarationPlan{}, err
+		}
+		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: blueprint.Identity, ConfigRevision: revision,
+			Source: runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}})
+	}
+	return runtimeagenttopology.NewSelectedDeclarationPlan(loaded.SourceArtifactFact.BundleHash(), desired)
 }
 
 func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource, options SelectedContractAgentRuntimeOptions) (SelectedContractAgentRuntimeOptions, *selectedContractWorkspaceProjection, error) {
@@ -473,6 +484,16 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if pipeline == nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
 	}
+	generationGrant, err := issueSelectedContractAgentRuntimeGenerationGrant(ctx, req, authority)
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
+	grantOwned := true
+	defer func() {
+		if grantOwned {
+			resultErr = errors.Join(resultErr, generationGrant.Retire(context.Background()))
+		}
+	}()
 	var published []runtimeflowidentity.RunScopedFlowInstance
 	defer func() {
 		if resultErr != nil {
@@ -508,20 +529,17 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			DeliveryStore:      ports.busDurable.DeliveryLifecycle,
 			WorkOwner:          req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
 			ReceiverExecution:  req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
-		}, nil, bus, ports, pipeline)
+		}, generationGrant, bus, ports, pipeline)
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
-		return &selectedContractAgentRuntime{manager: manager, workspaceProjection: req.AgentRuntime.workspaceProjection}, admission, nil
-	}
-	generationGrant, err := issueSelectedContractAgentRuntimeGenerationGrant(ctx, req, authority)
-	if err != nil {
-		return nil, managedexecution.Admission{}, err
-	}
-	grantOwned := true
-	defer func() {
-		if grantOwned {
-			_ = generationGrant.Retire(context.Background())
+		if _, err := generationGrant.MarkProbesSettled(ctx, nil); err != nil {
+			return nil, managedexecution.Admission{}, err
 		}
-	}()
+		if _, err := generationGrant.AdmitExecution(ctx); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		grantOwned = false
+		return &selectedContractAgentRuntime{manager: manager, generationGrant: generationGrant, workspaceProjection: req.AgentRuntime.workspaceProjection}, admission, nil
+	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, generationGrant, bus, pipeline)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -630,23 +648,32 @@ func issueSelectedContractAgentRuntimeGenerationGrant(
 	if capability == nil {
 		return nil, errors.New("selected-contract agent runtime requires the process topology capability")
 	}
-	plan, exists, err := capability.CurrentSourceSet(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load selected-contract runtime source set: %w", err)
-	}
-	if !exists {
-		return nil, errors.New("selected-contract agent runtime requires a current complete source set")
-	}
 	processAuthority, err := capability.Evidence()
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract process authority: %w", err)
 	}
 	bundleHash := req.LoadedSource.SourceArtifactFact.BundleHash()
-	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+	ports, err := req.Owner.require()
+	if err != nil {
+		return nil, err
+	}
+	binding, err := ports.fork.RequireRunForkSelectedContractBinding(ctx, authority.SelectedFork.ForkRunID)
+	if err != nil {
+		return nil, err
+	}
+	grant, err := capability.IssueSelectedForkGenerationGrant(ctx, runtimestartupownership.SelectedForkGrantRequest{
 		BundleHash:        bundleHash,
 		RuntimeInstanceID: processAuthority.RuntimeInstanceID,
-		RuntimeGeneration: authority.SelectedFork.Generation,
-		SourceSetRevision: plan.Revision,
+		Binding: runtimestartupownership.SelectedForkGrantBinding{
+			BindingID: binding.BindingID, ForkRunID: authority.SelectedFork.ForkRunID,
+			ExecutionID: authority.SelectedFork.ExecutionID, ExecutionGeneration: authority.SelectedFork.Generation,
+			ExecutionOwner: authority.ExecutionOwner, FenceGeneration: authority.FenceGeneration,
+			AdmissionFingerprint:       authority.SelectedFork.AdmissionFingerprint,
+			ContainerPlanFingerprint:   authority.SelectedFork.ContainerPlanFingerprint,
+			ActorCensusFingerprint:     authority.SelectedFork.ActorCensusFingerprint,
+			EffectiveConfigFingerprint: authority.SelectedFork.EffectiveConfigFingerprint,
+			DeclarationPlanFingerprint: req.AgentRuntime.Declarations.Revision,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue selected-contract runtime generation grant: %w", err)

@@ -183,6 +183,13 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 		filtered := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
 		for _, item := range items {
 			runID := strings.TrimSpace(item.Plan.RunID)
+			ownership, err := am.inspectRunExecutionOwnership(ctx, runID)
+			if err != nil {
+				return nil, fmt.Errorf("admit dynamic flow readiness run %s: %w", runID, err)
+			}
+			if ownership != RunExecutionOwned {
+				continue
+			}
 			disposition, ok := cache[runID]
 			if !ok {
 				disposition, err = am.roles.StandingRestarts.StandingRunRestartDisposition(ctx, runID)
@@ -423,6 +430,9 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	req runtimepipeline.FlowInstanceActivationRequest,
 	runID string,
 ) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
+	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
 	templateID := strings.TrimSpace(req.Instance.TemplateID)
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
@@ -512,6 +522,9 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
 		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact run_id")
+	}
+	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
+		return err
 	}
 	observedAt = observedAt.UTC()
 	if observedAt.IsZero() {
@@ -901,6 +914,9 @@ func validateDynamicFlowRuntimeReadinessCallbackSource(
 func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
 	admission dynamicFlowRuntimeReadinessAdmission,
 ) (result error) {
+	if err := am.requireRunExecutionOwnership(admission.ctx, admission.key.runID); err != nil {
+		return err
+	}
 	// The caller may stop waiting, but the accepted attempt must settle its
 	// retirement. Begin retains the exact Manager/standing/fork occurrence;
 	// cancellation of those owners, rather than the waiter, controls execution.
@@ -1044,6 +1060,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	admission dynamicFlowRuntimeReadinessAdmission,
 ) (retErr error) {
 	ctx := admission.ctx
+	if err := am.requireRunExecutionOwnership(ctx, admission.key.runID); err != nil {
+		return err
+	}
 	lease, err := am.beginWork(ctx, "readiness topology retirement")
 	if err != nil {
 		return err

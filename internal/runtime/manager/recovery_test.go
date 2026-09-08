@@ -151,6 +151,25 @@ type recoveryTestStore struct {
 	agents []PersistedAgent
 }
 
+func (s *recoveryTestStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if runID == managerIdentityTestRunID {
+		return RunExecutionOwned, nil
+	}
+	for _, record := range s.agents {
+		identity, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return 0, err
+		}
+		if identity.RunID == runID {
+			return RunExecutionOwned, nil
+		}
+	}
+	return RunExecutionForeign, nil
+}
+
 type startupRecoveryOrderStore struct {
 	recoveryTestStore
 	order      *[]string

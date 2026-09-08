@@ -71,6 +71,9 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 	if runID == "" {
 		return errors.New("committed agent readiness requires event run_id")
 	}
+	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
+		return err
+	}
 	blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
 	if err != nil {
 		return err
@@ -198,6 +201,13 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 			continue
 		}
 		if current.LifecyclePhase == AgentLifecycleTerminated {
+			continue
+		}
+		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		if err != nil {
+			return err
+		}
+		if ownership == RunExecutionForeign {
 			continue
 		}
 		owner := current.Topology.Authority.Static
@@ -529,6 +539,13 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		state.Identity = identity
 		census[identity] = state
 		if state.ProcessBinding.BundleHash == coordinate.BundleHash {
+			ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if ownership != RunExecutionOwned {
+				continue
+			}
 			selected[identity] = state
 		}
 	}
@@ -878,6 +895,17 @@ func (am *AgentManager) hydratePersistedAgentExecutions(ctx context.Context) err
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].StartedAt.Before(agents[j].StartedAt) })
 	for _, rec := range agents {
 		if !rec.Topology.Equal(admission) {
+			continue
+		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		if err != nil {
+			return err
+		}
+		if ownership != RunExecutionOwned {
 			continue
 		}
 		if strings.TrimSpace(rec.Config.ID) == "" {

@@ -132,6 +132,10 @@ func (*runtimeTestRetainedSession) ApplyDestructiveResetCleanup(context.Context,
 	return runtimedestructivereset.CleanupResult{}, errors.New("runtime test retained session does not own destructive reset")
 }
 
+func (*runtimeTestRetainedSession) InspectRunExecutionOwnership(context.Context, runtimestartupownership.GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
+	return 0, errors.New("run execution ownership requires a store-backed test session")
+}
+
 func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	result := runtimemanager.AgentLifecycleTransitionResult{
 		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,

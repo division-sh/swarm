@@ -126,6 +126,8 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "container", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ContainerPlanFingerprint += ":stale" }},
 		{name: "actors", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ActorCensusFingerprint += ":stale" }},
 		{name: "config", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.EffectiveConfigFingerprint += ":stale" }},
+		{name: "declarations", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.DeclarationPlanFingerprint += ":stale" }},
+		{name: "executable coordinate", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutableCoordinateFingerprint += ":stale" }},
 		{name: "generation", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.Generation++ }},
 		{name: "issue owner", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutionOwner += ":stale" }},
 	}
@@ -1261,7 +1263,8 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 	return selectedCompletionFixture{
 		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
-			Admission: admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
+			DeclarationPlan: emptySelectedDeclarationForTest(t, db, forkRun),
+			Admission:       admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: now,
 		},
 	}

@@ -100,6 +100,10 @@ func (s *supervisorTestRetainedSession) ApplyDestructiveResetCleanup(_ context.C
 	return runtimedestructivereset.CleanupResult{OperationName: req.Result.OperationName, IncludeSourceArtifacts: req.Result.IncludeSourceArtifacts, AppliedAt: req.RequestedAt}, nil
 }
 
+func (*supervisorTestRetainedSession) InspectRunExecutionOwnership(context.Context, runtimestartupownership.GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
+	return 0, errors.New("run execution ownership requires a store-backed test session")
+}
+
 func (*supervisorTestRetainedSession) CommitAgentLifecycleTransition(context.Context, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("supervisor test session has no agent lifecycle rows")
 }

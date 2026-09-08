@@ -395,6 +395,7 @@ type SessionTerminalOwner interface {
 // RetainedSession is implemented only by private selected-store adapters. It
 // never crosses process composition; callers receive ProcessCapability.
 type RetainedSession interface {
+	InspectRunExecutionOwnership(context.Context, GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error)
 	ProveSelectedForkGenerationGrant(context.Context, GrantEvidence) error
 	Authority() (Authority, error)
 	ProveCurrent(context.Context) error

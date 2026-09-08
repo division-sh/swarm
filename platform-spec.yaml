@@ -13741,7 +13741,7 @@ platform_tables:
             lifecycle_bundle_hash TEXT NOT NULL CHECK (lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             lifecycle_runtime_instance_id UUID NOT NULL,
             lifecycle_runtime_generation BIGINT NOT NULL CHECK (lifecycle_runtime_generation > 0),
-            topology_authority_kind     TEXT NOT NULL CHECK (topology_authority_kind IN ('static_declaration_plan', 'flow_readiness_plan')),
+            topology_authority_kind     TEXT NOT NULL CHECK (topology_authority_kind IN ('static_declaration_plan', 'flow_readiness_plan', 'selected_fork_declaration_plan')),
             topology_admission          JSONB NOT NULL,
             execution_lifetime          TEXT NOT NULL CHECK (execution_lifetime = 'durable_managed'),
             status                      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'terminated', 'failed')),
@@ -14148,6 +14148,9 @@ platform_tables:
         exist for a fork. Exact non-mutating admission and container/actor/config fingerprints are
         validated transactionally before issuance. Immutable completion evidence keeps this row and
         its retained runs parent readable after mutable fork projections are discarded.
+        The immutable selected declaration plan and its canonical fingerprint own static target
+        topology without consulting the live source-set head. An explicit empty plan represents
+        a target with no static agents; missing or corrupt plans never imply an empty census.
       ddl: |
         CREATE TABLE run_fork_selected_contract_runtime_executions (
             execution_id                   UUID PRIMARY KEY,
@@ -14161,6 +14164,8 @@ platform_tables:
             container_plan_fingerprint     TEXT NOT NULL,
             actor_census_fingerprint       TEXT NOT NULL,
             effective_config_fingerprint   TEXT NOT NULL,
+            declaration_plan_fingerprint   TEXT NOT NULL CHECK (declaration_plan_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            declaration_plan               JSONB NOT NULL,
             state                          TEXT NOT NULL CHECK (state IN ('prepared', 'running', 'quiesced', 'failed', 'closed')),
             execution_owner                TEXT,
             lease_expires_at               TIMESTAMPTZ,
@@ -14684,6 +14689,14 @@ platform_tables:
         run coordinate in the selected store. Retirement records terminal grant evidence even
         when the selected execution has already ended; it never authorizes successor work.
         Every readiness/execution/lifecycle admission also re-proves the retained process session.
+        Run admission consumes a closed owned/foreign result from that grant and the exact
+        durable run binding. A selected binding reserves its child at materialization commit,
+        before execution issuance: ordinary grants cannot discover, adopt or mutate it even
+        when the bundle hash and readiness plan match. Foreign rows are excluded from ordinary
+        readiness scans; direct and queued reconciliation rechecks ownership before acting.
+        Missing, malformed, retired or fenced authority is an error, not ordinary ownership.
+        Shared agent lifecycle adapters repeat this classification inside their mutation
+        transaction, including registration, takeover, rebind and terminal transitions.
       ddl: |
         CREATE TABLE runtime_generation_grants (
             fact_id               UUID PRIMARY KEY,
@@ -35735,13 +35748,23 @@ agent_topology_authority:
       RestoreSourceSet repairs the retained process head before runtime publication and is not a live
       reload primitive.
   admission:
-    variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
+    variants: [StaticDeclarationPlan, SelectedForkDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
       Every lifecycle construction carries exactly one sealed topology variant and one
       orthogonal execution lifetime. Static admission binds the global source-set revision
-      and exact bundle source coordinate. Flow readiness binds the exact keyed readiness
+      and exact bundle source coordinate. Selected declaration admission binds the fork run,
+      target bundle and immutable selected declaration/configuration census fingerprint recorded
+      by the selected runtime execution owner. It cannot be converted into a live source-set
+      plan. Flow readiness binds the exact keyed readiness
       plan. Ephemeral execution is nonpersistable. No zero variant, free-string authority,
       inferred owner, HiredBy interpretation, or flat declaration fallback exists.
+    selected_declarations: >-
+      The selected execution owner records the canonical typed declaration census, including an
+      explicit empty census, in its issuance transaction. The execution coordinate and every
+      selected grant bind its fingerprint. Issuance, claim and lifecycle admission reject changed
+      fingerprints; decoding rejects an invalid census instead of normalizing or repairing it.
+      A selected declaration mutation requires exact run, target, declaration identity and
+      effective configuration revision membership. It never queries the live source-set head.
   process_capability:
     owner: one retained selected-store session acquired only by process composition
     acquisition: >-
@@ -35804,6 +35827,20 @@ agent_topology_authority:
       each survivor's topology and process binding together under the lifecycle coordinator only after every durable
       rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
       is deterministic, idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
+    selected_run_ownership: >-
+      The durable selected-contract binding reserves its child run at materialization commit,
+      before execution issuance or discovery. A same-hash normal grant does not own that child.
+      Manager discovery, startup takeover, source-set rebind, readiness callbacks and durable
+      registration/adoption consume the selected-store run ownership classification through
+      their current generation grant. Queued readiness work rechecks after admission and before
+      topology mutation; an earlier observation is not retained permission. Missing or corrupt
+      run evidence, retired grants, changed selected execution fences and expired execution
+      ownership fail closed. The lifecycle transaction independently checks run ownership before
+      writing, so discovery filtering cannot be bypassed with a direct lifecycle request.
+      Complete-source-set retirement remains a distinct terminal operation: source_set_retire
+      or terminal process_takeover may settle a removed ordinary static declaration across
+      bundle coordinates only with the current plan's absence proof. This never admits execution
+      and never applies to a selected-bound child, even when its historical topology was static.
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline

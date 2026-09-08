@@ -153,7 +153,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 						t.Fatalf("flow-owned readiness = %#v", prepared.States)
 					}
 					if selected == 0 {
-						runtime, err := prepareSelectedContractAgentRuntimeMaterialization(context.Background(), LoadedSelectedContractSource{Source: source}, planning, prepared.Blueprints, SelectedContractAgentRuntimeOptions{})
+						runtime, err := prepareSelectedContractAgentRuntimeMaterialization(context.Background(), loaded, planning, prepared.Blueprints, SelectedContractAgentRuntimeOptions{})
 						if err != nil || runtime.Proof.MaterializationRequired || len(runtime.Blueprints) != 0 {
 							t.Fatalf("non-agent frontier fabricated a handler: %#v, %v", runtime, err)
 						}

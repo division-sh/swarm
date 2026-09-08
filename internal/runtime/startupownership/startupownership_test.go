@@ -18,6 +18,10 @@ import (
 const startupBundleHashA = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const startupBundleHashB = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+func (*retainedSessionProbe) InspectRunExecutionOwnership(context.Context, GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
+	return 0, errors.New("run execution ownership is not implemented by this session probe")
+}
+
 func TestAuthorityValidateRecomputesAcquisitionBinding(t *testing.T) {
 	req := AcquireRequest{OwnerID: "owner-a", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
 	valid, err := NewColdAuthority(req, "sqlite_retained_owner")
@@ -337,6 +341,37 @@ func TestRetainedSessionLossRetiresCapabilityAndAllGrantsBeforeReturn(t *testing
 	case <-grant.Done():
 	default:
 		t.Fatal("grant was not terminal before ProveCurrent returned")
+	}
+}
+
+func TestProcessPossessionProofDoesNotRequireSourceSet(t *testing.T) {
+	capability, session, _ := testCapability(t)
+	session.mu.Lock()
+	session.loadSourceErr = errors.New("live source set must not be consulted")
+	session.mu.Unlock()
+	if err := capability.ProveCurrent(context.Background()); err != nil {
+		t.Fatalf("process proof borrowed live-source authority: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := capability.ProveCurrent(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled process proof = %v", err)
+	}
+	select {
+	case <-capability.Done():
+		t.Fatal("caller cancellation terminalized process possession")
+	default:
+	}
+	session.mu.Lock()
+	session.proveErr = errors.New("process possession lost")
+	session.mu.Unlock()
+	if err := capability.ProveCurrent(context.Background()); err == nil {
+		t.Fatal("lost process possession accepted")
+	}
+	select {
+	case <-capability.Done():
+	default:
+		t.Fatal("lost possession did not terminalize before return")
 	}
 }
 

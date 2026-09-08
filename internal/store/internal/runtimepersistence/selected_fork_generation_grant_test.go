@@ -55,6 +55,7 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 					ExecutionOwner: authority.ExecutionOwner, AdmissionFingerprint: issued.AdmissionFingerprint,
 					ContainerPlanFingerprint: issued.ContainerPlanFingerprint, ActorCensusFingerprint: issued.ActorCensusFingerprint,
 					EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint,
+					DeclarationPlanFingerprint: issued.DeclarationPlanFingerprint,
 				},
 			}
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.forkRun).Scan(&req.BundleHash); err != nil {
@@ -81,6 +82,9 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 				}},
 				{"config", func(r *startupownership.SelectedForkGrantRequest) {
 					r.Binding.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("4", 64)
+				}},
+				{"declarations", func(r *startupownership.SelectedForkGrantRequest) {
+					r.Binding.DeclarationPlanFingerprint = "sha256:" + strings.Repeat("4", 64)
 				}},
 				{"bundle", func(r *startupownership.SelectedForkGrantRequest) {
 					r.BundleHash = "bundle-v2:sha256:" + strings.Repeat("4", 64)
@@ -145,6 +149,8 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 				{"container_plan_fingerprint", "sha256:" + strings.Repeat("7", 64)},
 				{"actor_census_fingerprint", "sha256:" + strings.Repeat("7", 64)},
 				{"effective_config_fingerprint", "sha256:" + strings.Repeat("7", 64)},
+				{"declaration_plan_fingerprint", "sha256:" + strings.Repeat("7", 64)},
+				{"declaration_plan", `{}`},
 				{"lease_expires_at", time.Unix(1, 0).UTC()},
 				{"state", "prepared"},
 			} {

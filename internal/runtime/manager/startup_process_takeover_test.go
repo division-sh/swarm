@@ -31,6 +31,18 @@ func (s *startupProcessTakeoverStore) ProcessExecutionBinding() (ProcessExecutio
 	return s.target, s.target.Validate()
 }
 
+func (s *startupProcessTakeoverStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	for _, state := range s.states {
+		if state.Identity.RunID == runID && state.ProcessBinding.BundleHash == s.target.BundleHash {
+			return RunExecutionOwned, nil
+		}
+	}
+	return RunExecutionForeign, nil
+}
+
 func (s *startupProcessTakeoverStore) LoadAgentLifecycleState(_ context.Context, identity runtimeagentidentity.Identity) (AgentLifecycleState, bool, error) {
 	key, err := identity.Fingerprint()
 	if err != nil {

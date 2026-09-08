@@ -301,6 +301,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		}
 		selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+			DeclarationPlan: emptySelectedDeclarationForTest(t, fixture.db, forkRunID),
 			Admission: runfork.RunForkSelectedContractExecutionAdmission{
 				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: sourceEventID,

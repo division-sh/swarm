@@ -45,6 +45,19 @@ func Lifecycle(t testing.TB, selected Store) runtimemanager.AgentLifecyclePersis
 	return &lifecycleStore{t: t, selected: selected}
 }
 
+func (s *lifecycleStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	session, err := fixtureSessionFor(s.t, ctx, s.selected)
+	if err != nil {
+		return 0, err
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.grant == nil {
+		return 0, errors.New("run ownership fixture requires an issued generation grant")
+	}
+	return session.grant.InspectRunExecutionOwnership(ctx, runID)
+}
+
 func (s *lifecycleStore) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
 	if s == nil || s.selected == nil {
 		return runtimemanager.ProcessExecutionBinding{}, fmt.Errorf("agent lifecycle fixture process capability is required")

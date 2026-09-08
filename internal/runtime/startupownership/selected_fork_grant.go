@@ -24,6 +24,7 @@ type SelectedForkGrantBinding struct {
 	ContainerPlanFingerprint   string `json:"container_plan_fingerprint"`
 	ActorCensusFingerprint     string `json:"actor_census_fingerprint"`
 	EffectiveConfigFingerprint string `json:"effective_config_fingerprint"`
+	DeclarationPlanFingerprint string `json:"declaration_plan_fingerprint"`
 }
 
 func (b SelectedForkGrantBinding) Validate() error {
@@ -39,7 +40,7 @@ func (b SelectedForkGrantBinding) Validate() error {
 	if b.ExecutionOwner == "" || strings.TrimSpace(b.ExecutionOwner) != b.ExecutionOwner {
 		return errors.New("selected-fork grant requires an exact execution owner")
 	}
-	for _, fingerprint := range []string{b.AdmissionFingerprint, b.ContainerPlanFingerprint, b.ActorCensusFingerprint, b.EffectiveConfigFingerprint} {
+	for _, fingerprint := range []string{b.AdmissionFingerprint, b.ContainerPlanFingerprint, b.ActorCensusFingerprint, b.EffectiveConfigFingerprint, b.DeclarationPlanFingerprint} {
 		hexValue, found := strings.CutPrefix(fingerprint, "sha256:")
 		decoded, err := hex.DecodeString(hexValue)
 		if !found || err != nil || len(decoded) != 32 || strings.ToLower(hexValue) != hexValue {

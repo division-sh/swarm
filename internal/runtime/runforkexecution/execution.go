@@ -179,6 +179,12 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}, err
 	}
 	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
+	if req.AgentRuntime.ProcessCapability == nil {
+		return SelectedContractExecutionResult{}, errors.New("selected-contract execution requires process capability before materialization")
+	}
+	if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("prove selected-contract process before materialization: %w", err)
+	}
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID:             plan.SourceRunID,
 		At:                      plan.ForkPoint.EventID,

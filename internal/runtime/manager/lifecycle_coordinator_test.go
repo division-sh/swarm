@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -98,6 +99,9 @@ func beginCoordinatorRun(t *testing.T, coordinator *agentLifecycleCoordinator, c
 
 func registerCoordinatorLifecycleCell(t *testing.T, coordinator *agentLifecycleCoordinator, ctx context.Context, rec PersistedAgent, persist bool) error {
 	t.Helper()
+	if coordinator.persistence() == nil {
+		rec.Topology.Lifetime = runtimeagenttopology.LifetimeEphemeral
+	}
 	return coordinator.registerExecution(ctx, rec, persist, nil, testManagerSubscriptionAdmission(t, rec.Config))
 }
 
@@ -218,6 +222,16 @@ func TestLifecycleTerminalMutationClassifiesGrantRetirementAndProcessTakeover(t 
 			}
 		})
 	}
+}
+
+func (*lifecyclePersistenceProbe) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return 0, err
+	}
+	return RunExecutionOwned, nil
 }
 
 func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
@@ -500,6 +514,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	coordinator := newAgentLifecycleCoordinator(nil, registry, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
+	rec.Topology = managerTestEphemeralTopologyAdmission(t)
 	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register: %v", err)
 	}

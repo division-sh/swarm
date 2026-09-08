@@ -104,6 +104,7 @@ func (e GrantEvidence) Validate() error {
 
 type GenerationGrant interface {
 	runtimemanager.AgentLifecyclePersistence
+	runtimemanager.RunExecutionOwner
 	Evidence() (GrantEvidence, error)
 	ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error)
 	ProveCurrent(context.Context) error
@@ -123,6 +124,7 @@ type LiveGenerationGrant interface {
 
 type ProcessCapability interface {
 	Evidence() (Authority, error)
+	ProveCurrent(context.Context) error
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
 	IssueGenerationGrant(context.Context, GrantRequest) (LiveGenerationGrant, error)
 	IssueSelectedForkGenerationGrant(context.Context, SelectedForkGrantRequest) (GenerationGrant, error)
@@ -192,6 +194,15 @@ func (p *processCapability) Evidence() (Authority, error) {
 		return Authority{}, err
 	}
 	return p.session.Authority()
+}
+
+func (p *processCapability) ProveCurrent(ctx context.Context) error {
+	if p == nil {
+		return errors.New("process startup/topology capability is missing")
+	}
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	return p.proveCurrent(ctx)
 }
 
 func (p *processCapability) CurrentSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
@@ -736,6 +747,12 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 		static := req.Topology.Authority.Static
 		if static.SourceSetRevision != evidence.SourceSetRevision || static.BundleHash != evidence.BundleHash {
 			return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("static lifecycle topology authority differs from runtime generation grant")
+		}
+	}
+	if req.Topology.Authority.Kind == runtimeagenttopology.AuthoritySelectedForkDeclarationPlan {
+		selected := req.Topology.Authority.Selected
+		if evidence.SelectedFork == nil || selected.RunID != evidence.SelectedFork.ForkRunID || selected.BundleHash != evidence.BundleHash || selected.PlanFingerprint != evidence.SelectedFork.DeclarationPlanFingerprint {
+			return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("selected declaration topology differs from runtime generation grant")
 		}
 	}
 	mutationCtx := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))

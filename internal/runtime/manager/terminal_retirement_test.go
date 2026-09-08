@@ -238,6 +238,10 @@ func (p *terminalSetPersistenceProbe) ProcessExecutionBinding() (ProcessExecutio
 	return lifecycleProbeProcessBinding(), nil
 }
 
+func (p *terminalSetPersistenceProbe) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	return inspectRunExecutionOwnership(ctx, p.AgentLifecyclePersistence, runID)
+}
+
 func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	p.mu.Lock()
 	member := p.agents[req.Identity]
