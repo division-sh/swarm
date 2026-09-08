@@ -20206,9 +20206,17 @@ test_specification:
         an unknown or duplicate claim, an unproved active claim, or companion
         metadata that disagrees with the filesystem is a test failure. External
         proof records additionally fail on missing or duplicate sources, missing
-        executor packages, absence of exactly one unfiltered package owner in
-        every required CI profile, unknown or multiply credited claims, and
-        malformed repository-relative paths. The required verify/boot gate runs
+        executor packages, incomplete or overlapping package execution in
+        any required CI profile, unknown or multiply credited claims, and
+        malformed repository-relative paths. The executor package remains the
+        semantic proof owner. Every required profile selects the identical set of
+        count-1 execution units: either one unfiltered unit or exhaustive disjoint
+        top-level partitions. The repository Go test/example/fuzz declaration census
+        must match each proof exactly once and every unit must match a proof.
+        Subtest filters are forbidden: all subtests and backend cases remain selected.
+        Additions, omissions, overlaps, empty units and profile drift fail closed.
+        Existing per-unit budgets and required-summary enforcement remain binding.
+        The required verify/boot gate runs
         every classified tier fixture, discovered example package, and admitted
         archetype through the supported verifier, reports every failing bundle in
         one pass, and is mutation-proven through live recursive discovery to name
@@ -20284,7 +20292,7 @@ test_specification:
       promoted_by: '#2168'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       process_boundary: >
         The executor builds the current swarm binary and uses only public readiness and
         /v1/rpc behavior against the authored source. Every workload runs from an authored
@@ -20317,7 +20325,7 @@ test_specification:
       promoted_by: '#2008'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       purpose: >
         Own one production-shaped compiled-process conformance profile that crosses cold authored source admission,
         standing activation, provider ingress, template routing, mock agent execution, workflow timer and decision-card
@@ -20375,7 +20383,7 @@ test_specification:
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The release fixture's finite-source guard and canonical-routing overlay independently prove the same explicit source root without introducing a second topology owner.
-        M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
+        M24: The mandatory top-level CI partition executes this complete proof, including smoke in PR profiles and all five journeys in full/nightly profiles; the package census proves exhaustive disjoint coverage across required units.
       supported_surfaces:
       - compiled swarm verify --json
       - compiled swarm serve and project-local swarm serve --dev

@@ -38,7 +38,8 @@ profiles:
       - catalog-required-verify
       - catalog-required-smoke
       - hitl-llm-full
-      - hitl-releasee2e-full
+      - hitl-releasee2e-rest
+      - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-full
       - store-full
@@ -55,7 +56,8 @@ profiles:
       - catalog-required-verify
       - catalog-full
       - hitl-llm-full
-      - hitl-releasee2e-full
+      - hitl-releasee2e-rest
+      - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-full
       - store-full
@@ -72,7 +74,8 @@ profiles:
       - catalog-required-verify
       - catalog-full
       - hitl-llm-full
-      - hitl-releasee2e-full
+      - hitl-releasee2e-rest
+      - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-full
       - store-full
@@ -89,7 +92,8 @@ profiles:
       - catalog-required-verify
       - catalog-full
       - hitl-llm-full
-      - hitl-releasee2e-full
+      - hitl-releasee2e-rest
+      - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-full
       - store-full
@@ -102,7 +106,7 @@ units:
   catalog-required-inventory:
     packages:
       - github.com/division-sh/swarm/internal/testcatalog
-    run: ^TestCatalog(RequiredInventory|InventoryFailsClosed|ExternalProofsFailClosed|OwnershipHasNoLegacyClassifierOrSimulator|FixturesUseCanonicalCreateFlowInstanceAuthoring|RequiredCIProofSelection|RequiredCensusArtifacts)$
+    run: ^TestCatalog(RequiredInventory|InventoryFailsClosed|ExternalProofsFailClosed|ExternalProofPartitionsThroughInventory|OwnershipHasNoLegacyClassifierOrSimulator|FixturesUseCanonicalCreateFlowInstanceAuthoring|RequiredCIProofSelection|RequiredCensusArtifacts)$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -131,9 +135,17 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
-  hitl-releasee2e-full:
+  hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
+    run: '^(Test($|[^D].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-invocation:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestD.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
