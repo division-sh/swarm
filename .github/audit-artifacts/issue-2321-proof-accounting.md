@@ -84,6 +84,46 @@ must be rebound to the final integrated head before the final audit is posted.
 | M28 | `TestCommandOwnedSelectionRefusesMissingPurposeAndRetiredSelectors`, provider/pin/model table, descriptor corruption tests, masked-config rejection. |
 | M29 | `TestPrivateTestIgnoresDeploymentResources` passes with both ambient store backends, an unreadable credential/token/password document, occupied API/MCP ports, a counted ambient API trap, unavailable Docker and retained-store/workspace sentinels. `TestPrivateTestRejectsEachExplicitDeploymentTargetBeforeAcquisition` covers all three target flags. Concurrent-live noninterference remains separate. |
 
+## Resource And Reintroduction Evidence
+
+Focused resource run on code head `34480efd9` passed (2.778s). This is additional
+evidence, not a claim that the final integrated suite or all acceptance is done.
+
+| Acquired owner / failure | Named execution proof |
+|---|---|
+| Private root, selected store and schema | `TestPrivateTestStartupFailureUnwindsAcquiredResources`: before store, after store/schema, workspace prepare/release failure, runtime-construction rejection; callback not called, store closed, root gone, project untouched. |
+| Immutable data/source projection | `TestPrivateTestRootCleanupRemovesImmutableProjectionsWithoutFollowingLinks`; private scenario success/abort root removal; `TestCloseServeRuntimeReleasesProjectionAfterShutdown` proves release follows shutdown. |
+| Runtime occurrence after construction | `TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence`: real context construction fails after occurrence acquisition, no returned runtime and exact active count zero. |
+| API/MCP listener binding | `TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness`: independently occupied API and MCP refuse in the shared constructor with no readiness. Private success/failure/cancellation/deadline test proves API unreachable after return. |
+| Process work versus selected-store lifetime | `TestTerminalStoreReleaseJoinsDelayedAccessBothStores`: delayed accepted SQLite/PostgreSQL access survives until its lease ends; close happens once after join. |
+| Process capability and store release failure | `TestActivatedServeLifecycleRetriesRetainedCapabilityAndExactClose` injects first release/close failures and retains diagnostics; probe labels are not independent backend execution credit. `TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailure` preserves remaining cleanup. |
+| Timeout while accepted work is still active | `TestActivatedServeLifecycleTimeoutReportsButWaitsForExactWork`: neither capability nor store closes before exact work settles; timeout remains failure. |
+| Final readiness barrier | `TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit`: real loopback /readyz remains 503 at injected final failure, public command fails rather than publishing readiness. |
+| Scenario callback and transport/auth lifetime | `TestPrivateTestSessionJoinedCleanupAndPrivateTransport`: success, failure, cancellation, deadline, current-token auth, predecessor-token refusal, ready/mock_only readback, absent provider ingress, closed DB/listener/root after return. |
+
+Focused external-effect/delay run also passed on `34480efd9`: llm 2.838s,
+pipeline 2.039s, generic schedule 0.008s. Named proofs are
+`TestMockEffectFenceRejectsEveryExternalAdapterBeforeAuthorization`,
+`TestExecuteMockCompletionUsesPythonAndCanonicalCompletionAuthority`,
+`TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP`,
+`TestMockOnlyPostureRejectsLiveDecisionAndDeferralBeforeMutationPreparation`,
+`TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores`,
+`TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores`,
+`TestMockOnlyPostureRejectsLiveScheduleBeforePersistence`, and
+`TestOccurrenceEventPreservesImmutableExecutionMode`.
+
+Replay/resume consumer check: event.replay and agent.replay share the typed
+`operator_event_replay.go` original-mode admission and exact-mode event builder.
+`TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation` is the negative;
+`TestServedParityHarnessLiveAgentEventReplayLifecycle` is the dual-store supported
+positive. Runtime ingress resume invokes `PreflightRuntimeIngressQueue` before its
+state mutation (`TestResumePreflightsQueueBeforeRuntimeStateMutation`). Run/runtime
+public positives remain `TestServedParityHarnessRunControlLifecycle` and
+`TestServedParityHarnessRuntimeIngressControlLifecycle`. The integrated execution
+results must still be recorded. `agent.replay_backlog` is already retired on the
+integrated baseline; only its forbidden-consumer guard remains. It is not a live
+interpreter to preserve or reintroduce for this migration.
+
 ## Honest Completion Boundary
 
 The first unfiltered swarm-test run failed in nine packages. No runtime blocker was
