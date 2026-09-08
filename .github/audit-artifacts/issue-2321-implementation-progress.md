@@ -413,3 +413,13 @@ the separate post-restart provider failure needs classification. A fresh PG
 diagnostic rerun is queued through swarm-test to retain the underlying attempt
 stderr/stdout before cleanup; it does not retry the failed delivery. #2432 remains
 unchanged and frozen. No full issue/merge-readiness claim is made.
+
+The approved bounded repair was pushed as 2c958d04f. The fresh PG diagnostic rerun
+subsequently failed in 120.763s, with the first turn/delivery successful and the
+second provider process returning error_during_execution with zero turns/API
+time/cost. Persisted stdout is truncated before its explanation; missing
+provider-local session state is still a source-backed hypothesis, not confirmed
+root cause. See the updated observation artifact and #2321 comment
+https://github.com/division-sh/swarm/issues/2321#issuecomment-5592833963.
+All launched proof jobs have completed. No further sends, production expansion,
+full-suite success or review-ready PR is claimed. #2432 remains frozen.

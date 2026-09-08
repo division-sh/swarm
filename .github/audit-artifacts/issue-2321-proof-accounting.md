@@ -50,6 +50,13 @@ controls PASS three repetitions (0.009s), diff check PASS. H remains H, not L.
 The runtime repair stays limited to the approved observation class; no provider
 state persistence/recovery or #2432 implementation is included.
 
+The bounded repair is pushed as 2c958d04f. Fresh PG diagnostic repeat failed
+(120.763s): provider reports error_during_execution with zero turns/API time/cost
+after retained restart, before capability validation. Its original explanation
+is not available in the truncated persisted stdout. All proof jobs are complete;
+no live restart or full-suite success is credited. Classification is requested on
+#2321 before any production scope expansion.
+
 ## Original Owner And Consumption Recheck
 
 - Command composition: `serveapp.Run` passes Live and `RunTestSession` passes

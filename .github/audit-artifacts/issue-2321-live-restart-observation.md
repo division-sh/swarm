@@ -3,6 +3,8 @@
 Agent: agent-g. #2321. This is a classification request, not a new runtime repair
 or a Post-Implementation Proof Audit claiming closure.
 
+Approved capability repair and bounded proof are pushed in **2c958d04f**.
+
 ## Proven Boundary
 
 The approved inventory repair passes the deterministic channel/presence matrix,
@@ -69,3 +71,32 @@ fallback, fresh-session retry, compatibility path or new framework is authorized
 or implemented. Existing inventory repair can be reviewed independently as the
 approved bounded change, but #2321 remains not review-ready: live restart, #2432
 and final integrated full-suite/merge proof remain outstanding.
+
+## Diagnostic Result
+
+The fresh PostgreSQL diagnostic rerun completed and failed in 120.763s (journey
+115.40s), after waiting for the shared swarm-test slot. Log:
+/tmp/agent-g-2321-live-restart-diagnostic.log. No diagnostic job remains pending.
+
+It again completed the first live turn/delivery, restarted successfully, and failed
+the distinct second turn. Deferred capture obtained the uncertain attempt's
+persisted evidence before cleanup:
+
+```json
+{"stage":"provider_call","operation":"wait_streaming","stderr":""}
+```
+
+Its stdout starts with a provider result carrying type=result,
+subtype=error_during_execution, duration_ms=0, duration_api_ms=0, is_error=true,
+num_turns=0 and total_cost_usd=0. The existing summarizeCLIErrorOutput truncation
+cuts the persisted JSON before its explanatory error field. Therefore this proves
+failure before response/capability validation and no reported provider API work,
+but does not prove the missing-transcript hypothesis. No further paid sends are
+needed merely to re-demonstrate the stalled second turn. Diagnostic output
+retention was not broadened in production under the inventory approval.
+
+The lead classification request remains open. No new runtime class is silently
+absorbed; no provider state migration, container-preservation or retry workaround
+has been added. The integrated full suite has not been rerun on an approved #2432
+repair because that repair remains frozen. No PR is opened or marked review-ready
+while those explicit acceptance obligations remain outstanding.
