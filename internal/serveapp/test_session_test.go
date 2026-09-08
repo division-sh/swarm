@@ -142,7 +142,7 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 }
 
 func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
-	for _, stage := range []string{"store_acquisition", "schema_after_store", "workspace_prepare", "workspace_release_failure"} {
+	for _, stage := range []string{"store_acquisition", "schema_after_store", "workspace_prepare", "workspace_release_failure", "runtime_construction"} {
 		t.Run(stage, func(t *testing.T) {
 			req := admittedPrivateTestRequest(t)
 			if stage == "schema_after_store" {
@@ -152,6 +152,15 @@ func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 			t.Cleanup(func() { buildStoresForServe = original })
 			var privateRoot string
 			var db *sql.DB
+			if stage == "runtime_construction" {
+				originalProjection := projectRuntimePersistenceForServe
+				t.Cleanup(func() { projectRuntimePersistenceForServe = originalProjection })
+				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+					projection := originalProjection(owner)
+					projection.deps.EventStore = nil
+					return projection
+				}
+			}
 			workspaceReleased := 0
 			if strings.HasPrefix(stage, "workspace_") {
 				originalWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
