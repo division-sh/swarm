@@ -184,3 +184,22 @@ and dual-store lifecycle proof, then the whole suite with explicit package budge
 `SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -timeout=30m ./...`.
 Individual scenario deadlines remain enforced; a repeated timeout requires diagnosis.
 No final proof audit, review-ready PR, whole-suite pass or runtime closure is claimed.
+
+## Diagnostic Gate Amendment And Provisioning
+
+The first independent #2432 gate was insufficient: selected-fork lifecycle
+producers and both activation validators consume the same durable diagnostic path.
+G posted the additive provenance amendment at
+https://github.com/division-sh/swarm/issues/2432#issuecomment-5589274582,
+pushed as cfc60b3b4 on agent-g/2432-diagnostic-audit. It requests a focused
+independent re-gate; diagnostic implementation remains frozen. Watchlist 7a23362
+already records this correction. #2321's approval is unchanged.
+
+Live environment provisioning has started through the supported command:
+`env -u SWARM_TEST_POSTGRES_DSN go run ./cmd/swarm workspace build --backend claude_cli --image swarm-workspace:agent-g-2321`.
+The first invocation correctly refused the inherited test-quarantined variable;
+the retry reached Docker package installation. Build/Claude validation has not yet
+completed at this checkpoint, so no provisioned image or authenticated provider
+turn is credited. The command log is /tmp/agent-g-2321-workspace-build.log.
+The requested supported credential configuration location remains outstanding.
+F's #2319 remains open with no reply to the existing coordination request.

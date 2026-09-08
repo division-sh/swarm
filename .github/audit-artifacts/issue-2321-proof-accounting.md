@@ -180,15 +180,19 @@ diagnostic finding is now classified by the lead as separate prerequisite #2432:
 convergence plus provenance, including sequential failed acknowledgement retry and
 cross-manager attribution. Its independent pre-audit is posted at
 https://github.com/division-sh/swarm/issues/2432#issuecomment-5588649360;
-repair approval is pending. #2321's existing gate remains approved. The relevant
+The first repair gate was insufficient on selected-fork provenance. The additive
+amendment at cfc60b3b4 is posted at
+https://github.com/division-sh/swarm/issues/2432#issuecomment-5589274582;
+independent re-gate approval is pending. #2321's existing gate remains approved. The relevant
 production projector and store CAS are unchanged here; this is not silently
 absorbed into command selection or repaired by weakening failure handling.
 
 Remaining independent work includes the next integrated result and final-head
 verification. External acceptance
 still requires completing the planned L serve/restart journey, its provisioned
-environment, and #2319 proof. Docker is present but Claude and the workspace image
-are absent; the existing paid Claude test does not cover the entire planned L matrix.
+environment, and #2319 proof. Docker is present; the supported workspace build is
+in progress, with no image validation or authenticated live turn yet credited.
+The existing paid Claude test does not cover the entire planned L matrix.
 After #2432 integration the full-profile rerun uses an explicit 30-minute package
 timeout without relaxing scenario deadlines. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.
