@@ -290,7 +290,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
 		t.Fatal(err)
 	}
-	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces"}
+	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
 	catalogUnits := []string{"catalog-replay", "catalog-runtime"}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
 		var selectors []string
@@ -311,7 +311,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatal("standalone catalog projection no longer covers the full package")
 	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
-	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
+	model := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
 	for _, profileName := range []string{
 		testplanning.ProfilePRCommon,
 		testplanning.ProfilePREscalated,

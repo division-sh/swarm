@@ -55,7 +55,7 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		}
 	}
 	producer := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
-	for _, want := range []string{"-record-evidence", "-plan \"$plan\"", "-unit \"$UNIT_ID\"", "-check-confirmation"} {
+	for _, want := range []string{"-record-evidence", "-plan \"$plan\"", "-unit \"$UNIT_ID\""} {
 		if producer == nil || !strings.Contains(producer.Run, want) {
 			t.Fatalf("proof producer missing %q", want)
 		}
@@ -81,6 +81,9 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		t.Fatal("workflow does not bind plan and consumer checkouts to the executed SHA")
 	}
 	for _, forbidden := range []string{
+		"-check-confirmation",
+		"-attempt confirmation",
+		"confirmation_status",
 		"go-test-shards.json",
 		"full-conformance-packages.txt",
 		"full-conformance:",
@@ -222,7 +225,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces"}
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
 	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
@@ -236,7 +239,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]

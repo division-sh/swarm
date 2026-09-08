@@ -15,11 +15,10 @@ import (
 
 const (
 	BudgetPolicyVersion    = 1
-	CommandEvidenceVersion = 2
+	CommandEvidenceVersion = 3
 	BudgetResultVersion    = 1
 
 	AttemptPrimary        = "primary"
-	AttemptConfirmation   = "confirmation"
 	CountModeCacheDefault = "cache-default"
 	CountModeOne          = "count-1"
 )
@@ -40,19 +39,21 @@ type CommandBudget struct {
 }
 
 type CommandEvidence struct {
-	Version        int      `json:"version"`
-	PlanDigest     string   `json:"plan_digest"`
-	Profile        string   `json:"profile"`
-	HeadSHA        string   `json:"head_sha"`
-	UnitID         string   `json:"unit_id"`
-	Surface        string   `json:"surface"`
-	Attempt        string   `json:"attempt"`
-	ElapsedSeconds float64  `json:"elapsed_seconds"`
-	ExitCode       int      `json:"exit_code"`
-	Packages       []string `json:"packages"`
-	EnvironmentID  string   `json:"environment_id"`
-	CountMode      string   `json:"count_mode"`
-	Report         Report   `json:"report"`
+	WorkflowRunID   int64    `json:"workflow_run_id"`
+	WorkflowAttempt int      `json:"workflow_attempt"`
+	Version         int      `json:"version"`
+	PlanDigest      string   `json:"plan_digest"`
+	Profile         string   `json:"profile"`
+	HeadSHA         string   `json:"head_sha"`
+	UnitID          string   `json:"unit_id"`
+	Surface         string   `json:"surface"`
+	Attempt         string   `json:"attempt"`
+	ElapsedSeconds  float64  `json:"elapsed_seconds"`
+	ExitCode        int      `json:"exit_code"`
+	Packages        []string `json:"packages"`
+	EnvironmentID   string   `json:"environment_id"`
+	CountMode       string   `json:"count_mode"`
+	Report          Report   `json:"report"`
 }
 
 type BudgetStatus string
@@ -65,11 +66,11 @@ const (
 )
 
 type SurfaceResult struct {
+	Job                      *JobTiming   `json:"job_timing,omitempty"`
 	Surface                  string       `json:"surface"`
 	Status                   BudgetStatus `json:"status"`
 	LimitSeconds             float64      `json:"limit_seconds"`
 	PrimarySeconds           *float64     `json:"primary_seconds,omitempty"`
-	ConfirmationSeconds      *float64     `json:"confirmation_seconds,omitempty"`
 	PrimaryPackageElapsedSec *float64     `json:"primary_package_elapsed_seconds,omitempty"`
 	Problems                 []string     `json:"problems,omitempty"`
 }
@@ -83,6 +84,7 @@ type PackageDiagnostic struct {
 }
 
 type BudgetResult struct {
+	Jobs               *JobSummary         `json:"jobs,omitempty"`
 	Version            int                 `json:"version"`
 	Status             BudgetStatus        `json:"status"`
 	Surfaces           []SurfaceResult     `json:"surfaces"`
@@ -91,14 +93,15 @@ type BudgetResult struct {
 }
 
 type EvaluationOptions struct {
+	WorkflowRunID     int64
+	WorkflowAttempt   int
 	Plan              testplanning.RunPlan
 	HistoricalWeights map[string]float64
 	LoadProblems      []string
 }
 
 type evidenceAttempts struct {
-	primary      *CommandEvidence
-	confirmation *CommandEvidence
+	primary *CommandEvidence
 }
 
 func LoadBudgetPolicy(r io.Reader) (BudgetPolicy, error) {
@@ -187,30 +190,11 @@ func mappingPath(document *yaml.Node, path ...string) *yaml.Node {
 	return node
 }
 
-func ConfirmationRequired(policy BudgetPolicy, plan testplanning.RunPlan, evidence CommandEvidence) (bool, error) {
-	problems := ValidateCommandEvidence(evidence, plan)
-	if len(problems) > 0 {
-		return false, fmt.Errorf("primary evidence is incomplete: %s", strings.Join(problems, "; "))
-	}
-	if evidence.Attempt != AttemptPrimary {
-		return false, fmt.Errorf("confirmation check requires a primary attempt")
-	}
-	if evidence.ExitCode != 0 || evidence.Report.Summary.FailedPackages > 0 || evidence.Report.Summary.FailedTests > 0 {
-		return false, fmt.Errorf("failed primary evidence is not confirmation-eligible")
-	}
-	unit, err := plan.Unit(evidence.UnitID)
-	if err != nil {
-		return false, err
-	}
-	budget, err := policy.budgetForClass(unit.BudgetClass)
-	if err != nil {
-		return false, err
-	}
-	return evidence.ElapsedSeconds > budget.LimitSeconds, nil
-}
-
 func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan) []string {
 	var problems []string
+	if evidence.WorkflowRunID <= 0 || evidence.WorkflowAttempt <= 0 {
+		problems = append(problems, "workflow run ID and attempt must be positive")
+	}
 	if evidence.Version != CommandEvidenceVersion {
 		problems = append(problems, fmt.Sprintf("version %d is unsupported", evidence.Version))
 	}
@@ -237,7 +221,7 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
 		}
 	}
-	if evidence.Attempt != AttemptPrimary && evidence.Attempt != AttemptConfirmation {
+	if evidence.Attempt != AttemptPrimary {
 		problems = append(problems, fmt.Sprintf("attempt %q is unsupported", evidence.Attempt))
 	}
 	if !finiteNonNegative(evidence.ElapsedSeconds) {
@@ -251,9 +235,6 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 	}
 	if evidence.CountMode != CountModeCacheDefault && evidence.CountMode != CountModeOne {
 		problems = append(problems, fmt.Sprintf("count_mode %q is unsupported", evidence.CountMode))
-	}
-	if evidence.Attempt == AttemptConfirmation && evidence.CountMode != CountModeOne {
-		problems = append(problems, "confirmation count_mode must be count-1")
 	}
 	declared, packageProblems := canonicalPackageList(evidence.Packages)
 	problems = append(problems, packageProblems...)
@@ -375,6 +356,9 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 	grouped := map[string]*evidenceAttempts{}
 	for i := range evidence {
 		item := &evidence[i]
+		if opts.WorkflowRunID > 0 && (item.WorkflowRunID != opts.WorkflowRunID || item.WorkflowAttempt != opts.WorkflowAttempt) {
+			result.Problems = append(result.Problems, "wrong workflow run/attempt for "+item.UnitID)
+		}
 		if _, ok := expected[item.UnitID]; !ok {
 			result.Problems = append(result.Problems, fmt.Sprintf("unexpected evidence unit %s", item.UnitID))
 			continue
@@ -390,12 +374,6 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 				result.Problems = append(result.Problems, fmt.Sprintf("duplicate primary evidence for %s", item.UnitID))
 			} else {
 				group.primary = item
-			}
-		case AttemptConfirmation:
-			if group.confirmation != nil {
-				result.Problems = append(result.Problems, fmt.Sprintf("duplicate confirmation evidence for %s", item.UnitID))
-			} else {
-				group.confirmation = item
 			}
 		default:
 			result.Problems = append(result.Problems, fmt.Sprintf("unsupported attempt %q for %s", item.Attempt, item.UnitID))
@@ -452,48 +430,9 @@ func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, bud
 		return result
 	}
 
-	over := primary.ElapsedSeconds > budget.LimitSeconds
-	if !over {
-		if group.confirmation != nil {
-			result.Status = BudgetIncomplete
-			result.Problems = append(result.Problems, "confirmation exists for a primary command within budget")
-		}
-		return result
-	}
-	if group.confirmation == nil {
-		result.Status = BudgetIncomplete
-		result.Problems = append(result.Problems, "over-budget primary is missing its one required confirmation")
-		return result
-	}
-	confirmation := group.confirmation
-	result.ConfirmationSeconds = floatPointer(confirmation.ElapsedSeconds)
-	result.Problems = append(result.Problems, ValidateCommandEvidence(*confirmation, plan)...)
-	if confirmation.PlanDigest != primary.PlanDigest || confirmation.Profile != primary.Profile || confirmation.HeadSHA != primary.HeadSHA || confirmation.UnitID != primary.UnitID {
-		result.Problems = append(result.Problems, "confirmation plan/profile/head/unit identity differs from primary")
-	}
-	if confirmation.Surface != primary.Surface {
-		result.Problems = append(result.Problems, "confirmation surface differs from primary")
-	}
-	if !equalStrings(primary.Packages, confirmation.Packages) {
-		result.Problems = append(result.Problems, "confirmation packages differ from primary")
-	}
-	if confirmation.EnvironmentID != primary.EnvironmentID {
-		result.Problems = append(result.Problems, "confirmation environment differs from primary")
-	}
-	if confirmation.CountMode != CountModeOne {
-		result.Problems = append(result.Problems, "confirmation must use count-1")
-	}
-	if confirmation.ExitCode != 0 || confirmation.Report.Summary.FailedPackages > 0 || confirmation.Report.Summary.FailedTests > 0 {
-		result.Problems = append(result.Problems, fmt.Sprintf("confirmation command failed with exit code %d", confirmation.ExitCode))
-	}
-	if len(result.Problems) > 0 {
-		result.Status = BudgetIncomplete
-		return result
-	}
-	if confirmation.ElapsedSeconds > budget.LimitSeconds {
+	if primary.ElapsedSeconds > budget.LimitSeconds {
 		result.Status = BudgetFail
-	} else {
-		result.Status = BudgetWarn
+		result.Problems = append(result.Problems, "primary command exceeded its timing budget")
 	}
 	return result
 }
@@ -578,22 +517,39 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 	if _, err := fmt.Fprintf(w, "\n**Status: %s**\n\n", result.Status); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "Hard latency is command-level `go test` elapsed. Package elapsed is concurrent work telemetry only; GitHub job wall time is non-authoritative."); err != nil {
+	if _, err := fmt.Fprintln(w, "Hard latency is command-level `go test` elapsed. Package elapsed is concurrent work telemetry only; whole-job latency is reported separately."); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "\n| Surface | Primary | Confirmation | Limit | Package work | Status |\n| --- | ---: | ---: | ---: | ---: | --- |"); err != nil {
+	if _, err := fmt.Fprintln(w, "\n| Surface | Primary | Limit | Package work | Status |\n| --- | ---: | ---: | ---: | --- |"); err != nil {
 		return err
 	}
 	for _, surface := range result.Surfaces {
-		if _, err := fmt.Fprintf(w, "| `%s` | %s | %s | %.0fs | %s | %s |\n",
+		if _, err := fmt.Fprintf(w, "| `%s` | %s | %.0fs | %s | %s |\n",
 			surface.Surface,
 			formatOptionalSeconds(surface.PrimarySeconds),
-			formatOptionalSeconds(surface.ConfirmationSeconds),
 			surface.LimitSeconds,
 			formatOptionalSeconds(surface.PrimaryPackageElapsedSec),
 			surface.Status,
 		); err != nil {
 			return err
+		}
+	}
+	if result.Jobs != nil {
+		jobs := result.Jobs
+		if _, err := fmt.Fprintf(w, "\n## Whole Proof Jobs\n\nProfile `%s`, run %d attempt %d: %d jobs, %.2f runner-minutes, %.0fs makespan, %.0fs aggregate queue time, peak concurrency %d. Whole-job improvement target: <=180s; command budgets above remain separately evaluated. Step-level setup/cache/proof/upload evidence is retained in the JSON report.\n\n| Surface | Whole job | Queue | Outside primary command |\n| --- | ---: | ---: | ---: |\n", jobs.Profile, jobs.RunID, jobs.RunAttempt, jobs.UnitCount, jobs.RunnerMinutes, jobs.MakespanSeconds, jobs.QueueSeconds, jobs.PeakConcurrency); err != nil {
+			return err
+		}
+		for _, surface := range result.Surfaces {
+			if surface.Job == nil {
+				continue
+			}
+			overhead := surface.Job.ElapsedSeconds
+			if surface.PrimarySeconds != nil {
+				overhead -= *surface.PrimarySeconds
+			}
+			if _, err := fmt.Fprintf(w, "| `%s` | %.0fs | %.0fs | %.0fs |\n", surface.Surface, surface.Job.ElapsedSeconds, surface.Job.QueueSeconds, overhead); err != nil {
+				return err
+			}
 		}
 	}
 	if len(result.PackageDiagnostics) > 0 {

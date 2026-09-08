@@ -122,40 +122,31 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		sort.Strings(shards[i].Packages)
 	}
 	units := append([]ProofUnit(nil), shards...)
-	specialPackageUses := map[string]int{}
-	for _, id := range profilePolicy.Units {
-		for _, pkg := range policy.Units[id].Packages {
-			specialPackageUses[pkg]++
-		}
-	}
 	for _, id := range profilePolicy.Units {
 		specialUnit := policy.Units[id]
-		weight := 0.0
 		for _, pkg := range specialUnit.Packages {
 			if !discovered[pkg] {
 				return RunPlan{}, fmt.Errorf("unit %s package %s is absent from discovered inventory", id, pkg)
 			}
-			packageWeight, ok := model.Packages[pkg]
-			if !ok {
-				packageWeight = policy.Planning.UnknownPackageSeconds
-			} else if packageWeight <= 0 {
-				packageWeight = 0.1
-			}
-			weight += packageWeight / float64(specialPackageUses[pkg])
 		}
 		unitPackages, err := canonicalStrings(specialUnit.Packages)
 		if err != nil {
 			return RunPlan{}, fmt.Errorf("unit %s: %w", id, err)
 		}
-		units = append(units, ProofUnit{
+		unit := ProofUnit{
 			ID:            id,
 			Packages:      unitPackages,
 			Run:           specialUnit.Run,
 			CountMode:     specialUnit.CountMode,
 			EnvironmentID: specialUnit.EnvironmentID,
 			BudgetClass:   specialUnit.BudgetClass,
-			WeightSeconds: weight,
-		})
+		}
+		weight, measured := model.UnitSeconds(profile, unit)
+		if !measured {
+			weight = policy.Planning.UnknownPackageSeconds
+		}
+		unit.WeightSeconds = weight
+		units = append(units, unit)
 	}
 	plan := RunPlan{
 		Version:        RunPlanVersion,

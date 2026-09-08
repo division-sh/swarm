@@ -1,6 +1,7 @@
 # Baseline: workflow run 29069663107 on tree cb2fa4caf5588689ffb3bd9591596a91364f96f0.
 # Hard limits change only through reviewed edits with updated one-line justification.
 # Package scheduling history is generated in .github/test-timing-weights.json.
+# Evaluate each primary exactly once. Overruns remain failures, not automatic reruns.
 version: 1
 hard:
   max_shard_command_seconds:
@@ -8,4 +9,4 @@ hard:
     justification: Broad and partitioned store proof units must complete within the four-minute CI target.
   full_conformance_command_seconds:
     limit_seconds: 540
-    justification: Ratified after the required 20-journey served lifecycle matrix produced isolated primary and confirmation observations of 492s and 461s.
+    justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.

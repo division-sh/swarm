@@ -236,36 +236,14 @@ jobs:
           set -e
           elapsed=$(( $(date +%s) - start ))
           go run ./cmd/swarm-test-timing -record-evidence \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -plan "$plan" -unit "$UNIT_ID" -attempt primary \
             -input "$primary_json" -evidence "$primary_evidence" \
             -elapsed-seconds "$elapsed" -exit-code "$status"
 
-          confirmation_status=0
-          if [ "$status" -eq 0 ]; then
-            confirm=$(go run ./cmd/swarm-test-timing -check-confirmation \
-              -plan "$plan" -policy .github/test-timing-budgets.yaml -evidence "$primary_evidence")
-            if [ "$confirm" = "true" ]; then
-              confirmation_json="test-results/evidence/${UNIT_ID}-confirmation.json"
-              confirmation_evidence="test-results/evidence/${UNIT_ID}-confirmation-evidence.json"
-              confirmation_start=$(date +%s)
-              set +e
-              go run ./cmd/swarm-test -- "${packages[@]}" "${run_args[@]}" -count=1 -json | tee "$confirmation_json"
-              confirmation_status=${PIPESTATUS[0]}
-              set -e
-              confirmation_elapsed=$(( $(date +%s) - confirmation_start ))
-              go run ./cmd/swarm-test-timing -record-evidence \
-                -plan "$plan" -unit "$UNIT_ID" -attempt confirmation \
-                -input "$confirmation_json" -evidence "$confirmation_evidence" \
-                -elapsed-seconds "$confirmation_elapsed" -exit-code "$confirmation_status"
-            elif [ "$confirm" != "false" ]; then
-              echo "invalid confirmation decision: $confirm" >&2
-              exit 1
-            fi
-          fi
           go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
           cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
           test "$status" -eq 0
-          test "$confirmation_status" -eq 0
       - name: Save measured Go cache
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
@@ -342,6 +320,9 @@ jobs:
     needs: [ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -365,7 +346,10 @@ jobs:
           merge-multiple: true
       - name: Evaluate complete plan-bound evidence
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           go run ./cmd/swarm-test-timing -evaluate-budget \
@@ -373,6 +357,8 @@ jobs:
             -policy .github/test-timing-budgets.yaml \
             -weight-model .github/test-timing-weights.json \
             -evidence-root test-results/evidence \
+            -jobs test-results/jobs.json \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -result-json test-results/timing-budget-result.json \
             -markdown test-results/timing-budget-result.md
           cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
@@ -384,6 +370,7 @@ jobs:
           path: |
             test-results/timing-budget-result.json
             test-results/timing-budget-result.md
+            test-results/jobs.json
           if-no-files-found: warn
 
   required-tests:
@@ -461,6 +448,7 @@ jobs:
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           result=$(go run ./cmd/swarm-test-timing -update-weight-model \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -plan test-results/plan/proof-plan.json \
             -evidence-root test-results/evidence \
             -weight-model .github/test-timing-weights.json \

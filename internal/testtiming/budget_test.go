@@ -23,17 +23,16 @@ hard:
 	}
 }
 
-func TestConfirmationRequiredUsesExactPlannedUnit(t *testing.T) {
+func TestCommandEvidenceRejectsPerformanceConfirmation(t *testing.T) {
 	plan := timingTestPlan(t)
-	policy := timingTestPolicy()
-	evidence := timingTestEvidence(plan, "broad-01", AttemptPrimary, 271)
-	required, err := ConfirmationRequired(policy, plan, evidence)
-	if err != nil || !required {
-		t.Fatalf("ConfirmationRequired = %v, %v; want true", required, err)
+	evidence := timingTestEvidence(plan, "broad-01", "confirmation", 10)
+	if problems := ValidateCommandEvidence(evidence, plan); len(problems) == 0 {
+		t.Fatal("removed performance confirmation was accepted")
 	}
+	evidence.Attempt = AttemptPrimary
 	evidence.PlanDigest = "wrong"
-	if _, err := ConfirmationRequired(policy, plan, evidence); err == nil || !strings.Contains(err.Error(), "plan_digest") {
-		t.Fatalf("wrong-plan error = %v", err)
+	if problems := ValidateCommandEvidence(evidence, plan); !strings.Contains(strings.Join(problems, ";"), "plan_digest") {
+		t.Fatalf("wrong-plan problems = %v", problems)
 	}
 }
 
@@ -73,7 +72,7 @@ func TestEvaluateBudgetRequiresEveryPlanUnitExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestEvaluateBudgetConfirmsOnlyResponsibleUnit(t *testing.T) {
+func TestEvaluateBudgetReportsOverrunWithoutRepeatingWork(t *testing.T) {
 	plan := timingTestPlan(t)
 	policy := timingTestPolicy()
 	values := make([]CommandEvidence, 0, len(plan.Units)+1)
@@ -84,14 +83,13 @@ func TestEvaluateBudgetConfirmsOnlyResponsibleUnit(t *testing.T) {
 		}
 		values = append(values, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
 	}
-	values = append(values, timingTestEvidence(plan, "broad-01", AttemptConfirmation, 269))
 	result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, values)
-	if result.Status != BudgetWarn {
-		t.Fatalf("status = %s, want WARN: %+v", result.Status, result)
+	if result.Status != BudgetFail {
+		t.Fatalf("status = %s, want FAIL: %+v", result.Status, result)
 	}
 	for _, surface := range result.Surfaces {
-		if surface.Surface != "broad-01" && surface.ConfirmationSeconds != nil {
-			t.Fatalf("unrelated unit %s was confirmed", surface.Surface)
+		if surface.Surface != "broad-01" && surface.Status != BudgetPass {
+			t.Fatalf("unrelated unit %s failed despite being within budget", surface.Surface)
 		}
 	}
 }
@@ -151,7 +149,7 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 		},
 		Projections: map[string]testplanning.ProjectionPolicy{},
 	}
-	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, testplanning.ProfilePRCommon, "test", "head")
+	plan, err := testplanning.BuildPlan(policy, testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, testplanning.ProfilePRCommon, "test", "head")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -174,9 +172,6 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		panic(err)
 	}
 	countMode := unit.CountMode
-	if attempt == AttemptConfirmation {
-		countMode = CountModeOne
-	}
 	report := Report{}
 	for _, pkg := range unit.Packages {
 		report.Packages = append(report.Packages, PackageTiming{Package: pkg, Result: "pass", Elapsed: 1})
@@ -185,17 +180,19 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		report.Summary.PackageElapsedSec++
 	}
 	return CommandEvidence{
-		Version:        CommandEvidenceVersion,
-		PlanDigest:     plan.Digest,
-		Profile:        plan.Profile,
-		HeadSHA:        plan.HeadSHA,
-		UnitID:         unit.ID,
-		Surface:        unit.ID,
-		Attempt:        attempt,
-		ElapsedSeconds: elapsed,
-		Packages:       append([]string(nil), unit.Packages...),
-		EnvironmentID:  unit.EnvironmentID,
-		CountMode:      countMode,
-		Report:         report,
+		WorkflowRunID:   1,
+		WorkflowAttempt: 1,
+		Version:         CommandEvidenceVersion,
+		PlanDigest:      plan.Digest,
+		Profile:         plan.Profile,
+		HeadSHA:         plan.HeadSHA,
+		UnitID:          unit.ID,
+		Surface:         unit.ID,
+		Attempt:         attempt,
+		ElapsedSeconds:  elapsed,
+		Packages:        append([]string(nil), unit.Packages...),
+		EnvironmentID:   unit.EnvironmentID,
+		CountMode:       countMode,
+		Report:          report,
 	}
 }

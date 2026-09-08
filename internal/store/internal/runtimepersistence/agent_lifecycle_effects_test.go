@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -285,8 +287,8 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil || len(diagnostics) != 3 {
 		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn, start, and restart", diagnostics, err)
 	}
-	if err := diagnosticsStore.MarkAgentLifecycleDiagnosticProjected(ctx, diagnostics[0].OutboxID, now.Add(3*time.Second)); err != nil {
-		t.Fatalf("mark lifecycle diagnostic projected: %v", err)
+	if err := runtimepkg.NewRuntimeLogger(store.(runtimepkg.RuntimeLogPersistence), executionposture.Live).ProjectLifecycleDiagnostic(ctx, diagnostics[0]); err != nil {
+		t.Fatalf("project lifecycle diagnostic: %v", err)
 	}
 	diagnostics, err = diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
 	if err != nil || len(diagnostics) != 2 {

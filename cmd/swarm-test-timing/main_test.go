@@ -67,7 +67,7 @@ func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidencePath := filepath.Join(dir, "unit-primary-evidence.json")
-	if err := run(config{recordEvidence: true, planPath: planPath, unitID: unit.ID, evidencePath: evidencePath, inputPath: jsonPath, attempt: testtiming.AttemptPrimary, elapsedSeconds: 1, exitCode: 0}); err != nil {
+	if err := run(config{recordEvidence: true, workflowRunID: 1, workflowAttempt: 1, planPath: planPath, unitID: unit.ID, evidencePath: evidencePath, inputPath: jsonPath, attempt: testtiming.AttemptPrimary, elapsedSeconds: 1, exitCode: 0}); err != nil {
 		t.Fatal(err)
 	}
 	evidence, err := readEvidence(evidencePath)
@@ -117,12 +117,12 @@ func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 			report.Summary.Packages++
 			report.Summary.PackageElapsedSec++
 		}
-		evidence := testtiming.CommandEvidence{Version: 2, PlanDigest: plan.Digest, Profile: plan.Profile, HeadSHA: plan.HeadSHA, UnitID: unit.ID, Surface: unit.ID, Attempt: testtiming.AttemptPrimary, Packages: unit.Packages, EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Report: report}
+		evidence := testtiming.CommandEvidence{Version: testtiming.CommandEvidenceVersion, WorkflowRunID: 1, WorkflowAttempt: 1, PlanDigest: plan.Digest, Profile: plan.Profile, HeadSHA: plan.HeadSHA, UnitID: unit.ID, Surface: unit.ID, Attempt: testtiming.AttemptPrimary, Packages: unit.Packages, EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Report: report}
 		if err := writeJSON(filepath.Join(evidenceRoot, unit.ID+"-primary-evidence.json"), evidence); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := run(config{updateWeights: true, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "new-run"}); err != nil {
+	if err := run(config{updateWeights: true, workflowRunID: 1, workflowAttempt: 1, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "new-run"}); err != nil {
 		t.Fatal(err)
 	}
 	model, err := readWeightModel(modelPath)
@@ -132,16 +132,67 @@ func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 	if model.SourceRunID != "new-run" || len(model.Packages) != 2 {
 		t.Fatalf("updated model = %+v", model)
 	}
+	for _, unit := range plan.Units {
+		if _, ok := model.UnitSeconds(plan.Profile, unit); !ok {
+			t.Fatalf("model omits exact profile/unit measurement for %s", unit.ID)
+		}
+	}
 	before, err := os.ReadFile(modelPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := run(config{updateWeights: true, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "another-run"}); err != nil {
+	if err := run(config{updateWeights: true, workflowRunID: 1, workflowAttempt: 1, planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "another-run"}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(modelPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	evidencePath := filepath.Join(evidenceRoot, plan.Units[0].ID+"-primary-evidence.json")
+	original, err := readEvidence(evidencePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		edit      func(*testtiming.CommandEvidence)
+		duplicate bool
+	}{
+		{"wrong_run", func(e *testtiming.CommandEvidence) { e.WorkflowRunID++ }, false},
+		{"wrong_attempt", func(e *testtiming.CommandEvidence) { e.WorkflowAttempt++ }, false},
+		{"wrong_head", func(e *testtiming.CommandEvidence) { e.HeadSHA = "foreign" }, false},
+		{"non_primary", func(e *testtiming.CommandEvidence) { e.Attempt = "confirmation" }, false},
+		{"failed", func(e *testtiming.CommandEvidence) { e.ExitCode = 1 }, false},
+		{"duplicate", func(e *testtiming.CommandEvidence) {}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := original
+			tc.edit(&changed)
+			path := evidencePath
+			if tc.duplicate {
+				path = filepath.Join(evidenceRoot, "duplicate-evidence.json")
+			}
+			if err := writeJSON(path, changed); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if tc.duplicate {
+					if err := os.Remove(path); err != nil {
+						t.Error(err)
+					}
+				} else if err := writeJSON(path, original); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := run(config{updateWeights: true, workflowRunID: 1, workflowAttempt: 1,
+				planPath: planPath, evidenceRoot: evidenceRoot, weightModelPath: modelPath, sourceRunID: "invalid"}); err == nil {
+				t.Fatal("invalid evidence published a timing model")
+			}
+			current, err := os.ReadFile(modelPath)
+			if err != nil || string(current) != string(after) {
+				t.Fatalf("rejected evidence changed model: %v", err)
+			}
+		})
 	}
 	if string(before) != string(after) {
 		t.Fatal("idempotent refresh rewrote an unchanged model")
@@ -171,7 +222,7 @@ projections: {required-full: {profile: full}}
 		t.Fatal(err)
 	}
 	modelPath := filepath.Join(dir, "weights.json")
-	model := testplanning.WeightModel{Version: 1, SourceRunID: "old-run", Packages: map[string]float64{"module/a": 20, "module/catalog": 20}}
+	model := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "old-run", Packages: map[string]float64{"module/a": 20, "module/catalog": 20}}
 	file, err := os.Create(modelPath)
 	if err != nil {
 		t.Fatal(err)

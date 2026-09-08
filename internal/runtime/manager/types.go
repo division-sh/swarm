@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ type BoardInteractiveAgent interface {
 type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 
 type Bus interface {
+	ProjectLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic) error
 	AdmitSourceArtifactFact(context.Context) (context.Context, error)
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
@@ -267,19 +269,8 @@ type SourceSetTransitionAdmission interface {
 	Done() <-chan struct{}
 }
 
-type AgentLifecycleDiagnostic struct {
-	OutboxID    string
-	OperationID string
-	Identity    runtimeagentidentity.Identity
-	AgentID     string
-	EventName   string
-	Payload     map[string]any
-	CreatedAt   time.Time
-}
-
 type AgentLifecycleDiagnosticPersistence interface {
-	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]AgentLifecycleDiagnostic, error)
-	MarkAgentLifecycleDiagnosticProjected(context.Context, string, time.Time) error
+	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]diaglog.LifecycleDiagnostic, error)
 }
 
 type ManagerPersistence interface {

@@ -1172,6 +1172,10 @@ type conformanceRuntimeLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
+func (h conformanceRuntimeLoggerHook) ProjectLifecycleDiagnostic(ctx context.Context, item runtimediaglog.LifecycleDiagnostic) error {
+	return h.logger.ProjectLifecycleDiagnostic(ctx, item)
+}
+
 func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
 	if h.logger == nil {
 		return nil

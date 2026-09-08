@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -69,6 +71,10 @@ func (s runtimeLogPersistenceStub) RuntimeLogLineageParentEventID(ctx context.Co
 		return "", nil
 	}
 	return subjectEventID, nil
+}
+
+func (s runtimeLogPersistenceStub) PersistLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic, RuntimeLogPersistenceRecord) (bool, error) {
+	return false, fmt.Errorf("lifecycle diagnostic persistence is not configured")
 }
 
 func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record RuntimeLogPersistenceRecord) error {
