@@ -70,7 +70,6 @@ func TestRecordValidateRejectsEveryNormalizedScalarFamily(t *testing.T) {
 		{"selected_authority", func(r *Record) { r.SelectedForkAuthorityStamp = " " }},
 		{"scope", func(r *Record) { r.Scope = events.EventScope(" global ") }},
 		{"payload_schema_bundle_hash", func(r *Record) { r.PayloadSchemaBundleHash += " " }},
-		{"payload_schema_bundle_source", func(r *Record) { r.PayloadSchemaBundleSource += " " }},
 		{"payload_schema_flow_id", func(r *Record) { r.PayloadSchemaFlowID = " flow " }},
 		{"payload_schema_event_key", func(r *Record) { r.PayloadSchemaEventKey += " " }},
 		{"payload_schema_digest", func(r *Record) { r.PayloadSchemaDigest += " " }},

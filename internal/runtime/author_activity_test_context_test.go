@@ -508,7 +508,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		opts.SourceArtifactFact = testSourceArtifactFact(t, runtimeTestBundleHash)
 	}
 	if opts.PayloadAdmitter == nil && opts.ContractBundle != nil {
-		opts.PayloadAdmitter = NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.BundleSourceFact)
+		opts.PayloadAdmitter = NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
 	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {

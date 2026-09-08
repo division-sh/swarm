@@ -361,7 +361,7 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, sqliteStore, runtimebus.EventBusOptions{
-		ContractBundle:   source,
+		ContractBundle:     source,
 		SourceArtifactFact: runStartTestSourceArtifactFact(),
 		PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
 			if event.Type() == "scan.requested" {
@@ -399,7 +399,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	canonicalEventName := "repo-scaffold/repo_scaffold.repo_commit_succeeded"
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle:   source,
+		ContractBundle:     source,
 		SourceArtifactFact: runStartTestSourceArtifactFact(),
 		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 			if string(event.Type()) != canonicalEventName {
@@ -543,7 +543,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "item.received", `{"item_id":"medicine","topic":"medicine"}`, "", "idem-root-collision"))
+	published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHashForSource(source), "item.received", `{"item_id":"medicine","topic":"medicine"}`, "", "idem-root-collision"))
 	if published.Error != nil {
 		t.Fatalf("event.publish root collision error = %#v", published.Error)
 	}
@@ -558,7 +558,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 			t.Fatalf("%s event count = %d, want 0", flowEventName, got)
 		}
 	}
-	assertEventPublishPersistence(t, db, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken))
+	assertEventPublishPersistence(t, db, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken), runStartTestBundleHashForSource(source))
 }
 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
@@ -1986,7 +1986,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-			ContractBundle:   source,
+			ContractBundle:     source,
 			SourceArtifactFact: runStartTestSourceArtifactFact(),
 			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
 				if event.Type() != "scan.requested" {
@@ -2380,29 +2380,22 @@ func rootAndAmbiguousFlowScopedEventPublishTestBundle(t testing.TB) *runtimecont
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	files := map[string]string{
-		"package.yaml": `name: routing-root-ingress
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - {id: alpha-flow, flow: alpha-flow, mode: static}
-  - {id: beta-flow, flow: beta-flow, mode: static}
-`,
 		"events.yaml": `item.received:
   item_id: text
   topic: text
 item.processed:
   item_id: text?
 `,
-		"flows/alpha-flow/schema.yaml": `name: alpha-flow
+		"alpha-flow/schema.yaml": `name: alpha-flow
 mode: static
 `,
-		"flows/alpha-flow/events.yaml": `item.received:
+		"alpha-flow/events.yaml": `item.received:
   item_id: text
 `,
-		"flows/beta-flow/schema.yaml": `name: beta-flow
+		"beta-flow/schema.yaml": `name: beta-flow
 mode: static
 `,
-		"flows/beta-flow/events.yaml": `item.received:
+		"beta-flow/events.yaml": `item.received:
   item_id: text
 `,
 	}
@@ -2465,7 +2458,6 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 		byID[strings.TrimSpace(flow.Paths.FlowPath)] = flow
 	}
 	return &runtimecontracts.WorkflowContractBundle{
-		Package:   runtimecontracts.ProjectPackageDocument{Name: "review", Version: "1.0.0"},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -2821,7 +2813,7 @@ func assertEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, eventID, su
 	}
 }
 
-func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy, expectedBundleHash string) {
 	t.Helper()
 	var runStatus, triggerType, triggerID, bundleHash string
 	if err := db.QueryRow(`
@@ -2834,8 +2826,8 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	if bundleHash != runStartTestBundleHash {
-		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, runStartTestBundleHash)
+	if bundleHash != expectedBundleHash {
+		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, expectedBundleHash)
 	}
 	assertPostgresEventPublishRows(t, db, runID, eventID, producedBy)
 }

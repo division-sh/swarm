@@ -137,8 +137,7 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC),
 			)
 			binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-				BundleHash:   "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-				BundleSource: "persisted",
+				BundleHash:   "bundle-v2:sha256:1111111111111111111111111111111111111111111111111111111111111111",
 				FlowID:       "proof-flow",
 				EventKey:     "outbox.payload_bytes",
 				SchemaDigest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",

@@ -23,11 +23,9 @@ import (
 	"github.com/google/uuid"
 )
 
-const payloadAdmissionTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
 func testRuntimePayloadAdmitter(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimebus.PayloadAdmitter {
 	t.Helper()
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(payloadAdmissionTestBundleHash)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}
@@ -52,10 +50,9 @@ func loadRootPayloadBundle(t *testing.T, eventsYAML, typesYAML string) *runtimec
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"package.yaml": "name: payload-admission-proof\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
-		"schema.yaml":  "name: payload-admission-proof\n",
-		"events.yaml":  eventsYAML,
-		"types.yaml":   typesYAML,
+		"schema.yaml": "name: payload-admission-proof\n",
+		"events.yaml": eventsYAML,
+		"types.yaml":  typesYAML,
 	} {
 		if contents == "" {
 			continue
@@ -261,7 +258,11 @@ func TestRuntimePayloadAdmitter_RejectsScalarAliasUUIDViolation(t *testing.T) {
 		"task.completed:\n  trace_id: TraceID\n",
 		"scalars:\n  TraceID: uuid\n",
 	))
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(payloadAdmissionTestBundleHash)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("payload admission fixture requires its admitted source artifact")
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}

@@ -142,8 +142,8 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 // shared by store fixtures that intentionally bypass runtime publication.
 func BindPayload(event events.Event) (events.Event, error) {
 	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash:   "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000",
-		BundleSource: "ephemeral", FlowID: event.RoutingSource().Route().FlowID, EventKey: string(event.Type()),
+		BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		FlowID:     event.RoutingSource().Route().FlowID, EventKey: string(event.Type()),
 		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass:  events.PayloadSchemaSchemaLess,
 	})

@@ -3387,11 +3387,9 @@ func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityColle
 
 func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
 	runID := uuid.NewString()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "work"},
-		RootEntities: runtimecontracts.EntityContractsDocument{
-			"items": {Fields: map[string]runtimecontracts.EntityFieldDecl{"id": {Type: "text"}, "status": {Type: "text"}}},
-		},
+	source := loadWorkflowTempSource(t, map[string]string{
+		"schema.yaml":   "name: work\ninitial_state: active\nstates: [active]\n",
+		"entities.yaml": "items:\n  id: text\n  status: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
 		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
@@ -3401,7 +3399,7 @@ func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *te
 		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
 	}}
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	rows, err := reader.QueryEntityCollection(ctx, "work", "items")
+	rows, err := reader.QueryEntityCollection(ctx, ".", "items")
 	if err != nil {
 		t.Fatalf("QueryEntityCollection: %v", err)
 	}

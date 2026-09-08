@@ -3592,9 +3592,7 @@ fan_out:
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Paths: runtimecontracts.ContractPaths{
-			ContractsRoot:      repoRoot,
-			PlatformSpecFile:   filepath.Join(repoRoot, "platform-spec.yaml"),
-			ProjectPackageFile: filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-condition-policy", "package.yaml"),
+			PlatformSpecFile: filepath.Join(repoRoot, "platform-spec.yaml"),
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.requested": {

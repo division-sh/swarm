@@ -38,9 +38,16 @@ func TestResolveEventSchemaBindsConcreteTemplateInstanceToAuthoredDeclaration(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolution := ResolveEventSchema(Wrap(bundle), "operating/ti-proof", "operating/ti-proof/operating.reported")
+	resolution := ResolveEventSchema(Wrap(bundle), "operating", "operating/ti-proof/operating.reported")
 	if !resolution.HasCompiled || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaAuthored {
 		t.Fatalf("template-instance schema binding = %#v, want compiled authored declaration", resolution)
+	}
+	if resolution.CompiledSchema.FlowPath() != "operating" {
+		t.Fatalf("schema owner = %q, want declared flow path", resolution.CompiledSchema.FlowPath())
+	}
+	invalid := ResolveEventSchema(Wrap(bundle), "operating/ti-proof", "operating/ti-proof/operating.reported")
+	if invalid.HasSchema || invalid.HasCompiled {
+		t.Fatalf("instance path became a schema owner: %#v", invalid)
 	}
 }
 

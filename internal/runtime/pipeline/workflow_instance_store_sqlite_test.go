@@ -674,7 +674,6 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			payload TEXT NOT NULL CHECK (json_valid(payload)),
 			payload_bytes BLOB NOT NULL,
 			payload_schema_bundle_hash TEXT NOT NULL,
-			payload_schema_bundle_source TEXT NOT NULL CHECK (payload_schema_bundle_source IN ('persisted', 'ephemeral')),
 			payload_schema_flow_id TEXT,
 			payload_schema_event_key TEXT NOT NULL,
 			payload_schema_digest TEXT NOT NULL,

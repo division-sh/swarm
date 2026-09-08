@@ -838,12 +838,12 @@ func collectionConsumerLabel(phase workflowCollectionPhase) string {
 }
 
 func (b *WorkflowContractBundle) resolveQueryEntityTable(node runtimeidentity.ExecutableNode, entities string) (WorkflowCollectionItemResolution, error) {
-	primary, err := b.ResolveFlowPrimaryEntity(node.FlowID())
+	primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
 	if err != nil {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q has no exact entity contract: %w", entities, err)
 	}
 	if entities != primary.EntityType {
-		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q does not match flow %s primary entity %q", entities, defaultPrimaryEntityFlowLabel(node.FlowID()), primary.EntityType)
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q does not match flow %s primary entity %q", entities, defaultPrimaryEntityFlowLabel(node.FlowPath()), primary.EntityType)
 	}
 	fields := make([]ResolvedCatalogField, 0, len(primary.Contract.Fields))
 	for _, name := range sortedEntityFieldKeys(primary.Contract.Fields) {
@@ -856,7 +856,7 @@ func (b *WorkflowContractBundle) resolveQueryEntityTable(node runtimeidentity.Ex
 	}
 	item := ResolvedCatalogType{Kind: CatalogTypeObject, Name: primary.EntityType, Fields: fields}
 	return WorkflowCollectionItemResolution{
-		Kind: WorkflowCollectionSourceEntityTable, Source: entities, FlowID: node.FlowID(), EntityType: primary.EntityType,
+		Kind: WorkflowCollectionSourceEntityTable, Source: entities, FlowID: node.FlowPath(), EntityType: primary.EntityType,
 		Origin: "entities." + primary.EntityType, ItemType: item,
 	}, nil
 }

@@ -298,7 +298,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
-	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.BundleSourceFact)
+	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.SourceArtifactFact)
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
 		ExecutionPosture:            req.AgentRuntime.Options.ExecutionPosture,
 		WorkOwner:                   forkOwner,

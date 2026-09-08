@@ -157,7 +157,7 @@ func bindCompiledEventSchema(source Source, bundle *runtimecontracts.WorkflowCon
 		if err != nil || !ok {
 			continue
 		}
-		if found && (scoped.PackageKey() != schema.PackageKey() || scoped.EventName() != schema.EventName()) {
+		if found && (scoped.FlowPath() != schema.FlowPath() || scoped.EventName() != schema.EventName()) {
 			return
 		}
 		scoped = schema

@@ -418,14 +418,16 @@ func declareGitHubProviderImports(t testing.TB, bundle *runtimecontracts.Workflo
 	if bundle == nil {
 		t.Fatal("bounded GitHub bundle is required")
 	}
-	if len(bundle.PackageTree) != 1 {
-		t.Fatalf("bounded GitHub package tree = %d, want one package", len(bundle.PackageTree))
+	flow, ok := bundle.FlowViewByID(boundedProviderFlowID)
+	if !ok {
+		t.Fatal("bounded GitHub flow is required")
 	}
 	imports := make([]runtimecontracts.ProviderTriggerEventImport, 0, len(eventNames))
 	for _, eventName := range eventNames {
 		imports = append(imports, runtimecontracts.ProviderTriggerEventImport{Provider: "github", Event: eventName})
 	}
-	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: imports}
+	flow.Schema.Imports.ProviderTriggerEvents = imports
+	bundle.FlowSchemas[boundedProviderFlowID] = flow.Schema
 }
 
 func withGitHubProviderSchemas(t testing.TB, source semanticview.Source, eventNames ...string) semanticview.Source {

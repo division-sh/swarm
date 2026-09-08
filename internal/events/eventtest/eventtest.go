@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const fixtureBundleHash = "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000"
+const fixtureBundleHash = "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 // AdmitPayload binds a fixture's current payload to deterministic schema
 // evidence. Tests exercising real schema admission should use the runtime
@@ -32,7 +32,7 @@ func AdmitPayload(event events.Event, flowID, eventKey string) (events.Event, er
 // admitters without granting them ownership of the event value.
 func PayloadAdmission(event events.Event, flowID, eventKey string) (events.PayloadAdmission, error) {
 	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: fixtureBundleHash, BundleSource: "ephemeral", FlowID: strings.TrimSpace(flowID),
+		BundleHash: fixtureBundleHash, FlowID: strings.TrimSpace(flowID),
 		EventKey: strings.TrimSpace(eventKey), SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass: events.PayloadSchemaSchemaLess,
 	})

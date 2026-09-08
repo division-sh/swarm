@@ -28,7 +28,6 @@ const (
 // partial or ambient-current-schema evidence.
 type PayloadSchemaBinding struct {
 	bundleHash   string
-	bundleSource string
 	flowID       string
 	eventKey     string
 	schemaDigest string
@@ -37,7 +36,6 @@ type PayloadSchemaBinding struct {
 
 type PayloadSchemaBindingInput struct {
 	BundleHash   string
-	BundleSource string
 	FlowID       string
 	EventKey     string
 	SchemaDigest string
@@ -46,8 +44,8 @@ type PayloadSchemaBindingInput struct {
 
 func NewPayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchemaBinding, error) {
 	binding := PayloadSchemaBinding{
-		bundleHash: strings.TrimSpace(input.BundleHash), bundleSource: strings.TrimSpace(input.BundleSource),
-		flowID: strings.TrimSpace(input.FlowID), eventKey: strings.TrimSpace(input.EventKey),
+		bundleHash: strings.TrimSpace(input.BundleHash),
+		flowID:     strings.TrimSpace(input.FlowID), eventKey: strings.TrimSpace(input.EventKey),
 		schemaDigest: strings.TrimSpace(input.SchemaDigest), schemaClass: PayloadSchemaClass(strings.TrimSpace(string(input.SchemaClass))),
 	}
 	if err := binding.Validate(); err != nil {
@@ -58,7 +56,7 @@ func NewPayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchemaBind
 
 func RestorePayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchemaBinding, error) {
 	for name, value := range map[string]string{
-		"bundle_hash": input.BundleHash, "bundle_source": input.BundleSource, "flow_id": input.FlowID,
+		"bundle_hash": input.BundleHash, "flow_id": input.FlowID,
 		"event_key": input.EventKey, "schema_digest": input.SchemaDigest, "schema_class": string(input.SchemaClass),
 	} {
 		if value != strings.TrimSpace(value) {
@@ -71,9 +69,6 @@ func RestorePayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchema
 func (b PayloadSchemaBinding) Validate() error {
 	if err := runtimebundleidentity.ValidateCanonicalHash(b.bundleHash); err != nil {
 		return fmt.Errorf("payload schema bundle: %w", err)
-	}
-	if b.bundleSource != "persisted" && b.bundleSource != "ephemeral" {
-		return fmt.Errorf("payload schema bundle_source must be persisted or ephemeral")
 	}
 	if b.eventKey == "" {
 		return fmt.Errorf("payload schema event_key is required")
@@ -90,14 +85,13 @@ func (b PayloadSchemaBinding) Validate() error {
 }
 
 func (b PayloadSchemaBinding) BundleHash() string              { return b.bundleHash }
-func (b PayloadSchemaBinding) BundleSource() string            { return b.bundleSource }
 func (b PayloadSchemaBinding) FlowID() string                  { return b.flowID }
 func (b PayloadSchemaBinding) EventKey() string                { return b.eventKey }
 func (b PayloadSchemaBinding) SchemaDigest() string            { return b.schemaDigest }
 func (b PayloadSchemaBinding) SchemaClass() PayloadSchemaClass { return b.schemaClass }
 
 func (b PayloadSchemaBinding) Equal(other PayloadSchemaBinding) bool {
-	return b.bundleHash == other.bundleHash && b.bundleSource == other.bundleSource && b.flowID == other.flowID &&
+	return b.bundleHash == other.bundleHash && b.flowID == other.flowID &&
 		b.eventKey == other.eventKey && b.schemaDigest == other.schemaDigest && b.schemaClass == other.schemaClass
 }
 

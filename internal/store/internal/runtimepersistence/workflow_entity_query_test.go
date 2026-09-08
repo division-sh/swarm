@@ -78,15 +78,17 @@ func TestWorkflowEntityCollectionIncludesStateOnlyRowsOnBothStores(t *testing.T)
 
 			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/state-only", "review_item", map[string]any{"account_id": "state-only"})
 			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/materialized", "review_item", map[string]any{"account_id": "materialized"})
-			seedStateOnlyAcquisitionLifecycle(t, backend, db, "child/materialized", "active")
+			seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, "child/materialized", "active")
 			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/terminated", "review_item", map[string]any{"account_id": "terminated"})
-			seedStateOnlyAcquisitionLifecycle(t, backend, db, "child/terminated", "terminated")
+			seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, "child/terminated", "terminated")
 			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "sibling/outside", "review_item", map[string]any{"account_id": "wrong-flow"})
 			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/wrong-type", "other_item", map[string]any{"account_id": "wrong-type"})
 
 			wrongRunID := uuid.NewString()
 			requireRunningRunForTest(t, context.Background(), selected, wrongRunID, time.Now().UTC())
 			seedWorkflowEntityQueryRowAs(t, backend, db, wrongRunID, "child/wrong-run", "review_item", map[string]any{"account_id": "wrong-run"})
+			// A sibling run's lifecycle must not hide this run's state-only row.
+			seedStateOnlyAcquisitionLifecycle(t, backend, db, wrongRunID, "child/state-only", "terminated")
 
 			records, err := reader.QueryWorkflowEntityCollection(ctx, owner)
 			if err != nil {

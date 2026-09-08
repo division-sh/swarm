@@ -71,7 +71,6 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	}
 	for _, column := range []string{
 		"payload_schema_bundle_hash",
-		"payload_schema_bundle_source",
 		"payload_schema_flow_id",
 		"payload_schema_event_key",
 		"payload_schema_digest",
@@ -148,7 +147,7 @@ func TestSQLiteStatementsForPlanTranslatesPayloadSchemaEvidenceExactly(t *testin
 		TableName:  "events",
 		SchemaKind: "platform_spec",
 		Statements: []string{
-			"CREATE TABLE IF NOT EXISTS events (\n    payload_schema_bundle_hash TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    payload_schema_digest TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$')\n)",
+			"CREATE TABLE IF NOT EXISTS events (\n    payload_schema_bundle_hash TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),\n    payload_schema_digest TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$')\n)",
 		},
 	})
 	if err != nil {

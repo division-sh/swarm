@@ -882,7 +882,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 }
 
 func (deps validatedRuntimeDeps) payloadAdmitter(logger *RuntimeLogger) runtimebus.PayloadAdmitter {
-	return NewRuntimePayloadAdmitter(logger, deps.Source, deps.BundleSourceFact)
+	return NewRuntimePayloadAdmitter(logger, deps.Source, deps.SourceArtifactFact)
 }
 
 func bindRuntimeStorePayloadAdmitter(eventBinder, inboundBinder EventPayloadAdmissionBinder, payloadAdmitter runtimebus.PayloadAdmitter) {

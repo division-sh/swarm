@@ -3,6 +3,8 @@ package contracts
 import (
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestInputPinResolutionGeneratedSourceModeMatrix(t *testing.T) {
@@ -148,11 +150,14 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 }
 
 func instanceResolutionTestBundle(events map[string]EventCatalogEntry) *WorkflowContractBundle {
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Path: ".", Children: []FlowContractView{
+		{Paths: FlowContractPaths{FlowPath: "account"}, Path: "account", Events: events},
+	}}
+	account := &root.Children[0]
 	return &WorkflowContractBundle{
-		Events: events,
-		projectContracts: map[string]ProjectContractView{
-			".": {Paths: ProjectPackagePaths{Key: ".", ProjectEventsFile: "events.yaml"}, Events: events},
-		},
+		Events:     events,
+		RootSchema: &FlowSchemaDocument{},
+		FlowTree:   flowmodel.Tree[FlowContractView]{Root: root, ByID: map[string]*FlowContractView{".": root, "account": account}, ByPath: map[string]*FlowContractView{".": root, "account": account}},
 	}
 }
 

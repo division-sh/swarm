@@ -581,8 +581,8 @@ func TestPayloadAdmissionRejectsNonObjectJSON(t *testing.T) {
 func testPayloadAdmission(t *testing.T, payload []byte) PayloadAdmission {
 	t.Helper()
 	binding, err := NewPayloadSchemaBinding(PayloadSchemaBindingInput{
-		BundleHash:   "bundle-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000",
-		BundleSource: "ephemeral", EventKey: "test.event",
+		BundleHash:   "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		EventKey:     "test.event",
 		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass:  PayloadSchemaSchemaLess,
 	})

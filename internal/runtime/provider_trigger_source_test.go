@@ -402,7 +402,11 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if !globalResolution.HasStructural || !globalResolution.HasCompiled || !globalResolution.HasClassification || globalResolution.Classification != runtimecontracts.CompiledEventSchemaImported {
 		t.Fatalf("target-free imported payload schema resolution = %#v", globalResolution)
 	}
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(payloadAdmissionTestBundleHash)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("provider fixture requires its admitted source artifact")
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}

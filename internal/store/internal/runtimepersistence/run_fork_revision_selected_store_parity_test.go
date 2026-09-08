@@ -215,12 +215,12 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO events (
 			event_class,event_id,run_id,event_name,entity_id,scope,payload,payload_bytes,execution_mode,
-			payload_schema_bundle_hash,payload_schema_bundle_source,payload_schema_flow_id,payload_schema_event_key,
+			payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,
 			payload_schema_digest,payload_schema_class,
 			chain_depth,produced_by,produced_by_type,created_at,routing_source_kind,source_route,target_route,target_set,route_settlement
 		) VALUES (
 			'selected_fork_replay',$1,$2,'fork.ready',$3,'entity',$4,$5,'live',
-			$6,'persisted','','fork.ready',$7,'schema_less',
+			$6,'','fork.ready',$7,'schema_less',
 			0,'sqlite-parity','platform',$8,'absent',$9,$9,$10,$11
 		)
 	`, eventID, runID, entityID, `{"name":"Snapshot Entity"}`, []byte(`{"name":"Snapshot Entity"}`),

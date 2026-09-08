@@ -397,7 +397,7 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	}
 	if opts.PayloadAdmitter == nil {
 		if opts.ContractBundle != nil {
-			opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.BundleSourceFact)
+			opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
 		} else {
 			opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 				return eventtest.PayloadAdmission(event, flowID, string(event.Type()))

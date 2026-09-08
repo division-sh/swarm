@@ -74,21 +74,21 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 	result, err := exec.ExecContext(ctx, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
-			payload_schema_bundle_hash, payload_schema_bundle_source, payload_schema_flow_id, payload_schema_event_key,
+			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 			route_settlement, operator_reference_event_id
 		) VALUES (
 			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
-			$11, $12, NULLIF($13,''), $14, $15, $16,
-			$17, $18, $19, $20, NULLIF($21,'')::uuid, $22,
-			$23, NULLIF($24,''), $25::jsonb, $26::jsonb, $27::jsonb,
-			$28::jsonb, NULLIF($29,'')::uuid
+			$11, NULLIF($12,''), $13, $14, $15,
+			$16, $17, $18, $19, NULLIF($20,'')::uuid, $21,
+			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
+			$27::jsonb, NULLIF($28,'')::uuid
 		) ON CONFLICT (event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-		record.PayloadSchemaBundleHash, record.PayloadSchemaBundleSource, record.PayloadSchemaFlowID,
+		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
 		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
@@ -121,7 +121,7 @@ const selectRecord = `
 	SELECT
 		e.event_class, e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 		COALESCE(e.task_id, ''), COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''),
-		e.scope, e.payload_bytes, e.payload_schema_bundle_hash, e.payload_schema_bundle_source,
+		e.scope, e.payload_bytes, e.payload_schema_bundle_hash,
 		COALESCE(e.payload_schema_flow_id, ''), e.payload_schema_event_key, e.payload_schema_digest,
 		e.payload_schema_class, e.execution_mode, e.chain_depth, e.produced_by, e.produced_by_type,
 		COALESCE(e.source_event_id::text, ''), e.created_at, e.routing_source_kind,
@@ -147,7 +147,7 @@ func scanTargets(record *eventrecord.Record) []any {
 	return []any{
 		&record.Class, &record.EventID, &record.RunID, &record.EventName, &record.TaskID,
 		&record.EntityID, &record.FlowInstance, &record.Scope, &record.Payload,
-		&record.PayloadSchemaBundleHash, &record.PayloadSchemaBundleSource, &record.PayloadSchemaFlowID,
+		&record.PayloadSchemaBundleHash, &record.PayloadSchemaFlowID,
 		&record.PayloadSchemaEventKey, &record.PayloadSchemaDigest, &record.PayloadSchemaClass, &record.ExecutionMode,
 		&record.ChainDepth, &record.ProducedBy, &record.ProducedByType, &record.SourceEventID,
 		&record.CreatedAt, &record.RoutingSourceKind, &record.RoutingSourceAuthority,
