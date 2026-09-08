@@ -32,7 +32,7 @@ func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 					if test.failStage == "plan" {
 						return Plan{}, failure
 					}
-					return Plan{CleanupRunSetKnown: true}, nil
+					return Plan{CleanupRunSetKnown: true, IncludeSourceArtifacts: test.include}, nil
 				}), Locks: &recordingLockManager{acquired: true}, RuntimeContexts: lifecycle,
 				Quiescer: quiescenceApplierFunc(func(context.Context, QuiescenceRequest) (QuiescenceResult, error) {
 					if test.failStage == "quiescence" {
@@ -51,11 +51,12 @@ func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 						return ContainerResetResult{}, failure
 					}
 					if test.failStage == "partial" {
-						return ContainerResetResult{Failed: []ContainerStopFailure{{Error: failure.Error()}}}, nil
+						return ContainerResetResult{OperationName: DefaultOperationName, Failed: []ContainerStopFailure{{Error: failure.Error()}}}, nil
 					}
-					return ContainerResetResult{}, nil
+					return ContainerResetResult{OperationName: DefaultOperationName}, nil
 				}),
 			}
+			installCoordinatorOperationFixture(t, &coord)
 			_, err := coord.Execute(context.Background(), Request{OperationID: destructiveResetOperationID, ActorTokenID: "operator", RequestHash: "hash", DryRun: test.dry, IncludeSourceArtifacts: test.include, IncludeSourceArtifactsSet: true})
 			if (err != nil) != test.wantError || !reflect.DeepEqual(lifecycle.retained, test.wantRetain) {
 				t.Fatalf("err=%v reconstructed=%v, want error=%v reconstructed=%v", err, lifecycle.retained, test.wantError, test.wantRetain)

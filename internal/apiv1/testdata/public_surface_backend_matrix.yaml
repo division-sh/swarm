@@ -498,6 +498,7 @@ store_parity:
         - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [runtime-open-sqlite]}
       optional_products: [destructiveReset]
       nested_roles: {product_destructive_reset: [inventory, locks, quiescence]}
+      platform_tables: [runtime_reset_operations]
       public_methods: [runtime.nuke]
     - id: non_store_transport
       semantic_owners: [internal/apiv1 websocket runtime]

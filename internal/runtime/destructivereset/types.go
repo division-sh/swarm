@@ -40,6 +40,7 @@ type Request struct {
 	OperationID               string
 	ActorTokenID              string
 	RequestHash               string
+	IdempotencyKey            string
 	DryRun                    bool
 	IncludeSourceArtifacts    bool
 	IncludeSourceArtifactsSet bool
@@ -55,6 +56,7 @@ type Result struct {
 }
 
 type QuiescenceRequest struct {
+	OperationID  string
 	Result       Result
 	ActorTokenID string
 	RequestedAt  time.Time
@@ -317,6 +319,7 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
+	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
 	if !r.IncludeSourceArtifactsSet {
 		r.IncludeSourceArtifacts = true
 		r.IncludeSourceArtifactsSet = true

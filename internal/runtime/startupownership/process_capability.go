@@ -104,6 +104,7 @@ type GenerationGrant interface {
 }
 
 type ProcessCapability interface {
+	runtimedestructivereset.OperationStore
 	Evidence() (Authority, error)
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
 	IssueGenerationGrant(context.Context, GrantRequest) (GenerationGrant, error)
