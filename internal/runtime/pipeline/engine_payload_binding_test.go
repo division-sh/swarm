@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,11 +30,11 @@ func TestPipelineEngineEvaluatorConsumesAdmittedHandlerPayloadTypeForTemplateRep
 		Payload: values.Wrap(map[string]any{"validation_case_id": "00000000-0000-0000-0000-000000000001", "candidate": "proof"}),
 	}
 	evaluator := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
-	passed, err := evaluator.EvalBool(`payload.validation_case_id != ""`, base, &resolution.StructuralType)
+	passed, err := evaluator.EvalBool(`payload.validation_case_id != ""`, base, workflowexpr.ValueExpressionOptions{PayloadType: &resolution.StructuralType})
 	if err != nil || !passed {
 		t.Fatalf("template reply evaluation = %t, %v", passed, err)
 	}
-	if _, err := evaluator.EvalBool(`payload.validation_case_id != ""`, base, nil); err == nil {
+	if _, err := evaluator.EvalBool(`payload.validation_case_id != ""`, base, workflowexpr.ValueExpressionOptions{}); err == nil {
 		t.Fatal("missing admitted handler schema must fail closed, not resolve the sender event again")
 	}
 	if got := base.Event.Raw()["trigger_event_type"]; got != "validator/ti-proof/validation.started" {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -261,7 +262,7 @@ request.received:
 		FlowID:  "child",
 		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID, "trigger_event_type": "request.received"}),
 		Payload: values.Wrap(map[string]any{"request_id": "req-existing"}),
-	}, &resolution.StructuralType)
+	}, workflowexpr.ValueExpressionOptions{PayloadType: &resolution.StructuralType})
 	if err != nil {
 		t.Fatalf("EvalBool query_entities: %v", err)
 	}
@@ -2886,7 +2887,7 @@ func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
 				"received_count": 3,
 			}),
 		},
-		nil,
+		workflowexpr.ValueExpressionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)

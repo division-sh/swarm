@@ -551,6 +551,7 @@ func admitSyntheticEntityContractsForTest(
 	admitted.Agents = base.Agents
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
+	admitted.RootTypes = base.RootTypes
 	admitted.Platform = base.Platform
 	if base.RootSchema != nil {
 		admitted.RootSchema = base.RootSchema

@@ -193,13 +193,20 @@ func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
 
 func TestWorkflowExpressionEvaluatorRejectsTypeInvalidJoinExpressionBeforeEval(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	_, err := eval.EvalBool(`join.missing > 1`, workflowExpressionContext{
+	_, err := eval.EvalBoolWithOptions(`join.missing > 1`, workflowExpressionContext{
 		Join: map[string]any{
 			"expected": 2, "completed": 1, "missing": []any{"b"}, "results": []any{"ok"}, "timed_out": false,
 		},
-	})
+	}, workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: runtimecontracts.CatalogTypeReference{Type: "text"}})
 	if err == nil || !strings.Contains(err.Error(), "no matching overload") {
 		t.Fatalf("EvalBool type-invalid join error = %v, want typed overload rejection before runtime evaluation", err)
+	}
+}
+
+func TestWorkflowExpressionEvaluatorDoesNotGrantJoinScopeFromText(t *testing.T) {
+	_, err := newWorkflowExpressionEvaluator().EvalBool(`join.completed > 0`, workflowExpressionContext{Join: map[string]any{"completed": 1}})
+	if err == nil || !strings.Contains(err.Error(), "only available") {
+		t.Fatalf("out-of-scope join error=%v", err)
 	}
 }
 
@@ -355,7 +362,8 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 
 func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(
 		`entity.current_state == "business-current-state" && _entity.current_state == "platform-current-state" && _entity.id == "ent-1" && _entity.gates.reviewed`,
 		workflowExpressionContext{
 			Entity: map[string]any{
@@ -370,7 +378,7 @@ func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEnti
 			},
 			Payload: map[string]any{},
 			Policy:  map[string]any{},
-		},
+		}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
@@ -382,11 +390,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEnti
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`has(entity.kill_reason)`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`has(entity.kill_reason)`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
 	}
@@ -397,11 +406,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`entity.kill_reason == null`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`entity.kill_reason == null`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool == null error = %v", err)
 	}
@@ -409,11 +419,11 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseFie
 		t.Fatal("expected sparse field == null to be true")
 	}
 
-	ok, err = eval.EvalBool(`entity.kill_reason != null`, workflowExpressionContext{
+	ok, err = eval.EvalBoolWithOptions(`entity.kill_reason != null`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool != null error = %v", err)
 	}
@@ -424,11 +434,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseFie
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasGuardedTernaryReadOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`has(entity.kill_reason) ? entity.kill_reason == "manual" : true`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`has(entity.kill_reason) ? entity.kill_reason == "manual" : true`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool ternary error = %v", err)
 	}

@@ -166,54 +166,6 @@ func normalizeStateField(field string) string {
 	}
 }
 
-func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) error {
-	if snapshot == nil || len(spec.Writes) == 0 {
-		return nil
-	}
-	if snapshot.StateCarrier.Fields == nil {
-		snapshot.StateCarrier.Fields = map[string]any{}
-	}
-	for _, write := range spec.Writes {
-		if write.IsContainedOperation() {
-			return fmt.Errorf("data_accumulation target %s: contained operations require semantic source validation", strings.TrimSpace(write.Target()))
-		}
-		target := strings.TrimSpace(write.Target())
-		if target == "" {
-			continue
-		}
-		parsed := paths.Parse(target)
-		switch parsed.Root {
-		case paths.RootEntity, paths.RootMetadata:
-			parsed = paths.Path{Segments: parsed.Segments}
-		case paths.RootUnknown:
-		default:
-			return fmt.Errorf("data_accumulation target %s: unsupported target scope", strings.TrimSpace(write.Target()))
-		}
-		switch {
-		case write.Value.HasLiteralValue():
-			setParsedValuePath(snapshot.StateCarrier.Fields, parsed, write.Value.Literal)
-		case write.Value.HasCELValue():
-			value, err := evalWorkflowValueExpression(base, state, write.Value.CEL, workflowexpr.ValueExpressionOptions{})
-			if err != nil {
-				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
-			}
-			setParsedValuePath(snapshot.StateCarrier.Fields, parsed, value)
-		default:
-			source := strings.TrimSpace(write.Source())
-			if source == "" {
-				continue
-			}
-			if value, ok := lookupPath(cloneStringAnyMap(base.Payload.Raw()), source); ok {
-				setParsedValuePath(snapshot.StateCarrier.Fields, parsed, value)
-			}
-		}
-	}
-	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
-		snapshot.SetBookkeeping("last_data_accumulation_source", sourceEvent)
-	}
-	return nil
-}
-
 func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (any, error) {
 	return workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
 		Entity:         base.Entity.Raw(),

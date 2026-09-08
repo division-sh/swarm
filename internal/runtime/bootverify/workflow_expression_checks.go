@@ -39,6 +39,7 @@ func (c *checkerContext) conditionExpressions() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
+			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			if handler.Guard != nil {
 				if err := validateGuardOnFailLocal(handler.Guard); err != nil {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
@@ -51,7 +52,7 @@ func (c *checkerContext) conditionExpressions() []Finding {
 			}
 			for _, cond := range handlerConditionExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				expr := cond.Expression
-				options := workflowexpr.ValueExpressionOptions{PayloadType: payloadType}
+				options := executableReaderExpressionOptions(cond, payloadType, entityType)
 				if source := cond.ConditionCollectionSource; source != "" {
 					itemType, err := executableCollectionItemStructuralType(c.source, nodeRef, eventType, handler, source)
 					if err != nil {
@@ -126,6 +127,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
+			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
@@ -134,7 +136,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{CheckID: "data_accumulation_expression_validation", Severity: SeverityHardInvalidity, Message: fmt.Sprintf("node %s handler %s %s has no exact payload schema: %v", nodeID, eventType, expr.Kind, payloadTypeErr), Location: nodeID})
 					continue
 				}
-				options := executableReaderExpressionOptions(expr, payloadType)
+				options := executableReaderExpressionOptions(expr, payloadType, entityType)
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, options); err != nil {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
@@ -161,6 +163,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
+			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
@@ -170,7 +173,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{CheckID: "emit_field_expression_validation", Severity: SeverityHardInvalidity, Message: fmt.Sprintf("node %s handler %s %s has no exact payload schema: %v", nodeID, eventType, expr.Kind, payloadTypeErr), Location: nodeID})
 					continue
 				}
-				options := executableReaderExpressionOptions(expr, payloadType)
+				options := executableReaderExpressionOptions(expr, payloadType, entityType)
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, options); err != nil {
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
@@ -196,6 +199,7 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
+			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				if executableReaderHasSpecializedExpressionCheck(expr) {
 					continue
@@ -214,7 +218,7 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 					})
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, executableReaderExpressionOptions(expr, payloadType)); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, executableReaderExpressionOptions(expr, payloadType, entityType)); err != nil {
 					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
 						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
 						Message: fmt.Sprintf("node %s handler %s %s %q is invalid: %v", nodeID, eventType, expr.Kind, expr.Expression, err), Location: nodeID,
@@ -344,6 +348,8 @@ type expressionReference struct {
 	AllowBareItem             bool
 	ItemAlias                 string
 	AllowJoin                 bool
+	JoinResultType            runtimecontracts.CatalogTypeReference
+	JoinContext               workflowexpr.JoinContext
 	ItemType                  runtimecontracts.ResolvedCatalogType
 	HasItemType               bool
 	ResultType                runtimecontracts.ResolvedCatalogType
@@ -593,9 +599,10 @@ func executableWildcardPayloadStructuralType(source semanticview.Source, node ru
 	return selected, nil
 }
 
-func executableReaderExpressionOptions(expr expressionReference, payloadType *runtimecontracts.ResolvedCatalogType) workflowexpr.ValueExpressionOptions {
+func executableReaderExpressionOptions(expr expressionReference, payloadType, entityType *runtimecontracts.ResolvedCatalogType) workflowexpr.ValueExpressionOptions {
 	options := workflowexpr.ValueExpressionOptions{
-		AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias, AllowJoin: expr.AllowJoin, PayloadType: payloadType,
+		AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias, AllowJoin: expr.AllowJoin, PayloadType: payloadType, EntityType: entityType,
+		JoinResultType: expr.JoinResultType, JoinContext: expr.JoinContext,
 	}
 	if expr.HasItemType {
 		value := expr.ItemType.Clone()

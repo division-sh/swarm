@@ -28,7 +28,11 @@ const (
 )
 
 func WorkflowEntityReferences(expression string) []string {
-	return workflowexpr.EntityReferences(expression)
+	normalized, _, err := normalizeWorkflowExpression(expression, workflowExpressionContext{AllowUnresolvedQueryOperands: true})
+	if err != nil {
+		return nil
+	}
+	return workflowexpr.EntityReferences(normalized)
 }
 
 func WorkflowPlatformEntityReferences(expression string) []string {
@@ -45,10 +49,6 @@ func WorkflowEntityReferenceField(ref string) string {
 
 func WorkflowBuiltinEntityField(field string) bool {
 	return false
-}
-
-func WorkflowPresenceGuardedEntityFields(expression string) map[string]struct{} {
-	return workflowexpr.PresenceGuardedEntityFields(expression)
 }
 
 func WorkflowEntityFieldsAvailableBeforeCondition(handler runtimecontracts.SystemNodeEventHandler, context WorkflowConditionContext) map[string]struct{} {

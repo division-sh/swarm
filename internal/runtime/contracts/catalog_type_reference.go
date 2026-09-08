@@ -208,6 +208,13 @@ func resolveJSONSchemaStructuralType(schema map[string]any, name, path string) (
 		return ResolvedCatalogType{Kind: CatalogTypeList, Element: &element}, nil
 	case "object":
 		properties, _ := schema["properties"].(map[string]any)
+		if additional, ok := schema["additionalProperties"].(map[string]any); ok && len(properties) == 0 {
+			value, err := resolveJSONSchemaStructuralType(additional, name, path+"{}")
+			if err != nil {
+				return ResolvedCatalogType{}, err
+			}
+			return ResolvedCatalogType{Kind: CatalogTypeMap, Key: &ResolvedCatalogType{Kind: CatalogTypeText}, Value: &value}, nil
+		}
 		if properties == nil {
 			return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
 		}

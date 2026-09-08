@@ -194,12 +194,13 @@ func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, route 
 	if source != nil {
 		policy = workflowTimerPolicy(source, flowID)
 	}
-	return workflowexpr.EvalValueExpression(raw, workflowexpr.ValueContext{
+	entityType, _ := semanticview.ResolveEntityStructuralType(source, flowID)
+	return workflowexpr.EvalValueExpressionWithOptions(raw, workflowexpr.ValueContext{
 		Entity: instance.Fields,
 		PlatformEntity: map[string]any{
 			"entity_id": entityID.String(), "flow_instance": route.InstancePath, "current_state": instance.CurrentState,
 		},
 		Policy:   policy,
 		Computed: payloadMap(instance.Fields["computed"]),
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: entityType})
 }

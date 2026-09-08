@@ -148,11 +148,16 @@ func deterministicMailboxItemID(sourceEventID, nodeID string) string {
 }
 
 func executionExpressionOptions(execCtx runtimeengine.ExecutionContext) workflowexpr.ValueExpressionOptions {
-	if execCtx.PayloadType == nil {
-		return workflowexpr.ValueExpressionOptions{}
+	options := workflowexpr.ValueExpressionOptions{}
+	if execCtx.PayloadType != nil {
+		value := execCtx.PayloadType.Clone()
+		options.PayloadType = &value
 	}
-	payloadType := execCtx.PayloadType.Clone()
-	return workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}
+	if execCtx.EntityType != nil {
+		value := execCtx.EntityType.Clone()
+		options.EntityType = &value
+	}
+	return options
 }
 
 func requiredMailboxString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {

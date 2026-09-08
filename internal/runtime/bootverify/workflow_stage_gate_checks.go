@@ -49,8 +49,9 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		if _, ok := terminal[stage]; ok {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("terminal stage %s cannot own an actionable gate", stage)))
 		}
+		entityType, _ := semanticview.ResolveEntityStructuralType(c.source, flowID)
 		for name, expression := range plan.Context {
-			if err := validateStageGateContextExpression(expression); err != nil {
+			if err := validateStageGateContextExpression(expression, entityType); err != nil {
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("context field %s is invalid: %v", strings.TrimSpace(name), err)))
 			}
 		}
@@ -83,7 +84,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 	return findings
 }
 
-func validateStageGateContextExpression(expression runtimecontracts.ExpressionValue) error {
+func validateStageGateContextExpression(expression runtimecontracts.ExpressionValue, entityType *runtimecontracts.ResolvedCatalogType) error {
 	text := stageGateExpressionText(expression)
 	if text == "" {
 		return fmt.Errorf("expression is empty")
@@ -91,7 +92,7 @@ func validateStageGateContextExpression(expression runtimecontracts.ExpressionVa
 	if stageGateDecisionRefPattern.MatchString(text) {
 		return fmt.Errorf("decision.* is available only in outcome emit fields")
 	}
-	return workflowexpr.ValidateValueExpression(text)
+	return workflowexpr.ValidateValueExpressionWithOptions(text, workflowexpr.ValueExpressionOptions{EntityType: entityType})
 }
 
 func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGatePlan, verdict string, outcome runtimecontracts.WorkflowGateOutcomePlan, location string) []Finding {

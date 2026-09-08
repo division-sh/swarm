@@ -95,7 +95,7 @@ func fanOutEntitySource(t testing.TB) semanticview.Source {
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
-				"items": {Type: "[text]"},
+				"items": {Type: "[text]"}, "rule_count": {Type: "integer"},
 			}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -692,14 +692,14 @@ func (o *recordingPublicationCommitter) CommitPublications(_ context.Context, in
 	return nil
 }
 func (stubDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error { return nil }
-func (s stubEvaluator) EvalBool(expression string, _ BaseContext, _ *runtimecontracts.ResolvedCatalogType) (bool, error) {
+func (s stubEvaluator) EvalBool(expression string, _ BaseContext, _ workflowexpr.ValueExpressionOptions) (bool, error) {
 	if err := s.errs[expression]; err != nil {
 		return false, err
 	}
 	return s.bools[expression], nil
 }
 func (s stubEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
-func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext, _ *runtimecontracts.ResolvedCatalogType) (bool, error) {
+func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext, _ workflowexpr.ValueExpressionOptions) (bool, error) {
 	if fn, ok := s.bools[expression]; ok {
 		return fn(base)
 	}
@@ -2329,8 +2329,8 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 		expression string
 		wantErr    bool
 	}{
-		{name: "named field", expression: `join.results[0].score > 0`},
-		{name: "named value is not scalar", expression: `join.results[0] > 1`, wantErr: true},
+		{name: "named field", expression: `join.results.exists(r, r.score > 0)`},
+		{name: "named value is not scalar", expression: `join.results.exists(r, r > 1)`, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := runtimecontracts.JoinSpec{
@@ -3740,8 +3740,11 @@ func collectionExecutionSource() semanticview.Source {
 }
 
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
+	source := sourceWithPolicy(map[string]any{"score": 6})
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "query_rows": {Type: "[ScoredItem]"}}}}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithPolicy(map[string]any{"score": 6}),
+		Source:        source,
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -3752,7 +3755,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
@@ -5173,6 +5176,7 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"FanItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"label": {Type: "text"}}}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"fan-out-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
 		},
@@ -5180,7 +5184,7 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 			"fan-out-node": {"batch.ready": qualified},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}}}},
+			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[FanItem]"}}}},
 		},
 	}
 	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("undeclared fan-out field"))}
@@ -5578,15 +5582,20 @@ func TestSelectedFanOutPlanIgnoresContradictoryRawHandlerSpec(t *testing.T) {
 }
 
 func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
-			"vertical.discovered": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-				"mode": {Type: "text"}, "discovery_context": {Type: "object"},
-			}),
-			"scoring.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
-				"vertical_name": {Type: "text"}, "rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"}, "discovery_context": {Type: "object"},
-			}),
+	source := sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+		"vertical.discovered": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"mode": {Type: "text"}, "discovery_context": {Type: "object"},
 		}),
+		"scoring.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+			"vertical_name": {Type: "text"}, "rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"}, "discovery_context": {Type: "object"},
+		}),
+	})
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+		"name": {Type: "text"}, "scoring_rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"},
+	}}}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        source,
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5597,7 +5606,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "vertical-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 

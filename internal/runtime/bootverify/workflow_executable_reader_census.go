@@ -10,6 +10,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 type handlerExecutableReaderCollector func(*[]expressionReference, executableReaderContext, runtimecontracts.SystemNodeEventHandler)
@@ -149,6 +150,19 @@ func handlerExecutableReaderExpressionsForSource(source semanticview.Source, nod
 	// Canonical emit lowering expands emit.from and namespace sugar into the
 	// exact expressions executed at every declarative emit site.
 	out = append(out, handlerEmitExpressionsForSource(source, node, eventType, handler)...)
+	if handler.Join != nil {
+		if plan, ok := semanticview.WorkflowJoinPlanForExecutionHandler(source, node, eventType, *handler.Join); ok {
+			for i := range out {
+				if !out[i].AllowJoin {
+					continue
+				}
+				out[i].JoinResultType = plan.ResultType
+				if plan.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
+					out[i].JoinContext = workflowexpr.JoinContextFanOutDelivery
+				}
+			}
+		}
+	}
 	return out
 }
 
@@ -403,7 +417,11 @@ func appendJoinExecutableReaders(out *[]expressionReference, ctx executableReade
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	appendExecutableReader(out, "join.members.from", join.Members.From, phase)
 	appendExecutableReader(out, "join.members.by", join.Members.By, phase)
+	beforeCompletion := len(*out)
 	appendExecutableReader(out, "join.complete_when", join.CompleteWhen, phase)
+	for i := beforeCompletion; i < len(*out); i++ {
+		(*out)[i].AllowJoin = true
+	}
 	if join.Window != nil {
 		appendExecutableReader(out, "join.window.from", join.Window.From, phase)
 		appendExecutableReader(out, "join.window.by", join.Window.By, phase)
