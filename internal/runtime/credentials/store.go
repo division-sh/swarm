@@ -46,11 +46,11 @@ type ReceiptObserver interface {
 	ObserveReceipt(context.Context, string, string) (WriteReceipt, bool, error)
 }
 
-// ReceiptDeleter removes only the exact writable occurrence created by a
-// receipt-bearing admission. A stale receipt can never delete its successor.
+// ReceiptDeleter removes only the exact writable value admitted under one
+// receipt. Receipt reuse cannot let stale cleanup delete corrected bytes.
 type ReceiptDeleter interface {
 	Store
-	DeleteWithReceipt(context.Context, string, string) (bool, error)
+	DeleteWithReceiptAndSeal(context.Context, string, string, ValueSeal) (bool, error)
 }
 
 const valueSealPrefix = "credential-value-seal-v1:"

@@ -103,6 +103,80 @@ func TestOnboardingCredentialWriterUnusableSubmissionDoesNotPoisonSameReceiptRet
 	}
 }
 
+func TestOnboardingCredentialWriterStaleReleaseCannotDeleteSameReceiptCorrection(t *testing.T) {
+	ctx := context.Background()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "channel.telegram.provider"
+	const receipt = "operation/provider"
+	first, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "first-token", Receipt: receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstAdmission := CredentialAdmission{Role: "provider", StoreKey: first.StoreKey, Kind: CredentialAdmissionWritten, Receipt: first.Receipt, ValueSeal: first.ValueSeal}
+	if deleted, err := writer.Release(ctx, firstAdmission); err != nil || !deleted {
+		t.Fatalf("remove first occurrence = %v, %v", deleted, err)
+	}
+	corrected, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "corrected-token", Receipt: receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correctedAdmission := CredentialAdmission{Role: "provider", StoreKey: corrected.StoreKey, Kind: CredentialAdmissionWritten, Receipt: corrected.Receipt, ValueSeal: corrected.ValueSeal}
+	if deleted, err := writer.Release(ctx, firstAdmission); err != nil || deleted {
+		t.Fatalf("stale same-receipt release = %v, %v; want false, nil", deleted, err)
+	}
+	if current, err := writer.Current(ctx, correctedAdmission); err != nil || !current {
+		t.Fatalf("corrected admission current = %v, %v", current, err)
+	}
+}
+
+func TestCredentialWriterReleaseOperationCannotDeleteSameReceiptSuccessor(t *testing.T) {
+	ctx := context.Background()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := CredentialReservation{Role: "provider", StoreKey: "channel.telegram.provider"}
+	op := Operation{OperationID: "operation-a", CredentialReservations: []CredentialReservation{reservation}}
+	key := operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role)
+	receipt := credentialReceipt(op.OperationID, reservation.Role)
+	first, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "first-token", Receipt: receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op.CredentialAdmissions = []CredentialAdmission{{
+		Role: reservation.Role, StoreKey: first.StoreKey, Kind: CredentialAdmissionWritten,
+		Receipt: first.Receipt, ValueSeal: first.ValueSeal,
+	}}
+	if deleted, err := writer.Release(ctx, op.CredentialAdmissions[0]); err != nil || !deleted {
+		t.Fatalf("remove first occurrence = %v, %v", deleted, err)
+	}
+	corrected, err := writer.Admit(ctx, CredentialWriteRequest{StoreKey: key, Value: "corrected-token", Receipt: receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correctedAdmission := CredentialAdmission{
+		Role: reservation.Role, StoreKey: corrected.StoreKey, Kind: CredentialAdmissionWritten,
+		Receipt: corrected.Receipt, ValueSeal: corrected.ValueSeal,
+	}
+	if err := writer.ReleaseOperation(ctx, op); err == nil || !strings.Contains(err.Error(), "changed before exact release") {
+		t.Fatalf("stale operation cleanup error = %v", err)
+	}
+	if current, err := writer.Current(ctx, correctedAdmission); err != nil || !current {
+		t.Fatalf("corrected admission current = %v, %v", current, err)
+	}
+}
+
 func TestOnboardingCredentialWriterCrashConvergence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	store, err := runtimecredentials.NewFileStore(path)

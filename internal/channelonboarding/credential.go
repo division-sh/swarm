@@ -39,7 +39,7 @@ func NewCredentialWriter(store runtimecredentials.Store) (*CredentialWriter, err
 	}
 	receiptDeleter, ok := store.(runtimecredentials.ReceiptDeleter)
 	if !ok || receiptDeleter == nil {
-		return nil, fmt.Errorf("channel onboarding requires receipt-fenced credential deletion")
+		return nil, fmt.Errorf("channel onboarding requires receipt-and-value-seal-fenced credential deletion")
 	}
 	snapshots, err := runtimecredentials.NewSnapshotOwner(store)
 	if err != nil {
@@ -62,7 +62,7 @@ func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmi
 	if admission.Kind != CredentialAdmissionWritten {
 		return false, nil
 	}
-	return w.deleter.DeleteWithReceipt(ctx, admission.StoreKey, admission.Receipt)
+	return w.deleter.DeleteWithReceiptAndSeal(ctx, admission.StoreKey, admission.Receipt, admission.ValueSeal)
 }
 
 // ReleaseOperation reconciles both checkpointed admissions and deterministic
@@ -104,11 +104,11 @@ func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation, r
 	seen := make(map[string]struct{}, cap(releases))
 	retainedRoles := make(map[string]struct{}, len(retainedEvidence))
 	addRelease := func(admission CredentialAdmission) {
-		occurrence := credentialCleanupIdentity(admission)
-		if _, duplicate := seen[occurrence]; duplicate {
+		receiptIdentity := credentialCleanupReceiptIdentity(admission)
+		if _, duplicate := seen[receiptIdentity]; duplicate {
 			return
 		}
-		seen[occurrence] = struct{}{}
+		seen[receiptIdentity] = struct{}{}
 		releases = append(releases, admission)
 	}
 	for _, admission := range op.CredentialAdmissions {

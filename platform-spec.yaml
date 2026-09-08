@@ -9555,9 +9555,10 @@ tool_model:
         longer current. Provider-value rotation invalidates binding and optional-proof identity evidence and requires fresh
         same-identity reconnect confirmation; a different claimant teaches rebind. Signing-only rotation invalidates
         activation, registration, and readiness without invalidating provider identity. Every operation-written credential
-        occurrence is owned only by its exact key and receipt: terminal
-        onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
-        retires. Durable successor activation publication, exact process publication, and activation-backed registration
+        cleanup identity is its exact store key, deterministic retry receipt, and admitted keyed value seal. The receipt
+        alone identifies a retry, not the current value occurrence. Terminal onboarding failure and destructive teardown
+        atomically compare-delete all three facts against the current writable value after executable authority retires.
+        Durable successor activation publication, exact process publication, and activation-backed registration
         promotion each commit before predecessor occurrence retirement; nonterminal recovery resumes from the last durable
         checkpoint and derives any still-pending predecessor cleanup from retained operation evidence. A successor
         occurrence and an observed pre-existing credential are never deleted by stale cleanup.
@@ -9677,7 +9678,8 @@ tool_model:
         active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
         transition, and boot presentation uses the same masked claimant fallback as canonical channel readback. When startup
         finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
-        runtime_context_retired terminal failure, compare-deletes only that operation's receipt-owned credentials,
+        runtime_context_retired terminal failure, atomically compare-deletes only credentials matching that operation's
+        exact store key, write receipt, and admitted keyed value seal,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
         Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
         durable identity without registration-order or primary-context inference, reconciles admitted predecessor effects,
