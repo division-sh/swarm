@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -463,7 +464,11 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	if err != nil {
 		return fmt.Errorf("activity state route: %w", err)
 	}
-	instance, ok, err := d.coordinator.workflowStore.Load(ctx, route)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(intent.SourceRunID, route)
+	if err != nil {
+		return err
+	}
+	instance, ok, err := d.coordinator.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return err
 	}

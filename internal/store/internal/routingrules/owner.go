@@ -152,28 +152,6 @@ func (s *RoutingPostgresOwner) LoadRoutingRules(ctx context.Context) ([]runtimem
 	return out, nil
 }
 
-func (s *RoutingPostgresOwner) DeactivateRoutingRulesByEntity(ctx context.Context, entityID string) error {
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return fmt.Errorf("entity_id is required")
-	}
-	flowInstance, err := routingRuleFlowInstance(ctx, s, entityID)
-	if err != nil {
-		return err
-	}
-	const q = `
-		UPDATE routing_rules
-		SET status = 'inactive'
-		WHERE flow_instance = $1
-		  AND status <> 'inactive'
-	`
-	_, err = s.backend.ExecContext(ctx, q, flowInstance)
-	if err != nil {
-		return fmt.Errorf("deactivate routing rules by entity: %w", err)
-	}
-	return nil
-}
-
 func routingRuleFlowInstance(ctx context.Context, s *RoutingPostgresOwner, entityID string) (string, error) {
 	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
 	if err != nil {

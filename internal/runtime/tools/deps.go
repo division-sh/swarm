@@ -25,7 +25,7 @@ type GenericScheduleAdmission interface {
 }
 
 type WorkflowInstanceLoader interface {
-	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
 }
 
 type EventPublisher interface {
@@ -35,7 +35,7 @@ type EventPublisher interface {
 }
 
 type Manager interface {
-	ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error)
+	ResolveAgentConfig(runID, agentID, flowInstance string) (models.AgentConfig, error)
 }
 
 type ManagerProvider func() Manager

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -177,7 +176,7 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: observed.ID, CapabilitySurface: surfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{

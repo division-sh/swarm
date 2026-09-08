@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,10 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
-const testAgentTopologyBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const testAgentTopologyBundleHash = "bundle-v2:sha256:475110a469b91fc27e36bf58b6a0bfda6dc0eb100b10692299019b487c866cc4"
 
 func testAgentTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()
@@ -45,10 +47,7 @@ func testAgentMemoryIdentity(t testing.TB, runID, agentID, flowInstance string) 
 }
 
 func mustTestAgentMemoryIdentity(runID, agentID, flowInstance string) agentmemory.Identity {
-	return agentmemory.Identity{
-		RunID: runID,
-		Agent: mustTestAgentIdentity(agentID, flowInstance),
-	}
+	return mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 }
 
 func testAgentIdentity(t testing.TB, agentID, flowInstance string) agentidentity.Identity {
@@ -66,6 +65,10 @@ func testAgentIdentityStorageFields(t testing.TB, identity agentidentity.Identit
 }
 
 func mustTestAgentIdentity(agentID, flowInstance string) agentidentity.Identity {
+	return mustTestAgentIdentityForRun("11111111-1111-4111-8111-111111111115", agentID, flowInstance)
+}
+
+func mustTestAgentIdentityForRun(runID, agentID, flowInstance string) agentidentity.Identity {
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	name, err := agentidentity.RuntimeName(agentID, "store-test-fixture")
 	if err != nil {
@@ -83,16 +86,16 @@ func mustTestAgentIdentity(agentID, flowInstance string) agentidentity.Identity 
 			panic(err)
 		}
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New(runID, name, route)
 	if err != nil {
 		panic(err)
 	}
 	return identity
 }
 
-func testAgentDeliveryRoute(t testing.TB, agentID, flowInstance string) events.DeliveryRoute {
+func testAgentDeliveryRoute(t testing.TB, runID, agentID, flowInstance string) events.DeliveryRoute {
 	t.Helper()
-	identity := testAgentIdentity(t, agentID, flowInstance)
+	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 }
 
@@ -106,6 +109,29 @@ func seedTestAgentRow(
 ) {
 	t.Helper()
 	fields := testAgentIdentityStorageFields(t, identity)
+	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fields.RunID}
+	var runOwner any
+	var requireErr error
+	if postgres {
+		owner := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		bootstrapTestPostgresStore(t, owner)
+		runOwner = owner
+		requireErr = owner.RequirePresentRun(ctx, fields.RunID)
+	} else {
+		owner := NewSQLiteRuntimeStoreForTest(db)
+		if err := owner.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
+			t.Fatalf("bootstrap test agent store: %v", err)
+		}
+		runOwner = owner
+		requireErr = owner.RequirePresentRun(ctx, fields.RunID)
+	}
+	switch {
+	case requireErr == nil:
+	case errors.Is(requireErr, runtimerunlifecycle.ErrRunNotFound):
+		requireRunFixtureForTest(t, ctx, runOwner, fixture)
+	default:
+		t.Fatalf("require test agent run %s: %v", fields.RunID, requireErr)
+	}
 	status = strings.TrimSpace(status)
 	if status == "" {
 		status = "active"
@@ -144,15 +170,15 @@ func seedTestAgentRow(
 			lifecycle_process_boot_id, lifecycle_generation_grant_id,
 			lifecycle_bundle_hash,
 			lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-			topology_authority_kind, topology_admission, execution_lifetime
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed')
+			topology_authority_kind, topology_admission, execution_lifetime, run_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed', ?)
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now,
 		processAuthorityID, "store-test-seed", processBootID, generationGrantID,
-		testAgentTopologyBundleHash, runtimeInstanceID, testAgentTopologyJSON(t),
+		testAgentTopologyBundleHash, runtimeInstanceID, testAgentTopologyJSON(t), fields.RunID,
 	}
 	if postgres {
 		query = `
@@ -166,8 +192,8 @@ func seedTestAgentRow(
 				lifecycle_process_boot_id, lifecycle_generation_grant_id,
 				lifecycle_bundle_hash,
 				lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-				topology_authority_kind, topology_admission, execution_lifetime
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18::uuid, 1, 'static_declaration_plan', $19::jsonb, 'durable_managed')
+				topology_authority_kind, topology_admission, execution_lifetime, run_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18::uuid, 1, 'static_declaration_plan', $19::jsonb, 'durable_managed', $20::uuid)
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

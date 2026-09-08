@@ -321,7 +321,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if exactDelivery {
 		currentState = application.State()
 	} else {
-		currentState, err = e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
+		flowOwner, ownerErr := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), stateRoute)
+		if ownerErr != nil {
+			return nil, ownerErr
+		}
+		currentState, err = e.coordinator.currentWorkflowState(ctx, flowOwner, identity.NormalizeEntityID(entityID))
 		if err != nil {
 			return nil, err
 		}

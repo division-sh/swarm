@@ -17,7 +17,7 @@ func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
 	revision := func(raw string) string {
 		t.Helper()
 		got, err := lifecycleConfigRevision(PersistedAgent{Config: managerTestAgentConfig(runtimeactors.AgentConfig{
-			ID: "agent", Config: json.RawMessage(raw),
+			ID: "agent", Identity: managerAgentIdentity("agent"), Config: json.RawMessage(raw),
 		})})
 		if err != nil {
 			t.Fatalf("lifecycleConfigRevision(%s): %v", raw, err)
@@ -92,7 +92,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 		t.Fatalf("Run: %v", err)
 	}
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-transition"), events.EventType("test.transition"),
-		"tester", "", nil, 0, eventtest.UUID("run-transition"), "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}

@@ -38,9 +38,9 @@ func prepareDynamicFlowCreationOccurrenceCommit(
 		       instance.status,
 		       instance.terminated_at IS NULL
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		JOIN runs AS run ON run.run_id = readiness.run_id
-		WHERE readiness.run_id = $1::uuid AND readiness.instance_id = $2
+		WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
 		FOR UPDATE OF readiness, instance, run
 	`
 	if !postgres {
@@ -52,9 +52,9 @@ func prepareDynamicFlowCreationOccurrenceCommit(
 			       instance.status,
 			       instance.terminated_at IS NULL
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			JOIN runs AS run ON run.run_id = readiness.run_id
-			WHERE readiness.run_id = ? AND readiness.instance_id = ?
+			WHERE readiness.run_id = ? AND readiness.instance_path = ?
 		`
 	}
 	var (
@@ -114,7 +114,7 @@ func markDynamicFlowCreationOccurrenceCommitted(
 		UPDATE flow_instance_runtime_readiness
 		SET creation_event_emitted_at = $1, updated_at = $1
 		WHERE run_id = $2::uuid
-		  AND instance_id = $3
+		  AND instance_path = $3
 		  AND creation_event_emitted_at IS NULL
 	`
 	if !postgres {
@@ -122,7 +122,7 @@ func markDynamicFlowCreationOccurrenceCommitted(
 			UPDATE flow_instance_runtime_readiness
 			SET creation_event_emitted_at = ?, updated_at = ?
 			WHERE run_id = ?
-			  AND instance_id = ?
+			  AND instance_path = ?
 			  AND creation_event_emitted_at IS NULL
 		`
 	}

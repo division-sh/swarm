@@ -56,7 +56,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !handled {
 		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want coordinator handler delivery")
 	}
-	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(singletoncoordinatorpilot.FlowInstance))
+	loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, singletoncoordinatorpilot.FlowInstance))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}
@@ -118,7 +118,7 @@ func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *
 		FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
 		EntityID:     uuid.NewString(),
 	}
-	if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), containedTarget) {
+	if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), testPipelineRunID, containedTarget) {
 		t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
 	}
 }
@@ -220,7 +220,7 @@ func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.D
 func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
 	t.Helper()
 	entityID := FlowInstanceEntityID(flowInstance)
-	if _, ok, err := store.Load(ctx, testWorkflowInstanceRoute(flowInstance)); err != nil {
+	if _, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, flowInstance)); err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", flowInstance, err)
 	} else if ok {
 		t.Fatalf("contained flow_instance %q materialized through storage-ref lookup", flowInstance)
@@ -241,8 +241,8 @@ func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db
 	assertNoSingletonCoordinatorPilotRow(t, db, `
 		SELECT COUNT(*)
 		FROM flow_instances
-		WHERE instance_id = $1
-	`, flowInstance)
+		WHERE run_id = $1::uuid AND instance_path = $2
+	`, testPipelineRunID, flowInstance)
 }
 
 func assertNoSingletonCoordinatorPilotRow(t *testing.T, db *sql.DB, query string, args ...any) {

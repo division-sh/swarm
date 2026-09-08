@@ -114,6 +114,11 @@ groups:
     roots:
       - tests/tier12-runtime-fork/test-non-agent-replay-fail-closed
       - tests/tier12-runtime-fork/test-selected-contract-fork-execution
+  - disposition: canonical-owner
+    owner: runtime.run_scoped_selected_fork_identity
+    proof: internal/runtime/cataloge2e/run_scoped_flow_agent_identity_e2e_test.go:TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores
+    roots:
+      - tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork
   - disposition: different-concept
     owner: engine.list_processing
     proof: internal/runtime/cataloge2e/tier3_list_processing_e2e_test.go:TestTier3ListProcessingCanonicalRoutingOwnership

@@ -189,14 +189,16 @@ func agentManagedTestContext(t testing.TB, agent *LLMAgent) context.Context {
 	return runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 }
 
+const testBoardDirectiveRunID = "00000000-0000-0000-0000-000000000201"
+
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 	return runtimeagentcontrol.BoardDirective{
 		Directive: text,
 		Event: eventtest.DiagnosticDirect("00000000-0000-0000-0000-000000000101",
 			events.EventType(runtimeagentcontrol.DirectiveEventType),
-			"runtime", "", []byte(`{"directive_text":"`+text+`","mode":"directive","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`), 0, "00000000-0000-0000-0000-000000000201", "", events.EventEnvelope{}, time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)),
+			"runtime", "", []byte(`{"directive_text":"`+text+`","mode":"directive","run_id":"`+testBoardDirectiveRunID+`","run_id_resolution":"specified","source":"test"}`), 0, testBoardDirectiveRunID, "", events.EventEnvelope{}, time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)),
 
-		RunIDResolution: runtimeagentcontrol.RunResolutionNewRunAllocated,
+		RunIDResolution: runtimeagentcontrol.RunResolutionSpecified,
 		Source:          "test",
 	}
 }
@@ -357,13 +359,14 @@ func toolNamesForAgentTest(tools []llm.ToolDefinition) []string {
 }
 
 func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
+	runID := eventtest.UUID("analysis-run")
 	rt := &boardTestRuntime{
 		steps: []*llm.Response{
 			{Message: llm.Message{Role: "assistant", Content: "Handled."}},
 		},
 	}
 	agent := mustBuildLLMAgent(t,
-		models.AgentConfig{ExecutionMode: "live", ID: "analysis-1", Role: "analysis"},
+		models.AgentConfig{ExecutionMode: "live", ID: "analysis-1", Role: "analysis", Identity: agentidentitytest.RootRuntimeForRun(t, runID, "analysis-1", "agent-llm-test")},
 		rt,
 		nil,
 		nil,
@@ -376,7 +379,7 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		eventtest.UUID("analysis-run"),
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Time{},
@@ -407,10 +410,11 @@ func TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive(t *testing.T) 
 		{name: "mock input to live agent is rejected", agentMode: runtimeeffects.ExecutionModeLive, inboundMode: runtimeeffects.ExecutionModeMock, wantReject: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			runID := eventtest.UUID("mode-run")
 			runtime := &boardTestRuntime{steps: []*llm.Response{{Message: llm.Message{Role: "assistant", Content: "handled"}}}}
-			agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mode-agent", Role: "worker", ExecutionMode: tc.agentMode}, runtime, nil, nil)
+			agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mode-agent", Role: "worker", ExecutionMode: tc.agentMode, Identity: agentidentitytest.RootRuntimeForRun(t, runID, "mode-agent", "agent-llm-test")}, runtime, nil, nil)
 			evt := eventtest.RunCreatingRootIngressWithMode(
-				"mode-event", "work.requested", "runtime", "", []byte(`{}`), 0, eventtest.UUID("mode-run"), "", events.EventEnvelope{}, time.Time{}, tc.inboundMode,
+				"mode-event", "work.requested", "runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Time{}, tc.inboundMode,
 			)
 
 			_, err := agent.OnEvent(agentManagedTestContext(t, agent), evt)
@@ -540,7 +544,7 @@ func roleScopedCapabilitiesForAgentTest(names []string, currentEntityEligible bo
 
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 	agent := mustBuildLLMAgent(t,
-		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
+		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator", Identity: agentidentitytest.RootRuntimeForRun(t, testBoardDirectiveRunID, "coordinator-1", "agent-llm-test")},
 		&boardTestRuntime{
 			steps: []*llm.Response{
 				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
@@ -574,7 +578,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 		},
 	}
 	agent := mustBuildLLMAgent(t,
-		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
+		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator", Identity: agentidentitytest.RootRuntimeForRun(t, testBoardDirectiveRunID, "coordinator-1", "agent-llm-test")},
 		rt,
 		boardEmitExecutor{},
 		[]llm.ToolDefinition{{Name: "emit_scan_requested"}},
@@ -615,7 +619,7 @@ func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Con
 	}
 	usageTarget := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: surface.Authority.ID, RunID: surface.Authority.RunID,
-		AgentID: session.AgentID, AgentIdentity: session.MemoryIdentity.Agent, SessionID: session.ID,
+		AgentID: session.AgentID, AgentIdentity: session.MemoryIdentity, SessionID: session.ID,
 		Memory: session.Memory, FlowInstance: session.MemoryIdentity.FlowInstance(),
 	}
 	if !usageTarget.Valid() {
@@ -646,7 +650,7 @@ func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Con
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity}, Memory: target.Memory,
+			Identity: target.AgentIdentity, Memory: target.Memory,
 			FlowInstance: target.FlowInstance, CapabilitySurfaceID: surface.ID, CapabilitySurface: surfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{
@@ -737,6 +741,7 @@ func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
 	agent, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
+		Identity:      agentidentitytest.RootRuntime(t, "analysis-agent", "agent-llm-test"),
 		Tools:         []string{"query_entities"},
 	}, "You are here."))
 	if err != nil {
@@ -797,6 +802,7 @@ func TestHumanTaskOutcomeInjectsCanonicalAskHumanToolResult(t *testing.T) {
 }
 
 func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testing.T) {
+	runID := eventtest.UUID("market-run")
 	rt := &boardTestRuntime{
 		steps: []*llm.Response{
 			{Message: llm.Message{Role: "assistant", Content: "handled"}},
@@ -805,6 +811,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ID:            "market-research-agent",
+		Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "market-research-agent", "agent-llm-test"),
 		Role:          "market_research",
 		Memory:        agentmemory.Authored(false),
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
@@ -820,7 +827,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		"",
 		[]byte(`{"assignment":{"scan_id":"root-run-id","geography":"US"}}`),
 		0,
-		eventtest.UUID("market-run"),
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "root-run-id"),
 		time.Time{},
@@ -856,6 +863,7 @@ func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testi
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
 	created, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ID:            "market-research-agent",
+		Identity:      agentidentitytest.RootRuntimeForRun(t, testBoardDirectiveRunID, "market-research-agent", "agent-llm-test"),
 		Role:          "market_research",
 		Memory:        agentmemory.Authored(false),
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
@@ -981,7 +989,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
-		Identity:      agentidentitytest.RootDeclared(t, "campaign-coordinator", "swarm-test://root/agents/campaign-coordinator"),
+		Identity:      agentidentitytest.RootDeclaredForRun(t, testBoardDirectiveRunID, "campaign-coordinator", "swarm-test://root/agents/campaign-coordinator"),
 		FlowID:        ".",
 		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
@@ -1085,7 +1093,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
-		Identity:      agentidentitytest.Declared(t, "campaign-coordinator", owner, "campaign-flow", "inst-1", "campaign-flow/inst-1"),
+		Identity:      agentidentitytest.DeclaredForRun(t, testBoardDirectiveRunID, "campaign-coordinator", owner, "campaign-flow", "inst-1", "campaign-flow/inst-1"),
 		EntityID:      eventtest.UUID("campaign-flow-inst-1-source"),
 		Role:          "campaign_coordinator",
 		FlowID:        "campaign-flow",
@@ -1150,10 +1158,12 @@ func (r *taskRetryRuntime) continueAgentTest(_ context.Context, _ *llm.Session, 
 
 func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {
 	rt := &taskRetryRuntime{}
+	runID := eventtest.UUID("spec-review-run")
 	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "spec-reviewer",
+			Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "spec-reviewer", "agent-llm-test"),
 			Role:          "spec_reviewer",
 			EntityID:      "ent-1",
 			Memory:        agentmemory.Authored(false),
@@ -1170,7 +1180,7 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		eventtest.UUID("spec-review-run"),
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Time{},
@@ -1210,10 +1220,12 @@ func (r *runIDCaptureRuntime) continueAgentTest(ctx context.Context, _ *llm.Sess
 
 func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	rt := &runIDCaptureRuntime{}
+	runID := eventtest.UUID("run-123")
 	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "analysis-agent",
+			Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "analysis-agent", "agent-llm-test"),
 			Role:          "analysis_agent",
 			EntityID:      "ent-1",
 		},
@@ -1222,7 +1234,6 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 		nil,
 	)
 
-	runID := eventtest.UUID("run-123")
 	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"scoring/scoring.requested",

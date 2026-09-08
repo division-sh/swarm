@@ -282,8 +282,11 @@ type ExecutionRequest struct {
 
 func (r ExecutionRequest) StateAddress() StateAddress {
 	return StateAddress{
-		FlowID:   identity.NormalizeFlowID(r.ExecutionFlowID.String()),
-		Route:    r.Route,
+		FlowID: identity.NormalizeFlowID(r.ExecutionFlowID.String()),
+		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{
+			RunID: strings.TrimSpace(r.Event.RunID()),
+			Route: r.Route,
+		}.Normalize(),
 		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
 	}
 }
@@ -415,6 +418,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.HandlerEventKey = strings.TrimSpace(i.HandlerEventKey)
 	i.ApprovalDecision = strings.TrimSpace(i.ApprovalDecision)
 	i.SourceEventID = strings.TrimSpace(i.SourceEventID)
+	i.SourceRunID = strings.TrimSpace(i.SourceRunID)
 	i.ParentEventID = strings.TrimSpace(i.ParentEventID)
 	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
 	i.Generation = i.Generation.Normalize()

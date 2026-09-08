@@ -40,6 +40,8 @@ type completionRecoveryAttempt struct {
 	ExecutionOwner       string
 	FenceGeneration      int64
 	LeaseExpiresAt       time.Time
+	AgentRunID           string
+	LineageRunID         string
 	AgentID              string
 	AgentNameOwner       string
 	AgentNameSource      string
@@ -89,6 +91,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,''),
 		       a.execution_owner,a.fence_generation,a.lease_expires_at,
+		       COALESCE(o.agent_run_id::text,''),COALESCE(o.lineage->>'run_id',''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
@@ -99,6 +102,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.run_id=o.agent_run_id
 		  AND g.agent_id=o.agent_id
 		  AND g.agent_name_owner=o.agent_name_owner
 		  AND g.agent_name_source=o.agent_name_source
@@ -142,6 +146,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,''),
 		       a.execution_owner,a.fence_generation,a.lease_expires_at,
+		       COALESCE(o.agent_run_id,''),COALESCE(json_extract(o.lineage,'$.run_id'),''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
@@ -152,6 +157,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.run_id=o.agent_run_id
 		  AND g.agent_id=o.agent_id
 		  AND g.agent_name_owner=o.agent_name_owner
 		  AND g.agent_name_source=o.agent_name_source
@@ -208,6 +214,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal,
 			&attempt.CapabilitySurfaceID, &attempt.CapabilitySurface,
 			&attempt.ExecutionOwner, &attempt.FenceGeneration, &lease,
+			&attempt.AgentRunID, &attempt.LineageRunID,
 			&attempt.AgentID, &attempt.AgentNameOwner, &attempt.AgentNameSource, &attempt.AgentRoutePresence,
 			&attempt.FlowScopeKey, &attempt.FlowInstanceID, &attempt.FlowInstance,
 			&attempt.RuntimeEpoch, &attempt.Generation,
@@ -354,7 +361,21 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	}
 	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		runID := strings.TrimSpace(target.RunID)
+		for _, axis := range []struct {
+			name  string
+			value string
+		}{
+			{name: "persisted agent", value: recovered.AgentRunID},
+			{name: "lineage", value: recovered.LineageRunID},
+			{name: "concrete agent", value: target.AgentIdentity.Normalize().RunID},
+		} {
+			if strings.TrimSpace(axis.value) == "" || strings.TrimSpace(axis.value) != runID {
+				return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery %s run identity conflicts for attempt %s", axis.name, recovered.AttemptID)
+			}
+		}
 		identity, err := agentidentity.FromStorageFields(agentidentity.StorageFields{
+			RunID:   target.RunID,
 			AgentID: recovered.AgentID, NameOwner: recovered.AgentNameOwner, NameSource: recovered.AgentNameSource,
 			RoutePresence: recovered.AgentRoutePresence, FlowScopeKey: recovered.FlowScopeKey,
 			FlowInstanceID: recovered.FlowInstanceID, FlowInstancePath: recovered.FlowInstance,
@@ -388,6 +409,8 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim conflicts for attempt %s", recovered.AttemptID)
 		}
 		attempt.Origin = origin
+	} else if strings.TrimSpace(recovered.AgentRunID) != "" {
+		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery non-agent authority carries agent run identity for attempt %s", recovered.AttemptID)
 	}
 	agentID := strings.TrimSpace(target.AgentID)
 	if agentID == "" {
@@ -437,7 +460,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
 			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,

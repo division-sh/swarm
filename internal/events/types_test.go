@@ -223,7 +223,7 @@ func TestDeliveryEventTargetlessRouteDoesNotConsumeJournalTargetSetProjection(t 
 	if err != nil {
 		t.Fatalf("DeclaredName: %v", err)
 	}
-	identity, err := agentidentity.New(name, agentidentity.RootRoute())
+	identity, err := agentidentity.New("run-one", name, agentidentity.RootRoute())
 	if err != nil {
 		t.Fatalf("agentidentity.New: %v", err)
 	}
@@ -399,7 +399,7 @@ func testDeliveryAgentIdentity(t testing.TB, agentID, scopeKey, instanceID, inst
 	if err != nil {
 		t.Fatalf("agentidentity.PresentRoute: %v", err)
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New("run-one", name, route)
 	if err != nil {
 		t.Fatalf("agentidentity.New: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -284,7 +285,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	routeTable := newRouteTable(nil)
 	routeTable.eventPath[eventType] = struct{}{}
-	routeTable.routes[eventType] = []Subscriber{{
+	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
 		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
 		Path:           "worker",
 		LocalizedEvent: "work.started",
@@ -316,21 +317,38 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt := eventtest.SelectedForkReplay(
-		uuid.NewString(), eventType, eventtest.Producer(events.EventProducerNode, "selected-node"), "fork-task",
-		[]byte(`{"selected":true}`), 0, lineage, events.EventEnvelope{}, time.Now().UTC(),
-	)
+	evt, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
+		Facts: events.EventFacts{
+			ID: uuid.NewString(), Type: eventType,
+			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: "selected-node"}, TaskID: "fork-task",
+			Payload: []byte(`{"selected":true}`), CreatedAt: time.Now().UTC(), ExecutionMode: lineage.ExecutionMode(),
+			RoutingSource: eventtest.ConcreteTemplateRoutingSource("worker", target.FlowInstance, target.EntityID),
+		}, Lineage: lineage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("prepare selected-fork publication: %v", err)
 	}
 	t.Cleanup(func() { _ = eb.AbandonPreparedPublish(context.Background(), prepared) })
 
-	request := prepared.CommitRequest()
-	if got := request.Event.Event().TargetRoute().Normalized(); got != target {
+	request := prepared.SelectedForkCommitRequest(runfork.RunForkSelectedContractExecutionLineage{
+		ForkRunID: lineage.DestinationRunID(), SourceRunID: lineage.SourceRunID(), SourceEventID: lineage.SourceEventID(),
+		ForkEventID: evt.ID(), EventName: string(evt.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: evt.CreatedAt(),
+	})
+	if !request.HasAuthorScope || request.AuthorScope.Kind == "" {
+		t.Fatalf("selected-fork commit author scope = %#v present=%t, want exact scope", request.AuthorScope, request.HasAuthorScope)
+	}
+	if !request.HasAuthorDescriptor || request.AuthorDescriptor.EventType != eventType {
+		t.Fatalf("selected-fork commit author descriptor = %#v present=%t, want %s", request.AuthorDescriptor, request.HasAuthorDescriptor, eventType)
+	}
+	commit := request.Commit
+	if got := commit.Event.Event().TargetRoute().Normalized(); got != target {
 		t.Fatalf("selected-fork event target = %#v, want %#v", got, target)
 	}
-	if err := request.ValidatePreparedEvent(); err != nil {
+	if err := commit.ValidatePreparedEvent(); err != nil {
 		t.Fatalf("validate selected-fork prepared aggregate: %v", err)
 	}
 }

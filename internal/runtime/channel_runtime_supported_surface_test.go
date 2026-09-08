@@ -30,6 +30,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -219,7 +220,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  activationOwner,
 				FlowRoutes:          bus,
 			})
-			if _, err := coordinator.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimepipeline.WorkflowInstance{
+			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowInstance)}
+			if _, err := coordinator.MaterializeInitialEntry(testLiveExecutionContext(ctx), owner, runtimepipeline.WorkflowInstance{
 				InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
 				EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
 				Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Config: map[string]any{}, Fields: map[string]any{},

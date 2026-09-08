@@ -17,8 +17,9 @@ func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 		ContainerName:  "swarm-agent-agent-a",
 		WorkspaceScope: "per-agent",
 		RunID:          "11111111-1111-1111-1111-111111111111",
-		AgentIdentity: runtimeagentidentitytest.Declared(
+		AgentIdentity: runtimeagentidentitytest.DeclaredForRun(
 			t,
+			"11111111-1111-1111-1111-111111111111",
 			"agent-a",
 			"test/agents.yaml",
 			"flow",
@@ -40,7 +41,7 @@ func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 }
 
 func TestIdentityEqualityUsesNormalizedCompleteIdentity(t *testing.T) {
-	agent := runtimeagentidentitytest.Declared(t, "agent-a", "test/agents.yaml", "child", "one", "child/one")
+	agent := runtimeagentidentitytest.DeclaredForRun(t, "run-a", "agent-a", "test/agents.yaml", "child", "one", "child/one")
 	left := Identity{Owner: OwnerRuntime, Kind: KindFlow, ResetEligible: true, ContainerName: " flow ", RunID: " run-a ", FlowInstance: "/child/one/", AgentIdentity: agent}
 	right := Identity{Owner: OwnerRuntime, Kind: KindFlow, ResetEligible: true, ContainerName: "flow", RunID: "run-a", FlowInstance: "child/one", AgentIdentity: agent}
 	if !left.Equal(right) {
@@ -61,7 +62,7 @@ func TestIdentityLabelsRoundTripFlowActorAndDataProjection(t *testing.T) {
 		ContainerName:  "swarm-flow-child-one-agent-a",
 		WorkspaceScope: "per-flow-instance",
 		RunID:          "11111111-1111-1111-1111-111111111111",
-		AgentIdentity:  runtimeagentidentitytest.Declared(t, "agent-a", "test/agents.yaml", "child", "one", "child/one"),
+		AgentIdentity:  runtimeagentidentitytest.DeclaredForRun(t, "11111111-1111-1111-1111-111111111111", "agent-a", "test/agents.yaml", "child", "one", "child/one"),
 		FlowInstance:   "child/one",
 		DataProjection: runtimedataaccess.ProjectionID("data-projection-v1:sha256:" + strings.Repeat("a", 64)),
 	}
@@ -82,10 +83,20 @@ func TestIdentityRejectsFlowWithoutActorOrMalformedProjection(t *testing.T) {
 	if err := base.Validate(); err == nil {
 		t.Fatal("flow identity without actor validated")
 	}
-	base.AgentIdentity = runtimeagentidentitytest.Declared(t, "agent-a", "test/agents.yaml", "child", "one", "child/one")
+	base.AgentIdentity = runtimeagentidentitytest.DeclaredForRun(t, "run-a", "agent-a", "test/agents.yaml", "child", "one", "child/one")
 	base.DataProjection = runtimedataaccess.ProjectionID("data-projection-v1:sha256:deadbeef")
 	if err := base.Validate(); err == nil {
 		t.Fatal("flow identity with malformed data projection validated")
+	}
+}
+
+func TestIdentityRejectsContainerAndAgentRunMismatch(t *testing.T) {
+	identity := Identity{
+		Owner: OwnerRuntime, Kind: KindAgent, ResetEligible: true, ContainerName: "swarm-agent-agent-a",
+		RunID: "run-a", AgentIdentity: runtimeagentidentitytest.RootDeclaredForRun(t, "run-b", "agent-a", "test/agents.yaml"),
+	}
+	if err := identity.Validate(); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched container identity error = %v, want exact run rejection", err)
 	}
 }
 

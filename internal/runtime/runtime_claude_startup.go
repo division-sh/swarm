@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -258,6 +259,89 @@ func workflowSourceOrManagerDeclaresAgents(source semanticview.Source, manager *
 	return len(manager.ListAgentConfigs()) > 0, nil
 }
 
+type managedProviderPreflightAgent struct {
+	config runtimeactors.AgentConfig
+	plan   runtimeagentidentity.Plan
+}
+
+func managedProviderPreflightAgentConfigs(manager *runtimemanager.AgentManager) ([]managedProviderPreflightAgent, error) {
+	if manager == nil {
+		return nil, nil
+	}
+	type candidateOwner struct {
+		live runtimeagentidentity.Identity
+		plan runtimeagentidentity.Plan
+	}
+	type candidate struct {
+		config   runtimeactors.AgentConfig
+		plan     runtimeagentidentity.Plan
+		revision string
+		owner    candidateOwner
+	}
+	byOwner := map[candidateOwner]candidate{}
+	add := func(owner candidateOwner, ownerDescription string, config runtimeactors.AgentConfig, plan runtimeagentidentity.Plan) error {
+		plan = plan.Normalize()
+		if owner.live.IsZero() == owner.plan.IsZero() {
+			return fmt.Errorf("managed provider preflight owner %s must be exactly one live identity or runless plan", ownerDescription)
+		}
+		revision, err := runtimemanager.AgentConfigPlanRevision(config, plan)
+		if err != nil {
+			return err
+		}
+		if previous, exists := byOwner[owner]; exists {
+			if previous.revision != revision {
+				return fmt.Errorf("managed provider preflight owner %s has conflicting resolved configurations", ownerDescription)
+			}
+			return nil
+		}
+		byOwner[owner] = candidate{config: config, plan: plan, revision: revision, owner: owner}
+		return nil
+	}
+	for _, config := range manager.ListAgentConfigs() {
+		identity, err := config.ConcreteIdentity()
+		if err != nil {
+			return nil, fmt.Errorf("managed provider preflight live agent %q: %w", strings.TrimSpace(config.ID), err)
+		}
+		plan, err := identity.Plan()
+		if err != nil {
+			return nil, err
+		}
+		if err := add(candidateOwner{live: identity.Normalize()}, identity.Description(), config, plan); err != nil {
+			return nil, err
+		}
+	}
+	blueprints, err := manager.PreRunAgentMaterializationBlueprints()
+	if err != nil {
+		return nil, fmt.Errorf("compile managed provider preflight blueprints: %w", err)
+	}
+	for _, blueprint := range blueprints {
+		plan := blueprint.Identity.Normalize()
+		if err := add(candidateOwner{plan: plan}, plan.Description(), blueprint.Config, plan); err != nil {
+			return nil, err
+		}
+	}
+	candidates := make([]candidate, 0, len(byOwner))
+	for _, value := range byOwner {
+		candidates = append(candidates, value)
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		leftLive := !candidates[left].owner.live.IsZero()
+		rightLive := !candidates[right].owner.live.IsZero()
+		if leftLive != rightLive {
+			return leftLive
+		}
+		if leftLive {
+			return runtimeagentidentity.Less(candidates[left].owner.live, candidates[right].owner.live)
+		}
+		return runtimeagentidentity.LessPlan(candidates[left].owner.plan, candidates[right].owner.plan)
+	})
+	configs := make([]managedProviderPreflightAgent, 0, len(candidates))
+	for _, candidate := range candidates {
+		configs = append(configs, managedProviderPreflightAgent{config: candidate.config, plan: candidate.plan})
+	}
+	return configs, nil
+}
+
 func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Config, source semanticview.Source, workspaces workspace.Lifecycle, manager *runtimemanager.AgentManager) error {
 	enabled, err := isClaudeCLIBackend(cfg)
 	if err != nil {
@@ -282,7 +366,12 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 	if manager == nil {
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
-	for _, agentCfg := range manager.ListAgentConfigs() {
+	preflightConfigs, err := managedProviderPreflightAgentConfigs(manager)
+	if err != nil {
+		return err
+	}
+	for _, target := range preflightConfigs {
+		agentCfg := target.config
 		profile, err := llmselection.ResolveActiveBackend(agentCfg.ResolvedLLMBackend)
 		if err != nil {
 			return fmt.Errorf("agent %s selected invalid llm backend: %w", strings.TrimSpace(agentCfg.ID), err)
@@ -363,11 +452,26 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	}
 	type preflightTarget struct {
 		config  runtimeactors.AgentConfig
+		plan    runtimeagentidentity.Plan
 		runtime llm.Runtime
 		probe   llm.StartupVisibleToolSurfaceProber
 	}
 	targets := make([]preflightTarget, 0)
-	for _, agentCfg := range manager.ListAgentConfigs() {
+	preflightConfigs, err := managedProviderPreflightAgentConfigs(manager)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range preflightConfigs {
+		agentCfg := candidate.config
+		if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
+			// A selected fork probes only its already-materialized execution census.
+			if agentCfg.Identity.IsZero() {
+				continue
+			}
+			if agentCfg.Identity.RunID != authority.RunID {
+				return nil, fmt.Errorf("selected-fork preflight agent run does not match execution authority")
+			}
+		}
 		resolved, resolveErr := runtimes.ResolveAgentRuntime(agentCfg)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve managed provider runtime for agent %s: %w", strings.TrimSpace(agentCfg.ID), resolveErr)
@@ -382,7 +486,7 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 		if !ok {
 			return nil, fmt.Errorf("managed provider startup probe is required for agent %s", strings.TrimSpace(resolved.Actor.ID))
 		}
-		targets = append(targets, preflightTarget{config: resolved.Actor, runtime: resolved.Runtime, probe: startupProbe})
+		targets = append(targets, preflightTarget{config: resolved.Actor, plan: candidate.plan, runtime: resolved.Runtime, probe: startupProbe})
 	}
 	if len(targets) == 0 {
 		return nil, nil
@@ -423,7 +527,7 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 			ExecutionKind: authority.ExecutionKind, ExecutionAuthorityID: strings.TrimSpace(authority.ExecutionAuthorityID),
 			RunID: strings.TrimSpace(authority.RunID), StartupOwnerID: strings.TrimSpace(authority.StartupOwnerID), StartupGeneration: authority.StartupGeneration,
 		}
-		surface, err := llm.ManagedCapabilitySurfaceForStartup(agentCtx, modelRuntime, sessionTools, capabilities, capabilityAuthority)
+		surface, err := llm.ManagedCapabilitySurfaceForStartup(agentCtx, target.plan, modelRuntime, sessionTools, capabilities, capabilityAuthority)
 		if err != nil {
 			return nil, fmt.Errorf("build managed capability startup surface for agent %s: %w", agentID, err)
 		}

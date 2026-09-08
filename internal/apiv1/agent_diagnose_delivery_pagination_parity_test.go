@@ -72,7 +72,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				})
 			}
 			agentID := "diagnose-agent"
-			identity := agentidentitytest.Runtime(t, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
+			identity := agentidentitytest.RuntimeForRun(t, runID, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
 			if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
@@ -120,16 +120,16 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				}),
 			})
 			first := rpcCall(t, handler, fmt.Sprintf(
-				`{"jsonrpc":"2.0","id":"first","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q,"queue_limit":1}}`,
-				agentID, identity.FlowInstance(),
+				`{"jsonrpc":"2.0","id":"first","method":"agent.diagnose","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q,"queue_limit":1}}`,
+				identity.RunID, agentID, identity.FlowInstance(),
 			))
 			firstDeliveryID, cursor := requireAgentDiagnoseDeliveryPage(t, first, 2)
 			if firstDeliveryID != wantDeliveryIDs[0] || cursor == "" {
 				t.Fatalf("first diagnosis page = delivery %q cursor %q, want %q plus cursor", firstDeliveryID, cursor, wantDeliveryIDs[0])
 			}
 			second := rpcCall(t, handler, fmt.Sprintf(
-				`{"jsonrpc":"2.0","id":"second","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q,"queue_limit":1,"queue_cursor":%q}}`,
-				agentID, identity.FlowInstance(), cursor,
+				`{"jsonrpc":"2.0","id":"second","method":"agent.diagnose","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q,"queue_limit":1,"queue_cursor":%q}}`,
+				identity.RunID, agentID, identity.FlowInstance(), cursor,
 			))
 			secondDeliveryID, next := requireAgentDiagnoseDeliveryPage(t, second, 2)
 			if secondDeliveryID != wantDeliveryIDs[1] || next != "" {

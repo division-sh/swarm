@@ -17,6 +17,7 @@ const (
 	DeliveryStatusChanged       Kind = "delivery_status_changed"
 	HandlerStarted              Kind = "handler_started"
 	HandlerCompleted            Kind = "handler_completed"
+	WorkflowTerminalCommitted   Kind = "workflow_terminal_committed"
 	PostCommitDispatchStarted   Kind = "post_commit_dispatch_started"
 	PostCommitDispatchCompleted Kind = "post_commit_dispatch_completed"
 )

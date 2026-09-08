@@ -131,11 +131,21 @@ func (r Route) Fields() (scopeKey, instanceID, instancePath string, present bool
 }
 
 type Identity struct {
+	RunID string `json:"run_id"`
+	Name  Name   `json:"name"`
+	Route Route  `json:"route"`
+}
+
+// Plan is declaration-owned, runless agent routing data. It may appear in
+// compiled blueprints, but it is not live authority and cannot address store
+// or process state until composed with an admitted run.
+type Plan struct {
 	Name  Name  `json:"name"`
 	Route Route `json:"route"`
 }
 
 type StorageFields struct {
+	RunID            string
 	AgentID          string
 	NameOwner        string
 	NameSource       string
@@ -145,15 +155,119 @@ type StorageFields struct {
 	FlowInstancePath string
 }
 
-func New(name Name, route Route) (Identity, error) {
-	identity := Identity{Name: name.Normalize(), Route: route.Normalize()}
+func New(runID string, name Name, route Route) (Identity, error) {
+	identity := Identity{RunID: strings.TrimSpace(runID), Name: name.Normalize(), Route: route.Normalize()}
 	if err := identity.Validate(); err != nil {
 		return Identity{}, err
 	}
 	return identity, nil
 }
 
+func NewPlan(name Name, route Route) (Plan, error) {
+	plan := Plan{Name: name.Normalize(), Route: route.Normalize()}
+	if err := plan.Validate(); err != nil {
+		return Plan{}, err
+	}
+	return plan, nil
+}
+
+func (p Plan) Normalize() Plan {
+	p.Name = p.Name.Normalize()
+	p.Route = p.Route.Normalize()
+	return p
+}
+
+func (p Plan) Validate() error {
+	p = p.Normalize()
+	if err := p.Name.Validate(); err != nil {
+		return err
+	}
+	return p.Route.Validate()
+}
+
+func (p Plan) IsZero() bool {
+	return p == Plan{}
+}
+
+func (p Plan) AgentID() string {
+	return p.Normalize().Name.AgentID
+}
+
+func (p Plan) FlowInstance() string {
+	return p.Normalize().Route.InstancePath
+}
+
+func (p Plan) Description() string {
+	p = p.Normalize()
+	if p.Route.Presence == RouteRoot {
+		return fmt.Sprintf("%s (planned root, owner=%s)", p.Name.AgentID, p.Name.Owner)
+	}
+	return fmt.Sprintf("%s (planned flow_instance=%s, owner=%s)", p.Name.AgentID, p.Route.InstancePath, p.Name.Owner)
+}
+
+// Fingerprint is the one-way physical projection of a declaration-owned
+// blueprint. It intentionally excludes run identity because a Plan exists
+// before admission to a concrete run.
+func (p Plan) Fingerprint() (string, error) {
+	p = p.Normalize()
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return "", fmt.Errorf("encode agent plan fingerprint: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func LessPlan(left, right Plan) bool {
+	left = left.Normalize()
+	right = right.Normalize()
+	leftParts := [...]string{
+		left.Name.AgentID,
+		left.Name.Owner,
+		string(left.Name.Source),
+		string(left.Route.Presence),
+		left.Route.ScopeKey,
+		left.Route.InstanceID,
+		left.Route.InstancePath,
+	}
+	rightParts := [...]string{
+		right.Name.AgentID,
+		right.Name.Owner,
+		string(right.Name.Source),
+		string(right.Route.Presence),
+		right.Route.ScopeKey,
+		right.Route.InstanceID,
+		right.Route.InstancePath,
+	}
+	for idx := range leftParts {
+		if leftParts[idx] != rightParts[idx] {
+			return leftParts[idx] < rightParts[idx]
+		}
+	}
+	return false
+}
+
+func (p Plan) Live(runID string) (Identity, error) {
+	p = p.Normalize()
+	if err := p.Validate(); err != nil {
+		return Identity{}, err
+	}
+	return New(runID, p.Name, p.Route)
+}
+
+func (i Identity) Plan() (Plan, error) {
+	i = i.Normalize()
+	if err := i.Validate(); err != nil {
+		return Plan{}, err
+	}
+	return NewPlan(i.Name, i.Route)
+}
+
 func (i Identity) Normalize() Identity {
+	i.RunID = strings.TrimSpace(i.RunID)
 	i.Name = i.Name.Normalize()
 	i.Route = i.Route.Normalize()
 	return i
@@ -161,6 +275,9 @@ func (i Identity) Normalize() Identity {
 
 func (i Identity) Validate() error {
 	i = i.Normalize()
+	if i.RunID == "" {
+		return fmt.Errorf("agent identity run_id is required")
+	}
 	if err := i.Name.Validate(); err != nil {
 		return err
 	}
@@ -206,6 +323,7 @@ func (i Identity) StorageFields() (StorageFields, error) {
 		return StorageFields{}, err
 	}
 	return StorageFields{
+		RunID:            i.RunID,
 		AgentID:          i.Name.AgentID,
 		NameOwner:        i.Name.Owner,
 		NameSource:       string(i.Name.Source),
@@ -218,6 +336,7 @@ func (i Identity) StorageFields() (StorageFields, error) {
 
 func FromStorageFields(fields StorageFields) (Identity, error) {
 	return New(
+		fields.RunID,
 		Name{
 			AgentID: fields.AgentID,
 			Owner:   fields.NameOwner,
@@ -235,11 +354,12 @@ func FromStorageFields(fields StorageFields) (Identity, error) {
 func (i Identity) Description() string {
 	i = i.Normalize()
 	if i.Route.Presence == RouteRoot {
-		return fmt.Sprintf("%s (root, owner=%s)", i.Name.AgentID, i.Name.Owner)
+		return fmt.Sprintf("%s (run=%s, root, owner=%s)", i.Name.AgentID, i.RunID, i.Name.Owner)
 	}
 	return fmt.Sprintf(
-		"%s (flow_instance=%s, scope_key=%s, instance_id=%s, owner=%s)",
+		"%s (run=%s, flow_instance=%s, scope_key=%s, instance_id=%s, owner=%s)",
 		i.Name.AgentID,
+		i.RunID,
 		i.Route.InstancePath,
 		i.Route.ScopeKey,
 		i.Route.InstanceID,
@@ -251,6 +371,7 @@ func Less(left, right Identity) bool {
 	left = left.Normalize()
 	right = right.Normalize()
 	leftParts := [...]string{
+		left.RunID,
 		left.Name.AgentID,
 		left.Name.Owner,
 		string(left.Name.Source),
@@ -260,6 +381,7 @@ func Less(left, right Identity) bool {
 		left.Route.InstancePath,
 	}
 	rightParts := [...]string{
+		right.RunID,
 		right.Name.AgentID,
 		right.Name.Owner,
 		string(right.Name.Source),

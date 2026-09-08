@@ -8,8 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
-// WorkflowInstanceRouteRecoveryProjection is the run-independent persisted
-// identity/config needed to restore one active materialized route at startup.
+// WorkflowInstanceRouteRecoveryProjection is the persisted identity/config
+// needed to restore one exact run-scoped materialized route at startup.
 type WorkflowInstanceRouteRecoveryProjection struct {
 	Identity runtimeflowidentity.Instance
 	Config   map[string]any
@@ -17,16 +17,17 @@ type WorkflowInstanceRouteRecoveryProjection struct {
 
 func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 	ctx context.Context,
-	route runtimeflowidentity.Route,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 ) (WorkflowInstanceRouteRecoveryProjection, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
+	flowIdentity = flowIdentity.Normalize()
+	if err := flowIdentity.Validate(); err != nil {
 		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow-instance route recovery identity is required")
 	}
+	route := flowIdentity.Route
 	if s == nil || s.routeRecovery == nil {
 		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("workflow instance store is required for route recovery %s", route.InstancePath)
 	}
-	record, err := s.routeRecovery.LoadActiveWorkflowRoute(ctx, route.InstancePath)
+	record, err := s.routeRecovery.LoadActiveWorkflowRoute(ctx, flowIdentity)
 	if err != nil {
 		return WorkflowInstanceRouteRecoveryProjection{}, err
 	}

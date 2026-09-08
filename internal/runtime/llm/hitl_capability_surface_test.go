@@ -48,7 +48,7 @@ func TestNotifyHumanManagedPlanningCoversEveryShippedBackendAndKillsOmission(t *
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			plan := func(definitions []ToolDefinition) (managedcapabilities.Surface, error) {
-				return managedCapabilityPlan(ctx, NewNoopRuntime(test.contract), test.contract.RuntimeMode, definitions, capabilities, managedcapabilities.Authority{
+				return managedCapabilityPlanForTest(ctx, NewNoopRuntime(test.contract), test.contract.RuntimeMode, definitions, capabilities, managedcapabilities.Authority{
 					Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 					ExecutionAuthorityID: uuid.NewString(), StartupOwnerID: "hitl-planning-test", StartupGeneration: 1,
 				})

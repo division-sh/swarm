@@ -186,7 +186,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return DeliveryTargetApplication{}, fmt.Errorf("delivery target application requires workflow persistence")
 	}
-	target, err := pc.workflowStore.LoadTargetPersistence(ctx, route, identity.NormalizeEntityID(application.entityID))
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
+	if err != nil {
+		return DeliveryTargetApplication{}, err
+	}
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, flowIdentity, identity.NormalizeEntityID(application.entityID))
 	if err != nil {
 		return DeliveryTargetApplication{}, fmt.Errorf("load exact admitted delivery target persistence: %w", err)
 	}
@@ -283,7 +287,11 @@ func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
 		return WorkflowInstance{}, WorkflowTargetPersistenceAbsent, nil
 	}
 	entityID := identity.NormalizeEntityID(application.EntityID())
-	target, err := pc.workflowStore.LoadTargetPersistence(ctx, application.Route(), entityID)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(application.Event().RunID(), application.Route())
+	if err != nil {
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, err
+	}
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, flowIdentity, entityID)
 	if err != nil {
 		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("reload exact admitted delivery target persistence: %w", err)
 	}

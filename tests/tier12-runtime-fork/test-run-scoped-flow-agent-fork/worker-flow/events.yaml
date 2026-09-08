@@ -1,0 +1,5 @@
+worker.ready:
+  swarm:
+    source: external
+  worker_id: string?
+worker.observed: {}

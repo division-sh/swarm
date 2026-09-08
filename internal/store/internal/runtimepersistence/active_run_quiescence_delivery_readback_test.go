@@ -39,7 +39,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				eventID, events.EventType("quiescence.requested"), "gateway", "", nil, 0,
 				runID, events.EventEnvelope{}, now,
 			)
-			identity := testAgentIdentity(t, "agent-a", "quiescence/instance-a")
+			identity := mustTestAgentIdentityForRun(runID, "agent-a", "quiescence/instance-a")
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
@@ -89,7 +89,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				t.Fatalf("active-run delivery quiescence = reason:%q quiesced:%v err:%v", reason, quiesced, err)
 			}
 			unrelated := route
-			unrelated.AgentIdentity = testAgentIdentity(t, "agent-a", "quiescence/instance-b")
+			unrelated.AgentIdentity = mustTestAgentIdentityForRun(runID, "agent-a", "quiescence/instance-b")
 			if reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, unrelated); err != nil || quiesced || reason != "" {
 				t.Fatalf("unrelated delivery quiescence = reason:%q quiesced:%v err:%v", reason, quiesced, err)
 			}

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 type RecoveryReader interface {
-	LoadActiveWorkflowRoute(context.Context, string) (RecoveryRecord, error)
+	LoadActiveWorkflowRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) (RecoveryRecord, error)
 }
 
 type RecoveryRecord struct {

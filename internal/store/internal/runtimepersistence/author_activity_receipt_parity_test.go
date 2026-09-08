@@ -55,7 +55,7 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{agentID}); err != nil {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
-			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)}
+			route := testAgentDeliveryRoute(t, runID, agentID, "fixture/"+agentID)
 			claimed, err := claimDeliveryFixture(ctx, fixture.store, event, route)
 			if err != nil {
 				t.Fatalf("ClaimAgentDelivery: %v", err)

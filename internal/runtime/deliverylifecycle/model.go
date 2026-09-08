@@ -307,6 +307,9 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute, authority 
 	route = route.Normalized()
 	class := SubscriberNode
 	if route.Recipient.IsAgent() {
+		if route.AgentIdentity.RunID != runID {
+			return Obligation{}, fmt.Errorf("delivery route agent run does not match obligation run")
+		}
 		class = SubscriberAgent
 	} else if !route.Recipient.IsNode() {
 		return Obligation{}, fmt.Errorf("delivery obligation subscriber class is invalid")
@@ -374,7 +377,6 @@ type SnapshotPage struct {
 
 type AgentLifecyclePageQuery struct {
 	AgentIdentity    agentidentity.Identity
-	RunID            string
 	Statuses         []Status
 	BeforeCreatedAt  time.Time
 	BeforeDeliveryID string

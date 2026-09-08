@@ -8,6 +8,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -28,7 +29,7 @@ const (
 	ErrCodeMCPInvalidRequest    = runtimemcp.ErrCodeInvalidRequest
 )
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingress.Controller, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingress.Controller, resolveActorConfig func(runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	runtimeIngressRequestPaused := func(ctx context.Context) (bool, error) {
 		if runtimeIngress == nil {
 			return false, nil

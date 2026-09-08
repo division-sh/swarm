@@ -127,7 +127,7 @@ func TestTargetedAgentDeliveryAcceptsEntitylessReceiverOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("declare agent route: %v", err)
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New("11111111-1111-1111-1111-111111111111", name, route)
 	if err != nil {
 		t.Fatalf("declare agent identity: %v", err)
 	}

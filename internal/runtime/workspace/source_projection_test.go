@@ -201,12 +201,12 @@ func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStopp
 			flowActor := models.AgentConfig{
 				ID:             "reviewer",
 				FlowPath:       "review/inst-1",
-				Identity:       runtimeagentidentitytest.Runtime(t, "reviewer", "workspace-process-replacement", "review", "inst-1", "review/inst-1"),
+				Identity:       runtimeagentidentitytest.RuntimeForRun(t, runtimecorrelation.RunIDFromContext(ctx), "reviewer", "workspace-process-replacement", "review", "inst-1", "review/inst-1"),
 				WorkspaceClass: "shared",
 			}
 			agentActor := models.AgentConfig{
 				ID:             "dedicated-agent",
-				Identity:       runtimeagentidentitytest.RootDeclared(t, "dedicated-agent", "test/agents.yaml"),
+				Identity:       runtimeagentidentitytest.RootDeclaredForRun(t, runtimecorrelation.RunIDFromContext(ctx), "dedicated-agent", "test/agents.yaml"),
 				WorkspaceClass: "dedicated",
 			}
 			for _, workspace := range []struct {
@@ -216,11 +216,11 @@ func TestSameBundleHashUsesDistinctProcessProjectionContainersForRunningAndStopp
 				{name: "per-agent", actor: agentActor},
 				{name: "per-flow-instance", actor: flowActor},
 			} {
-				firstTarget, err := firstManager.ResolveWorkspaceForCapabilityAdmission(ctx, workspace.actor)
+				firstTarget, err := firstManager.ResolveWorkspace(ctx, workspace.actor)
 				if err != nil {
 					t.Fatalf("first %s workspace: %v", workspace.name, err)
 				}
-				secondTarget, err := secondManager.ResolveWorkspaceForCapabilityAdmission(ctx, workspace.actor)
+				secondTarget, err := secondManager.ResolveWorkspace(ctx, workspace.actor)
 				if err != nil {
 					t.Fatalf("second %s workspace: %v", workspace.name, err)
 				}

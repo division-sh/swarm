@@ -215,7 +215,7 @@ func admitCompletionContinuationRow(ctx context.Context, req runtimeeffects.Comp
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
-	identity, err := storeagent.IdentityFromColumns(row.agentID, row.nameOwner, row.nameSource, row.routePresence, row.flowScopeKey, row.flowInstanceID, row.flowInstance)
+	identity, err := storeagent.IdentityFromColumns(row.runID, row.agentID, row.nameOwner, row.nameSource, row.routePresence, row.flowScopeKey, row.flowInstanceID, row.flowInstance)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -401,7 +401,7 @@ func validateCompletionProjection(attempt runtimeeffects.Attempt, projection run
 	}
 	if projection.ExpectedTurnCount < 0 || projection.TurnCount != projection.ExpectedTurnCount+1 ||
 		strings.TrimSpace(projection.SessionID) != attempt.Authority.Target.SessionID ||
-		projection.Identity.Normalize() != (agentmemory.Identity{RunID: attempt.Authority.Target.RunID, Agent: attempt.Authority.Target.AgentIdentity}).Normalize() {
+		projection.Identity.Normalize() != attempt.Authority.Target.AgentIdentity.Normalize() {
 		return errors.New("completion projection session, identity, or turn transition is invalid")
 	}
 	plan, err := projection.Memory.Normalize()

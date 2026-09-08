@@ -69,12 +69,12 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if strings.TrimSpace(rec.EntityID) == "" {
 			rec.EntityID = strings.TrimSpace(inbound.EntityID())
 		}
-		if rec.Identity.Agent.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
+		if rec.Identity.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
 			rec.FlowInstance = strings.TrimSpace(inbound.FlowInstance())
 		}
 	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		if rec.Identity.Agent.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
+		if rec.Identity.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
 			rec.FlowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
 		}
 	}

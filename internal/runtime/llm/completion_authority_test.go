@@ -16,7 +16,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -69,7 +68,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	if !ok {
 		t.Fatal("completion capability surface missing")
 	}
-	identity := agentmemory.Identity{RunID: authority.Target.RunID, Agent: authority.Target.AgentIdentity}.Normalize()
+	identity := authority.Target.AgentIdentity.Normalize()
 	messages := []Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "done"}}
 	payload, err := json.Marshal(completionContinuationEnvelope{
 		Version: completionContinuationVersion,

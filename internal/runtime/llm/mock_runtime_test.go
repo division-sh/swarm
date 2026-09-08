@@ -28,7 +28,7 @@ func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testin
 	actor := runtimeactors.AgentConfig{ID: "mock-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
 	actor.Identity = testAgentIdentity(actor.ID, "")
 	ctx := runtimeactors.WithActor(context.Background(), actor)
-	surface, err := managedCapabilityPlan(ctx, &MockRuntime{}, "mock", []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{
+	surface, err := managedCapabilityPlanForTest(ctx, &MockRuntime{}, "mock", []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{
 		Name: tool.Name, Visible: true, Callable: true,
 	}}), managedcapabilities.Authority{
 		Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,

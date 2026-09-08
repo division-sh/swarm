@@ -16,6 +16,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -55,6 +56,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	ctx := storeTestWorkContext(t, testAuthorActivityContext())
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	bus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
@@ -76,7 +78,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
-	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
+	identity := agentidentitytest.RootRuntimeForRun(t, runID, agent.id, "destructive-reset-integration")
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.directive-reset-agent.intent", "Exercise destructive reset coordination.")
 	if err != nil {
 		t.Fatalf("resolve test agent intent: %v", err)

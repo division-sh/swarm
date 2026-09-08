@@ -167,7 +167,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	agentRuntime, err := prepareSelectedContractAgentRuntimeMaterialization(ctx, loadedSource, *model.RecipientPlanning, req.AgentRuntime)
+	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
+	agentRuntime, workflowStates, err := prepareSelectedContractWorkflowReadiness(
+		ctx, ports.replay, loadedSource, *model.RecipientPlanning, plan, sourceEventIDs, req.AgentRuntime,
+	)
 	if err != nil {
 		return SelectedContractExecutionResult{
 			Owner:                       runfork.RunForkSelectedContractExecutionOwner,
@@ -175,32 +178,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}, err
 	}
 	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
-	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
-		RecipientPlanning: *model.RecipientPlanning,
-		AgentRuntime:      agentRuntime.Proof,
-	}); err != nil {
-		return SelectedContractExecutionResult{
-			Owner:                       runfork.RunForkSelectedContractExecutionOwner,
-			AgentRuntimeMaterialization: &agentRuntime.Proof,
-		}, err
-	}
-	workflowStates, err := selectedContractWorkflowStateProjection(plan, loadedSource.Source, *model.RecipientPlanning)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
-	if !req.AgentRuntime.ExecutionPosture.Valid() {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution posture is invalid")
-	}
-	sourceModes, err := ports.replay.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, sourceEventIDs)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	for _, mode := range sourceModes {
-		if err := req.AgentRuntime.ExecutionPosture.Admit(mode, "selected-contract source event admission"); err != nil {
-			return SelectedContractExecutionResult{}, err
-		}
-	}
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:             plan.SourceRunID,
 		At:                      plan.ForkPoint.EventID,
@@ -216,6 +193,23 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
+	}
+	agentRuntime, err = agentRuntime.bindRun(materialization.ForkRunID, materialization.AgentTopologies)
+	if err != nil {
+		return SelectedContractExecutionResult{
+			Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization,
+			AgentRuntimeMaterialization: &agentRuntime.Proof,
+		}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
+	}
+	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
+		RunID:             materialization.ForkRunID,
+		RecipientPlanning: *model.RecipientPlanning,
+		AgentRuntime:      agentRuntime.Proof,
+	}); err != nil {
+		return SelectedContractExecutionResult{
+			Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization,
+			AgentRuntimeMaterialization: &agentRuntime.Proof,
+		}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:             materialization.ForkRunID,
@@ -400,8 +394,9 @@ func newSelectedContractPipeline(
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
+	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator))
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator, instanceDeactivationPreparer))
 }
 
 func selectedContractPipelineCoordinatorOptions(
@@ -410,36 +405,39 @@ func selectedContractPipelineCoordinatorOptions(
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
+	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) runtimepipeline.PipelineCoordinatorOptions {
 	var scenarioProfiles runtimepipeline.ScenarioExecutionProfileReader
 	if reader, ok := ports.fork.(runtimepipeline.ScenarioExecutionProfileReader); ok {
 		scenarioProfiles = reader
 	}
 	return runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:          agentRuntime.ExecutionPosture,
-		WorkOwner:                 agentRuntime.AgentManagerOptions.WorkOwner,
-		ReceiverExecution:         agentRuntime.AgentManagerOptions.ReceiverExecution,
-		Module:                    loaded.Module,
-		Persistence:               ports.workflow,
-		DeliveryStore:             ports.busDurable.DeliveryLifecycle,
-		DeadLetters:               ports.busDurable.TargetFailureRecorder,
-		PipelineObligations:       ports.pipelineObligations,
-		InstanceActivator:         instanceActivator,
-		MailboxMaterializer:       ports.mailbox,
-		DecisionCards:             ports.decisionCards,
-		ProposedEffects:           ports.proposedEffects,
-		HumanTasks:                ports.humanTasks,
-		DecisionCardDraftExpiry:   ports.decisionCardDraftExpiry,
-		HumanTaskExpiry:           ports.humanTaskExpiry,
-		DeliveryRuntime:           bus,
-		FlowRoutes:                bus,
-		RunLifecycle:              ports.busDurable.RunLifecycle,
-		Credentials:               agentRuntime.Credentials,
-		ManagedCredentials:        agentRuntime.ManagedCredentials,
-		MockConnectorResponses:    loaded.MockConnectorResponses,
-		SourceArtifactFact:        loaded.SourceArtifactFact,
-		ScenarioExecutionProfiles: scenarioProfiles,
-		EffectiveSourceIdentity:   loaded.EffectiveSourceIdentity,
+		ExecutionPosture:             agentRuntime.ExecutionPosture,
+		WorkOwner:                    agentRuntime.AgentManagerOptions.WorkOwner,
+		TestLifecycleProbe:           agentRuntime.AgentManagerOptions.TestLifecycleProbe,
+		ReceiverExecution:            agentRuntime.AgentManagerOptions.ReceiverExecution,
+		Module:                       loaded.Module,
+		Persistence:                  ports.workflow,
+		DeliveryStore:                ports.busDurable.DeliveryLifecycle,
+		DeadLetters:                  ports.busDurable.TargetFailureRecorder,
+		PipelineObligations:          ports.pipelineObligations,
+		InstanceActivator:            instanceActivator,
+		InstanceDeactivationPreparer: instanceDeactivationPreparer,
+		MailboxMaterializer:          ports.mailbox,
+		DecisionCards:                ports.decisionCards,
+		ProposedEffects:              ports.proposedEffects,
+		HumanTasks:                   ports.humanTasks,
+		DecisionCardDraftExpiry:      ports.decisionCardDraftExpiry,
+		HumanTaskExpiry:              ports.humanTaskExpiry,
+		DeliveryRuntime:              bus,
+		FlowRoutes:                   bus,
+		RunLifecycle:                 ports.busDurable.RunLifecycle,
+		Credentials:                  agentRuntime.Credentials,
+		ManagedCredentials:           agentRuntime.ManagedCredentials,
+		MockConnectorResponses:       loaded.MockConnectorResponses,
+		SourceArtifactFact:           loaded.SourceArtifactFact,
+		ScenarioExecutionProfiles:    scenarioProfiles,
+		EffectiveSourceIdentity:      loaded.EffectiveSourceIdentity,
 	}
 }
 

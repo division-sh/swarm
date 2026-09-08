@@ -24,8 +24,8 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	insertDirectiveRun(t, ctx, pg, runB, "paused")
 	insertDirectiveRun(t, ctx, pg, runDone, "cancelled")
 
-	agentA := testAgentIdentity(t, "agent-a", "directive/agent-a")
-	explicit, err := pg.ResolveAgentDirectiveRunTarget(ctx, agentA, runA)
+	agentA := mustTestAgentIdentityForRun(runA, "agent-a", "directive/agent-a")
+	explicit, err := pg.ResolveAgentDirectiveRunTarget(ctx, agentA)
 	if err != nil {
 		t.Fatalf("explicit target: %v", err)
 	}
@@ -34,44 +34,23 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	}
 
 	missingID := "00000000-0000-0000-0000-000000000404"
-	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, agentA, missingID)
+	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, mustTestAgentIdentityForRun(missingID, "agent-a", "directive/agent-a"))
 	if !errors.Is(err, runtimeagentcontrol.ErrRunNotFound) {
 		t.Fatalf("missing target err = %v, want run not found", err)
 	}
 
-	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, agentA, runDone)
+	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, mustTestAgentIdentityForRun(runDone, "agent-a", "directive/agent-a"))
 	if !errors.Is(err, runtimeagentcontrol.ErrRunAlreadyTerminal) {
 		t.Fatalf("terminal target err = %v, want run already terminal", err)
 	}
 
-	allocated, err := pg.ResolveAgentDirectiveRunTarget(ctx, testAgentIdentity(t, "agent-empty", "directive/empty"), "")
+	active, err := pg.ResolveAgentDirectiveRunTarget(ctx, mustTestAgentIdentityForRun(runB, "agent-active", "directive/active"))
 	if err != nil {
-		t.Fatalf("zero active target: %v", err)
+		t.Fatalf("exact active target: %v", err)
 	}
-	if allocated.RunID == "" || allocated.Mode != runtimeagentcontrol.RunResolutionNewRunAllocated {
-		t.Fatalf("zero active target = %#v", allocated)
+	if active.RunID != runB || active.Mode != runtimeagentcontrol.RunResolutionSpecified {
+		t.Fatalf("exact active target = %#v", active)
 	}
-
-	agentOne := testAgentIdentity(t, "agent-one", "directive/one")
-	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentOne, "active")
-	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000101", agentOne, runB)
-	active, err := pg.ResolveAgentDirectiveRunTarget(ctx, agentOne, "")
-	if err != nil {
-		t.Fatalf("one active target: %v", err)
-	}
-	if active.RunID != runB || active.Mode != runtimeagentcontrol.RunResolutionActiveSession || len(active.ActiveSessions) != 1 {
-		t.Fatalf("one active target = %#v", active)
-	}
-
-	agentMany := testAgentIdentity(t, "agent-many", "directive/many")
-	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentMany, "active")
-	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000201", agentMany, runA)
-	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000202", agentMany, runB)
-	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, agentMany, "")
-	if !errors.Is(err, runtimeagentcontrol.ErrAmbiguousRunTarget) {
-		t.Fatalf("many active err = %v, want ambiguous", err)
-	}
-
 }
 
 func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status string) {

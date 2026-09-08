@@ -31,7 +31,7 @@ func TestManagedCapabilityPlanSeparatesAllProviderNativeFamiliesFromConcreteFall
 		})
 	}
 
-	surface, err := managedCapabilityPlan(
+	surface, err := managedCapabilityPlanForTest(
 		runtimeactors.WithActor(context.Background(), actor),
 		&ClaudeCLIRuntime{},
 		"startup_probe",
@@ -93,7 +93,7 @@ func TestManagedCapabilityPlanRejectsUnsupportedProviderNativeFamilies(t *testin
 			actor := runtimeactors.AgentConfig{ID: "unsupported-agent", Identity: testAgentIdentity("unsupported-agent", ""), NativeTools: test.native}
 			ctx := runtimeactors.WithActor(context.Background(), actor)
 
-			_, err := managedCapabilityPlan(ctx, runtime, "", nil, toolcapabilities.Set{}, nativeCapabilityTestAuthority())
+			_, err := managedCapabilityPlanForTest(ctx, runtime, "", nil, toolcapabilities.Set{}, nativeCapabilityTestAuthority())
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("managedCapabilityPlan error = %v, want unsupported %s", err, test.want)
 			}
@@ -107,7 +107,7 @@ func TestManagedCapabilityPlanPreservesConcreteAPIFallbackDefinition(t *testing.
 	definition := ToolDefinition{Name: "web_search", Schema: map[string]any{"type": "object"}}
 	ctx := runtimeactors.WithActor(context.Background(), actor)
 
-	surface, err := managedCapabilityPlan(
+	surface, err := managedCapabilityPlanForTest(
 		ctx,
 		&AnthropicAPIRuntime{},
 		"",
@@ -138,7 +138,7 @@ func TestManagedCapabilityPlanPreservesConcreteAPIFallbackDefinition(t *testing.
 func TestManagedCapabilityPlanRejectsFallbackWithoutConcreteDefinition(t *testing.T) {
 	actor := runtimeactors.AgentConfig{ID: "fallback-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
 	actor.Identity = testAgentIdentity(actor.ID, "")
-	_, err := managedCapabilityPlan(
+	_, err := managedCapabilityPlanForTest(
 		runtimeactors.WithActor(context.Background(), actor),
 		&AnthropicAPIRuntime{},
 		"",
@@ -154,7 +154,7 @@ func TestManagedCapabilityPlanRejectsFallbackWithoutConcreteDefinition(t *testin
 func TestManagedCapabilityPlanRejectsMissingAndUnexpectedProviderBuiltins(t *testing.T) {
 	actor := runtimeactors.AgentConfig{ID: "native-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
 	actor.Identity = testAgentIdentity(actor.ID, "")
-	surface, err := managedCapabilityPlan(
+	surface, err := managedCapabilityPlanForTest(
 		runtimeactors.WithActor(context.Background(), actor),
 		&ClaudeCLIRuntime{},
 		"",

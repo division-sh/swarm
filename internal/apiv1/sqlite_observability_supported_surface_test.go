@@ -192,7 +192,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 			storetest.CommitSemanticEvent(t, ctx, sqliteStore, evt)
 			continue
 		}
-		identity := agentidentitytest.Runtime(t, fixture.agentID, "observability-surface-test", "trace", fixture.agentID, "trace/"+fixture.agentID)
+		identity := agentidentitytest.RuntimeForRun(t, runID, fixture.agentID, "observability-surface-test", "trace", fixture.agentID, "trace/"+fixture.agentID)
 		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: identity}
 		storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 		claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
@@ -310,7 +310,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	event := eventtest.PersistedProjection(eventID,
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
-	identity := agentidentitytest.Runtime(t, "agent-1", "observability-surface-test", "trace", "agent-1", "trace/agent-1")
+	identity := agentidentitytest.RuntimeForRun(t, runID, "agent-1", "observability-surface-test", "trace", "agent-1", "trace/agent-1")
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
 		[]events.DeliveryRoute{route},

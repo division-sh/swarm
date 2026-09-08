@@ -105,7 +105,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				eventID, events.EventType("freeze.pending"), eventtest.Producer(events.EventProducerPlatform, "test"),
 				"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.forkedAt.Add(-time.Minute),
 			)
-			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent"), AgentIdentity: mustTestAgentIdentity("freeze-agent", "fixture/freeze-agent")}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent"), AgentIdentity: mustTestAgentIdentityForRun(fixture.sourceRun, "freeze-agent", "fixture/freeze-agent")}
 			var claim runtimedelivery.Claim
 			if fixture.postgres != nil {
 				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.postgres, event, []string{"freeze-agent"}); err != nil {

@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
@@ -49,29 +48,25 @@ func TestPlanRejectsEnabledPlatformDefaultProvenance(t *testing.T) {
 }
 
 func TestIdentityRequiresExactRunAgentAndFlowInstance(t *testing.T) {
-	validAgent := agentidentitytest.Runtime(t, "agent-a", "test-fixture", "support", "chat-a", "support/chat-a")
-	valid := Identity{RunID: "run-a", Agent: validAgent}
-	if err := valid.Validate(); err != nil {
+	valid := agentidentitytest.RuntimeForRun(t, "run-a", "agent-a", "test-fixture", "support", "chat-a", "support/chat-a")
+	if err := ValidateIdentity(valid, true); err != nil {
 		t.Fatalf("valid identity: %v", err)
 	}
+	missingRun := valid
+	missingRun.RunID = ""
+	root := agentidentitytest.RootRuntimeForRun(t, "run-a", "agent-a", "test-fixture")
 
 	for _, tc := range []struct {
 		name     string
 		identity Identity
 		want     string
 	}{
-		{name: "run", identity: Identity{Agent: validAgent}, want: "run_id"},
+		{name: "run", identity: missingRun, want: "run_id"},
 		{name: "agent", identity: Identity{RunID: "run-a"}, want: "agent_id"},
-		{name: "flow instance", identity: Identity{
-			RunID: "run-a",
-			Agent: agentidentity.Identity{
-				Name:  validAgent.Name,
-				Route: agentidentity.RootRoute(),
-			},
-		}, want: "flow_instance"},
+		{name: "flow instance", identity: root, want: "flow_instance"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.identity.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err := ValidateIdentity(tc.identity, true); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Validate error = %v, want %q", err, tc.want)
 			}
 		})
@@ -79,9 +74,10 @@ func TestIdentityRequiresExactRunAgentAndFlowInstance(t *testing.T) {
 }
 
 func TestIdentityValueIsolatesRunsAndConcreteAgents(t *testing.T) {
-	base := Identity{RunID: "run-a", Agent: agentidentitytest.Runtime(t, "agent-a", "test-fixture", "support", "chat-a", "support/chat-a")}
-	otherRun := Identity{RunID: "run-b", Agent: base.Agent}
-	otherFlow := Identity{RunID: "run-a", Agent: agentidentitytest.Runtime(t, "agent-a", "test-fixture", "support", "chat-b", "support/chat-b")}
+	base := agentidentitytest.RuntimeForRun(t, "run-a", "agent-a", "test-fixture", "support", "chat-a", "support/chat-a")
+	otherRun := base
+	otherRun.RunID = "run-b"
+	otherFlow := agentidentitytest.RuntimeForRun(t, "run-a", "agent-a", "test-fixture", "support", "chat-b", "support/chat-b")
 	if base == otherRun {
 		t.Fatal("different runs produced the same memory identity key")
 	}

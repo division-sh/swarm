@@ -31,6 +31,7 @@ const (
 	releaseE2EWorkspaceImage       = "swarm-workspace:latest"
 	releaseE2ENetwork              = "mas_default"
 	releaseE2EAgentWorkdir         = "/workspace"
+	releaseE2ESystemWorkdir        = "/opt/swarm"
 	releaseE2EManagedModel         = "sonnet"
 	releaseE2EAgentFingerprint     = "02eb55189f919027f3a34472e14e521f6d0630ccd16517d974953e699bd154a5"
 	releaseE2EProjectionDigest     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -373,6 +374,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	if !validReleaseBundleHash(bundleHash) {
 		return fmt.Errorf("create bundle_hash is invalid")
 	}
+	fingerprint, _ := releaseE2EAgentContainerFingerprint(create.name)
 	expected := map[string]expectation{
 		"scaffold": {
 			workdir:       "/opt/swarm/scaffold",
@@ -401,7 +403,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			resetEligible: "true",
 			source:        "workspace.ResolveWorkspace",
 			scope:         "per-agent",
-			requiredMount: map[string]string{releaseE2EAgentWorkdir: mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableAgent, releaseE2EAgentFingerprint)},
+			requiredMount: map[string]string{releaseE2EAgentWorkdir: mustReleaseE2EDurableBackingKeyForHash(bundleHash, releaseE2EDurableAgent, fingerprint)},
 		},
 	}[kind]
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
@@ -758,11 +760,30 @@ func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool
 	switch suffix {
 	case "scaffold", "system":
 		return suffix, processScope, true
-	case releaseE2EAgentSuffix:
-		return "agent", processScope, true
 	default:
+		if _, valid := releaseE2EAgentSuffixFingerprint(suffix); valid {
+			return "agent", processScope, true
+		}
 		return "", "", false
 	}
+}
+
+func releaseE2EAgentContainerFingerprint(name string) (string, bool) {
+	kind, scope, ok := releaseE2EContainerIdentity(name)
+	if !ok || kind != "agent" {
+		return "", false
+	}
+	return releaseE2EAgentSuffixFingerprint(strings.TrimPrefix(name, "swarm-"+scope+"-"))
+}
+
+func releaseE2EAgentSuffixFingerprint(name string) (string, bool) {
+	const prefix = "agent-"
+	fingerprint := strings.TrimPrefix(name, prefix)
+	if len(fingerprint) != 64 || prefix+fingerprint != name || strings.ToLower(fingerprint) != fingerprint {
+		return "", false
+	}
+	decoded, err := hex.DecodeString(fingerprint)
+	return fingerprint, err == nil && len(decoded) == 32
 }
 
 func equalStrings(got, want []string) bool {
@@ -952,12 +973,6 @@ target:
 	}
 	container := args[index]
 	invocation.commandArgs = append([]string(nil), args[index+1:]...)
-	if kind, _, ok := releaseE2EContainerIdentity(container); !ok || kind != "agent" {
-		return invocation, fmt.Errorf("Claude Docker exec container = %q, want exact bundle-scoped agent", container)
-	}
-	if workdir != releaseE2EAgentWorkdir {
-		return invocation, fmt.Errorf("Claude Docker exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
-	}
 	if len(env) != 2 || env["SWARM_TOOL_GATEWAY_URL"] != releaseE2ERawMCPURL ||
 		env["CLAUDE_CODE_OAUTH_TOKEN"] != releaseE2EOAuthToken {
 		return invocation, fmt.Errorf("Claude Docker exec environment is incomplete or invalid")
@@ -972,6 +987,21 @@ target:
 	invocation.startup = prompt == "Startup validation probe. Do not call any tools. Reply with the exact text ok."
 	if !invocation.startup && strings.Contains(prompt, "Startup validation probe") {
 		return invocation, fmt.Errorf("startup probe prompt is not exact")
+	}
+	if invocation.startup {
+		if kind, _, ok := releaseE2EContainerIdentity(container); !ok || kind != "system" {
+			return invocation, fmt.Errorf("Claude startup probe container = %q, want runless system workspace", container)
+		}
+		if workdir != releaseE2ESystemWorkdir {
+			return invocation, fmt.Errorf("Claude startup probe workdir = %q, want %q", workdir, releaseE2ESystemWorkdir)
+		}
+	} else {
+		if _, ok := releaseE2EAgentContainerFingerprint(container); !ok {
+			return invocation, fmt.Errorf("Claude live exec container = %q, want run-scoped agent container", container)
+		}
+		if workdir != releaseE2EAgentWorkdir {
+			return invocation, fmt.Errorf("Claude live exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
+		}
 	}
 	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:], invocation.startup); err != nil {
 		return invocation, err

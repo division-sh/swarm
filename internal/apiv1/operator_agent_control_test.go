@@ -14,6 +14,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -143,11 +144,12 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+	runID := "00000000-0000-0000-0000-000000000803"
 	operation := runtimeagentcontrol.DirectiveOperation{
 		OperationID:      "00000000-0000-0000-0000-000000000801",
-		AgentIdentity:    agentidentitytest.Declared(t, "agent-1", "test-bundle", "research", "inst-1", "research/inst-1"),
+		AgentIdentity:    agentidentitytest.DeclaredForRun(t, runID, "agent-1", "test-bundle", "research", "inst-1", "research/inst-1"),
 		DirectiveEventID: "00000000-0000-0000-0000-000000000802",
-		ResolvedRunID:    "00000000-0000-0000-0000-000000000803",
+		ResolvedRunID:    runID,
 		State:            runtimeagentcontrol.DirectiveOperationIndeterminate,
 		Failure:          &failure,
 	}
@@ -218,14 +220,6 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 						RunID:         terminalRunID,
 						CurrentStatus: "completed",
 					},
-					"ambiguous": &runtimeagentcontrol.StateError{
-						Err:     runtimeagentcontrol.ErrAmbiguousRunTarget,
-						AgentID: "agent-1",
-						ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{
-							SessionID: "00000000-0000-0000-0000-000000000501",
-							RunID:     "00000000-0000-0000-0000-000000000601",
-						}},
-					},
 				},
 			},
 		}),
@@ -238,7 +232,6 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	}{
 		{"missing", agentDirectiveBodyWithRun("agent-1", missingRunID, "missing", ""), RunNotFoundCode},
 		{"terminal", agentDirectiveBodyWithRun("agent-1", terminalRunID, "terminal", ""), RunAlreadyTerminalCode},
-		{"ambiguous", agentDirectiveBody("agent-1", "ambiguous", ""), AmbiguousRunTargetCode},
 	}
 	for _, tc := range cases {
 		resp := rpcCall(t, handler, tc.body)
@@ -279,6 +272,10 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		if err := manager.Shutdown(); err != nil {
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
+	})
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
+		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	handler := testHandler(t, Options{
@@ -347,6 +344,10 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
+		BundleHash: bootFact.BundleHash(),
+	})
 	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -357,31 +358,25 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 		}),
 	})
 
-	first := rpcCall(t, handler, agentDirectiveBody("agent-1", "new run", "idem-directive-bundle-new"))
+	first := rpcCall(t, handler, agentDirectiveBody("agent-1", "exact run", "idem-directive-bundle-exact"))
 	if first.Error != nil {
-		t.Fatalf("new-run directive error = %#v", first.Error)
+		t.Fatalf("exact-run directive error = %#v", first.Error)
 	}
-	newRunID, _ := asMap(t, first.Result)["run_id"].(string)
-	if newRunID == "" {
-		t.Fatalf("new-run directive result = %#v", first.Result)
+	runID, _ := asMap(t, first.Result)["run_id"].(string)
+	if runID != agentidentitytest.DefaultRunID {
+		t.Fatalf("exact-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash())
-
-	existingRunID := "00000000-0000-0000-0000-000000000755"
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID:      existingRunID,
-		BundleHash: bootFact.BundleHash(),
-	})
-	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", "idem-directive-bundle-existing"))
-	if explicit.Error != nil {
-		t.Fatalf("existing-run directive error = %#v", explicit.Error)
-	}
-	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash())
+	assertRunBundleIdentity(t, db, runID, bootFact.BundleHash())
 }
 
 func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
 	t.Helper()
-	cfg.Identity = agentidentitytest.RootRuntime(t, cfg.ID, "api-test")
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if runID == "" {
+		runID = agentidentitytest.DefaultRunID
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	cfg.Identity = agentidentitytest.RootRuntimeForRun(t, runID, cfg.ID, "api-test")
 	if cfg.Role == "" {
 		cfg.Role = "api-test"
 	}
@@ -513,21 +508,13 @@ func (c *fakeAgentControlController) SendDirective(_ context.Context, req runtim
 		}
 	}
 	c.directiveCalls++
-	runID := req.RunID
-	if runID == "" {
-		runID = "00000000-0000-0000-0000-000000000902"
-	}
-	mode := runtimeagentcontrol.RunResolutionSpecified
-	if req.RunID == "" {
-		mode = runtimeagentcontrol.RunResolutionNewRunAllocated
-	}
 	result := runtimeagentcontrol.SendDirectiveResult{
 		OK:                 true,
 		AgentID:            req.AgentID,
 		OperationID:        "00000000-0000-0000-0000-000000000904",
 		Response:           c.directiveResponse,
-		RunID:              runID,
-		RunIDResolution:    mode,
+		RunID:              req.RunID,
+		RunIDResolution:    runtimeagentcontrol.RunResolutionSpecified,
 		DirectiveEventID:   "00000000-0000-0000-0000-000000000903",
 		DirectiveEventType: runtimeagentcontrol.DirectiveEventType,
 	}
@@ -550,16 +537,13 @@ func (c *fakeAgentControlController) Restart(_ context.Context, req runtimeagent
 
 func agentControlBody(method, agentID, idempotencyKey string) string {
 	if idempotencyKey == "" {
-		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-control","method":%q,"params":{"agent_id":%q}}`, method, agentID)
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-control","method":%q,"params":{"agent_id":%q,"run_id":%q}}`, method, agentID, agentidentitytest.DefaultRunID)
 	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-control","method":%q,"params":{"agent_id":%q,"idempotency_key":%q}}`, method, agentID, idempotencyKey)
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-control","method":%q,"params":{"agent_id":%q,"run_id":%q,"idempotency_key":%q}}`, method, agentID, agentidentitytest.DefaultRunID, idempotencyKey)
 }
 
 func agentDirectiveBody(agentID, directive, idempotencyKey string) string {
-	if idempotencyKey == "" {
-		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q}}`, agentID, directive)
-	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"idempotency_key":%q}}`, agentID, directive, idempotencyKey)
+	return agentDirectiveBodyWithRun(agentID, agentidentitytest.DefaultRunID, directive, idempotencyKey)
 }
 
 func agentDirectiveBodyWithRun(agentID, runID, directive, idempotencyKey string) string {

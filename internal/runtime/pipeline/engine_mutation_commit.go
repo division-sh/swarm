@@ -85,8 +85,7 @@ func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistence
 // workflow state mutation. Runtime owns semantic projection; private adapters
 // own SQL representation and compare-and-write mechanics.
 type WorkflowEngineStateRecord struct {
-	RunID            string
-	Route            runtimeflowidentity.Route
+	Identity         runtimeflowidentity.RunScopedFlowInstance
 	EntityID         string
 	WorkflowName     string
 	WorkflowVersion  string
@@ -112,8 +111,8 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
-	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
-	if strings.TrimSpace(r.RunID) == "" || !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" {
+	r.Identity = r.Identity.Normalize()
+	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
 		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
@@ -211,7 +210,7 @@ func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
 // WorkflowEngineRouteRetirement declares that the exact persisted route must
 // be retired in the same selected-store transaction as terminal workflow state.
 type WorkflowEngineRouteRetirement struct {
-	Route runtimeflowidentity.Route
+	Identity runtimeflowidentity.RunScopedFlowInstance
 }
 
 // WorkflowEnginePostCommitPlan carries semantic work that is legal only after
@@ -221,7 +220,7 @@ type WorkflowEnginePostCommitPlan struct {
 }
 
 type WorkflowEngineFlowDeactivation struct {
-	Route     runtimeflowidentity.Route
+	Identity  runtimeflowidentity.RunScopedFlowInstance
 	EntityID  string
 	NextState string
 }
@@ -240,7 +239,7 @@ func (p WorkflowEngineProposedEffect) Validate() error {
 
 func (c WorkflowEngineMutationCommand) Validate() error {
 	entityless := !c.EntitylessTarget.Empty()
-	runID := strings.TrimSpace(c.State.RunID)
+	runID := strings.TrimSpace(c.State.Identity.RunID)
 	if entityless {
 		if err := c.EntitylessTarget.Validate(); err != nil {
 			return fmt.Errorf("workflow engine entityless target: %w", err)
@@ -271,7 +270,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if err := c.State.Validate(); err != nil {
 			return err
 		}
-		if err := c.Lifecycle.Validate(c.State.RunID, c.State.Route, c.State.EntityID); err != nil {
+		if err := c.Lifecycle.Validate(c.State.Identity.RunID, c.State.Identity.Route, c.State.EntityID); err != nil {
 			return fmt.Errorf("workflow engine lifecycle plan: %w", err)
 		}
 	}
@@ -340,14 +339,14 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		seen[eventID] = struct{}{}
 	}
 	if retirement := c.RouteRetirement; retirement != nil {
-		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
-		if !route.Valid() || route != c.State.Route || c.State.Transition.CreatesState() || strings.TrimSpace(c.State.Status) != "terminated" {
+		identity := retirement.Identity.Normalize()
+		if identity.Validate() != nil || identity != c.State.Identity || c.State.Transition.CreatesState() || strings.TrimSpace(c.State.Status) != "terminated" {
 			return fmt.Errorf("workflow engine route retirement requires the exact terminal state route")
 		}
 	}
 	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
-		route := runtimeflowidentity.StoredRoute(deactivation.Route.ScopeKey, deactivation.Route.InstanceID, deactivation.Route.InstancePath)
-		if !route.Valid() || route != c.State.Route || strings.TrimSpace(deactivation.EntityID) != c.State.EntityID || strings.TrimSpace(deactivation.NextState) == "" {
+		identity := deactivation.Identity.Normalize()
+		if identity.Validate() != nil || identity != c.State.Identity || strings.TrimSpace(deactivation.EntityID) != c.State.EntityID || strings.TrimSpace(deactivation.NextState) == "" {
 			return fmt.Errorf("workflow engine post-commit flow deactivation requires exact state identity")
 		}
 	}
@@ -355,7 +354,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 }
 
 func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
-	return strings.TrimSpace(record.RunID) == "" && !record.Route.Valid() && strings.TrimSpace(record.EntityID) == "" &&
+	return record.Identity.IsZero() && strings.TrimSpace(record.EntityID) == "" &&
 		strings.TrimSpace(record.WorkflowName) == "" && strings.TrimSpace(record.WorkflowVersion) == "" &&
 		strings.TrimSpace(record.Mode) == "" && strings.TrimSpace(record.Status) == "" && strings.TrimSpace(record.CurrentState) == "" &&
 		strings.TrimSpace(record.EntityType) == "" && strings.TrimSpace(record.Slug) == "" && strings.TrimSpace(record.Name) == "" &&
@@ -365,15 +364,18 @@ func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
 }
 
 func workflowEngineStateRecord(
-	runID string,
-	route runtimeflowidentity.Route,
+	owner runtimeflowidentity.RunScopedFlowInstance,
 	instance WorkflowInstance,
 	expectedState string,
 	expectedRevision int64,
 	transition WorkflowEngineStateTransition,
 	updatedAt time.Time,
 ) (WorkflowEngineStateRecord, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	owner = owner.Normalize()
+	if err := owner.Validate(); err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	route := owner.Route
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
@@ -414,7 +416,7 @@ func workflowEngineStateRecord(
 		status = "active"
 	}
 	record := WorkflowEngineStateRecord{
-		RunID: strings.TrimSpace(runID), Route: route, EntityID: identity.RowID(),
+		Identity: owner, EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
@@ -459,8 +461,7 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 		return fmt.Errorf("committed workflow engine lifecycle: %w", err)
 	}
 	if retirement := r.RouteRetirement; retirement != nil {
-		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
-		if !route.Valid() {
+		if retirement.Identity.Validate() != nil {
 			return fmt.Errorf("committed workflow engine route retirement requires exact identity")
 		}
 	}
@@ -473,8 +474,7 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 		}
 	}
 	if deactivation := r.PostCommit.FlowDeactivation; deactivation != nil {
-		route := runtimeflowidentity.StoredRoute(deactivation.Route.ScopeKey, deactivation.Route.InstanceID, deactivation.Route.InstancePath)
-		if !route.Valid() || strings.TrimSpace(deactivation.EntityID) == "" || strings.TrimSpace(deactivation.NextState) == "" {
+		if deactivation.Identity.Validate() != nil || strings.TrimSpace(deactivation.EntityID) == "" || strings.TrimSpace(deactivation.NextState) == "" {
 			return fmt.Errorf("committed workflow engine flow deactivation requires exact identity and state")
 		}
 	}

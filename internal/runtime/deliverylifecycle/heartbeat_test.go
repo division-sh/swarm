@@ -241,3 +241,58 @@ func TestClaimSameIncludesOpaqueFencingToken(t *testing.T) {
 		t.Fatal("claim matched a foreign fencing token")
 	}
 }
+
+func TestClaimHeartbeatRetirementRetainsExactSettlementOwnership(t *testing.T) {
+	for _, rejected := range []bool{false, true} {
+		t.Run(map[bool]string{false: "settled", true: "store_fence_wins"}[rejected], func(t *testing.T) {
+			owner := newHeartbeatTestOwner(t)
+			store := &heartbeatTestStore{}
+			if rejected {
+				store.failAt = 2
+			}
+			claim := heartbeatTestClaim()
+			heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, claim, DefaultLeaseTTL-time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = heartbeat.Stop() }()
+			owner.Retire()
+			<-heartbeat.done
+			if owner.ActiveCount() != 1 {
+				t.Fatal("retirement released accepted settlement ownership before its handler finished")
+			}
+			guard, err := heartbeat.BeginSettlement()
+			if rejected {
+				if err == nil || guard != nil {
+					t.Fatal("retired handler bypassed selected-store claim fencing")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement := guard.Context()
+				actual, ok := ClaimFromContext(settlement)
+				if !ok || !actual.Same(claim) || settlement.Err() != nil {
+					t.Fatal("settlement lost exact accepted claim or used canceled execution context")
+				}
+				actualOwner, ok := worklifetime.OccurrenceFromContext(settlement)
+				if !ok || actualOwner != owner {
+					t.Fatal("settlement detached from its retired occurrence")
+				}
+				if lease, err := actualOwner.Begin(settlement); err == nil {
+					_ = lease.Done()
+					t.Fatal("settlement context admitted new work after retirement")
+				}
+				if err := guard.Finish(true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := heartbeat.Stop(); (err != nil) != rejected {
+				t.Fatalf("stop must preserve exact settlement failure: %v", err)
+			}
+			if owner.ActiveCount() != 0 {
+				t.Fatal("completed settlement retained its work lease")
+			}
+		})
+	}
+}

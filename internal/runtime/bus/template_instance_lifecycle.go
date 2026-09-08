@@ -180,7 +180,7 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: failure}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
 	derivedRoute := plan.ReceiverRoute(decision.InstancePath, decision.EntityID)
-	if templateInstanceLifecycleMatchIsRoutable(o.routeTable, plan, derivedRoute) {
+	if templateInstanceLifecycleMatchIsRoutable(o.routeTable, evt.RunID(), plan, derivedRoute) {
 		if mode == runtimecontracts.FlowInputResolutionModeCreate {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureInstanceConflict}, TemplateInstanceLifecycleDecision{}, true, nil
 		}
@@ -213,7 +213,7 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, refreshErr
 			}
 			matches = runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, refreshed)
-			if len(matches) == 1 && templateInstanceLifecycleMatchIsRoutable(o.routeTable, plan, matches[0]) {
+			if len(matches) == 1 && templateInstanceLifecycleMatchIsRoutable(o.routeTable, evt.RunID(), plan, matches[0]) {
 				return templateInstanceLifecycleMaterialization(plan, matches), o.decision(plan, evt, keyMaterial, matches[0], templateInstanceLifecycleActionReused), true, nil
 			}
 			if len(matches) > 1 {
@@ -366,15 +366,15 @@ func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinroutin
 	return ok && failure.Failure.Class == runtimefailures.ClassConflictingDuplicate
 }
 
-func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {
-	if routeTable == nil {
+func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, runID string, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {
+	if routeTable == nil || strings.TrimSpace(runID) == "" {
 		return false
 	}
 	target = target.Normalized()
 	if target.Empty() {
 		return false
 	}
-	return len(routeTable.evaluateConnectPlan(plan, []events.RouteIdentity{target}).Recipients()) > 0
+	return len(routeTable.evaluateConnectPlan(runID, plan, []events.RouteIdentity{target}).Recipients()) > 0
 }
 
 func templateInstanceLifecycleParentRoute(evt events.Event, plan runtimepinrouting.ConnectRoutePlan) runtimeflowidentity.ParentRoute {

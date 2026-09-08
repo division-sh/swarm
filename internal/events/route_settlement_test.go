@@ -18,7 +18,7 @@ func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing
 	planID := AdmitConnectPlanIdentity(sha256.Sum256([]byte("plan-a")))
 	receiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-a")))
 	recipient := MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))
-	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, ConnectCandidateAccepted)
+	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Plan{}, ConnectCandidateAccepted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing
 		t.Fatal(err)
 	}
 	rejectedReceiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-b")))
-	rejected, err := NewConnectCandidateEvidence(rejectedReceiver, MustNodeDeliveryRecipient(identitytest.RootNode(t, "other")), "other", agentidentity.Identity{}, ConnectCandidatePathMismatch)
+	rejected, err := NewConnectCandidateEvidence(rejectedReceiver, MustNodeDeliveryRecipient(identitytest.RootNode(t, "other")), "other", agentidentity.Plan{}, ConnectCandidatePathMismatch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,11 +69,11 @@ func TestConnectRecipientEvaluationReturnsClosedRejectionEvidence(t *testing.T) 
 	planID := AdmitConnectPlanIdentity(sha256.Sum256([]byte("plan-a")))
 	receiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-a")))
 	recipient := MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))
-	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, ConnectCandidateAccepted)
+	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Plan{}, ConnectCandidateAccepted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rejected, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, ConnectCandidatePathMismatch)
+	rejected, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Plan{}, ConnectCandidatePathMismatch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestConnectRecipientEvaluationReturnsClosedRejectionEvidence(t *testing.T) 
 		}
 	}
 	for _, outcome := range []ConnectCandidateOutcome{ConnectCandidatePinMismatch, ConnectCandidatePathMismatch, ConnectCandidateAccepted} {
-		candidate, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, outcome)
+		candidate, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Plan{}, outcome)
 		if err != nil || candidate.Outcome() != outcome {
 			t.Fatalf("candidate outcome %q = %#v err=%v", outcome.Code(), candidate, err)
 		}

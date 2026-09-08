@@ -69,8 +69,7 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 // adapters decide only how those facts are represented by their backend.
 type FlowInstanceActivationRecord struct {
 	State                    WorkflowEngineStateRecord
-	RunID                    string
-	Route                    runtimeflowidentity.Route
+	Identity                 runtimeflowidentity.RunScopedFlowInstance
 	EntityID                 string
 	WorkflowName             string
 	WorkflowVersion          string
@@ -98,11 +97,11 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if !r.State.Transition.CreatesState() {
 		return fmt.Errorf("flow instance activation requires a creating state record")
 	}
-	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
-	if strings.TrimSpace(r.RunID) == "" || !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" {
+	r.Identity = r.Identity.Normalize()
+	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
 		return fmt.Errorf("flow instance activation record requires exact run, route, and entity identity")
 	}
-	if r.State.RunID != r.RunID || r.State.Route != r.Route || r.State.EntityID != r.EntityID {
+	if r.State.Identity != r.Identity || r.State.EntityID != r.EntityID {
 		return fmt.Errorf("flow instance activation state identity disagrees with activation record")
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
@@ -192,13 +191,16 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	state, err := workflowEngineStateRecord(normalized.Readiness.RunID, normalized.Identity.Route(), instance, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, normalized.OccurredAt)
+	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(normalized.Readiness.RunID, normalized.Identity.Route())
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	state, err := workflowEngineStateRecord(flowOwner, instance, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, normalized.OccurredAt)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
 	record := FlowInstanceActivationRecord{
-		State: state,
-		RunID: normalized.Readiness.RunID, Route: normalized.Identity.Route(), EntityID: identity.RowID(),
+		State: state, Identity: state.Identity, EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: workflowInstanceMode(instance),
 		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
 		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config,
@@ -305,7 +307,15 @@ type FlowInstanceDeactivationRequest struct {
 	FinalState     string
 }
 
-type FlowInstanceDeactivator func(context.Context, FlowInstanceDeactivationRequest) error
+// PreparedFlowInstanceDeactivation owns completion before a terminal mutation.
+// Commit consumes selected-store commit evidence at the caller; Abort releases
+// the unused reservation on rollback. Neither operation admits another task.
+type PreparedFlowInstanceDeactivation interface {
+	Commit() error
+	Abort() error
+}
+
+type FlowInstanceDeactivationPreparer func(context.Context, FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error)
 
 type flowInstanceConfigRefError struct {
 	Key    string

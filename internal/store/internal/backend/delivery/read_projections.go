@@ -165,7 +165,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 		args = append(args, asOf.UTC())
 		asOfIndex := len(args)
 		query = fmt.Sprintf(`
-			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			SELECT d.run_id::text, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			       d.agent_route_presence, d.agent_flow_scope_key,
 			       d.agent_flow_instance_id, d.agent_flow_instance_path,
 			       COUNT(*), MIN(e.created_at)
@@ -177,7 +177,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 			  AND e.created_at >= $%d::timestamptz
 			  AND (e.run_id IS NULL OR r.status IN ($%d, $%d))
 			  AND %s
-			GROUP BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			GROUP BY d.run_id, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			         d.agent_route_presence, d.agent_flow_scope_key,
 			         d.agent_flow_instance_id, d.agent_flow_instance_path
 			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
@@ -187,7 +187,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		args = append(args, sqliteTraceSQLTime(asOf.UTC()))
 		query = fmt.Sprintf(`
-			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			SELECT d.run_id, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			       d.agent_route_presence, d.agent_flow_scope_key,
 			       d.agent_flow_instance_id, d.agent_flow_instance_path,
 			       COUNT(*), MIN(e.created_at)
@@ -199,7 +199,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 			  AND e.created_at >= ?
 			  AND (e.run_id IS NULL OR r.status IN (?, ?))
 			  AND %s
-			GROUP BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			GROUP BY d.run_id, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			         d.agent_route_presence, d.agent_flow_scope_key,
 			         d.agent_flow_instance_id, d.agent_flow_instance_path
 			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
@@ -213,19 +213,20 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 	out := make([]AgentPendingAggregate, 0, len(identities))
 	for rows.Next() {
 		var (
-			item                                           AgentPendingAggregate
-			agentID, nameOwner, nameSource, routePresence  string
-			flowScopeKey, flowInstanceID, flowInstancePath string
-			oldestRaw                                      any
+			item                                                 AgentPendingAggregate
+			runID, agentID, nameOwner, nameSource, routePresence string
+			flowScopeKey, flowInstanceID, flowInstancePath       string
+			oldestRaw                                            any
 		)
 		if err := rows.Scan(
-			&agentID, &nameOwner, &nameSource, &routePresence,
+			&runID, &agentID, &nameOwner, &nameSource, &routePresence,
 			&flowScopeKey, &flowInstanceID, &flowInstancePath,
 			&item.Count, &oldestRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent pending aggregate: %w", err)
 		}
 		item.AgentIdentity, err = agentidentity.FromStorageFields(agentidentity.StorageFields{
+			RunID:   runID,
 			AgentID: agentID, NameOwner: nameOwner, NameSource: nameSource,
 			RoutePresence: routePresence, FlowScopeKey: flowScopeKey,
 			FlowInstanceID: flowInstanceID, FlowInstancePath: flowInstancePath,
@@ -430,7 +431,7 @@ func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identiti
 			WITH ranked AS (
 				SELECT d.delivery_id,
 					ROW_NUMBER() OVER (
-						PARTITION BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+						PARTITION BY d.run_id, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 						             d.agent_route_presence, d.agent_flow_scope_key,
 						             d.agent_flow_instance_id, d.agent_flow_instance_path
 						ORDER BY
@@ -463,7 +464,7 @@ func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identiti
 			WITH ranked AS (
 				SELECT d.delivery_id,
 					ROW_NUMBER() OVER (
-						PARTITION BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+						PARTITION BY d.run_id, d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 						             d.agent_route_presence, d.agent_flow_scope_key,
 						             d.agent_flow_instance_id, d.agent_flow_instance_path
 						ORDER BY
@@ -535,7 +536,7 @@ func agentIdentityPredicate(dialect Dialect, alias string, identities []agentide
 		return "", nil, fmt.Errorf("agent identity predicate requires at least one identity")
 	}
 	columns := []string{
-		"subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence",
+		"run_id", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence",
 		"agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path",
 	}
 	args := make([]any, 0, len(identities)*len(columns))
@@ -546,7 +547,7 @@ func agentIdentityPredicate(dialect Dialect, alias string, identities []agentide
 			return "", nil, err
 		}
 		values := []any{
-			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		}
 		terms := make([]string, 0, len(columns))

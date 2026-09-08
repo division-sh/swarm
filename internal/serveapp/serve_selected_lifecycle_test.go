@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,7 +13,87 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil"
 )
+
+type observedTerminalJoinContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *observedTerminalJoinContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
+type observedTerminalStore struct {
+	activatedSelectedStore
+	mu       sync.Mutex
+	attempts int
+}
+
+func (s *observedTerminalStore) CloseActivated(receipt *worklifetime.ProcessJoinReceipt) error {
+	s.mu.Lock()
+	s.attempts++
+	s.mu.Unlock()
+	return s.activatedSelectedStore.CloseActivated(receipt)
+}
+
+func TestTerminalStoreReleaseJoinsDelayedAccessBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected *selectedStoreOwner
+			if backend == "sqlite" {
+				selected = openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "terminal.db"), nil)
+			} else {
+				dsn, db, _ := testutil.StartPostgres(t)
+				selected = openSelectedPostgresOwner(t, dsn, db, nil)
+			}
+			db, _, _ := selectedRuntimeStoreForTest(t, projectServeRuntimePersistence(selected))
+			process := worklifetime.NewProcess()
+			observed := &observedTerminalStore{activatedSelectedStore: selected}
+			lifecycle, err := activateServeLifecycle(observed, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := process.Begin(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			joinCtx := &observedTerminalJoinContext{Context: cancelled, entered: make(chan struct{})}
+			completed := make(chan error, 1)
+			go func() { completed <- lifecycle.Finalize(joinCtx, nil) }()
+			<-joinCtx.entered
+			observed.mu.Lock()
+			attempts := observed.attempts
+			observed.mu.Unlock()
+			if attempts != 0 {
+				t.Errorf("store close attempted before accepted work settled: %d", attempts)
+			}
+			var one int
+			if err := db.QueryRowContext(context.WithoutCancel(lease.Context()), "SELECT 1").Scan(&one); err != nil || one != 1 {
+				t.Errorf("delayed accepted store access lost its capability: value=%d error=%v", one, err)
+			}
+			if err := lease.Done(); err != nil {
+				t.Error(err)
+			}
+			if err := <-completed; !errors.Is(err, context.Canceled) {
+				t.Errorf("shutdown did not retain its expired join diagnostic: %v", err)
+			}
+			if err := db.PingContext(context.Background()); err == nil {
+				t.Error("successfully joined selected store remained open")
+			}
+			observed.mu.Lock()
+			defer observed.mu.Unlock()
+			if observed.attempts != 1 {
+				t.Errorf("store release attempts = %d, want one after join", observed.attempts)
+			}
+		})
+	}
+}
 
 func TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction(t *testing.T) {
 	source, err := os.ReadFile("main.go")

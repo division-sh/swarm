@@ -111,7 +111,7 @@ func TestFlowWorkspaceBackingKeysAreInjectiveAndBackendNeutral(t *testing.T) {
 		if err != nil {
 			t.Fatalf("docker workspace %q: %v", flowPath, err)
 		}
-		hostTarget, err := host.ResolveWorkspaceForCapabilityAdmission(context.Background(), actor)
+		hostTarget, err := host.ResolveWorkspace(context.Background(), actor)
 		if err != nil {
 			t.Fatalf("host workspace %q: %v", flowPath, err)
 		}

@@ -109,7 +109,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				t.Fatalf("agent mailbox readback = %#v err=%v", item, err)
 			}
 
-			identity := testAgentIdentity(t, "provider-agent", "provider/account-a")
+			identity := mustTestAgentIdentityForRun(runID, "provider-agent", "provider/account-a")
 			routing, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
 				FlowID: "provider", FlowInstance: identity.FlowInstance(), EntityID: record.Origin.EntityID,
 			})

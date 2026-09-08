@@ -41,12 +41,12 @@ type deliveryLifecycleConformanceBackend struct {
 	postgres bool
 }
 
-func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberID string) events.DeliveryRoute {
+func deliveryLifecycleConformanceRoute(t testing.TB, runID, subscriberType, subscriberID string) events.DeliveryRoute {
 	t.Helper()
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(conformanceNode(t, "", subscriberID))}
 	if subscriberType == string(runtimedelivery.SubscriberAgent) {
 		route.Recipient = events.MustAgentDeliveryRecipient(subscriberID)
-		route.AgentIdentity = agentidentitytest.RootRuntime(t, subscriberID, "delivery-lifecycle-conformance")
+		route.AgentIdentity = agentidentitytest.RootRuntimeForRun(t, runID, subscriberID, "delivery-lifecycle-conformance")
 	} else {
 		route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "delivery-lifecycle-conformance"})
 	}
@@ -77,10 +77,10 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			t.Run("exact_route_claim_settlement_and_outcome", func(t *testing.T) {
 				event := deliveryLifecycleEvent("exact-" + backend.name)
-				agent := deliveryLifecycleConformanceRoute(t, "agent", "agent-a")
+				agent := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "agent-a")
 				sibling := agent
 				sibling.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:delivery-lifecycle-sibling"}}
-				node := deliveryLifecycleConformanceRoute(t, "node", "node-a")
+				node := deliveryLifecycleConformanceRoute(t, event.RunID(), "node", "node-a")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 
 				agentProof, err := backend.store.ProveHandoff(ctx, event.ID(), agent)
@@ -156,7 +156,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 				for index, fact := range facts {
 					event := deliveryLifecycleEvent(fmt.Sprintf("rule-fact-%s-%d", backend.name, index))
-					route := deliveryLifecycleConformanceRoute(t, "node", fmt.Sprintf("rule-node-%d", index))
+					route := deliveryLifecycleConformanceRoute(t, event.RunID(), "node", fmt.Sprintf("rule-node-%d", index))
 					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 					claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 					if err != nil {
@@ -175,7 +175,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 
 				event := deliveryLifecycleEvent("rule-conflict-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "node", "rule-conflict")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "node", "rule-conflict")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				firstClaim, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 				if err != nil {
@@ -223,7 +223,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			t.Run("delivery_continuation_restart_preserves_exact_payload_bytes", func(t *testing.T) {
 				payload := json.RawMessage("{\n  \"numeric\": 1.0, \"ordered\": {\"b\": 2, \"a\": 1}\n}")
 				event := deliveryLifecycleEventWithPayload("continuation-payload-"+backend.name, payload)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "continuation-payload")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "continuation-payload")
 				storetest.CommitSemanticEventWithInitialFacts(
 					t,
 					ctx,
@@ -270,7 +270,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("normal_authority_activation_reclaims_predecessor_attempt", func(t *testing.T) {
 				event := deliveryLifecycleEvent("activation-reclaim-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "activation-reclaim-agent")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "activation-reclaim-agent")
 				storetest.CommitSemanticEventWithInitialFacts(
 					t,
 					ctx,
@@ -344,7 +344,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("closed_claim_and_cursor_disposition_matrix", func(t *testing.T) {
 				pendingEvent := deliveryLifecycleEvent("claim-matrix-pending-" + backend.name)
-				pendingRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-pending")
+				pendingRoute := deliveryLifecycleConformanceRoute(t, pendingEvent.RunID(), "agent", "claim-matrix-pending")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 				pendingID, err := runtimedelivery.DeliveryID(pendingEvent.ID(), pendingRoute)
 				if err != nil {
@@ -402,7 +402,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 
 				deferredEvent := deliveryLifecycleEvent("claim-matrix-deferred-" + backend.name)
-				deferredRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-deferred")
+				deferredRoute := deliveryLifecycleConformanceRoute(t, deferredEvent.RunID(), "agent", "claim-matrix-deferred")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deferredEvent, []events.DeliveryRoute{deferredRoute}, runtimepipelineobligation.ScopeSubscribed)
 				deferredClaim, err := storetest.ClaimDelivery(ctx, backend.store, deferredEvent, deferredRoute)
 				if err != nil {
@@ -432,7 +432,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				acknowledgeDeliveryLifecyclePipelineEvent(t, ctx, backend.selected, deferredEvent.ID())
 
 				invalidEvent := deliveryLifecycleEvent("claim-matrix-invalid-" + backend.name)
-				invalidRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-invalid")
+				invalidRoute := deliveryLifecycleConformanceRoute(t, invalidEvent.RunID(), "agent", "claim-matrix-invalid")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, invalidEvent, []events.DeliveryRoute{invalidRoute}, runtimepipelineobligation.ScopeSubscribed)
 				invalidID, err := runtimedelivery.DeliveryID(invalidEvent.ID(), invalidRoute)
 				if err != nil {
@@ -468,9 +468,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("recovery_inventory_and_opaque_wake_are_store_owned", func(t *testing.T) {
 				event := deliveryLifecycleEvent("recovery-inventory-" + backend.name)
-				pendingRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-pending")
-				failedRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-failed")
-				busyRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-busy")
+				pendingRoute := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "inventory-pending")
+				failedRoute := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "inventory-failed")
+				busyRoute := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "inventory-busy")
 				storetest.CommitSemanticEventWithInitialFacts(
 					t,
 					ctx,
@@ -586,9 +586,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 				if backend.postgres {
 					longEvent := deliveryLifecycleEvent("long-transaction-clock-" + backend.name)
-					longClaimRoute := deliveryLifecycleConformanceRoute(t, "node", "long-claim")
-					longRetryRoute := deliveryLifecycleConformanceRoute(t, "node", "long-retry")
-					longLeaseRoute := deliveryLifecycleConformanceRoute(t, "node", "long-lease")
+					longClaimRoute := deliveryLifecycleConformanceRoute(t, longEvent.RunID(), "node", "long-claim")
+					longRetryRoute := deliveryLifecycleConformanceRoute(t, longEvent.RunID(), "node", "long-retry")
+					longLeaseRoute := deliveryLifecycleConformanceRoute(t, longEvent.RunID(), "node", "long-lease")
 					storetest.CommitSemanticEventWithInitialFacts(
 						t,
 						ctx,
@@ -731,7 +731,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("postcommit_handoff_restarts_before_prior_cursor", func(t *testing.T) {
 				oldEvent := deliveryLifecycleEvent("handoff-before-cursor-" + backend.name)
-				oldRoute := deliveryLifecycleConformanceRoute(t, "agent", "old-route")
+				oldRoute := deliveryLifecycleConformanceRoute(t, oldEvent.RunID(), "agent", "old-route")
 				storetest.CommitSemanticEventWithRoutes(
 					t,
 					ctx,
@@ -755,7 +755,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					oldEvent.Envelope(),
 					oldEvent.CreatedAt().Add(time.Second),
 				)
-				newRoute := deliveryLifecycleConformanceRoute(t, "agent", "new-route")
+				newRoute := deliveryLifecycleConformanceRoute(t, newEvent.RunID(), "agent", "new-route")
 				storetest.CommitSemanticEventWithInitialFacts(
 					t,
 					ctx,
@@ -819,7 +819,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("claim_renewal_fences_reclaim_and_preserves_settlement", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-renewal-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "renewal-agent")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "renewal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 				if err != nil {
@@ -865,7 +865,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("parent_terminalization_fences_late_writer", func(t *testing.T) {
 				event := deliveryLifecycleEvent("terminalize-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "terminal-agent")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "terminal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 				if err != nil {
@@ -904,7 +904,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("parent_terminalization_owns_pending_and_preserves_failed_selection", func(t *testing.T) {
 				pendingEvent := deliveryLifecycleEvent("terminalize-pending-" + backend.name)
-				pendingRoute := deliveryLifecycleConformanceRoute(t, "node", "terminal-pending")
+				pendingRoute := deliveryLifecycleConformanceRoute(t, pendingEvent.RunID(), "node", "terminal-pending")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 				pendingID, err := runtimedelivery.DeliveryID(pendingEvent.ID(), pendingRoute)
 				if err != nil {
@@ -918,7 +918,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 
 				failedEvent := deliveryLifecycleEvent("terminalize-failed-" + backend.name)
-				failedRoute := deliveryLifecycleConformanceRoute(t, "node", "terminal-failed")
+				failedRoute := deliveryLifecycleConformanceRoute(t, failedEvent.RunID(), "node", "terminal-failed")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, failedEvent, []events.DeliveryRoute{failedRoute}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := storetest.ClaimDelivery(ctx, backend.store, failedEvent, failedRoute)
 				if err != nil {
@@ -942,7 +942,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-race-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "race-agent")
+				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "race-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 
 				type concurrentClaimResult struct {
@@ -1019,11 +1019,12 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("expired_claim_precedes_continuous_pending_backlog", func(t *testing.T) {
 				expiredEvent := deliveryLifecycleEvent("selector-expired-" + backend.name)
-				route := deliveryLifecycleConformanceRoute(t, "agent", "selector-agent-"+backend.name)
+				route := deliveryLifecycleConformanceRoute(t, expiredEvent.RunID(), "agent", "selector-agent-"+backend.name)
 				routes := []events.DeliveryRoute{route}
 				for index := 0; index < 12; index++ {
-					routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index)), AgentIdentity: agentidentitytest.RootRuntime(
+					routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index)), AgentIdentity: agentidentitytest.RootRuntimeForRun(
 						t,
+						expiredEvent.RunID(),
 						fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
 						"delivery-lifecycle-conformance",
 					),
@@ -1063,7 +1064,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					class := class
 					t.Run(string(class), func(t *testing.T) {
 						event := deliveryLifecycleEvent(fmt.Sprintf("atomic-diagnostic-%s-%s", backend.name, class))
-						route := deliveryLifecycleConformanceRoute(t, string(class), "diagnostic-"+string(class))
+						route := deliveryLifecycleConformanceRoute(t, event.RunID(), string(class), "diagnostic-"+string(class))
 						storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 						var claimed runtimedelivery.ClaimedObligation
 						var err error
@@ -1236,8 +1237,8 @@ func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend de
 
 func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend) {
 	t.Helper()
-	route := deliveryLifecycleConformanceRoute(t, "agent", "schema-agent-"+backend.name)
 	event := deliveryLifecycleEvent("schema-event-" + backend.name)
+	route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "schema-agent-"+backend.name)
 	other := deliveryLifecycleEvent("schema-other-run-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, other, nil, runtimepipelineobligation.ScopeDirect)
@@ -1254,8 +1255,9 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{other.RunID(), proof.DeliveryID()})
 
 	missingAttemptEvent := deliveryLifecycleEvent("schema-missing-attempt-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, missingAttemptEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	missingAttempt, err := backend.store.ProveHandoff(ctx, missingAttemptEvent.ID(), route)
+	missingAttemptRoute := deliveryLifecycleConformanceRoute(t, missingAttemptEvent.RunID(), "agent", "schema-agent-"+backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, missingAttemptEvent, []events.DeliveryRoute{missingAttemptRoute}, runtimepipelineobligation.ScopeSubscribed)
+	missingAttempt, err := backend.store.ProveHandoff(ctx, missingAttemptEvent.ID(), missingAttemptRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1266,15 +1268,16 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{now, missingAttempt.DeliveryID()})
 
 	sessionEvent := deliveryLifecycleEvent("schema-session-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	claimed, err := storetest.ClaimDelivery(ctx, backend.store, sessionEvent, route)
+	sessionRoute := deliveryLifecycleConformanceRoute(t, sessionEvent.RunID(), "agent", "schema-agent-"+backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{sessionRoute}, runtimepipelineobligation.ScopeSubscribed)
+	claimed, err := storetest.ClaimDelivery(ctx, backend.store, sessionEvent, sessionRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertDeliverySQLRejected(t, backend, "nonexistent exact agent session",
 		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_run_id=$2::uuid, session_agent_id=$3 WHERE delivery_id=$4::uuid AND claim_version=$5`,
 		`UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?`,
-		[]any{uuid.NewString(), sessionEvent.RunID(), route.Recipient.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+		[]any{uuid.NewString(), sessionEvent.RunID(), sessionRoute.Recipient.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
 
 	otherSessionEvent := deliveryLifecycleEvent("schema-session-other-owner-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimepipelineobligation.ScopeDirect)
@@ -1294,8 +1297,8 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`,
 		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version() + 1, uuid.NewString(), now, now.Add(time.Minute)})
 
-	terminatedRoute := deliveryLifecycleConformanceRoute(t, "agent", "terminated-session-agent-"+backend.name)
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
+	terminatedRoute := deliveryLifecycleConformanceRoute(t, terminatedEvent.RunID(), "agent", "terminated-session-agent-"+backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	terminatedClaim, err := storetest.ClaimDelivery(ctx, backend.store, terminatedEvent, terminatedRoute)
 	if err != nil {
@@ -1321,8 +1324,9 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	}
 
 	outcomeEvent := deliveryLifecycleEvent("schema-outcome-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	outcomeProof, err := backend.store.ProveHandoff(ctx, outcomeEvent.ID(), route)
+	outcomeRoute := deliveryLifecycleConformanceRoute(t, outcomeEvent.RunID(), "agent", "schema-agent-"+backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{outcomeRoute}, runtimepipelineobligation.ScopeSubscribed)
+	outcomeProof, err := backend.store.ProveHandoff(ctx, outcomeEvent.ID(), outcomeRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1332,8 +1336,9 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{outcomeProof.DeliveryID(), now})
 
 	deadLetterEvent := deliveryLifecycleEvent("schema-dead-letter-failure-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deadLetterEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	deadLetterProof, err := backend.store.ProveHandoff(ctx, deadLetterEvent.ID(), route)
+	deadLetterRoute := deliveryLifecycleConformanceRoute(t, deadLetterEvent.RunID(), "agent", "schema-agent-"+backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deadLetterEvent, []events.DeliveryRoute{deadLetterRoute}, runtimepipelineobligation.ScopeSubscribed)
+	deadLetterProof, err := backend.store.ProveHandoff(ctx, deadLetterEvent.ID(), deadLetterRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1360,7 +1365,7 @@ func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanc
 func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, class runtimedelivery.SubscriberClass, subscriberID string, maxRetries int) {
 	t.Helper()
 	event := deliveryLifecycleEvent(fmt.Sprintf("retry-%s-%s", backend.name, class))
-	route := deliveryLifecycleConformanceRoute(t, string(class), subscriberID)
+	route := deliveryLifecycleConformanceRoute(t, event.RunID(), string(class), subscriberID)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
 	if err != nil {
@@ -1621,7 +1626,7 @@ func deliveryLifecycleEventWithPayload(label string, payload json.RawMessage) ev
 
 func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, sessionID, runID, agentID string) {
 	t.Helper()
-	identity := agentidentitytest.RootRuntime(t, agentID, "delivery-lifecycle-conformance")
+	identity := agentidentitytest.RootRuntimeForRun(t, runID, agentID, "delivery-lifecycle-conformance")
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("seed delivery agent identity: %v", err)

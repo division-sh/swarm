@@ -162,8 +162,8 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
-	runID := managedNormalEffectStoreTestRunID(agentID)
 	identity := testAgentIdentity(t, agentID, "neutral")
+	runID := identity.RunID
 	seedTestAgentRow(t, ctx, db, !sqlite, identity, "active")
 	if sqlite {
 		fields := testAgentIdentityStorageFields(t, identity)
@@ -276,7 +276,7 @@ func completionOnlyAuthorityForParity(kind runtimeeffects.AuthorityKind) runtime
 		return runtimeeffects.Authority{
 			Kind: kind, ID: forkTurnID, ExecutionOwner: "hostile-forkchat", LeaseExpiresAt: now.Add(time.Minute), FenceGeneration: 1,
 			ForkChat: runtimeeffects.ConversationForkChatAuthority{
-				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: authorActivityTestBundleHash, ActorTokenID: "actor",
+				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), SourceRunID: uuid.NewString(), BundleHash: authorActivityTestBundleHash, ActorTokenID: "actor",
 				RequestOccurrenceID: uuid.NewString(), RequestHash: "request",
 			},
 		}

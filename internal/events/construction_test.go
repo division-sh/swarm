@@ -27,7 +27,6 @@ var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{}
 
 var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/pipeline/decision_card_mutation.go", Scope: "decisionCardRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:            1,
-	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunCreatingDiagnosticDirectEvent"}:                                 1,
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                   1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                         1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                     1,

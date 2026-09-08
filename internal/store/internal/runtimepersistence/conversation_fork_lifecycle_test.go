@@ -542,10 +542,11 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
 		ExecutionMode: prepared.Snapshot.SourceAgent.ExecutionMode,
 		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
+			ForkTurnID: prepared.ForkTurnID, ForkID: prepared.Fork.ForkID, SourceRunID: prepared.Snapshot.SourceRunID,
+			BundleHash: prepared.SourceBundleHash, ActorTokenID: prepared.ActorTokenID,
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
-		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
+		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal, RunID: prepared.Snapshot.SourceRunID},
 	}
 	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(s))
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, fmt.Sprintf("forkchat-test:%s:%d", prepared.RequestOccurrenceID, ordinal))
@@ -640,7 +641,7 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
-	identity := testAgentIdentity(t, source.agentID, conversationForkSourceFlowInstance)
+	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)

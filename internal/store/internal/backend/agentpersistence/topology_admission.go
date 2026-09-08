@@ -93,15 +93,15 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 	query := `
 		SELECT readiness.plan, instance.status
 		FROM flow_instance_runtime_readiness AS readiness
-		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
-		WHERE readiness.run_id = ? AND readiness.instance_id = ?`
+		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
+		WHERE readiness.run_id = ? AND readiness.instance_path = ?`
 	args := []any{authority.RunID, authority.InstancePath}
 	if !sqlite {
 		query = `
 			SELECT readiness.plan, instance.status
 			FROM flow_instance_runtime_readiness AS readiness
-			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
-			WHERE readiness.run_id = $1::uuid AND readiness.instance_id = $2
+			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
+			WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
 			FOR UPDATE OF readiness, instance`
 	}
 	var raw []byte
@@ -144,7 +144,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 			return topologyConflict(req, "readiness_instance_not_active")
 		}
 		if desiredRevision != strings.TrimSpace(req.ConfigRevision) {
-			return topologyConflict(req, "readiness_agent_revision_mismatch")
+			return fmt.Errorf("%w: desired=%s requested=%s", topologyConflict(req, "readiness_agent_revision_mismatch"), desiredRevision, strings.TrimSpace(req.ConfigRevision))
 		}
 		return nil
 	}
@@ -156,9 +156,13 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 
 func desiredAgentForIdentity(plan runtimeagenttopology.SourceSetPlan, identity runtimeagentidentity.Identity) (runtimeagenttopology.DesiredAgent, bool, error) {
 	identity = identity.Normalize()
+	identityPlan, err := identity.Plan()
+	if err != nil {
+		return runtimeagenttopology.DesiredAgent{}, false, err
+	}
 	var found *runtimeagenttopology.DesiredAgent
 	for _, desired := range plan.Agents {
-		if desired.Identity.Normalize() != identity {
+		if desired.Identity.Normalize() != identityPlan {
 			continue
 		}
 		if found != nil {
@@ -174,11 +178,12 @@ func desiredAgentForIdentity(plan runtimeagenttopology.SourceSetPlan, identity r
 }
 
 func topologyConflict(req runtimemanager.AgentLifecycleTransition, reason string) error {
-	return runtimefailures.New(
+	failure := runtimefailures.New(
 		runtimefailures.ClassLifecycleConflict,
 		"agent_topology_authority_conflict",
 		"agent-lifecycle-store",
 		req.OperationKind,
 		map[string]any{"agent_id": req.AgentID, "reason": reason, "authority_kind": req.Topology.Authority.Kind},
 	)
+	return fmt.Errorf("%w: %s", failure, reason)
 }

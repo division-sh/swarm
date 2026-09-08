@@ -64,7 +64,7 @@ func operatorAgentProjectionTestIdentity(t *testing.T, agentID, flow string) age
 			t.Fatal(err)
 		}
 	}
-	identity, err := agentidentity.New(name, route)
+	identity, err := agentidentity.New("11111111-1111-4111-8111-111111111114", name, route)
 	if err != nil {
 		t.Fatal(err)
 	}

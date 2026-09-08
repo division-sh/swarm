@@ -38,7 +38,7 @@ func ReadRunSummary(
 		       COALESCE(es.flow_instance, ''),
 		       COALESCE(fi.flow_template, '')
 		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = ?
 		ORDER BY es.entity_id`
 	args := []any{runID}
@@ -50,7 +50,7 @@ func ReadRunSummary(
 			       COALESCE(es.flow_instance, ''),
 			       COALESCE(fi.flow_template, '')
 			FROM entity_state es
-			LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 			WHERE es.run_id = $1::uuid
 			ORDER BY es.entity_id
 			FOR SHARE OF es`

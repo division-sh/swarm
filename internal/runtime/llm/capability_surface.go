@@ -43,10 +43,24 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 	if err != nil {
 		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn actor identity: %w", err)
 	}
-	sessionIdentity := session.MemoryIdentity.Agent.Normalize()
+	sessionIdentity := session.MemoryIdentity.Normalize()
 	sameSessionActor, sessionIdentityErr := runtimeagentidentity.Equal(actorIdentity, sessionIdentity)
-	if sessionIdentityErr != nil || !sameSessionActor || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
-		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn session actor mismatch")
+	if sessionIdentityErr != nil {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn session identity: %w", sessionIdentityErr)
+	}
+	if !sameSessionActor {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf(
+			"managed capability provider turn actor %s does not match session actor %s",
+			actorIdentity.Description(),
+			sessionIdentity.Description(),
+		)
+	}
+	if strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf(
+			"managed capability provider turn session agent_id %q does not match actor %q",
+			strings.TrimSpace(session.AgentID),
+			actorIdentity.AgentID(),
+		)
 	}
 	if existing, ok := providerTurnAuthorityFromContext(ctx); ok {
 		if existing.Kind != managedcapabilities.AuthorityProviderTurn ||
@@ -160,7 +174,7 @@ func managedCapabilityPlanForTurn(ctx context.Context, runtime Runtime, session 
 	if session == nil || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires exact session actor")
 	}
-	if equal, equalErr := runtimeagentidentity.Equal(session.MemoryIdentity.Agent, actorIdentity); equalErr != nil || !equal {
+	if equal, equalErr := runtimeagentidentity.Equal(session.MemoryIdentity, actorIdentity); equalErr != nil || !equal {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface session identity mismatch")
 	}
 	authority, ok := providerTurnAuthorityFromContext(ctx)
@@ -170,11 +184,32 @@ func managedCapabilityPlanForTurn(ctx context.Context, runtime Runtime, session 
 	return managedCapabilityPlan(ctx, runtime, "", tools, capabilities, authority)
 }
 
-func ManagedCapabilitySurfaceForStartup(ctx context.Context, runtime Runtime, tools []ToolDefinition, capabilities toolcapabilities.Set, authority managedcapabilities.Authority) (managedcapabilities.Surface, error) {
+func ManagedCapabilitySurfaceForStartup(ctx context.Context, actorPlan runtimeagentidentity.Plan, runtime Runtime, tools []ToolDefinition, capabilities toolcapabilities.Set, authority managedcapabilities.Authority) (managedcapabilities.Surface, error) {
 	if authority.Kind != managedcapabilities.AuthorityStartupProbe {
 		return managedcapabilities.Surface{}, fmt.Errorf("startup capability surface requires startup-probe authority")
 	}
-	return managedCapabilityPlan(ctx, runtime, "startup_probe", tools, capabilities, authority)
+	actorPlan = actorPlan.Normalize()
+	if err := actorPlan.Validate(); err != nil {
+		return managedcapabilities.Surface{}, fmt.Errorf("startup capability surface actor plan: %w", err)
+	}
+	actor, ok := models.ActorFromContext(ctx)
+	if !ok || strings.TrimSpace(actor.ID) != actorPlan.AgentID() || actor.CanonicalFlowPath() != actorPlan.FlowInstance() {
+		return managedcapabilities.Surface{}, fmt.Errorf("startup capability surface requires exact actor plan projection")
+	}
+	var actorIdentity runtimeagentidentity.Identity
+	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
+		identity, err := actor.ConcreteIdentity()
+		if err != nil {
+			return managedcapabilities.Surface{}, fmt.Errorf("selected-fork startup capability surface actor identity: %w", err)
+		}
+		identityPlan, err := identity.Plan()
+		if err != nil || identityPlan.Normalize() != actorPlan {
+			return managedcapabilities.Surface{}, fmt.Errorf("selected-fork startup capability surface actor plan mismatch")
+		}
+		actorIdentity = identity
+		actorPlan = runtimeagentidentity.Plan{}
+	}
+	return managedCapabilityPlanForActor(actor, actorIdentity, actorPlan, runtime, "startup_probe", tools, capabilities, authority)
 }
 
 func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode string, tools []ToolDefinition, capabilities toolcapabilities.Set, authority managedcapabilities.Authority) (managedcapabilities.Surface, error) {
@@ -186,6 +221,10 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 	if err != nil {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface actor identity: %w", err)
 	}
+	return managedCapabilityPlanForActor(actor, actorIdentity, runtimeagentidentity.Plan{}, runtime, runtimeMode, tools, capabilities, authority)
+}
+
+func managedCapabilityPlanForActor(actor models.AgentConfig, actorIdentity runtimeagentidentity.Identity, actorPlan runtimeagentidentity.Plan, runtime Runtime, runtimeMode string, tools []ToolDefinition, capabilities toolcapabilities.Set, authority managedcapabilities.Authority) (managedcapabilities.Surface, error) {
 	contract, ok := ProviderContractForRuntime(runtime)
 	if !ok {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires provider contract")
@@ -249,6 +288,7 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorIdentity:    actorIdentity,
+		ActorPlan:        actorPlan,
 		RuntimeMode:      strings.TrimSpace(runtimeMode),
 		Provider:         contract.Provider,
 		Transport:        string(contract.Transport),

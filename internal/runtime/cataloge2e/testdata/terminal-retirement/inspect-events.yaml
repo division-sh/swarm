@@ -1,0 +1,3 @@
+worker.inspect:
+  swarm:
+    source: external

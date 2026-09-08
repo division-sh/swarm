@@ -17,6 +17,7 @@ type ClaimHeartbeat struct {
 	stop      chan struct{}
 	done      chan struct{}
 	stopOnce  sync.Once
+	leaseOnce sync.Once
 	renewMu   sync.Mutex
 	errMu     sync.Mutex
 	renewErr  error
@@ -43,6 +44,13 @@ type ClaimRenewalHandoff struct {
 type ClaimSettlementGuard struct {
 	heartbeat *ClaimHeartbeat
 	once      sync.Once
+}
+
+// Context retains the accepted claim's occurrence and authority while permitting
+// its final selected-store settlement after execution cancellation. The heartbeat
+// lease remains owned until Stop; this context cannot authorize another claim.
+func (g *ClaimSettlementGuard) Context() context.Context {
+	return context.WithoutCancel(g.heartbeat.ctx)
 }
 
 // MarkCommitted records terminal selected-store settlement and releases the
@@ -184,7 +192,7 @@ func (h *ClaimHeartbeat) BeginSettlement() (*ClaimSettlementGuard, error) {
 		h.renewMu.Unlock()
 		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
 	}
-	if _, err := h.store.RenewClaim(h.ctx, h.claim); err != nil {
+	if _, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim); err != nil {
 		h.recordRenewalFailure("renew delivery claim before settlement", err)
 		h.renewMu.Unlock()
 		return nil, h.currentRenewalError()
@@ -224,6 +232,11 @@ func (h *ClaimHeartbeat) Stop() error {
 	}
 	h.stopOnce.Do(func() { close(h.stop) })
 	<-h.done
+	h.leaseOnce.Do(func() {
+		if err := h.workLease.Done(); err != nil {
+			h.recordRenewalFailure("settle delivery heartbeat work", err)
+		}
+	})
 	h.errMu.Lock()
 	defer h.errMu.Unlock()
 	return h.renewErr
@@ -231,7 +244,6 @@ func (h *ClaimHeartbeat) Stop() error {
 
 func (h *ClaimHeartbeat) run(store Store, claim Claim, interval time.Duration) {
 	defer close(h.done)
-	defer func() { _ = h.workLease.Done() }()
 	defer h.cancel(nil)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -256,7 +268,9 @@ func (h *ClaimHeartbeat) renew(store Store, claim Claim, operation string) bool 
 	if h.settled {
 		return true
 	}
-	if _, err := store.RenewClaim(h.ctx, claim); err != nil {
+	// An already-admitted renewal must settle even when retirement cancels
+	// execution. The selected store still fences the exact claim token.
+	if _, err := store.RenewClaim(context.WithoutCancel(h.ctx), claim); err != nil {
 		h.recordRenewalFailure(operation, err)
 		return false
 	}

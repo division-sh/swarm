@@ -320,7 +320,7 @@ func selectedContractDynamicTopologyEvidence(frontier runfork.RunForkContractFro
 				continue
 			}
 			item.recipients = append(item.recipients, runfork.NewRunForkContractFrontierRecipient(
-				recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+				recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
 			))
 		}
 	}

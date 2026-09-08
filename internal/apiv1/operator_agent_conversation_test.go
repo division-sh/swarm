@@ -53,7 +53,7 @@ type fakeAgentConversationReadStore struct {
 	lastConversationTurnID               string
 }
 
-func (s *fakeAgentConversationReadStore) ResolveOperatorAgentIdentity(_ context.Context, agentID, flowInstance string) (agentidentity.Identity, error) {
+func (s *fakeAgentConversationReadStore) ResolveOperatorAgentIdentity(_ context.Context, runID, agentID, flowInstance string) (agentidentity.Identity, error) {
 	s.lastResolveAgentID = agentID
 	s.lastResolveFlowInstance = flowInstance
 	if s.resolveErr != nil {
@@ -70,7 +70,7 @@ func (s *fakeAgentConversationReadStore) ResolveOperatorAgentIdentity(_ context.
 	if err != nil {
 		return agentidentity.Identity{}, err
 	}
-	return agentidentity.New(name, route)
+	return agentidentity.New(runID, name, route)
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
@@ -342,7 +342,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	assertUnsupportedAgentMetricStubsAbsent(t, asMap(t, agents[0]))
 
-	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1","flow_instance":"research/inst-1"}}`)
+	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","flow_instance":"research/inst-1"}}`)
 	if getAgent.Error != nil {
 		t.Fatalf("agent.get error = %#v", getAgent.Error)
 	}
@@ -361,7 +361,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		}
 	}
 
-	diagnoseAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_limit":1,"queue_cursor":"cursor-1"}}`)
+	diagnoseAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","queue_limit":1,"queue_cursor":"cursor-1"}}`)
 	if diagnoseAgent.Error != nil {
 		t.Fatalf("agent.diagnose error = %#v", diagnoseAgent.Error)
 	}
@@ -419,7 +419,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		}
 	}
 
-	usageResp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"agent_id":"agent-1","since":"2026-05-21T09:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
+	usageResp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","since":"2026-05-21T09:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
 	if usageResp.Error != nil {
 		t.Fatalf("agent.usage error = %#v", usageResp.Error)
 	}
@@ -483,7 +483,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		}
 	}
 
-	deliveryDiagnostics := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","failure_limit":1,"failure_cursor":"failure-cursor-1","dead_letter_limit":1,"dead_letter_cursor":"dead-letter-cursor-1"}}`)
+	deliveryDiagnostics := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-1111-1111-111111111111","agent_id":"agent-1","failure_limit":1,"failure_cursor":"failure-cursor-1","dead_letter_limit":1,"dead_letter_cursor":"dead-letter-cursor-1"}}`)
 	if deliveryDiagnostics.Error != nil {
 		t.Fatalf("agent.delivery_diagnostics error = %#v", deliveryDiagnostics.Error)
 	}
@@ -594,7 +594,7 @@ func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T
 		t.Fatalf("agent.list exposed dashboard lifecycle field: %#v", listAgent)
 	}
 
-	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1"}}`)
+	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if getAgent.Error != nil {
 		t.Fatalf("agent.get error = %#v", getAgent.Error)
 	}
@@ -663,35 +663,35 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 		{
 			name:    "agent missing",
 			method:  "agent.get",
-			body:    `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"missing"}}`,
+			body:    `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"missing"}}`,
 			reads:   &fakeAgentConversationReadStore{agentErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent diagnosis missing",
 			method:  "agent.diagnose",
-			body:    `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"missing"}}`,
+			body:    `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"missing"}}`,
 			reads:   &fakeAgentConversationReadStore{agentDiagnosisErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent usage missing",
 			method:  "agent.usage",
-			body:    `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"agent_id":"missing"}}`,
+			body:    `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"missing"}}`,
 			reads:   &fakeAgentConversationReadStore{agentUsageErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent delivery diagnostics missing",
 			method:  "agent.delivery_diagnostics",
-			body:    `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"missing"}}`,
+			body:    `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"missing"}}`,
 			reads:   &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent delivery lifecycle missing",
 			method:  "agent.delivery_lifecycle",
-			body:    `{"jsonrpc":"2.0","id":"agent-delivery-lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"missing"}}`,
+			body:    `{"jsonrpc":"2.0","id":"agent-delivery-lifecycle","method":"agent.delivery_lifecycle","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"missing"}}`,
 			reads:   &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
@@ -760,7 +760,7 @@ func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.usage returned success for malformed owner result")
 	}
@@ -791,7 +791,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.diagnose returned success for malformed owner result")
 	}
@@ -835,7 +835,7 @@ func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *test
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_diagnostics returned success for malformed owner result")
 	}
@@ -866,7 +866,7 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-lifecycle","method":"agent.delivery_lifecycle","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_lifecycle returned success for malformed owner result")
 	}
@@ -902,7 +902,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.diagnose returned success for malformed watchdog owner result")
 	}
@@ -932,7 +932,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.diagnose returned success for malformed active owner result")
 	}
@@ -990,7 +990,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 				}),
 			})
 
-			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1"}}`)
 			if resp.Error == nil {
 				t.Fatal("agent.diagnose returned success for malformed last_tool_outcome owner result")
 			}
@@ -1010,7 +1010,7 @@ func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_limit":0}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","queue_limit":0}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.diagnose returned success for invalid queue_limit")
 	}
@@ -1025,7 +1025,7 @@ func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_cursor":"bad"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","queue_cursor":"bad"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.diagnose returned success for invalid queue_cursor")
 	}
@@ -1040,7 +1040,7 @@ func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-usage","method":"agent.usage","params":{"agent_id":"agent-1","since":"2026-05-21T10:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-usage","method":"agent.usage","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","since":"2026-05-21T10:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.usage returned success for invalid window")
 	}
@@ -1055,13 +1055,13 @@ func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","failure_limit":0}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","failure_limit":0}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_diagnostics returned success for invalid failure_limit")
 	}
 	assertReadOnlyProbeInvalidParams(t, "agent.delivery_diagnostics", resp, "failure_limit")
 
-	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","dead_letter_limit":0}}`)
+	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","dead_letter_limit":0}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_diagnostics returned success for invalid dead_letter_limit")
 	}
@@ -1076,19 +1076,19 @@ func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T)
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"agent-1","cursor":"bad"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","cursor":"bad"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_lifecycle returned success for invalid cursor")
 	}
 	assertReadOnlyProbeInvalidParams(t, "agent.delivery_lifecycle", resp, "cursor")
 
-	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"agent-1","delivery_status":["unknown"]}}`)
+	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","delivery_status":["unknown"]}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_lifecycle returned success for invalid delivery_status")
 	}
 	assertReadOnlyProbeInvalidParams(t, "agent.delivery_lifecycle", resp, "delivery_status")
 
-	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"agent-1","limit":0}}`)
+	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_lifecycle","method":"agent.delivery_lifecycle","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","limit":0}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_lifecycle returned success for invalid limit")
 	}
@@ -1103,7 +1103,7 @@ func TestOperatorAgentDeliveryDiagnosticsRejectsBadCursor(t *testing.T) {
 		}),
 	})
 
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","dead_letter_cursor":"bad"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"run_id":"11111111-1111-4111-8111-111111111111","agent_id":"agent-1","dead_letter_cursor":"bad"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.delivery_diagnostics returned success for invalid dead_letter_cursor")
 	}

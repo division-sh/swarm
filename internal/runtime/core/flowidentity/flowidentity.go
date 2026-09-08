@@ -89,6 +89,51 @@ type Route struct {
 	InstancePath string
 }
 
+// RunScopedFlowInstance is the complete identity of a live flow execution.
+// Route remains the runless authored/materialization coordinate; live runtime
+// and persistence owners must carry this type instead of a path by itself.
+type RunScopedFlowInstance struct {
+	RunID string
+	Route Route
+}
+
+func NewRunScopedFlowInstance(runID string, route Route) (RunScopedFlowInstance, error) {
+	identity := RunScopedFlowInstance{
+		RunID: strings.TrimSpace(runID),
+		Route: StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath),
+	}
+	if err := identity.Validate(); err != nil {
+		return RunScopedFlowInstance{}, err
+	}
+	return identity, nil
+}
+
+func (i RunScopedFlowInstance) Normalize() RunScopedFlowInstance {
+	i.RunID = strings.TrimSpace(i.RunID)
+	i.Route = StoredRoute(i.Route.ScopeKey, i.Route.InstanceID, i.Route.InstancePath)
+	return i
+}
+
+func (i RunScopedFlowInstance) Validate() error {
+	i = i.Normalize()
+	if i.RunID == "" {
+		return fmt.Errorf("live flow instance run_id is required")
+	}
+	if !i.Route.Valid() {
+		return fmt.Errorf("live flow instance route is incomplete")
+	}
+	return nil
+}
+
+func (i RunScopedFlowInstance) IsZero() bool {
+	return i == RunScopedFlowInstance{}
+}
+
+func (i RunScopedFlowInstance) Key() string {
+	i = i.Normalize()
+	return i.RunID + "\x00" + i.Route.InstancePath
+}
+
 func (r Route) AgentIdentityRoute() (runtimeagentidentity.Route, error) {
 	r = StoredRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 	if !r.Valid() {

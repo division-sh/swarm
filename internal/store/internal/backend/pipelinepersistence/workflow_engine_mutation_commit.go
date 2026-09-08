@@ -29,7 +29,6 @@ func commitWorkflowEngineState(
 	postgres bool,
 	effects *revisionEffects,
 	record runtimepipeline.WorkflowEngineStateRecord,
-	rebindExistingRoute bool,
 ) error {
 	if tx == nil {
 		return fmt.Errorf("workflow engine state commit requires private transaction")
@@ -37,61 +36,44 @@ func commitWorkflowEngineState(
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	if rebindExistingRoute && !record.Transition.CreatesState() {
-		return fmt.Errorf("workflow engine route rebinding requires paired state and companion creation")
-	}
 	if postgres {
-		if err := requirePostgresRunActive(ctx, tx, record.RunID); err != nil {
+		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.RunID+":"+record.Route.InstancePath); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.Identity.RunID+":"+record.Identity.Route.InstancePath); err != nil {
 			return fmt.Errorf("lock workflow engine state route: %w", err)
 		}
-		if err := commitPostgresWorkflowEngineState(ctx, tx, record, rebindExistingRoute); err != nil {
+		if err := commitPostgresWorkflowEngineState(ctx, tx, record); err != nil {
 			return err
 		}
-		return effects.Add(record.RunID, privaterunforkrevision.FamilyEntityMetadata)
+		return effects.Add(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata)
 	}
-	if err := requireSQLiteRunActive(ctx, tx, record.RunID); err != nil {
+	if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return err
 	}
-	if err := commitSQLiteWorkflowEngineState(ctx, tx, record, rebindExistingRoute); err != nil {
+	if err := commitSQLiteWorkflowEngineState(ctx, tx, record); err != nil {
 		return err
 	}
-	return effects.Add(record.RunID, privaterunforkrevision.FamilyEntityMetadata)
+	return effects.Add(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata)
 }
 
-func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
+func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord) error {
 	if record.Transition.CreatesState() {
-		query := `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-		`
-		if rebindExistingRoute {
-			query += `
-				ON CONFLICT (instance_id) DO UPDATE SET
-					flow_template = EXCLUDED.flow_template,
-					mode = EXCLUDED.mode,
-					config = EXCLUDED.config,
-					status = EXCLUDED.status,
-					terminated_at = NULL
-			`
-		} else {
-			query += ` ON CONFLICT (instance_id) DO NOTHING`
-		}
-		result, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7)
+			ON CONFLICT (run_id, instance_path) DO NOTHING
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
 		}
-		if !rebindExistingRoute {
-			rows, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("read workflow engine flow insertion: %w", err)
-			}
-			if rows == 0 {
-				if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, true, record); err != nil {
-					return err
-				}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("read workflow engine flow insertion: %w", err)
+		}
+		if rows == 0 {
+			if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, true, record); err != nil {
+				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -105,7 +87,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 				$7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1,
 				$12, $13, $13
 			)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
+		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType, record.Slug, record.Name,
 			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine entity state: %w", err)
@@ -131,7 +113,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		  AND current_state = $14
 		  AND entity_type = $15
 	`, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
+		record.EnteredStageAt, record.UpdatedAt, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
 	}
@@ -144,9 +126,9 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	}
 	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
-			VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at)
+			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8)
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
 			nullableWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt); err != nil {
 			return fmt.Errorf("create workflow engine lifecycle companion for existing state: %w", err)
 		}
@@ -158,8 +140,8 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		    config = $2::jsonb,
 		    status = $3,
 		    terminated_at = CASE WHEN $3 = 'terminated' THEN COALESCE(terminated_at, $4) ELSE NULL END
-		WHERE instance_id = $5
-	`, record.WorkflowName, string(record.Config), record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
+		WHERE run_id = $5::uuid AND instance_path = $6
+	`, record.WorkflowName, string(record.Config), record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Identity.RunID, record.Identity.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -168,42 +150,28 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		if err != nil {
 			return fmt.Errorf("read workflow engine flow update: %w", err)
 		}
-		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Route.InstancePath)
+		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Identity.Route.InstancePath)
 	}
 	return nil
 }
 
-func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
+func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord) error {
 	if record.Transition.CreatesState() {
-		query := `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`
-		if rebindExistingRoute {
-			query += `
-				ON CONFLICT(instance_id) DO UPDATE SET
-					flow_template = excluded.flow_template,
-					mode = excluded.mode,
-					config = excluded.config,
-					status = excluded.status,
-					terminated_at = NULL
-			`
-		} else {
-			query += ` ON CONFLICT(instance_id) DO NOTHING`
-		}
-		result, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(run_id, instance_path) DO NOTHING
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
 		}
-		if !rebindExistingRoute {
-			rows, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("read workflow engine flow insertion: %w", err)
-			}
-			if rows == 0 {
-				if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, false, record); err != nil {
-					return err
-				}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("read workflow engine flow insertion: %w", err)
+		}
+		if rows == 0 {
+			if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, false, record); err != nil {
+				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -213,7 +181,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 				entered_state_at, created_at, updated_at
 			)
 			VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
+		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType, record.Slug, record.Name,
 			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine entity state: %w", err)
@@ -239,7 +207,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		  AND current_state = ?
 		  AND entity_type = ?
 	`, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
+		record.EnteredStageAt, record.UpdatedAt, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
 	}
@@ -252,9 +220,9 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 	}
 	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
 			nullableWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt); err != nil {
 			return fmt.Errorf("create workflow engine lifecycle companion for existing state: %w", err)
 		}
@@ -266,8 +234,8 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		    config = ?,
 		    status = ?,
 		    terminated_at = CASE WHEN ? = 'terminated' THEN COALESCE(terminated_at, ?) ELSE NULL END
-		WHERE instance_id = ?
-	`, record.WorkflowName, string(record.Config), record.Status, record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
+		WHERE run_id = ? AND instance_path = ?
+	`, record.WorkflowName, string(record.Config), record.Status, record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Identity.RunID, record.Identity.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -276,7 +244,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		if err != nil {
 			return fmt.Errorf("read workflow engine flow update: %w", err)
 		}
-		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Route.InstancePath)
+		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Identity.Route.InstancePath)
 	}
 	return nil
 }
@@ -288,20 +256,20 @@ func workflowEngineStateRevisionConflict(record runtimepipeline.WorkflowEngineSt
 		"workflow-engine-persistence",
 		"commit_state",
 		map[string]any{
-			"route": record.Route.InstancePath, "expected_revision": record.ExpectedRevision,
+			"route": record.Identity.Route.InstancePath, "expected_revision": record.ExpectedRevision,
 			"expected_state": record.ExpectedState,
 		},
 	)
 }
 
 func verifyWorkflowEngineFlowDescriptor(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord) error {
-	query := `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = ?`
+	query := `SELECT flow_template, mode, config, status FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if postgres {
-		query = `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = $1`
+		query = `SELECT flow_template, mode, config, status FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	var workflowName, mode, status string
 	var config any
-	if err := tx.QueryRowContext(ctx, query, record.Route.InstancePath).Scan(&workflowName, &mode, &config, &status); err != nil {
+	if err := tx.QueryRowContext(ctx, query, record.Identity.RunID, record.Identity.Route.InstancePath).Scan(&workflowName, &mode, &config, &status); err != nil {
 		return fmt.Errorf("load existing workflow engine flow descriptor: %w", err)
 	}
 	var configBytes []byte
@@ -314,7 +282,7 @@ func verifyWorkflowEngineFlowDescriptor(ctx context.Context, tx *sql.Tx, postgre
 		return fmt.Errorf("existing workflow engine flow descriptor has unsupported config type %T", config)
 	}
 	if workflowName != record.WorkflowName || mode != record.Mode || status != record.Status || !workflowCommitJSONEqual(configBytes, record.Config) {
-		return fmt.Errorf("workflow engine flow descriptor conflicts at route %s", record.Route.InstancePath)
+		return fmt.Errorf("workflow engine flow descriptor conflicts at route %s", record.Identity.Route.InstancePath)
 	}
 	return nil
 }
@@ -372,7 +340,7 @@ func loadWorkflowEngineStateProjection(
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
 	query := `SELECT current_state, fields, bookkeeping, gates, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
-	args := []any{record.RunID, record.EntityID, record.Route.InstancePath}
+	args := []any{record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath}
 	if postgres {
 		query = `SELECT current_state, fields, bookkeeping, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3 FOR UPDATE`
 	}
@@ -380,7 +348,7 @@ func loadWorkflowEngineStateProjection(
 	var fieldsRaw, bookkeepingRaw, gatesRaw, accumulatorRaw any
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accumulatorRaw); err != nil {
 		if err == sql.ErrNoRows {
-			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine state route is missing: %s", record.Route.InstancePath)
+			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine state route is missing: %s", record.Identity.Route.InstancePath)
 		}
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("load workflow engine state projection: %w", err)
 	}
@@ -444,7 +412,7 @@ func commitWorkflowEngineMutationLog(
 	if !ok {
 		return fmt.Errorf("workflow engine SQLite mutation requires SQLite selected store")
 	}
-	return storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.RunID, record.EntityID, before, after, writer, record.UpdatedAt)
+	return storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.Identity.RunID, record.EntityID, before, after, writer, record.UpdatedAt)
 }
 
 func commitWorkflowEngineInitialValues(
@@ -496,7 +464,7 @@ func commitWorkflowEngineInitialValues(
 			}), runtimeAuthorActivityMutation(story), effects, record.EntityID, adjusted, next, writer); err != nil {
 				return runtimemutationlog.EntityStateProjection{}, err
 			}
-		} else if err := storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.RunID, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
+		} else if err := storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.Identity.RunID, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
 			return runtimemutationlog.EntityStateProjection{}, err
 		}
 		adjusted = next
@@ -562,12 +530,12 @@ func commitWorkflowEngineMutation(
 			if err != nil {
 				return err
 			}
-			if err := commitWorkflowEngineState(txctx, tx, postgres, effects, command.State, false); err != nil {
+			if err := commitWorkflowEngineState(txctx, tx, postgres, effects, command.State); err != nil {
 				return err
 			}
 		}
 		if !entityless && command.RouteRetirement != nil {
-			sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Route}}
+			sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Identity}}
 			if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
 				return fmt.Errorf("retire terminal workflow route: %w", err)
 			}
@@ -585,7 +553,7 @@ func commitWorkflowEngineMutation(
 				return err
 			}
 			if command.Lifecycle.RequestCompletionCandidate {
-				candidate, err := requestCandidate(txctx, tx, command.State.RunID)
+				candidate, err := requestCandidate(txctx, tx, command.State.Identity.RunID)
 				if err != nil {
 					return err
 				}
@@ -603,7 +571,7 @@ func commitWorkflowEngineMutation(
 			}
 		}
 		if command.FanOutIntent != nil {
-			runID := command.State.RunID
+			runID := command.State.Identity.RunID
 			fields := command.State.Fields
 			triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
 			createdAt := command.State.UpdatedAt
@@ -638,7 +606,7 @@ func commitWorkflowEngineMutation(
 			result.Publications = append(result.Publications, evidence)
 		}
 		if command.FanOutBarrierCompletion != nil {
-			runID := command.State.RunID
+			runID := command.State.Identity.RunID
 			updatedAt := command.State.UpdatedAt
 			if entityless {
 				runID = command.EntitylessRunID

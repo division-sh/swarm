@@ -204,7 +204,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 		t.Fatalf("update workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("contained-state-flow"))
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance("contained-state-flow"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

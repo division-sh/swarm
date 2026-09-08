@@ -74,8 +74,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 		}
 		return buildConversationForkSandboxMCPHTTPBinding(ctx, cfg, turns, gateway, endpoint, allowed)
 	}
-	actorIdentity, identityErr := actor.ConcreteIdentity()
-	if identityErr != nil || !surface.MatchesActor(actorIdentity) {
+	if !capabilitySurfaceMatchesActorConfig(surface, actor) {
 		return MCPHTTPBinding{}, false, errors.New("mcp bridge capability surface actor mismatch")
 	}
 	if len(surface.BindingNames(managedcapabilities.BindingMCPTool)) == 0 {
@@ -122,6 +121,14 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 			contextToken:  contextToken,
 		},
 	}, true, nil
+}
+
+func capabilitySurfaceMatchesActorConfig(surface managedcapabilities.Surface, actor models.AgentConfig) bool {
+	if !surface.ActorPlan.IsZero() {
+		return surface.MatchesPreRunActorProjection(actor.ID, actor.CanonicalFlowPath())
+	}
+	identity, err := actor.ConcreteIdentity()
+	return err == nil && surface.MatchesActor(identity)
 }
 
 func buildConversationForkSandboxMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnContextStore, gateway toolgateway.Binding, endpoint MCPGatewayEndpoint, allowed []string) (MCPHTTPBinding, bool, error) {

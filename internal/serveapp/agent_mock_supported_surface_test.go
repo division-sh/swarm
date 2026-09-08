@@ -172,7 +172,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	secondCardID := waitForMockConnectorDecisionCard(t, backend, location, 2)
 	approveMockDecisionCard(t, secondURL+"/v1/rpc", secondCardID)
 	waitForMockConnectorAttempts(t, backend, location, 2)
-	assertMockUsageReadback(t, secondURL+"/v1/rpc", "phrase-bot")
+	assertMockUsageReadback(t, secondURL+"/v1/rpc", mockSessionRunID(t, before), "phrase-bot")
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d\n%s", code, second.outputString())
 	}
@@ -516,10 +516,21 @@ func assertMockMailboxReadback(t *testing.T, endpoint, cardID string) {
 	}
 }
 
-func assertMockUsageReadback(t *testing.T, endpoint, agentID string) {
+func mockSessionRunID(t testing.TB, sessions map[string]standingMemorySession) string {
+	t.Helper()
+	for _, session := range sessions {
+		if runID := strings.TrimSpace(session.RunID); runID != "" {
+			return runID
+		}
+	}
+	t.Fatal("mock session has no run identity")
+	return ""
+}
+
+func assertMockUsageReadback(t *testing.T, endpoint, runID, agentID string) {
 	t.Helper()
 	var result map[string]any
-	requireServedJSONRPCResult(t, endpoint, "agent.usage", map[string]any{"agent_id": agentID}, &result)
+	requireServedJSONRPCResult(t, endpoint, "agent.usage", map[string]any{"run_id": runID, "agent_id": agentID}, &result)
 	breakdown, ok := result["breakdown"].([]any)
 	if !ok || len(breakdown) == 0 {
 		t.Fatalf("mock agent.usage = %#v, want non-empty breakdown", result)

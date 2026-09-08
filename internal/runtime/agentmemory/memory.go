@@ -61,44 +61,19 @@ func ValidateFlowOwnership(plan Plan, flowInstance string) error {
 	return nil
 }
 
-type Identity struct {
-	RunID string                 `json:"run_id"`
-	Agent agentidentity.Identity `json:"agent"`
-}
+// Identity is the canonical concrete live-agent owner. Memory and session
+// consumers must not restate its run axis in a parallel wrapper.
+type Identity = agentidentity.Identity
 
-func (i Identity) Normalize() Identity {
-	i.RunID = strings.TrimSpace(i.RunID)
-	i.Agent = i.Agent.Normalize()
-	return i
-}
-
-func (i Identity) Validate() error {
-	if err := i.ValidateOwner(); err != nil {
-		return err
+func ValidateIdentity(identity Identity, requireFlowInstance bool) error {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("agent memory identity: %w", err)
 	}
-	if i.Normalize().Agent.Route.Presence != agentidentity.RoutePresent {
+	if requireFlowInstance && identity.Route.Presence != agentidentity.RoutePresent {
 		return fmt.Errorf("agent memory flow_instance is required")
 	}
 	return nil
-}
-
-func (i Identity) ValidateOwner() error {
-	i = i.Normalize()
-	if i.RunID == "" {
-		return fmt.Errorf("agent memory run_id is required")
-	}
-	if err := i.Agent.Validate(); err != nil {
-		return fmt.Errorf("agent memory identity: %w", err)
-	}
-	return nil
-}
-
-func (i Identity) AgentID() string {
-	return i.Normalize().Agent.AgentID()
-}
-
-func (i Identity) FlowInstance() string {
-	return i.Normalize().Agent.FlowInstance()
 }
 
 type executionContextKey struct{}

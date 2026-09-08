@@ -327,8 +327,8 @@ func TestSelectedStoreAgentSnapshotHandlersExecuteAcrossBackends(t *testing.T) {
 				params string
 			}{
 				{method: "agent.list", params: `{}`},
-				{method: "agent.get", params: fmt.Sprintf(`{"agent_id":%q,"flow_instance":%q}`, fixture.identity.AgentID(), fixture.identity.FlowInstance())},
-				{method: "agent.diagnose", params: fmt.Sprintf(`{"agent_id":%q,"flow_instance":%q,"queue_limit":10}`, fixture.identity.AgentID(), fixture.identity.FlowInstance())},
+				{method: "agent.get", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"flow_instance":%q}`, fixture.identity.RunID, fixture.identity.AgentID(), fixture.identity.FlowInstance())},
+				{method: "agent.diagnose", params: fmt.Sprintf(`{"run_id":%q,"agent_id":%q,"flow_instance":%q,"queue_limit":10}`, fixture.identity.RunID, fixture.identity.AgentID(), fixture.identity.FlowInstance())},
 			} {
 				response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
 				if response.Error != nil {
@@ -361,7 +361,7 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 				t.Fatalf("%s agent.list canonical output = %#v", backend.name, listed)
 			}
 
-			get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"agent.get","params":{"agent_id":%q,"flow_instance":%q}}`, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
+			get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"agent.get","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q}}`, fixture.identity.RunID, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
 			if get.Error != nil {
 				t.Fatalf("%s agent.get error = %#v", backend.name, get.Error)
 			}
@@ -379,7 +379,7 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 				t.Fatalf("%s last_turn_ref = %#v", backend.name, turnRef)
 			}
 
-			diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q}}`, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
+			diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q}}`, fixture.identity.RunID, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
 			if diagnose.Error != nil {
 				t.Fatalf("%s agent.diagnose error = %#v", backend.name, diagnose.Error)
 			}
@@ -410,8 +410,8 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 				}
 			}
 
-			emptyIdentity := sqliteAgentUsageIdentity(t, "snapshot-agent-b")
-			emptyGet := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-get","method":"agent.get","params":{"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
+			emptyIdentity := sqliteAgentUsageIdentityForRun(t, fixture.runID, "snapshot-agent-b")
+			emptyGet := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-get","method":"agent.get","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.RunID, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
 			if emptyGet.Error != nil {
 				t.Fatalf("%s empty agent.get error = %#v", backend.name, emptyGet.Error)
 			}
@@ -421,7 +421,7 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 					t.Fatalf("%s empty agent.get exposed %s: %#v", backend.name, absent, emptyDetail)
 				}
 			}
-			emptyDiagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-diagnose","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
+			emptyDiagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-diagnose","method":"agent.diagnose","params":{"run_id":%q,"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.RunID, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
 			if emptyDiagnose.Error != nil {
 				t.Fatalf("%s empty agent.diagnose error = %#v", backend.name, emptyDiagnose.Error)
 			}
@@ -586,7 +586,7 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 	}
 	identities := make(map[string]agentidentity.Identity, 2)
 	for _, agentID := range []string{"snapshot-agent-a", "snapshot-agent-b"} {
-		identity := sqliteAgentUsageIdentity(t, agentID)
+		identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 		identities[agentID] = identity
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, store, runtimemanager.PersistedAgent{
 			Config: runtimeactors.AgentConfig{

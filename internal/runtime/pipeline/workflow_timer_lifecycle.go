@@ -2,12 +2,14 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -16,7 +18,7 @@ import (
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
-func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
+func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (handled bool, advanced bool, resultErr error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {
 		return false, false, nil
 	}
@@ -50,9 +52,13 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if !route.Valid() {
 		return true, false, fmt.Errorf("workflow timer activation is missing its canonical route")
 	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(activation.RunID, route)
+	if err != nil {
+		return true, false, err
+	}
 	nextStage := strings.TrimSpace(timer.AdvancesTo)
 	if nextStage == "" {
-		instance, found, err := pc.workflowStore.Load(ctx, route)
+		instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 		if err != nil {
 			return true, false, err
 		}
@@ -72,7 +78,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if pc.workflowStore.engineMutations == nil {
 		return true, false, fmt.Errorf("workflow timer transition requires the selected workflow engine mutation owner")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil || !found {
 		return true, false, err
 	}
@@ -105,8 +111,9 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		}
 	}
 	address := runtimeengine.StateAddress{
-		FlowID: identity.NormalizeFlowID(instance.WorkflowName), Route: route,
-		EntityID: identity.NormalizeEntityID(entityID),
+		FlowID:       identity.NormalizeFlowID(instance.WorkflowName),
+		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: route}.Normalize(),
+		EntityID:     identity.NormalizeEntityID(entityID),
 	}
 	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
 		NextState: nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
@@ -119,7 +126,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, &prepared.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
+	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &prepared.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
 		return true, false, err
 	}
@@ -127,15 +134,28 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: state, Lifecycle: lifecycle.Commit})
+	terminal, err := pc.prepareTerminalFlowInstanceDeactivation(ctx, flowIdentity, address.EntityID, nextStage)
 	if err != nil {
 		return true, false, err
 	}
-	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
-		return true, true, err
+	if terminal != nil {
+		defer func() { resultErr = errors.Join(resultErr, terminal.Abort()) }()
 	}
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+		State: state, Lifecycle: lifecycle.Commit,
+		PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
+			Identity: flowIdentity, EntityID: entityID, NextState: nextStage,
+		}},
+	})
+	if err != nil && committed.PostCommit.FlowDeactivation == nil {
+		return true, false, err
+	}
+	if committed.PostCommit.FlowDeactivation != nil && terminal != nil {
+		err = errors.Join(err, terminal.Commit())
+	}
+	err = errors.Join(err, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
 	pc.notifyTestEntityStateUpdated(entityID, nextStage)
-	if err := pc.maybeDeactivateTerminalFlowInstance(ctx, route, identity.NormalizeEntityID(entityID), nextStage); err != nil {
+	if err != nil {
 		return true, true, err
 	}
 	if lateBy := evt.CreatedAt().Sub(occurrence.DueAt); lateBy > time.Minute {

@@ -157,7 +157,10 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		EntityID:     entityID,
 	}))
 
-	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RouteForInstancePath(flowInstance))
+	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: templateInstanceDeliveryRunID,
+		Route: runtimeflowidentity.RouteForInstancePath(flowInstance),
+	})
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}

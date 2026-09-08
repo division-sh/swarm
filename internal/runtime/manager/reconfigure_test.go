@@ -24,10 +24,7 @@ func (reconfigureTestAgent) OnEvent(context.Context, events.Event) ([]events.Eve
 
 func reconfigureMemoryIdentity(t testing.TB, am *AgentManager, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
-	return agentmemory.Identity{
-		RunID: "run-reconfigure",
-		Agent: testAgentIdentity(t, am, agentID, flowInstance),
-	}
+	return testAgentIdentity(t, am, agentID, flowInstance)
 }
 
 func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
@@ -48,6 +45,7 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
+		Identity:      managerRuntimeAgentIdentityForFlowPath("worker", "review/inst-1"),
 		FlowPath:      "review/inst-1",
 		Tools:         []string{"tool-old"},
 	})
@@ -65,7 +63,7 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 	if !errors.Is(err, persistenceErr) {
 		t.Fatalf("lifecycle reconfigure error = %v, want %v", err, persistenceErr)
 	}
-	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
+	visible, err := am.ResolveAgentConfig(cfg.Identity.RunID, cfg.ID, cfg.FlowPath)
 	if err != nil {
 		t.Fatalf("ResolveAgentConfig after persistence failure: %v", err)
 	}

@@ -56,36 +56,36 @@ type PipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module                 WorkflowModule
-	workflowStore          *workflowInstanceStore
-	expressionEval         *workflowExpressionEvaluator
-	instanceActivator      FlowInstanceActivator
-	instanceDeactivator    FlowInstanceDeactivator
-	timerScheduler         *Scheduler
-	genericSchedules       GenericScheduleWakeupOwner
-	workflowTimers         *WorkflowTimerLifecycle
-	timerCancellations     *runtimetimercancellation.Reconciler
-	mailboxMaterializer    MailboxWriteMaterializationStore
-	decisionCards          decisioncard.Store
-	proposedEffects        decisioncard.ProposedEffectStore
-	humanTasks             decisioncard.HumanTaskStore
-	decisionDraftExpiry    DecisionCardDraftExpiry
-	humanTaskExpiry        HumanTaskExpiry
-	deliveryStore          runtimedelivery.Store
-	deadLetters            runtimedeadletters.Recorder
-	deliveryRuntime        WorkflowDeliveryRuntime
-	flowRoutes             FlowInstanceRouteOwner
-	credentials            runtimecredentials.Store
-	managedCredentials     runtimemanagedcredentials.Store
-	mockConnectorResponses *providerconnectors.MockResponsePlan
-	scenarioProfiles       ScenarioExecutionProfileReader
-	effectiveSource        scenarioexecution.EffectiveSourceIdentity
-	channelActivations     *runtimechannelactivation.Owner
-	artifactRoot           string
-	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
-	runBundleAvailability  RunBundleAvailabilityReader
-	decisionCardCadence    decisioncard.CadencePolicy
-	executionPosture       executionposture.Posture
+	module                       WorkflowModule
+	workflowStore                *workflowInstanceStore
+	expressionEval               *workflowExpressionEvaluator
+	instanceActivator            FlowInstanceActivator
+	instanceDeactivationPreparer FlowInstanceDeactivationPreparer
+	timerScheduler               *Scheduler
+	genericSchedules             GenericScheduleWakeupOwner
+	workflowTimers               *WorkflowTimerLifecycle
+	timerCancellations           *runtimetimercancellation.Reconciler
+	mailboxMaterializer          MailboxWriteMaterializationStore
+	decisionCards                decisioncard.Store
+	proposedEffects              decisioncard.ProposedEffectStore
+	humanTasks                   decisioncard.HumanTaskStore
+	decisionDraftExpiry          DecisionCardDraftExpiry
+	humanTaskExpiry              HumanTaskExpiry
+	deliveryStore                runtimedelivery.Store
+	deadLetters                  runtimedeadletters.Recorder
+	deliveryRuntime              WorkflowDeliveryRuntime
+	flowRoutes                   FlowInstanceRouteOwner
+	credentials                  runtimecredentials.Store
+	managedCredentials           runtimemanagedcredentials.Store
+	mockConnectorResponses       *providerconnectors.MockResponsePlan
+	scenarioProfiles             ScenarioExecutionProfileReader
+	effectiveSource              scenarioexecution.EffectiveSourceIdentity
+	channelActivations           *runtimechannelactivation.Owner
+	artifactRoot                 string
+	sourceArtifactFact           runtimecorrelation.SourceArtifactFact
+	runBundleAvailability        RunBundleAvailabilityReader
+	decisionCardCadence          decisioncard.CadencePolicy
+	executionPosture             executionposture.Posture
 
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -110,7 +110,7 @@ type PipelineCoordinatorOptions struct {
 	DeadLetters                      runtimedeadletters.Recorder
 	PipelineObligations              runtimepipelineobligation.Store
 	InstanceActivator                FlowInstanceActivator
-	InstanceDeactivator              FlowInstanceDeactivator
+	InstanceDeactivationPreparer     FlowInstanceDeactivationPreparer
 	TimerScheduler                   *Scheduler
 	GenericSchedules                 GenericScheduleWakeupOwner
 	TimerObligationReader            runtimetimerobligation.Reader
@@ -283,7 +283,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		module:                           module,
 		expressionEval:                   newWorkflowExpressionEvaluator(),
 		instanceActivator:                opts.InstanceActivator,
-		instanceDeactivator:              opts.InstanceDeactivator,
+		instanceDeactivationPreparer:     opts.InstanceDeactivationPreparer,
 		timerScheduler:                   opts.TimerScheduler,
 		genericSchedules:                 opts.GenericSchedules,
 		mailboxMaterializer:              opts.MailboxMaterializer,
@@ -627,7 +627,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node, evt, nil)
 }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled bool, resultErr error) {
 	if pc == nil {
 		return false, nil
 	}
@@ -702,7 +702,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		if heartbeatErr != nil {
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
-		defer heartbeat.Stop()
+		defer func() { resultErr = errors.Join(resultErr, heartbeat.Stop()) }()
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
 		// Preparation is part of the claimed attempt. Its failure must use the

@@ -376,7 +376,7 @@ func TestValidateNativeToolBootConfigResolvesDistinctProjectAndFlowOwners(t *tes
 	}
 }
 
-func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t *testing.T) {
+func TestValidateNativeToolBootConfigValidatesScopedFlowRouteWithoutMaterializingWorkspace(t *testing.T) {
 	source := scopedFlowWorkspaceNativeToolFixture(t)
 	root := filepath.Join(t.TempDir(), "workspaces")
 	contractsDir := t.TempDir()
@@ -411,8 +411,8 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 		t.Fatal(err)
 	}
 	bundleScope := "bundle-" + strings.TrimPrefix(projection.BundleHash(), "bundle-v2:sha256:")
-	if info, err := os.Stat(filepath.Join(root, bundleScope, backingKey)); err != nil || !info.IsDir() {
-		t.Fatalf("scoped flow workspace stat = info:%#v err:%v, want directory", info, err)
+	if _, err := os.Stat(filepath.Join(root, bundleScope, backingKey)); !os.IsNotExist(err) {
+		t.Fatalf("capability admission materialized run-bound scoped flow workspace: %v", err)
 	}
 }
 

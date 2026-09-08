@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
@@ -15,7 +16,7 @@ func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver"}
 	node := testFlowNode(t, "receiver", "collector")
 	recipient := events.MustNodeDeliveryRecipient(node)
-	evidence, err := events.NewConnectCandidateEvidence(events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("pin"))), recipient, "receiver", events.DeliveryRoute{}.AgentIdentity, events.ConnectCandidateAccepted)
+	evidence, err := events.NewConnectCandidateEvidence(events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("pin"))), recipient, "receiver", agentidentity.Plan{}, events.ConnectCandidateAccepted)
 	if err != nil {
 		t.Fatal(err)
 	}
