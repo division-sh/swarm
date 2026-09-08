@@ -200,11 +200,10 @@ func listMailboxProjection(ctx context.Context, req Request, opts DecisionCardHa
 	nextState := cursor
 	for _, entry := range selected {
 		items = append(items, entry.Value)
-		ownerCursor := mailbox.EncodeV1Cursor(entry.CreatedAt, entry.ID)
 		if entry.Kind == decisioncard.KindNotice {
-			nextState.Notice = ownerCursor
+			nextState.Notice = mailbox.EncodeV1Cursor(entry.CreatedAt, entry.ID)
 		} else {
-			nextState.Card = ownerCursor
+			nextState.Card = decisioncard.EncodeCursor(entry.CreatedAt, entry.ID)
 		}
 	}
 	next := ""
@@ -252,12 +251,31 @@ func decodeMailboxProjectionCursor(raw string) (mailboxProjectionCursor, error) 
 	if err != nil {
 		return mailboxProjectionCursor{}, err
 	}
-	var cursor mailboxProjectionCursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return mailboxProjectionCursor{}, err
+	value, err := canonicaljson.Decode(decoded)
+	if err != nil || value.Kind() != semanticvalue.KindObject || value.Len() == 0 {
+		return mailboxProjectionCursor{}, fmt.Errorf("invalid tagged mailbox cursor")
 	}
-	if strings.TrimSpace(cursor.Notice) == "" && strings.TrimSpace(cursor.Card) == "" {
-		return mailboxProjectionCursor{}, fmt.Errorf("empty tagged mailbox cursor")
+	var cursor mailboxProjectionCursor
+	// Admit all supplied positions before filters can suppress an owner.
+	for _, member := range value.Members() {
+		token, ok := member.Value.String()
+		if !ok || strings.TrimSpace(token) == "" {
+			return mailboxProjectionCursor{}, fmt.Errorf("invalid mailbox cursor slot %q", member.Name)
+		}
+		switch member.Name {
+		case "notice":
+			if _, err := mailbox.DecodeV1Cursor(token); err != nil {
+				return mailboxProjectionCursor{}, err
+			}
+			cursor.Notice = token
+		case "card":
+			if _, err := decisioncard.DecodeCursor(token); err != nil {
+				return mailboxProjectionCursor{}, err
+			}
+			cursor.Card = token
+		default:
+			return mailboxProjectionCursor{}, fmt.Errorf("unknown mailbox cursor slot %q", member.Name)
+		}
 	}
 	return cursor, nil
 }

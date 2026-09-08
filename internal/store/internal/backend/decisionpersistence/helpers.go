@@ -2,8 +2,6 @@ package decisionpersistence
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,32 +11,6 @@ import (
 )
 
 const runLifecycleActiveStateSQLValues = runstate.ActiveStateSQLValues
-
-type decisionCursor struct {
-	CreatedAt time.Time `json:"created_at"`
-	CardID    string    `json:"card_id"`
-}
-
-func decodeDecisionCursor(raw string) (decisionCursor, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return decisionCursor{}, nil
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return decisionCursor{}, fmt.Errorf("invalid decision-card cursor")
-	}
-	var cursor decisionCursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.CreatedAt.IsZero() || strings.TrimSpace(cursor.CardID) == "" {
-		return decisionCursor{}, fmt.Errorf("invalid decision-card cursor")
-	}
-	return cursor, nil
-}
-
-func encodeDecisionCursor(createdAt time.Time, cardID string) string {
-	raw, _ := json.Marshal(decisionCursor{CreatedAt: createdAt.UTC(), CardID: strings.TrimSpace(cardID)})
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
 
 func sqliteNullTime(value time.Time) any {
 	if value.IsZero() {

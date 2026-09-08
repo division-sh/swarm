@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -28,52 +27,6 @@ type APIIdempotencyStore interface {
 
 type EventPublisher interface {
 	Publish(context.Context, events.Event) error
-}
-
-type mailboxListResult struct {
-	Items                      []mailbox.V1Item `json:"items"`
-	NextCursor                 string           `json:"next_cursor,omitempty"`
-	UnreadInformationalNotices int              `json:"unread_informational_notices"`
-}
-
-func OperatorMailboxHandlers(opts MailboxHandlerOptions) map[string]MethodHandler {
-	if opts.Mailbox == nil {
-		return nil
-	}
-	handlers := map[string]MethodHandler{
-		"mailbox.list": func(ctx context.Context, req Request) (any, error) {
-			listOpts, err := mailboxListOptionsFromParams(req.Params)
-			if err != nil {
-				return nil, err
-			}
-			items, nextCursor, err := opts.Mailbox.ListV1MailboxItems(ctx, listOpts)
-			if errors.Is(err, mailbox.ErrV1InvalidCursor) {
-				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid mailbox cursor"})
-			}
-			if err != nil {
-				return nil, err
-			}
-			if items == nil {
-				items = []mailbox.V1Item{}
-			}
-			unread, err := opts.Mailbox.CountUnreadInformationalNotices(ctx)
-			if err != nil {
-				return nil, err
-			}
-			return mailboxListResult{Items: items, NextCursor: nextCursor, UnreadInformationalNotices: unread}, nil
-		},
-		"mailbox.get": func(ctx context.Context, req Request) (any, error) {
-			detail, err := opts.Mailbox.GetV1MailboxItem(ctx, stringParam(req.Params, "mailbox_id"))
-			if errors.Is(err, mailbox.ErrV1NotFound) {
-				return nil, NewApplicationError(MailboxNotFoundCode, false, map[string]any{"mailbox_id": stringParam(req.Params, "mailbox_id")})
-			}
-			if err != nil {
-				return nil, err
-			}
-			return detail, nil
-		},
-	}
-	return handlers
 }
 
 func mailboxListOptionsFromParams(params map[string]any) (mailbox.V1ListOptions, error) {

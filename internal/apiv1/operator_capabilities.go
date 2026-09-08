@@ -78,10 +78,6 @@ type ObservabilityHandlerOptions struct {
 	Observability ObservabilityReadStore
 }
 
-type MailboxHandlerOptions struct {
-	Mailbox MailboxAPIStore
-}
-
 type EventPublicationOptions struct {
 	SelectedForkControls      SelectedForkControlAdmission
 	ExecutionPosture          executionposture.Posture

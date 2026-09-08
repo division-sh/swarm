@@ -1574,7 +1574,15 @@ func newMutatingProbeMailboxStore(state *mutatingRuntimeProbeState) *mutatingPro
 }
 
 func (s *mutatingProbeMailboxStore) ListV1MailboxItems(_ context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
-	if strings.TrimSpace(opts.Cursor) != "" {
+	cursor, err := mailbox.DecodeV1Cursor(opts.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, s.item.CreatedAt)
+	if err != nil {
+		return nil, "", err
+	}
+	if !cursor.CreatedAt.IsZero() && (createdAt.Before(cursor.CreatedAt) || createdAt.Equal(cursor.CreatedAt) && s.item.MailboxID <= cursor.MailboxID) {
 		return []mailbox.V1Item{}, "", nil
 	}
 	return []mailbox.V1Item{s.item}, "", nil
@@ -1732,7 +1740,11 @@ func (s *mutatingProbeDecisionCardStore) ListDecisionCards(_ context.Context, op
 	if s.err != nil {
 		return nil, "", s.err
 	}
-	if strings.TrimSpace(opts.Cursor) != "" {
+	cursor, err := decisioncard.DecodeCursor(opts.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	if !cursor.CreatedAt.IsZero() && (s.card.CreatedAt.Before(cursor.CreatedAt) || s.card.CreatedAt.Equal(cursor.CreatedAt) && s.card.CardID <= cursor.CardID) {
 		return []decisioncard.ListItem{}, "", nil
 	}
 	scope, err := s.card.Anchor.Scope()
