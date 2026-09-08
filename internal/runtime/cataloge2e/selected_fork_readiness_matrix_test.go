@@ -455,7 +455,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, stopAfterSelectedForkCommit{forkStore})
 						}
 						result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-							SourceRunID: catalogRuntimeRunID, At: event.ID(), ConfirmSourceFreeze: true,
+							SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
 							Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 						})
 						forkRun := result.Materialization.ForkRunID
@@ -471,7 +471,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 							}
 							for attempt := 0; attempt < attempts; attempt++ {
 								activated, activateErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-									ForkRunID: forkRun, ConfirmSourceFreeze: true, Store: selected,
+									ForkRunID: forkRun, AllowSourceFreeze: true, Store: selected,
 									ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
 								})
 								if !refused {
@@ -573,7 +573,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 								beforeRetry := activityLineageStateSnapshot(t, ctx, h, forkRun)
 								for attempt := 0; attempt < 2; attempt++ {
 									_, retryErr := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-										ForkRunID: forkRun, Store: selected, ConfirmSourceFreeze: true, ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
+										ForkRunID: forkRun, Store: selected, AllowSourceFreeze: true, ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
 									})
 									if retryErr == nil || activityCalls.Load() != wantCalls {
 										t.Fatalf("repeated final verification executed: calls=%d err=%v", activityCalls.Load(), retryErr)

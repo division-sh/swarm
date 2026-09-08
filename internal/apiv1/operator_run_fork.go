@@ -41,12 +41,12 @@ type RunForkExecutorSelector interface {
 }
 
 type RunForkExecutionRequest struct {
-	SourceRunID         string
-	ForkEventID         string
-	BundleHash          string
-	ConfirmSourceFreeze bool
-	DataPinOverrides    []durabledata.ExplicitPin
-	ContractSelection   runfork.RunForkContractSelection
+	SourceRunID       string
+	ForkEventID       string
+	BundleHash        string
+	AllowSourceFreeze bool
+	DataPinOverrides  []durabledata.ExplicitPin
+	ContractSelection runfork.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
@@ -106,7 +106,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		SourceRunID:             strings.TrimSpace(req.SourceRunID),
 		At:                      strings.TrimSpace(req.ForkEventID),
 		ExpectedBundleHash:      strings.TrimSpace(req.BundleHash),
-		ConfirmSourceFreeze:     req.ConfirmSourceFreeze,
+		AllowSourceFreeze:       req.AllowSourceFreeze,
 		DataPinOverrides:        req.DataPinOverrides,
 		SourceLoader:            e.SourceLoader,
 		ContractSelection:       selection,
@@ -169,10 +169,10 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	if !availability.Available() {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
-	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
+	if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
 		return nil, NewInvalidParamsError(map[string]any{
-			"field":  "confirm_source_freeze",
-			"reason": "must be true when forking a running or paused source because the operation may permanently freeze it unless source advancement selects branch divergence",
+			"field":  "allow_source_freeze",
+			"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
 		})
 	}
 	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
@@ -230,12 +230,12 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		result, err := executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
-			SourceRunID:         params.SourceRunID,
-			ForkEventID:         params.ForkEventID,
-			BundleHash:          params.BundleHash,
-			ConfirmSourceFreeze: params.ConfirmSourceFreeze,
-			DataPinOverrides:    params.DataPinOverrides,
-			ContractSelection:   contractSelection,
+			SourceRunID:       params.SourceRunID,
+			ForkEventID:       params.ForkEventID,
+			BundleHash:        params.BundleHash,
+			AllowSourceFreeze: params.AllowSourceFreeze,
+			DataPinOverrides:  params.DataPinOverrides,
+			ContractSelection: contractSelection,
 		})
 		if err != nil {
 			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
@@ -283,12 +283,12 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 }
 
 type runForkParams struct {
-	SourceRunID         string
-	ForkEventID         string
-	BundleHash          string
-	ConfirmSourceFreeze bool
-	DataPinOverrides    []durabledata.ExplicitPin
-	IdempotencyKey      string
+	SourceRunID       string
+	ForkEventID       string
+	BundleHash        string
+	AllowSourceFreeze bool
+	DataPinOverrides  []durabledata.ExplicitPin
+	IdempotencyKey    string
 }
 
 func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
@@ -309,7 +309,7 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v2:sha256:<64 lowercase hex>"})
 		}
 	}
-	confirmSourceFreeze, err := optionalBoolParam(params, "confirm_source_freeze", false)
+	allowSourceFreeze, err := optionalBoolParam(params, "allow_source_freeze", false)
 	if err != nil {
 		return runForkParams{}, err
 	}
@@ -322,12 +322,12 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 		return runForkParams{}, err
 	}
 	return runForkParams{
-		SourceRunID:         sourceRunID,
-		ForkEventID:         forkEventID,
-		BundleHash:          bundleHash,
-		ConfirmSourceFreeze: confirmSourceFreeze,
-		DataPinOverrides:    dataPinOverrides,
-		IdempotencyKey:      idempotencyKey,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       forkEventID,
+		BundleHash:        bundleHash,
+		AllowSourceFreeze: allowSourceFreeze,
+		DataPinOverrides:  dataPinOverrides,
+		IdempotencyKey:    idempotencyKey,
 	}, nil
 }
 
@@ -437,8 +437,8 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	switch {
 	case errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired):
 		return NewInvalidParamsError(map[string]any{
-			"field":  "confirm_source_freeze",
-			"reason": "must be true when the selected fork freezes a running or paused source",
+			"field":  "allow_source_freeze",
+			"reason": "must be true to allow permanently freezing a source that has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Withhold permission to decline source freeze",
 		})
 	case errors.Is(err, runtimerunlifecycle.ErrRunNotActive):
 		details := map[string]any{"run_id": strings.TrimSpace(sourceRunID)}

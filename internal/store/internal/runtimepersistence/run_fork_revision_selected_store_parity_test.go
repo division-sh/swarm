@@ -295,7 +295,7 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	}
 	cancelledCtx, cancel = context.WithCancel(ctx)
 	cancel()
-	if _, err := selected.ActivateRunFork(cancelledCtx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true}); err == nil {
+	if _, err := selected.ActivateRunFork(cancelledCtx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true}); err == nil {
 		t.Fatal("pre-cancelled fork activation succeeded")
 	}
 	var forkStatus string
@@ -309,7 +309,7 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		t.Fatalf("pre-cancelled activation changed source/fork state to %q/%q", status, forkStatus)
 	}
 	activation, err := selected.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-		ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true,
+		ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true,
 	})
 	if err != nil {
 		t.Fatalf("activate selected-store run fork: %v", err)

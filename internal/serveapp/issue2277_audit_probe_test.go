@@ -42,7 +42,7 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "confirm_source_freeze": true, "idempotency_key": "audit2277-fork"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "audit2277-fork"}
 			first := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
 			var forks, completions int
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forks); err != nil {

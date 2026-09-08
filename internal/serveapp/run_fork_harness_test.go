@@ -26,7 +26,7 @@ import (
 )
 
 // runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
-// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
+// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--allow-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
 func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -40,7 +40,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
 	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
 	activate := fs.Bool("activate", false, "Activate an already materialized state-only fork")
-	confirmSourceFreeze := fs.Bool("confirm-source-freeze", false, "Confirm that activation may permanently freeze an active source run")
+	allowSourceFreeze := fs.Bool("allow-source-freeze", false, "Confirm that activation may permanently freeze an active source run")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
@@ -167,8 +167,8 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	if *activate {
 		result, err := runForkOwner.Activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
-			ForkRunID:           strings.TrimSpace(*runID),
-			ConfirmSourceFreeze: *confirmSourceFreeze,
+			ForkRunID:         strings.TrimSpace(*runID),
+			AllowSourceFreeze: *allowSourceFreeze,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: cfg, ExecutionPosture: posture,
 			},

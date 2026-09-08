@@ -9498,9 +9498,9 @@
           }
         },
         {
-          "name": "confirm_source_freeze",
+          "name": "allow_source_freeze",
           "required": false,
-          "description": "Must be true before forking a running or paused source. It authorizes the operation to permanently freeze an unadvanced source; source advancement may instead select branch divergence and preserve the source. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation.",
+          "description": "Must be true before forking a running or paused source. It permits permanently freezing a source that has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Withhold permission to cancel without starting a fork. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation. The retired confirm_source_freeze parameter is rejected, not aliased.",
           "schema": {
             "default": false,
             "type": "boolean"

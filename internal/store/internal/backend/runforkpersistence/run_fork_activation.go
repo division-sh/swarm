@@ -159,7 +159,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	if err := bindRunForkFanOutPendingReplays(ctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
 		return result, err
 	}
-	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff); err != nil {
 		return result, err
 	}
 	if err := effects.Add(lineage.ForkRunID,
@@ -294,7 +294,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 		if err := bindRunForkFanOutPendingReplays(txctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
 			return err
 		}
-		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff); err != nil {
 			return err
 		}
 		if err := effects.Add(lineage.ForkRunID,

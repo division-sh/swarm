@@ -27,12 +27,12 @@ type SelectedContractActivationStore interface {
 }
 
 type SelectedContractActivationGateRequest struct {
-	ForkRunID           string
-	ConfirmSourceFreeze bool
-	Store               SelectedContractActivationStore
-	ExecutionOwner      SelectedContractExecutionOwner
-	SourceLoader        SelectedContractSourceLoader
-	AgentRuntime        SelectedContractAgentRuntimeOptions
+	ForkRunID         string
+	AllowSourceFreeze bool
+	Store             SelectedContractActivationStore
+	ExecutionOwner    SelectedContractExecutionOwner
+	SourceLoader      SelectedContractSourceLoader
+	AgentRuntime      SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractActivationGateResult struct {
@@ -66,7 +66,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !ok {
 		activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 			ForkRunID:                         forkRunID,
-			ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
+			AllowSourceFreeze:                 req.AllowSourceFreeze,
 			HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 		})
 		return SelectedContractActivationGateResult{RunForkActivation: activation}, err
@@ -305,7 +305,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ExecutionSource:       loadedSource.Source,
 			ForkRunID:             forkRunID,
-			ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
 			FrontierAdmission:     frontier,
 			RouteTopology:         routeTopology,
@@ -332,7 +332,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 
 	activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 		ForkRunID:                         forkRunID,
-		ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
+		AllowSourceFreeze:                 req.AllowSourceFreeze,
 		HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 	})
 	result.RunForkActivation = activation

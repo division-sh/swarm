@@ -101,12 +101,12 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	executionCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	executionOwner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg)
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID:         sourceRunID,
-		At:                  forkAt,
-		ConfirmSourceFreeze: true,
-		Owner:               executionOwner,
-		SourceLoader:        loader,
-		ContractSelection:   selection,
+		SourceRunID:       sourceRunID,
+		At:                forkAt,
+		AllowSourceFreeze: true,
+		Owner:             executionOwner,
+		SourceLoader:      loader,
+		ContractSelection: selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 			Config:            cfg,
 			ProcessCapability: h.processTopology,

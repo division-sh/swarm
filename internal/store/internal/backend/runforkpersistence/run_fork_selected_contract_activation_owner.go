@@ -161,7 +161,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			divergence = &value
 			return nil
 		}
-		return port.freeze(txctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff)
+		return port.freeze(txctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff)
 	})
 	if err != nil {
 		return result, err

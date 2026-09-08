@@ -795,7 +795,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	}
 
 	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{
-		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "confirm_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
+		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "allow_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
 	})
 	if rpcErr == nil {
 		t.Fatal("join run.fork succeeded, want timer-history rejection")
@@ -1633,15 +1633,15 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
 
 	forkParams := map[string]any{
-		"source_run_id":         started.RunID,
-		"fork_event_id":         published.EventID,
-		"confirm_source_freeze": true,
-		"idempotency_key":       "issue-2361-" + rt.Backend + "-run-fork",
+		"source_run_id":       started.RunID,
+		"fork_event_id":       published.EventID,
+		"allow_source_freeze": true,
+		"idempotency_key":     "issue-2361-" + rt.Backend + "-run-fork",
 	}
 	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{
 		"run", "fork", started.RunID,
 		"--at-event", published.EventID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--idempotency-key", forkParams["idempotency_key"].(string),
 		"--json",
 	})

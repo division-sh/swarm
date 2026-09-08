@@ -267,7 +267,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				t, executionCtx, selected, selectedSource, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
 			)
 			result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: materialization.ForkRunID, ConfirmSourceFreeze: true, Store: selected,
+				ForkRunID: materialization.ForkRunID, AllowSourceFreeze: true, Store: selected,
 				ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader,
 				AgentRuntime: agentRuntime,
 			})

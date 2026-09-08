@@ -150,7 +150,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Owner: selectedContractExecutionOwnerForTest(t, pg),
+				SourceRunID: sourceRunID, At: sourceRequestEventID, AllowSourceFreeze: true, Owner: selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader: loader, ContractSelection: selection,
 			})
 			if tt.wantError != "" {

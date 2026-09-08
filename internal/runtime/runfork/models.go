@@ -58,7 +58,7 @@ const (
 
 type RunForkActivateRequest struct {
 	ForkRunID                         string
-	ConfirmSourceFreeze               bool
+	AllowSourceFreeze                 bool
 	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
 }
 
@@ -1057,7 +1057,7 @@ type RunForkSelectedContractAgentTopology struct {
 type RunForkSelectedContractExecutionActivateRequest struct {
 	ExecutionSource       semanticview.Source
 	ForkRunID             string
-	ConfirmSourceFreeze   bool
+	AllowSourceFreeze     bool
 	AllowedSourceEventIDs []string
 	FrontierAdmission     RunForkContractFrontierAdmission
 	RouteTopology         RunForkSelectedContractRouteTopology

@@ -28,7 +28,7 @@ type SelectedContractExecutionRequest struct {
 	ExpectedBundleHash      string
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
-	ConfirmSourceFreeze     bool
+	AllowSourceFreeze       bool
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
@@ -275,7 +275,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ExecutionSource:       loadedSource.Source,
 		ForkRunID:             materialization.ForkRunID,
-		ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
+		AllowSourceFreeze:     req.AllowSourceFreeze,
 		AllowedSourceEventIDs: sourceEventIDs,
 		FrontierAdmission:     frontier,
 		RouteTopology:         routeTopology,

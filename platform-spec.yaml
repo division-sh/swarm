@@ -16199,7 +16199,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -16237,7 +16237,7 @@ run_model:
       requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
       execution_ready=true planner result at the original selected event revision. Activation atomically transitions the
       fork run to status=running and the source run to status=forked through store.run_fork.source_freeze. A running or
-      paused source requires explicit confirm_source_freeze=true; a completed or otherwise terminal source refuses before
+      paused source requires explicit allow_source_freeze=true; a completed or otherwise terminal source refuses before
       confirmation or mutation. It may create fork-local event and delivery
       rows only after runtime.run_fork.historical_replay_execution consumes a concrete
       runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
@@ -25924,7 +25924,7 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -25934,10 +25934,13 @@ cli_specification:
       behavior: >
         Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is retired. `--at-event` is an explicit fork-event selector only.
-        A currently running or paused source requires `--confirm-source-freeze`; this authorizes the operation to
-        permanently freeze an unadvanced source, while the selected source-advanced branch-divergence path preserves
-        the source as an independently live branch. An interactive TTY may obtain the same explicit conditional
-        authorization after warning that the operation may freeze the source. Non-TTY callers must pass the flag.
+        A currently running or paused source requires `--allow-source-freeze`; this authorizes the operation to
+        permanently freeze a source that has not advanced beyond the fork point. A frozen source cannot resume.
+        The selected source-advanced branch-divergence path preserves the source as an independently live branch.
+        Help text, the interactive warning, and the non-TTY teaching error state both outcomes and the alternative:
+        withhold permission (decline the default-No prompt) to cancel without starting a fork.
+        An interactive TTY may obtain the same explicit conditional authorization. Non-TTY callers must pass the flag.
+        The old --confirm-source-freeze and confirm_source_freeze spellings are rejected, never aliased.
         Terminal sources fail closed without a confirmation ceremony. The result reports the actual source outcome
         through required source_frozen and source_run_status fields.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
@@ -25948,6 +25951,7 @@ cli_specification:
         same_bundle_db_loaded_source: '#1024'
         boot_pinned_cross_bundle_target_selection: '#976'
       rejected_legacy_flags:
+        - --confirm-source-freeze
         - --dry-run
         - --materialize-only
         - --activate
@@ -26525,7 +26529,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -32994,9 +32998,9 @@ api_specification:
         description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
-      - name: confirm_source_freeze
+      - name: allow_source_freeze
         required: false
-        description: Must be true before forking a running or paused source. It authorizes the operation to permanently freeze an unadvanced source; source advancement may instead select branch divergence and preserve the source. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation.
+        description: Must be true before forking a running or paused source. It permits permanently freezing a source that has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Withhold permission to cancel without starting a fork. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation. The retired confirm_source_freeze parameter is rejected, not aliased.
         schema:
           type: boolean
           default: false

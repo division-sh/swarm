@@ -206,7 +206,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 				}
 			}
 			defer checkSource()
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "confirm_source_freeze": true, "idempotency_key": "recipient-fork"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "allow_source_freeze": true, "idempotency_key": "recipient-fork"}
 			var fork, replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {

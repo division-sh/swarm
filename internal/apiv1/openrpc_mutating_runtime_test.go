@@ -408,8 +408,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 2,
 		},
 		"run.fork": {
-			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true},
-			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true},
+			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
+			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
 			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash", "executed_event_count"},
 			SuccessEffects: 1,
 		},
@@ -612,10 +612,10 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.forks.deleteErr = runfork.ErrConversationForkNotFound
 		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runFork.err = errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)
 		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash)
 		}}},
@@ -763,9 +763,9 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
 			Method: "run.fork",
 			Params: map[string]any{
-				"source_run_id":         runForkTestSourceRunID,
-				"fork_event_id":         runForkTestEventID,
-				"confirm_source_freeze": true,
+				"source_run_id":       runForkTestSourceRunID,
+				"fork_event_id":       runForkTestEventID,
+				"allow_source_freeze": true,
 			},
 			Code: string(code),
 			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
