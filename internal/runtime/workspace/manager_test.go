@@ -19,6 +19,7 @@ import (
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
@@ -945,6 +946,9 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 				"dev.swarm.creation_source":          "workspace.ResolveWorkspace",
 				"dev.swarm.container.name":           "swarm-agent-agent-a",
 				"dev.swarm.workspace.scope":          "per-agent",
+				"dev.swarm.bundle_hash":              "bundle-v2:sha256:" + strings.Repeat("a", 64),
+				"dev.swarm.source_projection":        "runtime-projection-v1:" + strings.Repeat("b", 32),
+				"dev.swarm.data_projection_id":       string(testDataProjectionID("c")),
 				"dev.swarm.run_id":                   "33333333-3333-3333-3333-333333333333",
 				"dev.swarm.agent_id":                 "agent-a",
 				"dev.swarm.agent_name_owner":         "test/agents.yaml",
@@ -1002,6 +1006,82 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 	ref := refs[0]
 	if ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentIdentity.AgentID() != "agent-a" || ref.RunID == "" {
 		t.Fatalf("ref = %#v, want agent identity with run lineage", ref)
+	}
+	inspection, err := manager.InspectManagedContainer(context.Background(), ref.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := inspection.Identity
+	if identity.BundleHash != "bundle-v2:sha256:"+strings.Repeat("a", 64) || identity.SourceProjection != "runtime-projection-v1:"+strings.Repeat("b", 32) {
+		t.Fatalf("reset inspection lost admitted source identity: %#v", identity)
+	}
+	if !ref.Identity().Equal(identity) || ref.DataProjection != testDataProjectionID("c") {
+		t.Fatalf("inventory identity differs from inspection: ref=%+v inspection=%+v", ref, identity)
+	}
+}
+
+func TestStopManagedContainerUsesExactDockerObjectAndReconcilesAcknowledgment(t *testing.T) {
+	for _, mode := range []string{"success", "lost_ack_stopped", "lost_ack_missing", "lost_ack_running", "lost_ack_foreign", "successor", "missing_id"} {
+		t.Run(mode, func(t *testing.T) {
+			manager := NewDockerManager()
+			expected := runtimecontaineridentity.Identity{
+				Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindAgent,
+				ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: "planned-container",
+				BundleHash:       "bundle-v2:sha256:" + strings.Repeat("a", 64),
+				SourceProjection: "runtime-projection-v1:" + strings.Repeat("a", 32),
+				AgentIdentity:    runtimeagentidentitytest.RootDeclared(t, "worker", "test/agents.yaml"),
+			}
+			var stops, readbacks int
+			manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+				switch args[0] {
+				case "inspect":
+					identity, running, id := expected, true, "immutable-predecessor-id"
+					if args[len(args)-1] == id {
+						readbacks++
+						if mode == "lost_ack_missing" {
+							return "", errors.New("No such object")
+						}
+						running = mode == "lost_ack_running"
+						if mode == "lost_ack_foreign" {
+							identity.SourceProjection = "runtime-projection-v1:" + strings.Repeat("b", 32)
+						}
+					} else if mode == "successor" {
+						identity.SourceProjection = "runtime-projection-v1:" + strings.Repeat("b", 32)
+					}
+					if mode == "missing_id" {
+						id = ""
+					}
+					return strings.Replace(managedContainerInspectJSON(identity.Labels(), running), "{", fmt.Sprintf(`{"Id":%q,`, id), 1), nil
+				case "stop":
+					stops++
+					if len(args) != 2 || args[1] != "immutable-predecessor-id" {
+						t.Fatalf("stop dispatched by mutable name: %v", args)
+					}
+					if strings.HasPrefix(mode, "lost_ack_") {
+						return "", errors.New("lost acknowledgment")
+					}
+					return "", nil
+				default:
+					t.Fatalf("unexpected Docker call: %v", args)
+					return "", nil
+				}
+			})
+			err := manager.StopManagedContainer(context.Background(), destructivereset.ContainerRefFromIdentity(expected, destructivereset.ContainerActionStop))
+			wantErr := mode == "successor" || mode == "missing_id" || mode == "lost_ack_running" || mode == "lost_ack_foreign"
+			if (err != nil) != wantErr {
+				t.Fatalf("error=%v wantError=%v", err, wantErr)
+			}
+			wantStops := 1
+			if mode == "successor" || mode == "missing_id" {
+				wantStops = 0
+			}
+			if stops != wantStops {
+				t.Fatalf("stops=%d want=%d", stops, wantStops)
+			}
+			if strings.HasPrefix(mode, "lost_ack_") && readbacks != 1 {
+				t.Fatalf("readbacks=%d want=1", readbacks)
+			}
+		})
 	}
 }
 

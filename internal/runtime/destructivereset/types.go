@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/google/uuid"
 )
 
@@ -183,15 +185,30 @@ type TableRef struct {
 }
 
 type ContainerRef struct {
-	Name           string                        `json:"name"`
-	Kind           string                        `json:"kind"`
-	Action         string                        `json:"action"`
-	ResetEligible  bool                          `json:"reset_eligible,omitempty"`
-	CreationSource string                        `json:"creation_source,omitempty"`
-	WorkspaceScope string                        `json:"workspace_scope,omitempty"`
-	RunID          string                        `json:"run_id,omitempty"`
-	AgentIdentity  runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
-	FlowInstance   string                        `json:"flow_instance,omitempty"`
+	Owner            string                        `json:"owner"`
+	Name             string                        `json:"name"`
+	Kind             string                        `json:"kind"`
+	Action           string                        `json:"action"`
+	ResetEligible    bool                          `json:"reset_eligible,omitempty"`
+	CreationSource   string                        `json:"creation_source,omitempty"`
+	WorkspaceScope   string                        `json:"workspace_scope,omitempty"`
+	RunID            string                        `json:"run_id,omitempty"`
+	AgentIdentity    runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
+	FlowInstance     string                        `json:"flow_instance,omitempty"`
+	BundleHash       string                        `json:"bundle_hash,omitempty"`
+	SourceProjection string                        `json:"source_projection,omitempty"`
+	DataProjection   dataaccess.ProjectionID       `json:"data_projection,omitempty"`
+}
+
+func (r ContainerRef) Identity() containeridentity.Identity {
+	return containeridentity.Identity{
+		Owner: r.Owner, Kind: r.Kind, ResetEligible: r.ResetEligible,
+		CreationSource: r.CreationSource, ContainerName: r.Name,
+		WorkspaceScope: r.WorkspaceScope, RunID: r.RunID,
+		AgentIdentity: r.AgentIdentity, FlowInstance: r.FlowInstance,
+		BundleHash: r.BundleHash, SourceProjection: r.SourceProjection,
+		DataProjection: r.DataProjection,
+	}.Normalized()
 }
 
 type PreservedResources struct {
@@ -278,26 +295,15 @@ type CleanupStore interface {
 
 type ManagedContainerRuntime interface {
 	InspectManagedContainer(context.Context, string) (ManagedContainerInspection, error)
-	StopManagedContainer(context.Context, string) error
+	StopManagedContainer(context.Context, ContainerRef) error
 }
 
 type ManagedContainerInspection struct {
+	RuntimeID   string
 	Exists      bool
 	Running     bool
 	HasIdentity bool
-	Identity    ContainerIdentity
-}
-
-type ContainerIdentity struct {
-	Owner          string
-	Kind           string
-	ResetEligible  bool
-	CreationSource string
-	ContainerName  string
-	WorkspaceScope string
-	RunID          string
-	AgentIdentity  runtimeagentidentity.Identity
-	FlowInstance   string
+	Identity    containeridentity.Identity
 }
 
 func (r Request) normalize(now time.Time) (Request, error) {

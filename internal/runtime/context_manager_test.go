@@ -308,6 +308,51 @@ func TestRuntimeContextManagerDeactivationPropagatesShutdownOptions(t *testing.T
 	}
 }
 
+func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *testing.T) {
+	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, release, admitted := first.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
+	if !admitted {
+		t.Fatal("first admission rejected")
+	}
+	defer release()
+	done := make(chan []RuntimeContextDeactivationResult, 1)
+	go func() {
+		done <- manager.DeactivateAllWithOptions(RuntimeContextCauseUnloaded, ShutdownOptions{Grace: 20 * time.Millisecond})
+	}()
+	// Cancellation marks the point where shutdown has reached the first drain,
+	// but the admitted request deliberately has not settled yet.
+	select {
+	case <-active.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("first context never reached drain")
+	}
+	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(runtimeContextTestHashB).Loaded() {
+		t.Fatal("later context remains executable while predecessor is draining")
+	}
+	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB)
+	if use != nil {
+		_ = use.Done()
+	}
+	if err != nil || use != nil || lookup.Loaded() {
+		t.Fatalf("later context admission: use=%v lookup=%+v err=%v", use, lookup, err)
+	}
+	select {
+	case <-done:
+		t.Fatal("shutdown abandoned the first admitted request")
+	default:
+	}
+	release()
+	results := <-done
+	if len(results) != 2 || results[0].ShutdownErr == nil || results[1].ShutdownErr != nil {
+		t.Fatalf("unexpected drain results: %+v", results)
+	}
+}
+
 func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
