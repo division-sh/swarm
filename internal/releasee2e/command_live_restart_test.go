@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -203,7 +206,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 	}
 	converge := func(process *releaseServeProcess, run fullLifecycleRun, count, id int, receipt fullLifecycleIngressReceipt) fullLifecycleEvent {
 		t.Logf("L ingress %d accepted; awaiting reply approval", id)
-		approveFullLifecycleEffect(t, process.rpc, run.RunID, fmt.Sprintf("live-send-%d", id))
+		approveLifecycleEffectMode(t, process.rpc, run.RunID, fmt.Sprintf("live-send-%d", id), "live")
 		waitForLifecycleConvergenceMode(t, process, run.RunID, count, "live")
 		t.Logf("L ingress %d converged through live agent and Telegram connector", id)
 		return requireFullLifecycleReceiptEvents(t, process.rpc, run.RunID, id, receipt)
@@ -367,5 +370,59 @@ func TestLiveProcessOutputRedactsSplitSecretWrites(t *testing.T) {
 	_, _ = output.Write([]byte("token complete"))
 	if got := output.String(); got != "message [REDACTED] complete" {
 		t.Fatal("process output did not redact a secret spanning writes")
+	}
+}
+
+func TestLifecycleEffectApprovalUsesExpectedMode(t *testing.T) {
+	for _, mode := range []string{"mock", "live"} {
+		t.Run(mode, func(t *testing.T) {
+			var decisions atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					ID     any            `json:"id"`
+					Method string         `json:"method"`
+					Params map[string]any `json:"params"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode proof request: %v", err)
+					http.Error(w, "invalid request", http.StatusBadRequest)
+					return
+				}
+				card := fullLifecycleCard{
+					CardID: "card", RunID: "run", Status: "pending", ExecutionMode: mode,
+					Decision: "send_telegram_message", CardContentHash: "content-hash",
+				}
+				card.Snapshot.Decision = card.Decision
+				if decisions.Load() != 0 {
+					card.Status = "decided"
+				}
+				projection := fullLifecycleCardProjection{Kind: "decision_card", DecisionCard: card}
+				var result any
+				switch request.Method {
+				case "mailbox.list":
+					result = map[string]any{"items": []fullLifecycleCardProjection{projection}}
+				case "mailbox.get":
+					result = projection
+				case "mailbox.decide":
+					if request.Params["card_id"] != card.CardID || request.Params["observed_content_hash"] != card.CardContentHash {
+						t.Error("approval lost the exact card/content identity")
+					}
+					decisions.Add(1)
+					result = map[string]any{"status": "decided", "idempotency_replayed": false}
+				default:
+					t.Errorf("unexpected proof method %s", request.Method)
+					http.Error(w, "unexpected method", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+			}))
+			defer server.Close()
+			rpc := &releaseRPCClient{endpoint: server.URL, client: server.Client()}
+			approveLifecycleEffectMode(t, rpc, "run", "proof", mode)
+			if got := decisions.Load(); got != 1 {
+				t.Fatalf("approval count = %d, want 1", got)
+			}
+		})
 	}
 }

@@ -303,3 +303,21 @@ swarm-test; /tmp/agent-g-2321-live-sqlite-4.log owns its pending result. No pass
 turn, connector success, restart or full-suite result is claimed. #2432 remains
 separately gated and frozen. No new production defect has been established by
 these harness/deployment findings.
+
+## Live Approval Assertion Repair
+
+The reachable-listener SQLite attempt executed in 34.335s after acquiring the
+shared test slot. Real Claude produced a live connector approval card. The test
+then stopped before mailbox.decide because the reused H helper incorrectly
+required mock mode. This is a test-contract error, not a production failure or
+successful Telegram-send proof.
+
+Approval now takes an explicit expected mode: H retains mock and L requires live.
+TestLifecycleEffectApprovalUsesExpectedMode exercises both modes with a local RPC
+double and verifies exactly one approval against the exact card/content identity.
+The focused approval, prerequisite and public-boundary checks pass (0.019s).
+This local helper regression is not L proof. No runtime code changed.
+
+The repaired real SQLite journey is first in the shared swarm-test queue at this
+checkpoint; /tmp/agent-g-2321-live-sqlite-5.log owns its result. Telegram delivery,
+live restart, PostgreSQL L and final whole-suite completion remain unproven.

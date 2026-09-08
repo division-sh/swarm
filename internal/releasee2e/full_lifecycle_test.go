@@ -587,9 +587,14 @@ func assertFullLifecycleCardDecided(t *testing.T, rpc *releaseRPCClient, cardID 
 
 func approveFullLifecycleEffect(t *testing.T, rpc *releaseRPCClient, runID, key string) {
 	t.Helper()
+	approveLifecycleEffectMode(t, rpc, runID, key, "mock")
+}
+
+func approveLifecycleEffectMode(t *testing.T, rpc *releaseRPCClient, runID, key, mode string) {
+	t.Helper()
 	card := waitForFullLifecycleCard(t, rpc, runID, "send_telegram_message")
-	if card.ExecutionMode != "mock" {
-		t.Fatalf("connector decision card execution mode = %q, want mock", card.ExecutionMode)
+	if card.ExecutionMode != mode {
+		t.Fatalf("connector decision card execution mode = %q, want %s", card.ExecutionMode, mode)
 	}
 	decideFullLifecycleCard(t, rpc, card, "connector-"+key+"-"+card.CardID)
 	assertFullLifecycleCardDecided(t, rpc, card.CardID)

@@ -218,3 +218,9 @@ probe found the harness MCP listener unreachable from Docker at the advertised h
 address. The bounded test/deployment correction uses a schema-valid counter and an
 explicit reachable MCP listener IP; the actual corrected L rerun is queued, not
 passed. These findings do not authorize a diagnostic/runtime scope expansion.
+
+Subsequent L attempt reached a real live approval card, then failed an H-only
+mock expectation before approval or outbound delivery. The helper now checks the
+explicit expected mode, with passing local RPC regression cases for mock and
+live. The corrected real SQLite run is queued. Card creation is partial live
+evidence only; no Telegram-send, restart or L matrix pass is credited yet.
