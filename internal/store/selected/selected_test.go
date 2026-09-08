@@ -159,8 +159,8 @@ func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) 
 	if _, available := owner.RunFork(); !available {
 		t.Fatal("SQLite run fork must be available")
 	}
-	if _, available := owner.DestructiveReset(); available {
-		t.Fatal("SQLite destructive reset unexpectedly available")
+	if reset, available := owner.DestructiveReset(); !available || reset.Inventory() == nil || reset.Locks() == nil || reset.Quiescence() == nil {
+		t.Fatal("SQLite destructive reset roles are incomplete")
 	}
 	if recovery, available := owner.StartupRecovery(); !available || recovery.Availability() == nil {
 		t.Fatal("SQLite startup artifact integrity must be available")

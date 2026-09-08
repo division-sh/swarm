@@ -84,6 +84,9 @@ func TestManagedContainerStopperDryRunSelectsOnlyResetEligibleLabeledContainers(
 	if len(result.Preserved) != 2 {
 		t.Fatalf("preserved = %#v, want system and unlabeled", result.Preserved)
 	}
+	if len(result.Failed) != 2 {
+		t.Fatalf("unproven planned ownership was treated as settled: %#v", result)
+	}
 	if len(result.Missing) != 1 || result.Missing[0].Name != "swarm-missing" {
 		t.Fatalf("missing = %#v, want missing no-op", result.Missing)
 	}
@@ -197,7 +200,7 @@ func TestManagedContainerStopperPreservesSuccessorIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(runtime.stops) != 0 || len(result.Preserved) != 1 {
+			if len(runtime.stops) != 0 || len(result.Preserved) != 1 || len(result.Failed) != 1 {
 				t.Fatalf("reset touched same-name successor: stops=%v result=%+v", runtime.stops, result)
 			}
 		})

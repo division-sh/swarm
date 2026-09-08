@@ -1462,6 +1462,7 @@ type servedControlProofRuntime struct {
 	BundleHash string
 	Probe      *lifecycletest.Probe
 	Runtime    *runtimepkg.Runtime
+	Contexts   *runtimepkg.RuntimeContextManager
 	Postgres   *store.PostgresStore
 	SQLite     *store.SQLiteRuntimeStore
 }
@@ -1598,6 +1599,8 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
+	var contexts *runtimepkg.RuntimeContextManager
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1612,20 +1615,21 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			servedDB, _, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                   writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			TestRuntimeContextsReadyHook: captureContexts,
+			SourceRoot:                   sourceRoot,
+			PlatformSpecPath:             defaultPlatformSpecPath,
+			APIListenAddr:                "127.0.0.1:0",
+			MCPListenAddr:                "127.0.0.1:0",
+			SelfCheck:                    true,
+			Verbose:                      true,
+			TestLifecycleProbe:           probe,
+			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, SQLite: servedSQLite}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1634,19 +1638,20 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeServeRuntimeTestConfig(t),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			StoreMode:               "postgres",
-			StoreModeSet:            true,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                   writeServeRuntimeTestConfig(t),
+			TestRuntimeContextsReadyHook: captureContexts,
+			SourceRoot:                   sourceRoot,
+			PlatformSpecPath:             defaultPlatformSpecPath,
+			StoreMode:                    "postgres",
+			StoreModeSet:                 true,
+			APIListenAddr:                "127.0.0.1:0",
+			MCPListenAddr:                "127.0.0.1:0",
+			SelfCheck:                    true,
+			Verbose:                      true,
+			TestLifecycleProbe:           probe,
+			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Postgres: pg}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -8497,7 +8502,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels, semanticview.Wrap(bundle))
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}

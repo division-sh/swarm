@@ -38,6 +38,13 @@ func TestResetConvergedOperationRetryDoesNotWithdrawSuccessor(t *testing.T) {
 	}
 }
 
+func TestResetMissingContainerInspectorCannotProveAbsence(t *testing.T) {
+	s := newProcessLifecycleSupervisor(nil, nil)
+	if _, err := s.InspectManagedContainer(context.Background(), "saved-object-id"); err == nil {
+		t.Fatal("missing inspection owner was accepted as evidence that the container is absent")
+	}
+}
+
 func TestResetInventoryExcludesForeignAndSuccessorProjections(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: reset-inventory\n"), 0o600); err != nil {
@@ -67,5 +74,41 @@ func TestResetInventoryExcludesForeignAndSuccessorProjections(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != owned {
 		t.Fatalf("reset inventory = %#v, want only current exact projection", got)
+	}
+	intent, err := projection.CleanupIntent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stopped []string
+	s.resetContexts = nil
+	s.resetStartup = true
+	s.resetRecoveredProjections = []destructivereset.SourceProjection{{Cleanup: intent, ManagedContainers: true}}
+	s.resetContainerRuntime = serveRuntimeWorkspaceStub{
+		managedContainers: []destructivereset.ContainerRef{owned, successor, foreign}, stoppedContainers: &stopped,
+	}
+	got, err = s.ManagedResetContainerInventory(context.Background())
+	if err != nil || len(got) != 1 || got[0] != owned {
+		t.Fatalf("recovered inventory expanded source scope: %#v, %v", got, err)
+	}
+	for _, unowned := range []destructivereset.ContainerRef{successor, foreign} {
+		if err := s.StopManagedContainer(context.Background(), unowned); err == nil {
+			t.Fatal("recovery stopped an unowned projection")
+		}
+	}
+	if len(stopped) != 0 {
+		t.Fatal("unowned stop reached the container runtime")
+	}
+	if err := s.StopManagedContainer(context.Background(), owned); err != nil {
+		t.Fatal(err)
+	}
+	if len(stopped) != 1 || stopped[0] != owned.Name {
+		t.Fatalf("recovery lost exact predecessor target: %v", stopped)
+	}
+	s.resetRecoveredProjections[0].ManagedContainers = false
+	if got, err = s.ManagedResetContainerInventory(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("host-only scope inventoried Docker: %#v, %v", got, err)
+	}
+	if err := s.StopManagedContainer(context.Background(), owned); err == nil {
+		t.Fatal("host-only scope authorized Docker stop")
 	}
 }

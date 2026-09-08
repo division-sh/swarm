@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -32,6 +33,49 @@ type standingRuntimeContextOperationResult struct {
 	Generation     int64  `json:"generation"`
 	EffectiveState string `json:"effective_state"`
 	Transition     string `json:"transition"`
+}
+
+func TestStandingMutationsRemainFencedUntilResetConsumersConverge(t *testing.T) {
+	manager, err := runtimepkg.NewRuntimeContextManager(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor := newProcessLifecycleSupervisor(nil, nil)
+	supervisor.resetting = true
+	controller := &serveStandingServiceController{manager: manager, supervisor: supervisor}
+	for _, call := range []func(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error){
+		controller.SuspendStandingService, controller.ResumeStandingService, controller.ResetStandingService,
+	} {
+		if _, err := call(context.Background(), runtimepipeline.StandingServiceOperation{ServiceID: "unavailable"}); err == nil || !strings.Contains(err.Error(), "reset has not converged") {
+			t.Fatalf("standing mutation bypassed reset fence: %v", err)
+		}
+	}
+	supervisor.resetting = false
+	release, err := controller.admitProcessTransition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := make(chan struct{})
+	entering := make(chan struct{})
+	go func() {
+		close(entering)
+		supervisor.mu.Lock()
+		supervisor.resetting = true
+		supervisor.mu.Unlock()
+		close(locked)
+	}()
+	<-entering
+	select {
+	case <-locked:
+		t.Fatal("reset passed an unsettled standing mutation")
+	default:
+	}
+	release()
+	select {
+	case <-locked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reset did not acquire fence after standing mutation settled")
+	}
 }
 
 func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testing.T) {
@@ -114,7 +158,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			t.Cleanup(primaryRegistration.Release)
 			t.Cleanup(selectedRegistration.Release)
 
-			controller := &serveStandingServiceController{manager: manager}
+			controller := &serveStandingServiceController{manager: manager, supervisor: newProcessLifecycleSupervisor(nil, primary)}
 			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{
 				Controller:  controller,
 				Idempotency: selectedStores.Idempotency(),

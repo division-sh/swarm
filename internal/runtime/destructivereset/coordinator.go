@@ -38,9 +38,21 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 
 	var operation Operation
 	if !req.DryRun {
-		operation, err = c.Operations.AdmitResetOperation(ctx, req)
+		previous, err := c.Operations.LookupResetOperation(ctx, req)
 		if err != nil {
 			return ExecutionResult{}, err
+		}
+		if previous != nil {
+			operation = *previous
+		} else {
+			req.SourceProjections, err = c.RuntimeContexts.ResetSourceProjections(ctx)
+			if err != nil {
+				return ExecutionResult{}, err
+			}
+			operation, err = c.Operations.AdmitResetOperation(ctx, req)
+			if err != nil {
+				return ExecutionResult{}, err
+			}
 		}
 		if err := operation.Validate(); err != nil {
 			return ExecutionResult{}, err
@@ -56,47 +68,59 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 // RecoverPending settles unfinished reset obligations independently of historical
 // response replay. The startup caller must hold retained process authority and
 // invoke this before source ingestion, topology installation, or execution admission.
-func (c *Coordinator) RecoverPending(ctx context.Context) (retErr error) {
+func (c *Coordinator) RecoverPending(ctx context.Context) (recovery *PendingRecovery, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := c.validate(true); err != nil {
-		return err
+		return nil, err
 	}
 	lease, err := c.acquire(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		if recovery == nil {
+			retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
+		}
+	}()
 	pending, err := c.Operations.PendingResetOperations(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(pending) > 1 {
-		return errors.New("multiple active destructive reset operations")
+		return nil, errors.New("multiple active destructive reset operations")
 	}
 	for _, operation := range pending {
 		if err := operation.Validate(); err != nil {
-			return err
+			return nil, err
 		}
 		if operation.Phase == PhaseCompleted {
-			return errors.New("pending reset enumeration returned a completed operation")
+			return nil, errors.New("pending reset enumeration returned a completed operation")
 		}
-		if _, err := c.continueOperation(ctx, operation.Request, operation); err != nil {
-			return err
-		}
-		current, err := c.Operations.ReadResetOperation(ctx, operation.Request.OperationID)
+		runtimeReset, err := c.RuntimeContexts.BeginDestructiveReset(ctx, operation.Request.OperationID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := current.Validate(); err != nil {
-			return err
+		if runtimeReset == nil {
+			return nil, errors.New("reset lifecycle returned no operation")
 		}
-		if current.Phase != PhaseCompleted {
-			return fmt.Errorf("%w: reset %s remains %s", ErrOperationInProgress, current.Request.OperationID, current.Phase)
+		current, out, err := c.continueEffects(ctx, operation.Request, operation)
+		if err != nil {
+			runtimeReset.Release()
+			return nil, err
 		}
+		if current.Phase != PhaseContainersSettled {
+			runtimeReset.Release()
+			return nil, fmt.Errorf("%w: reset %s remains %s", ErrOperationInProgress, current.Request.OperationID, current.Phase)
+		}
+		if err := runtimeReset.SettleResources(ctx); err != nil {
+			runtimeReset.Release()
+			return nil, err
+		}
+		return &PendingRecovery{coordinator: c, operation: current, outcome: out, runtime: runtimeReset, lease: lease}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func (c *Coordinator) validate(apply bool) error {
@@ -148,7 +172,20 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 		}
 		defer runtimeReset.Release()
 	}
+	operation, out, err := c.continueEffects(ctx, req, operation)
+	if err != nil || req.DryRun {
+		return out, err
+	}
+	if operation.Phase != PhaseContainersSettled {
+		return operation.Outcome()
+	}
+	if err := runtimeReset.SettleResources(ctx); err != nil {
+		return ExecutionResult{}, err
+	}
+	return c.completeOperation(ctx, operation, out, runtimeReset)
+}
 
+func (c *Coordinator) continueEffects(ctx context.Context, req Request, operation Operation) (Operation, ExecutionResult, error) {
 	var result Result
 	if operation.Plan != nil {
 		result = *operation.Plan
@@ -156,7 +193,7 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 		// Include work persisted or containers created while predecessors drain.
 		plan, err := c.Planner.BuildPlan(ctx, req)
 		if err != nil {
-			return ExecutionResult{}, err
+			return operation, ExecutionResult{}, err
 		}
 		result = Result{
 			OperationName: DefaultOperationName, DryRun: req.DryRun,
@@ -167,7 +204,7 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 			next := operation
 			next.Phase, next.Revision, next.Plan = PhasePlanned, operation.Revision+1, &result
 			if err := c.advanceOperation(ctx, operation, next); err != nil {
-				return ExecutionResult{}, err
+				return operation, ExecutionResult{}, err
 			}
 			operation = next
 		}
@@ -185,11 +222,11 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 		if !req.DryRun {
 			operation, err = c.readEffectReceipt(ctx, operation, PhaseQuiesced, err)
 			if err != nil {
-				return ExecutionResult{}, err
+				return operation, ExecutionResult{}, err
 			}
 			quiescence = *operation.Quiescence
 		} else if err != nil {
-			return ExecutionResult{}, err
+			return operation, ExecutionResult{}, err
 		}
 	}
 	var cleanup CleanupResult
@@ -204,11 +241,11 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 		if !req.DryRun {
 			operation, err = c.readEffectReceipt(ctx, operation, PhaseCleanupCommitted, err)
 			if err != nil {
-				return ExecutionResult{}, err
+				return operation, ExecutionResult{}, err
 			}
 			cleanup = *operation.Cleanup
 		} else if err != nil {
-			return ExecutionResult{}, err
+			return operation, ExecutionResult{}, err
 		}
 	}
 
@@ -221,12 +258,12 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 			Result: result, Cleanup: cleanup, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt,
 		})
 		if err != nil {
-			return ExecutionResult{}, err
+			return operation, ExecutionResult{}, err
 		}
 	}
 	out := ExecutionResult{Plan: result, Quiescence: quiescence, Cleanup: cleanup, Containers: containers}
 	if req.DryRun {
-		return out, nil
+		return operation, out, nil
 	}
 	if len(containers.Failed) != 0 {
 		if operation.Response == nil {
@@ -234,21 +271,29 @@ func (c *Coordinator) continueOperation(ctx context.Context, req Request, operat
 			next.Revision++
 			next.Response = &out
 			if err := c.advanceOperation(ctx, operation, next); err != nil {
-				return ExecutionResult{}, err
+				return operation, ExecutionResult{}, err
 			}
 			operation = next
 		}
-		return operation.Outcome()
+		out, err := operation.Outcome()
+		return operation, out, err
 	}
 	if operation.Containers == nil {
 		next := operation
 		next.Phase, next.Revision, next.Containers = PhaseContainersSettled, operation.Revision+1, &containers
 		if err := c.advanceOperation(ctx, operation, next); err != nil {
-			return ExecutionResult{}, err
+			return operation, ExecutionResult{}, err
 		}
 		operation = next
 	}
-	if err := runtimeReset.Complete(ctx, !req.IncludeSourceArtifacts); err != nil {
+	return operation, out, nil
+}
+
+func (c *Coordinator) completeOperation(ctx context.Context, operation Operation, out ExecutionResult, runtimeReset RuntimeReset) (ExecutionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ExecutionResult{}, err
+	}
+	if err := runtimeReset.Complete(ctx, !operation.Request.IncludeSourceArtifacts); err != nil {
 		return ExecutionResult{}, err
 	}
 	next := operation

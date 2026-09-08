@@ -14,6 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func (*resetReceiptLifecycle) SettleResources(context.Context) error { return nil }
+
+func (*resetReceiptLifecycle) ResetSourceProjections(context.Context) ([]destructivereset.SourceProjection, error) {
+	return nil, nil
+}
+
 func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, phase := range []string{"planned", "quiesced", "cleanup_committed", "completed"} {
@@ -78,7 +84,14 @@ func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
 				if before.Plan != nil {
 					laterRun = seedRun()
 				}
-				if err := coordinator.RecoverPending(ctx); err != nil {
+				recovery, err := coordinator.RecoverPending(ctx)
+				if err != nil || recovery == nil {
+					t.Fatal(err)
+				}
+				if err := recovery.Complete(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := recovery.Close(ctx); err != nil {
 					t.Fatal(err)
 				}
 				after, err := cap.ReadResetOperation(ctx, req.OperationID)

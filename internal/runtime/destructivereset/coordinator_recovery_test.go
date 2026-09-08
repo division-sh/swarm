@@ -10,6 +10,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func (*recoveryResetLifecycle) SettleResources(context.Context) error { return nil }
+
+func (*recoveryResetLifecycle) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
+	return nil, nil
+}
+
 func TestCoordinatorPendingRecoveryUsesOnlyUncommittedPhases(t *testing.T) {
 	for _, phase := range []OperationPhase{PhaseAdmitted, PhasePlanned, PhaseQuiesced, PhaseCleanupCommitted, PhaseContainersSettled} {
 		for _, retain := range []bool{false, true} {
@@ -76,7 +82,17 @@ func TestCoordinatorPendingRecoveryUsesOnlyUncommittedPhases(t *testing.T) {
 					t.Fatal(err)
 				}
 				interrupted, lifecycle.completeErr = false, nil
-				if err := c.RecoverPending(context.Background()); err != nil {
+				recovery, err := c.RecoverPending(context.Background())
+				if err != nil || recovery == nil {
+					t.Fatal(err)
+				}
+				if journal.operation.Phase != PhaseContainersSettled || len(lifecycle.retained) != 0 {
+					t.Fatal("effect recovery completed before local reconstruction")
+				}
+				if err := recovery.Complete(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if err := recovery.Close(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 				if journal.operation.Phase != PhaseCompleted || plans != 1 || quiescences != 1 || cleanups != 1 || stops != 1 {
@@ -91,8 +107,8 @@ func TestCoordinatorPendingRecoveryUsesOnlyUncommittedPhases(t *testing.T) {
 					}
 				}
 				begins := len(lifecycle.operationIDs)
-				if err := c.RecoverPending(context.Background()); err != nil {
-					t.Fatal(err)
+				if recovery, err := c.RecoverPending(context.Background()); err != nil || recovery != nil {
+					t.Fatalf("completed operation returned pending recovery: %v", err)
 				}
 				req.OperationID = uuid.NewString()
 				out, err := c.Execute(context.Background(), req)
@@ -125,7 +141,7 @@ func TestCoordinatorPendingRecoveryPreservesHistoricalPartialOutcome(t *testing.
 		t.Fatal(err)
 	}
 	revision := journal.operation.Revision
-	if err := c.RecoverPending(context.Background()); !errors.Is(err, ErrOperationInProgress) {
+	if _, err := c.RecoverPending(context.Background()); !errors.Is(err, ErrOperationInProgress) {
 		t.Fatalf("unsettled recovery admitted startup: %v", err)
 	}
 	if journal.operation.Revision != revision || len(lifecycle.retained) != 0 {
@@ -144,7 +160,14 @@ func TestCoordinatorPendingRecoveryPreservesHistoricalPartialOutcome(t *testing.
 		t.Fatal("partial recovery repeated committed destruction")
 		return CleanupResult{}, nil
 	})
-	if err := c.RecoverPending(context.Background()); err != nil {
+	recovery, err := c.RecoverPending(context.Background())
+	if err != nil || recovery == nil {
+		t.Fatal(err)
+	}
+	if err := recovery.Complete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := recovery.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if journal.operation.Phase != PhaseCompleted || len(lifecycle.retained) != 1 || stops != 3 {
@@ -176,3 +199,59 @@ func (l *recoveryResetLifecycle) Complete(_ context.Context, retain bool) error 
 }
 
 func (l *recoveryResetLifecycle) Release() {}
+
+func TestPendingRecoveryInterruptionDoesNotCompleteOrReleaseSuccessor(t *testing.T) {
+	lifecycle := &recoveryResetLifecycle{completeErr: errors.New("boot interrupted")}
+	c := receiptTestCoordinator(lifecycle)
+	journal := installCoordinatorOperationFixture(t, c)
+	if _, err := c.Execute(context.Background(), receiptTestRequest()); err == nil {
+		t.Fatal("expected interruption after effect settlement")
+	}
+	locks := &recordingLockManager{acquired: true}
+	c.Locks = locks
+	recovery, err := c.RecoverPending(context.Background())
+	if err != nil || recovery == nil {
+		t.Fatalf("recover effects: %v", err)
+	}
+	if locks.lease.releases != 0 || journal.operation.Phase != PhaseContainersSettled {
+		t.Fatal("recovery released serialization or completed before reconstruction")
+	}
+	before := journal.operation
+	if err := recovery.Complete(context.Background()); err == nil {
+		t.Fatal("failed reconstruction completed recovery")
+	}
+	if !reflect.DeepEqual(before, journal.operation) {
+		t.Fatal("failed reconstruction changed durable effect evidence")
+	}
+	for i := 0; i < 2; i++ {
+		if err := recovery.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locks.lease.releases != 1 || !reflect.DeepEqual(before, journal.operation) {
+		t.Fatal("closing an interrupted recovery repeated release or completed its receipt")
+	}
+	lifecycle.completeErr = nil
+	next, err := c.RecoverPending(context.Background())
+	if err != nil || next == nil {
+		t.Fatalf("recover interrupted startup: %v", err)
+	}
+	defer func() { _ = next.Close(context.Background()) }()
+	if err := recovery.Complete(context.Background()); err == nil {
+		t.Fatal("closed recovery retained completion authority")
+	}
+	if err := recovery.Close(context.Background()); err != nil || locks.lease.releases != 0 {
+		t.Fatal("old recovery released successor serialization")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := next.Complete(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled startup completed recovery: %v", err)
+	}
+	if err := next.Complete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.Complete(context.Background()); err != nil || len(lifecycle.retained) != 1 {
+		t.Fatal("repeated completion reconstructed execution")
+	}
+}

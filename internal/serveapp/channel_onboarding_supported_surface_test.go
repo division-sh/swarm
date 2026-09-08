@@ -401,23 +401,28 @@ type channelOnboardingCrashServeProcess struct {
 
 func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	return startServedCrashProcess(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
+		channelOnboardingCrashServeHelperEnv + "=1",
+		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
+		"TEST_CHANNEL_ONBOARDING_CONTRACTS=" + opts.SourceRoot,
+		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC=" + opts.PlatformSpecPath,
+		"TEST_CHANNEL_ONBOARDING_STORE=" + opts.StoreMode,
+		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
+		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN=" + opts.PublicWebhookListen,
+		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE=" + telegramBaseURL,
+	})
+}
+
+func startServedCrashProcess(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	output := &lockedBuffer{}
-	cmd := exec.Command(executable, "-test.run=^TestChannelOnboardingCrashServeProcessHelper$", "-test.v")
+	cmd := exec.Command(executable, "-test.run=^"+helper+"$", "-test.v")
 	cmd.Dir = repoRootForTest()
-	cmd.Env = append(os.Environ(),
-		channelOnboardingCrashServeHelperEnv+"=1",
-		"TEST_CHANNEL_ONBOARDING_CONFIG="+opts.ConfigPath,
-		"TEST_CHANNEL_ONBOARDING_CONTRACTS="+opts.SourceRoot,
-		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC="+opts.PlatformSpecPath,
-		"TEST_CHANNEL_ONBOARDING_STORE="+opts.StoreMode,
-		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN="+opts.PublicWebhookBaseURL,
-		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN="+opts.PublicWebhookListen,
-		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE="+telegramBaseURL,
-	)
+	cmd.Env = append(os.Environ(), environment...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {

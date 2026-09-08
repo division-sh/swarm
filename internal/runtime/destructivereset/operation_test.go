@@ -11,6 +11,17 @@ import (
 
 type operationMemoryStore struct{ operation Operation }
 
+func (s *operationMemoryStore) LookupResetOperation(_ context.Context, req Request) (*Operation, error) {
+	if s.operation.Revision == 0 {
+		return nil, nil
+	}
+	if !s.operation.Matches(req) {
+		return nil, ErrOperationConflict
+	}
+	op := s.operation
+	return &op, nil
+}
+
 func (s *operationMemoryStore) AdmitResetOperation(_ context.Context, req Request) (Operation, error) {
 	if s.operation.Revision != 0 {
 		if !s.operation.Matches(req) {
@@ -109,6 +120,7 @@ func proveCoordinatorHistoricalReplay(t *testing.T, partial bool) {
 		t.Fatal(err)
 	}
 	req.OperationID = uuid.NewString()
+	lifecycle.sourceError = errors.New("later projection is unavailable")
 	second, err := c.Execute(context.Background(), req)
 	if err != nil || !reflect.DeepEqual(first, second) {
 		t.Fatalf("replay = %+v, %v", second, err)
@@ -117,7 +129,7 @@ func proveCoordinatorHistoricalReplay(t *testing.T, partial bool) {
 	if partial {
 		wantPhase = PhaseCleanupCommitted
 	}
-	if lifecycle.begins != 1 || plans != 1 || journal.operation.Phase != wantPhase {
+	if lifecycle.begins != 1 || lifecycle.sourceReads != 1 || plans != 1 || journal.operation.Phase != wantPhase {
 		t.Fatal("historical replay touched current execution")
 	}
 	req.RequestHash = "conflict"

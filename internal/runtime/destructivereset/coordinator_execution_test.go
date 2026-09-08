@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func (testRuntimeReset) SettleResources(context.Context) error { return nil }
+
+func (runtimeContextQuiescerFunc) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
+	return nil, nil
+}
+
 func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 	now := time.Date(2026, 8, 9, 19, 0, 0, 0, time.UTC)
 	locks := &recordingLockManager{acquired: true}

@@ -10,16 +10,47 @@ import (
 const RuntimeContextCauseReset = "runtime_context_reset"
 
 // StageResetRuntimeContexts replaces retired execution, not admitted sources.
-// No staged context is selectable until PublishResetRuntimeContexts succeeds.
+// Publication exposes metadata for consumer convergence, not execution authority.
 func (m *RuntimeContextManager) StageResetRuntimeContexts(contexts ...BundleContext) error {
-	return m.installResetRuntimeContexts(false, contexts)
+	return m.installResetRuntimeContexts(false, false, contexts)
 }
 
 func (m *RuntimeContextManager) PublishResetRuntimeContexts(contexts ...BundleContext) error {
-	return m.installResetRuntimeContexts(true, contexts)
+	return m.installResetRuntimeContexts(true, false, contexts)
 }
 
-func (m *RuntimeContextManager) installResetRuntimeContexts(publish bool, contexts []BundleContext) error {
+// StageRecoveredRuntimeContexts installs the admitted reset source set into a
+// new process manager. Retained process authority has already excluded and
+// settled the predecessor; there are no old process-local entries to replace.
+func (m *RuntimeContextManager) StageRecoveredRuntimeContexts(contexts ...BundleContext) error {
+	return m.installResetRuntimeContexts(false, true, contexts)
+}
+
+// ReleaseResetExecution admits the exact published set after its consumers have
+// converged. An old or partial candidate set cannot release a successor's fence.
+func (m *RuntimeContextManager) ReleaseResetExecution(contexts ...BundleContext) error {
+	if m == nil {
+		return errors.New("reset requires runtime context manager")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.resetExecutionFenced || len(contexts) == 0 || len(contexts) != len(m.contexts) {
+		return errors.New("reset execution release requires the complete fenced publication")
+	}
+	seen := make(map[string]bool, len(contexts))
+	for _, candidate := range contexts {
+		hash := candidate.BundleHash()
+		entry := m.contexts[hash]
+		if seen[hash] || !runtimeContextEntryLoaded(entry) || entry.runtime != candidate.Runtime || entry.workOwner != candidate.WorkOwner {
+			return fmt.Errorf("reset execution release does not match published source %s", hash)
+		}
+		seen[hash] = true
+	}
+	m.resetExecutionFenced = false
+	return nil
+}
+
+func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered bool, contexts []BundleContext) error {
 	if m == nil {
 		return errors.New("reset requires runtime context manager")
 	}
@@ -30,14 +61,14 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish bool, contex
 	if m.pendingSourceSetTransition != nil {
 		return errors.New("reset cannot replace an unsettled source-set transition")
 	}
-	if len(contexts) != len(m.contexts) || len(contexts) == 0 {
+	if len(contexts) == 0 || (recovered && len(m.contexts) != 0) || (!recovered && len(contexts) != len(m.contexts)) {
 		return errors.New("reset must reconstruct the identical complete source set")
 	}
 	seen := make(map[string]bool, len(contexts))
 	for _, candidate := range contexts {
 		hash := candidate.BundleHash()
 		old := m.contexts[hash]
-		if seen[hash] || old == nil || runtimeContextEntryLoaded(old) {
+		if seen[hash] || (!recovered && (old == nil || runtimeContextEntryLoaded(old))) {
 			return fmt.Errorf("reset source %s is duplicate, changed, or still selectable", hash)
 		}
 		seen[hash] = true
@@ -48,7 +79,7 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish bool, contex
 			if old.cause != RuntimeContextCauseReset || old.runtime != candidate.Runtime || old.workOwner != candidate.WorkOwner {
 				return fmt.Errorf("reset source %s does not match staged execution", hash)
 			}
-		} else {
+		} else if !recovered {
 			old.shutdownMu.Lock()
 			retired := old.shutdownComplete
 			old.shutdownMu.Unlock()
@@ -94,6 +125,7 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish bool, contex
 		}
 	}
 	m.contexts, m.order = prepared.contexts, prepared.order
+	m.resetExecutionFenced = true
 	m.nextPublicationGeneration = prepared.nextPublicationGeneration
 	m.suppressedStandingServices = prepared.suppressedStandingServices
 	m.setBaseCapabilitySubjectsLocked(prepared.capabilitySubjects)

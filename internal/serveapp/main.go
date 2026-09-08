@@ -873,21 +873,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
-	channelOnboardingStore := stores.ChannelOnboarding()
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
-	if err != nil {
-		detail := err.Error()
-		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
-			detail = cliapp.FormatCLIAPIError(err)
-		}
-		presenter.fail(4, "bundle_load", errors.New(detail))
-		return 1
-	}
-	if len(loadedBundles) == 0 {
-		presenter.fail(4, "bundle_load", errors.New("no bundle contexts loaded"))
-		return 1
-	}
-	bundleSourcesCleaned := false
+	var loadedBundles []serveRuntimeBundle
 	cleanupLoadedSourceArtifacts := func() error {
 		var cleanupErr error
 		for _, loaded := range loadedBundles {
@@ -897,19 +883,137 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		return cleanupErr
 	}
+	processWorkOwner := worklifetime.NewProcess()
+	selectedLifecycle, err := activateServeLifecycle(storeLifetime, processWorkOwner)
+	if err != nil {
+		presenter.fail(5, "runtime_context", err)
+		return 1
+	}
+	closeUnactivatedStore = false
+	var runtimeContexts []serveRuntimeBundleContext
+	var runtimeRequests []serveRuntimeBundleContextRequest
+	var runtimeContextManager *runtime.RuntimeContextManager
+	var supervisor *processLifecycleSupervisor
+	var resetRecovery *runtimedestructivereset.PendingRecovery
+	var workspaces cliapp.ServeWorkspaceLifecycle
+	var processCapability runtimestartupownership.ProcessCapability
+	cancelOwnershipWatch := func() {}
+	var apiServer, mcpServer *http.Server
+	var publicExposure *runtimepublicingress.Controller
+	var storyFollower *serveAuthorActivityFollower
 	defer func() {
-		if bundleSourcesCleaned {
-			return
+		cancelServe()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
+		defer cancelShutdown()
+		deadline, _ := shutdownCtx.Deadline()
+		if storyFollower != nil {
+			storyFollower.StopAndWait()
 		}
-		if err := cleanupLoadedSourceArtifacts(); err != nil {
-			presenter.cleanupFailure("bundle source cleanup", err)
+		var shutdownErr error
+		if publicExposure != nil {
+			shutdownErr = publicExposure.Stop(shutdownCtx)
 		}
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
+		shutdownErr = errors.Join(shutdownErr, resetRecovery.Close(shutdownCtx))
+		if supervisor != nil {
+			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
+		} else {
+			if len(runtimeContexts) > 1 {
+				shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
+			}
+			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
+				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
+				shutdownErr = errors.Join(shutdownErr, joinErr)
+				if joinErr == nil && runtimeContexts[0].workspaces != nil {
+					shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].workspaces.ReleaseSourceProjection(context.Background()))
+				}
+			}
+		}
+		if shutdownErr == nil {
+			shutdownErr = cleanupLoadedSourceArtifacts()
+		}
+		cancelOwnershipWatch()
+		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
 	}()
-	loadedBundle := loadedBundles[0]
+	processCapability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
+		return 3
+	}
+	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	processAuthority, err := processCapability.Evidence()
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	if processAuthority.AcquisitionKind == runtimestartupownership.AcquisitionCrashTakeover {
+		presenter.recordRecoveredPreviousSession()
+	}
+	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
+	cancelOwnershipWatch = watchCancel
+	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	channelOnboardingStore := stores.ChannelOnboarding()
+	runtimeContextManager, err = runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
+	if err != nil {
+		presenter.fail(5, "runtime_context", err)
+		return 1
+	}
+	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
+	supervisor = newProcessLifecycleSupervisor(ready, nil)
+	supervisor.SetProcessCapability(processCapability)
+	supervisor.runtimeContexts = runtimeContextManager
+	supervisor.resetStartup = true
+	supervisor.resetContainerRuntime = workspace.NewDockerManager()
+	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+	if coordinator := buildSelectedResetCoordinator(stores, processCapability, supervisor); coordinator != nil {
+		resetRecovery, err = coordinator.RecoverPending(ctx)
+		if err != nil {
+			presenter.fail(5, "pending_reset_recovery", err)
+			return 3
+		}
+	}
+	if resetRecovery != nil {
+		loadedBundles, err = loadServeRecoveredResetSources(ctx, repo, stores.SourceArtifactStore(), resetRecovery, platformPackBases)
+	} else {
+		supervisor.resetStartup = false
+		loadedBundles, err = loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
+	}
+	if err != nil {
+		detail := err.Error()
+		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			detail = cliapp.FormatCLIAPIError(err)
+		}
+		presenter.fail(4, "bundle_load", errors.New(detail))
+		return 1
+	}
+	if len(loadedBundles) == 0 && resetRecovery == nil {
+		presenter.fail(4, "bundle_load", errors.New("no bundle contexts loaded"))
+		return 1
+	}
+	loadedBundle := serveRuntimeBundle{platformSpecPath: preCatalogPlatformSpecPath, runningSpecPath: preCatalogPlatformSpecPath}
+	if len(loadedBundles) > 0 {
+		loadedBundle = loadedBundles[0]
+	}
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
-	presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
-	_, err = cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+	if len(loadedBundles) == 0 {
+		presenter.boot(4, "bundle_load", "ok", "reset retained an empty source set; execution remains unloaded")
+	} else {
+		presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
+	}
+	if len(loadedBundles) > 0 {
+		_, err = cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+	}
 	if err != nil {
 		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 			cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
@@ -940,9 +1044,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			return 1
 		}
 	}
-	primaryPackLoad := bundlePackLoads[0]
-	if cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels)
+	if len(bundlePackLoads) > 0 && cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
+		primaryPackLoad := bundlePackLoads[0]
+		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {
@@ -971,7 +1075,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		loadedBundles[i].sourceArtifactFact = fact
 	}
-	loadedBundle = loadedBundles[0]
+	if len(loadedBundles) > 0 {
+		loadedBundle = loadedBundles[0]
+	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
 	credentialStore, err := cliapp.BuildCredentialStore()
 	if err != nil {
@@ -999,58 +1105,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 3
 	}
 
-	processWorkOwner := worklifetime.NewProcess()
-	selectedLifecycle, err := activateServeLifecycle(storeLifetime, processWorkOwner)
-	if err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
-	closeUnactivatedStore = false
-	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
-	runtimeRequests := make([]serveRuntimeBundleContextRequest, 0, len(loadedBundles))
-	var runtimeContextManager *runtime.RuntimeContextManager
-	var supervisor *processLifecycleSupervisor
-	var workspaces cliapp.ServeWorkspaceLifecycle
-	var processCapability runtimestartupownership.ProcessCapability
-	cancelOwnershipWatch := func() {}
-	var apiServer, mcpServer *http.Server
-	var publicExposure *runtimepublicingress.Controller
-	var storyFollower *serveAuthorActivityFollower
-	defer func() {
-		cancelServe()
-		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
-		defer cancelShutdown()
-		deadline, _ := shutdownCtx.Deadline()
-		if storyFollower != nil {
-			storyFollower.StopAndWait()
-		}
-		var shutdownErr error
-		if publicExposure != nil {
-			shutdownErr = publicExposure.Stop(shutdownCtx)
-		}
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
-		if supervisor != nil {
-			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
-		} else {
-			if len(runtimeContexts) > 1 {
-				shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
-			}
-			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
-				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
-				shutdownErr = errors.Join(shutdownErr, joinErr)
-				if joinErr == nil && runtimeContexts[0].workspaces != nil {
-					shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].workspaces.ReleaseSourceProjection(context.Background()))
-				}
-			}
-			if shutdownErr == nil {
-				shutdownErr = cleanupLoadedSourceArtifacts()
-			}
-		}
-		bundleSourcesCleaned = true
-		cancelOwnershipWatch()
-		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
-	}()
 	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
 		contextToolGatewayBinding := toolgateway.Binding{}
@@ -1104,38 +1158,24 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		runtimeContexts = append(runtimeContexts, contextDef)
 		runtimeRequests = append(runtimeRequests, request)
+		supervisor.resetContexts = runtimeContexts
+		supervisor.resetRequests = runtimeRequests
 	}
-	primaryContext := runtimeContexts[0]
+	primaryContext := serveRuntimeBundleContext{loaded: loadedBundle}
+	if len(runtimeContexts) > 0 {
+		primaryContext = runtimeContexts[0]
+	}
 	processSourceSet, err := compileServeSourceSetPlan(runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "startup_topology", err)
 		return 3
 	}
-	processCapability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	})
-	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
-		return 3
-	}
-	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
-	}
-	processAuthority, err := processCapability.Evidence()
-	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
-	}
-	if processAuthority.AcquisitionKind == runtimestartupownership.AcquisitionCrashTakeover {
-		presenter.recordRecoveredPreviousSession()
-	}
-	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
-	cancelOwnershipWatch = watchCancel
-	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
-	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
+	if resetRecovery != nil {
+		expected, expectedErr := resetRecovery.SourceSet()
+		if expectedErr != nil || expected.Revision != processSourceSet.Revision {
+			presenter.fail(5, "pending_reset_recovery", errors.Join(expectedErr, errors.New("reconstructed reset sources differ from the admitted snapshot")))
+			return 3
+		}
 	}
 	if err := installServeSourceSet(ctx, processCapability, processSourceSet); err != nil {
 		presenter.fail(5, "startup_topology", err)
@@ -1157,6 +1197,11 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	source = primaryContext.loaded.source
 	workspaces = primaryContext.workspaces
 	rt := primaryContext.runtime
+	posture, err := cfg.ProcessExecutionPosture()
+	if err != nil {
+		presenter.fail(5, "runtime_context", err)
+		return 1
+	}
 	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
@@ -1208,30 +1253,23 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(5, "pinned_bundle_admission", err)
 		return 3
 	}
-	standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
-	if err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
-	for i := range runtimeContexts {
-		targets, activations, err := reconcileServeRuntimeStandingTargets(runtimeContexts[i].runtime, standingReconciliations)
+	if rt != nil {
+		standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
 		if err != nil {
 			presenter.fail(5, "runtime_context", err)
 			return 1
 		}
-		runtimeContexts[i].startupStandingTargets = targets
-		runtimeContexts[i].startupStandingActivations = activations
+		for i := range runtimeContexts {
+			targets, activations, err := reconcileServeRuntimeStandingTargets(runtimeContexts[i].runtime, standingReconciliations)
+			if err != nil {
+				presenter.fail(5, "runtime_context", err)
+				return 1
+			}
+			runtimeContexts[i].startupStandingTargets = targets
+			runtimeContexts[i].startupStandingActivations = activations
+		}
 	}
-	runtimeContextManager, err = runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
-	if err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
-
-	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor = newProcessLifecycleSupervisor(ready, rt)
-	supervisor.SetProcessCapability(processCapability)
-	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+	supervisor.currentRT = rt
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.sourceArtifactFact)
 	supervisor.resetRequests = runtimeRequests
 	supervisor.resetContexts = runtimeContexts
@@ -1247,7 +1285,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
-		ExecutionPosture:        rt.ExecutionPosture,
+		ExecutionPosture:        posture,
 		ProcessCapability:       processCapability,
 		PlatformPackBases:       platformPackBases,
 		RuntimeContextManager:   runtimeContextManager,
@@ -1266,7 +1304,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return buildServeRuntimeExecution(stores, apiCapabilityRequest, primary, toolGatewayBinding)
 	}
 	supervisor.resetBuildExecution = buildExecution
-	supervisor.execution, err = buildExecution(primaryContext)
+	if rt != nil {
+		supervisor.execution, err = buildExecution(primaryContext)
+	}
 	if err != nil {
 		presenter.fail(5, "runtime_execution", err)
 		return 1
@@ -1287,7 +1327,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(20, "channel_onboarding", fmt.Errorf("selected store does not provide channel confirmation outcome ownership"))
 		return 1
 	}
-	confirmationDispatcher, err := newServeChannelConfirmationDispatcher(confirmationEffects, providerCredentialOwner, rt.ExecutionPosture, runtimeInstanceID, nil)
+	confirmationDispatcher, err := newServeChannelConfirmationDispatcher(confirmationEffects, providerCredentialOwner, posture, runtimeInstanceID, nil)
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
@@ -1330,7 +1370,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	handlers := apiv1.MergeOperatorHandlers(
-		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
+		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: posture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
 		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
@@ -1339,7 +1379,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: apiStoreCaps.Data}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPI()}),
 		supervisor.executionDispatch(),
-		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: idempotency}),
+		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager, supervisor: supervisor}, Idempotency: idempotency}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Confirmation: channelOnboarding, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
@@ -1352,7 +1392,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		OperatorPrincipalID: operatorPrincipal.ID,
 		Handlers:            handlers,
 		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
-			ExecutionPosture: rt.ExecutionPosture,
+			ExecutionPosture: posture,
 			Ready:            readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
 			DecisionCards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Publication: runtimeContextManager,
 		}),
@@ -1362,7 +1402,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	var inboundHandler http.Handler
-	if rt.InboundGateway != nil {
+	if rt != nil && rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
 	apiServer = newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx)
@@ -1382,7 +1422,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if publicIngressEnabled {
 		registrationController, controllerErr := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
 			CredentialOwner: providerCredentialOwner, EffectsStore: stores.Effects(),
-			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
+			HTTP: runtimeregistration.HTTPExecutor{}, Posture: posture, RuntimeInstanceID: runtimeInstanceID,
 			StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) {
 				current, _ := supervisor.PublicIngressState()
 				if current == nil {
@@ -1469,6 +1509,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		supervisor.stopRunStalled = stop
 		return nil
 	}
+	var recoveredStarts []*runtime.PreparedStartup
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
@@ -1487,8 +1528,19 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			defer func() { _ = mcpServerLease.Done() }()
 			serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
 		}()
-		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
-			return err
+		if resetRecovery != nil && len(runtimeContexts) > 0 {
+			if err := runtimeContextManager.StageRecoveredRuntimeContexts(preflightContexts...); err != nil {
+				return err
+			}
+			var err error
+			recoveredStarts, err = startResetServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
+			if err != nil {
+				return err
+			}
+		} else {
+			if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
+				return err
+			}
 		}
 		supervisor.resetContextsManaged = true
 		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
@@ -1496,13 +1548,27 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
-		presenter.fail(22, "channel_onboarding", err)
-		return 1
+	if rt != nil {
+		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
+		}
 	}
 	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
+	}
+	if len(recoveredStarts) > 0 {
+		if err := runtimeContextManager.ReleaseResetExecution(preflightContexts...); err != nil {
+			presenter.fail(22, "pending_reset_recovery", err)
+			return 3
+		}
+		for _, start := range recoveredStarts {
+			if err := start.Start(); err != nil {
+				presenter.fail(22, "pending_reset_recovery", err)
+				return 3
+			}
+		}
 	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
 	if publicIngressEnabled {
@@ -1544,13 +1610,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			presenter.recordNoConnectedChannels()
 		}
 	}
-	if opts.TestRuntimeReadyHook != nil {
+	if opts.TestRuntimeReadyHook != nil && rt != nil {
 		opts.TestRuntimeReadyHook(rt)
 	}
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, rt.ExecutionPosture)
+	if rt != nil {
+		supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, posture)
+	}
 	if err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
@@ -1574,6 +1642,16 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		if err := opts.TestBeforeReadinessCommit(); err != nil {
 			presenter.fail(22, "ready", err)
 			return 1
+		}
+	}
+	if resetRecovery != nil {
+		if err := resetRecovery.Complete(ctx); err != nil {
+			presenter.fail(22, "pending_reset_recovery", err)
+			return 3
+		}
+		if err := resetRecovery.Close(ctx); err != nil {
+			presenter.fail(22, "pending_reset_recovery", err)
+			return 3
 		}
 	}
 	readyAfter := time.Since(bootStartedAt)
@@ -1851,8 +1929,21 @@ func serveRuntimeContextStandingTargets(
 }
 
 type serveStandingServiceController struct {
-	manager *runtime.RuntimeContextManager
-	mu      sync.Mutex
+	manager    *runtime.RuntimeContextManager
+	supervisor *processLifecycleSupervisor
+	mu         sync.Mutex
+}
+
+func (c *serveStandingServiceController) admitProcessTransition() (func(), error) {
+	if c == nil || c.manager == nil || c.supervisor == nil {
+		return nil, errors.New("standing service process lifecycle owner is required")
+	}
+	c.supervisor.mu.RLock()
+	if c.supervisor.resetting {
+		c.supervisor.mu.RUnlock()
+		return nil, errors.New("runtime reset has not converged")
+	}
+	return c.supervisor.mu.RUnlock, nil
 }
 
 type serveStandingServiceTransition struct {
@@ -1884,9 +1975,11 @@ func (t *serveStandingServiceTransition) Retire(ctx context.Context) error {
 }
 
 func (c *serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c == nil || c.manager == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
+	release, err := c.admitProcessTransition()
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
+	defer release()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
@@ -1914,9 +2007,11 @@ func (c *serveStandingServiceController) SuspendStandingService(ctx context.Cont
 }
 
 func (c *serveStandingServiceController) ResumeStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c == nil || c.manager == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
+	release, err := c.admitProcessTransition()
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
+	defer release()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
@@ -1945,9 +2040,11 @@ func (c *serveStandingServiceController) ResumeStandingService(ctx context.Conte
 }
 
 func (c *serveStandingServiceController) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c == nil || c.manager == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
+	release, err := c.admitProcessTransition()
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
+	defer release()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	use, _, err := c.manager.AcquireStandingService(ctx, operation.ServiceID)
@@ -2249,25 +2346,26 @@ func runServeSourceArtifactStartupRecovery(
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
-	return startServeRuntimeContextSet(ctx, contexts, manager, false)
+	_, err := startServeRuntimeContextSet(ctx, contexts, manager, false)
+	return err
 }
 
 // Reset uses the same startup interpreter, but publishes no individual source.
 // The supervisor must stage every fresh context and rebind consumers first.
-func startResetServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+func startResetServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) ([]*runtime.PreparedStartup, error) {
 	if manager == nil {
-		return errors.New("reset startup requires runtime context manager")
+		return nil, errors.New("reset startup requires runtime context manager")
 	}
 	return startServeRuntimeContextSet(ctx, contexts, manager, true)
 }
 
-func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) error {
+func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) ([]*runtime.PreparedStartup, error) {
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
 		if err := contextDef.runtime.PreflightDynamicTopologyStartup(ctx); err != nil {
-			return fmt.Errorf("preflight runtime dynamic topology: %w", err)
+			return nil, fmt.Errorf("preflight runtime dynamic topology: %w", err)
 		}
 	}
 	prepared := make([]*runtime.Runtime, 0, len(contexts))
@@ -2279,7 +2377,7 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			for _, rt := range prepared {
 				_ = rt.Shutdown()
 			}
-			return fmt.Errorf("prepare author activity catalog: %w", err)
+			return nil, fmt.Errorf("prepare author activity catalog: %w", err)
 		}
 		prepared = append(prepared, contextDef.runtime)
 	}
@@ -2288,7 +2386,7 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			for _, preparedRuntime := range prepared {
 				_ = preparedRuntime.Shutdown()
 			}
-			return fmt.Errorf("prepare runtime lifecycle: %w", err)
+			return nil, fmt.Errorf("prepare runtime lifecycle: %w", err)
 		}
 	}
 	registered := make([]struct {
@@ -2319,6 +2417,7 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			}
 		}
 	}
+	var starts []*runtime.PreparedStartup
 	resetContexts := make([]runtime.BundleContext, 0, len(contexts))
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
@@ -2331,23 +2430,30 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 		)
 		if err != nil {
 			rollback()
-			return err
+			return nil, err
 		}
 		if startupStandingOwner != nil {
 			if contextDef.runtime.Bus == nil {
 				rollback()
-				return errors.New("standing startup recovery requires event bus")
+				return nil, errors.New("standing startup recovery requires event bus")
 			}
 			contextDef.runtime.Bus.SetStandingRunWorkOwner(startupStandingOwner)
 		}
-		if err := contextDef.runtime.Start(ctx); err != nil {
+		if reset {
+			start, err := contextDef.runtime.PrepareStart(ctx)
+			if err != nil {
+				rollback()
+				return nil, err
+			}
+			starts = append(starts, start)
+		} else if err := contextDef.runtime.Start(ctx); err != nil {
 			rollback()
-			return err
+			return nil, err
 		}
 		targets, activations, err := contextDef.runtime.EnsureStandingTargets(ctx)
 		if err != nil {
 			rollback()
-			return err
+			return nil, err
 		}
 		if manager != nil {
 			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
@@ -2357,7 +2463,7 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 				}
 				if err := manager.SuppressStandingServiceTargets(activation.ServiceID); err != nil {
 					rollback()
-					return err
+					return nil, err
 				}
 			}
 			definition := runtime.BundleContext{
@@ -2380,7 +2486,7 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			}
 			if err := manager.Register(definition); err != nil {
 				rollback()
-				return err
+				return nil, err
 			}
 			registered = append(registered, struct {
 				hash    string
@@ -2391,16 +2497,16 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			})
 		} else if len(targets) > 0 {
 			rollback()
-			return errors.New("standing targets require runtime context manager")
+			return nil, errors.New("standing targets require runtime context manager")
 		}
 	}
 	if reset {
 		if err := manager.PublishResetRuntimeContexts(resetContexts...); err != nil {
 			rollback()
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return starts, nil
 }
 
 type serveStartupStandingRecoveryOwner struct {

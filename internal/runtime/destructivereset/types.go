@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -45,6 +46,12 @@ type Request struct {
 	IncludeSourceArtifacts    bool
 	IncludeSourceArtifactsSet bool
 	RequestedAt               time.Time
+	SourceProjections         []SourceProjection
+}
+
+type SourceProjection struct {
+	Cleanup           sourceartifact.RuntimeProjectionCleanup `json:"cleanup"`
+	ManagedContainers bool                                    `json:"managed_containers"`
 }
 
 type Result struct {
@@ -278,12 +285,14 @@ type ContainerStopper interface {
 }
 
 type RuntimeContextLifecycle interface {
+	ResetSourceProjections(context.Context) ([]SourceProjection, error)
 	BeginDestructiveReset(context.Context, string) (RuntimeReset, error)
 }
 
 // RuntimeReset owns only process-local reconstruction. Durable reset phases and
 // outcome replay belong to the reset coordinator and selected-store operation.
 type RuntimeReset interface {
+	SettleResources(context.Context) error
 	Complete(context.Context, bool) error
 	Release()
 }
@@ -335,6 +344,18 @@ func (r Request) normalize(now time.Time) (Request, error) {
 		r.RequestedAt = now
 	}
 	r.RequestedAt = r.RequestedAt.UTC()
+	r.SourceProjections = append([]SourceProjection(nil), r.SourceProjections...)
+	identities, roots := map[string]bool{}, map[string]bool{}
+	for _, source := range r.SourceProjections {
+		projection := source.Cleanup
+		if err := projection.Validate(); err != nil {
+			return Request{}, fmt.Errorf("invalid reset source projection: %w", err)
+		}
+		if identities[projection.Identity] || roots[projection.Root] {
+			return Request{}, errors.New("reset source projections repeat identity or root")
+		}
+		identities[projection.Identity], roots[projection.Root] = true, true
+	}
 	return r, nil
 }
 

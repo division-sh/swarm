@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go, internal/serveapp/serve_runtime_execution.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, served-selected-contract-fork, destructive-reset-postgres]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -79,7 +79,6 @@ store_parity:
       backends: [default_sqlite]
       purpose_ids: [runtime]
       capabilities:
-        - {claim_id: destructive_reset, risk_dimensions: [fail_closed]}
         - {claim_id: source_artifact, risk_dimensions: [selected_construction]}
     - id: runtime-open-postgres
       kind: go_test
@@ -202,11 +201,14 @@ store_parity:
     - {id: source-startup-integrity, kind: go_test, name: TestSourceArtifactStartupIntegrityParityPreservesRunHistory, path: internal/store/internal/runtimepersistence/source_artifact_selected_store_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: source_artifact, risk_dimensions: [fail_closed]}]}
     - {id: served-startup-integrity, kind: go_test, name: TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores, path: internal/serveapp/startup_integrity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: source_artifact, risk_dimensions: [fail_closed]}]}
     - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
-    - id: destructive-reset-parity-2388
-      kind: tracker
-      issue: 2388
-      watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-      capabilities: [{claim_id: destructive_reset}]
+    - {id: destructive-reset-served, kind: go_test, name: TestServedResetRetainClearAndHistoricalReplayBothStores, path: internal/serveapp/reset_served_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-cli, kind: go_test, name: TestServedResetCLIDryRunApplyAndReplayBothStores, path: internal/serveapp/reset_served_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-final-receipt, kind: go_test, name: TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorBothStores, path: internal/serveapp/reset_convergence_receipt_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-crash, kind: go_test, name: TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores, path: internal/serveapp/reset_process_crash_test.go, profile: full, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [restart, forced_death]}]}
+    - {id: destructive-reset-candidates, kind: go_test, name: TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores, path: internal/serveapp/reset_candidate_fence_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-provider-guard, kind: go_test, name: TestResetRetainedCleanupProviderAuthorityBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-directive-guard, kind: go_test, name: TestResetRetainedCleanupDirectiveAuthorityBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-scope-guard, kind: go_test, name: TestResetRetainedCleanupScopeAndRollbackBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
     - {id: websocket-different-concept, kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: non_store_transport, risk_dimensions: [structural_census, proof_schedule]}]}
     - id: golden-forced-restart
       kind: go_test
@@ -486,16 +488,14 @@ store_parity:
       runtime_deps: [RuntimeLogStore]
       public_methods: [run.trace, runtime.incidents, runtime.logs]
     - id: destructive_reset
-      semantic_owners: [internal/store/selected destructive reset, internal/runtime/destructivereset]
+      semantic_owners: [internal/store/selected destructive reset, internal/runtime/destructivereset, internal/serveapp/process_runtime_reset.go, internal/runtime/context_manager_reset.go, internal/sourceartifact.RuntimeProjection]
       selected_purposes: [runtime]
-      backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
-      split_issue: 2388
-      split_proof_id: destructive-reset-parity-2388
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke]
-      risk_dimensions: [fail_closed, writer_ownership]
+      risk_dimensions: [fail_closed, writer_ownership, restart, forced_death]
       evidence:
-        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [destructive-reset-postgres]}
-        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [runtime-open-sqlite]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [fail_closed, writer_ownership], proof_ids: [destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-candidates, destructive-reset-provider-guard, destructive-reset-directive-guard, destructive-reset-scope-guard]}
+        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_ids: [destructive-reset-crash]}
       optional_products: [destructiveReset]
       nested_roles: {product_destructive_reset: [inventory, locks, quiescence]}
       platform_tables: [runtime_reset_operations]
@@ -509,9 +509,6 @@ store_parity:
         - {role: different_concept, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, proof_schedule], proof_ids: [websocket-different-concept]}
       public_methods: [agent.frame, event.subscribe, health.ping, health.subscribe, mailbox.subscribe, rpc.unsubscribe, run.subscribe_trace, runtime.identity, runtime.subscribe_logs]
 active_trackers:
-  - kind: github_issue
-    issue: 2388
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: github_issue
     issue: 2274
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
@@ -741,15 +738,19 @@ mutating_api_parity_ledger:
       Shared served harness proves real /v1/rpc generation replacement, prior
       run quiescence, fresh publication, and idempotent replay.
   - method: runtime.nuke
-    classification: split_with_issue_ref
-    backends: [postgres_only]
-    split_issue: 2388
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: destructive_reset_lifecycle
     spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke
     proof_refs:
       - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}
-      - {kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce}
-      - {kind: tracker, issue: 2388, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      - {kind: go_test, name: TestServedResetRetainClearAndHistoricalReplayBothStores}
+    notes: >
+      Served retain/clear reset joins predecessor work, reconstructs retained
+      sources with fresh authority, fences cleared execution, and replays exact
+      durable outcomes without touching later work. The destructive_reset claim
+      additionally schedules both-backend CLI, final-receipt retry, multi-context
+      convergence fencing, and actual process-death/startup recovery proofs.
   - method: conversation.fork
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

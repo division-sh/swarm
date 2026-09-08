@@ -130,6 +130,14 @@ func DatabaseForTest(selected any) *sql.DB {
 	return Database(selected)
 }
 
+func SetResetFinalReceiptFault(ctx context.Context, selected any, enabled bool) error {
+	return private.SetResetFinalReceiptFaultForTest(ctx, selected, enabled)
+}
+
+func SetResetPlanReceiptFault(ctx context.Context, selected any, enabled bool) error {
+	return private.SetResetPlanReceiptFaultForTest(ctx, selected, enabled)
+}
+
 func commitPersistedEventDeliveryFixture(ctx context.Context, selected any, eventID, runID string, routes []events.DeliveryRoute) error {
 	return private.CommitPersistedEventDeliveryFixtureForTest(ctx, selected, eventID, runID, routes)
 }

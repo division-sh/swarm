@@ -51,6 +51,7 @@ type Operation struct {
 // OperationStore is reset-family authority retained independently of the API
 // completion cache. Admission returns the original operation for a keyed retry.
 type OperationStore interface {
+	LookupResetOperation(context.Context, Request) (*Operation, error)
 	AdmitResetOperation(context.Context, Request) (Operation, error)
 	ReadResetOperation(context.Context, string) (Operation, error)
 	PendingResetOperations(context.Context) ([]Operation, error)
@@ -111,10 +112,14 @@ func (o Operation) Validate() error {
 		return errors.New("reset operation plan does not match admitted request")
 	}
 	if o.Plan != nil {
+		seen := make(map[string]bool, len(o.Plan.Plan.ManagedContainers))
 		for _, target := range o.Plan.Plan.ManagedContainers {
-			if target.Name == "" || target.RuntimeID == "" {
-				return errors.New("reset operation container intent requires its exact immutable target")
+			identity := target.Identity()
+			if target.Name == "" || target.RuntimeID == "" || seen[target.RuntimeID] || target.Action != ContainerActionStop ||
+				identity.Validate() != nil || identity.BundleHash == "" || !identity.ResetEligibleManaged() {
+				return errors.New("reset operation container intent requires unique immutable targets with complete reset-eligible source/projection identity")
 			}
+			seen[target.RuntimeID] = true
 		}
 	}
 	if o.Quiescence != nil && (o.Quiescence.DryRun || o.Quiescence.OperationName != DefaultOperationName) {
@@ -125,6 +130,11 @@ func (o Operation) Validate() error {
 	}
 	if o.Containers != nil && (o.Containers.DryRun || o.Containers.OperationName != DefaultOperationName || len(o.Containers.Failed) != 0) {
 		return errors.New("reset operation resource settlement is incomplete")
+	}
+	if o.Containers != nil {
+		if err := validateContainerSettlement(o.Plan.Plan.ManagedContainers, *o.Containers); err != nil {
+			return err
+		}
 	}
 	if o.Response != nil {
 		if step < 3 || !reflect.DeepEqual(o.Plan, &o.Response.Plan) || !reflect.DeepEqual(o.Quiescence, &o.Response.Quiescence) ||

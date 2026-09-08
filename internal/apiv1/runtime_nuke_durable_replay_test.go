@@ -14,6 +14,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func (*countingAdministrativeResetLifecycle) ResetSourceProjections(context.Context) ([]destructivereset.SourceProjection, error) {
+	return nil, nil
+}
+
 func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)

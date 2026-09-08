@@ -6,6 +6,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 )
 
+func (*supervisorTestRetainedSession) LookupResetOperation(context.Context, destructivereset.Request) (*destructivereset.Operation, error) {
+	return nil, errors.New("reset lookup is not part of this lifecycle fixture")
+}
 func (*supervisorTestRetainedSession) AdmitResetOperation(context.Context, destructivereset.Request) (destructivereset.Operation, error) {
 	return destructivereset.Operation{}, errors.New("reset admission is not part of this lifecycle fixture")
 }

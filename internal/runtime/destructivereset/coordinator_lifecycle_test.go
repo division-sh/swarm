@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func (*recordingResetLifecycle) SettleResources(context.Context) error { return nil }
+
+func (l *recordingResetLifecycle) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
+	l.sourceReads++
+	return nil, l.sourceError
+}
+
 func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 	failure := errors.New("lost stage acknowledgment")
 	for _, test := range []struct {
@@ -75,6 +82,8 @@ func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 type recordingResetLifecycle struct {
 	begins, releases int
 	retained         []bool
+	sourceReads      int
+	sourceError      error
 }
 
 func (l *recordingResetLifecycle) BeginDestructiveReset(context.Context, string) (RuntimeReset, error) {

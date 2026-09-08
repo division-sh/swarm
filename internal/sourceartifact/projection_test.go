@@ -13,11 +13,20 @@ func TestRuntimeProjectionReleaseRetriesFailedDeletionWithoutReopening(t *testin
 		t.Skip("requires filesystem permission enforcement")
 	}
 	parent := t.TempDir()
-	root := filepath.Join(parent, "projection")
-	if err := os.Mkdir(root, 0o700); err != nil {
+	t.Setenv("TMPDIR", parent)
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "schema.yaml"), []byte("name: release-retry\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p := &RuntimeProjection{state: &runtimeProjectionState{root: root, refs: 1}}
+	artifact, err := AdmitDirectory(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := MaterializeRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := p.state.storageRoot
 	defer func() { _ = os.Chmod(parent, 0o700) }()
 	if err := os.Chmod(parent, 0o500); err != nil {
 		t.Fatal(err)

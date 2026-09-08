@@ -79,6 +79,10 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		}
 		if !inspection.HasIdentity || inspection.Identity.BundleHash == "" || inspection.Identity.Validate() != nil || !inspection.Identity.ResetEligibleManaged() || !inspection.Identity.Equal(planned.Identity()) {
 			result.Preserved = append(result.Preserved, preservedContainerRef(planned, inspection.Identity))
+			result.Failed = append(result.Failed, ContainerStopFailure{
+				Container: withContainerAction(planned, ContainerActionFailed),
+				Error:     "container ownership differs from the exact planned source/projection identity",
+			})
 			continue
 		}
 		ref := ContainerRefFromIdentity(inspection.Identity, planned.RuntimeID, ContainerActionStop)
@@ -148,4 +152,56 @@ func copyContainerResetResult(result ContainerResetResult) ContainerResetResult 
 	result.Stopped = append([]ContainerRef(nil), result.Stopped...)
 	result.Failed = append([]ContainerStopFailure(nil), result.Failed...)
 	return result
+}
+
+// A successful receipt accounts for every immutable target once. Preserving a
+// changed object is safe, but is not proof that the planned resource settled.
+func validateContainerSettlement(planned []ContainerRef, result ContainerResetResult) error {
+	if len(result.Failed) != 0 || len(result.Preserved) != 0 {
+		return fmt.Errorf("reset container settlement retains unresolved ownership")
+	}
+	targets := make(map[string]ContainerRef, len(planned))
+	for _, target := range planned {
+		if _, duplicate := targets[target.RuntimeID]; duplicate || target.RuntimeID == "" {
+			return fmt.Errorf("reset container intent is missing or duplicates immutable identity %q", target.RuntimeID)
+		}
+		targets[target.RuntimeID] = target
+	}
+	settled := make(map[string]bool, len(targets))
+	for _, group := range []struct {
+		targets []ContainerRef
+		action  string
+	}{
+		{result.Stopped, ContainerActionStop},
+		{result.AlreadyStopped, ContainerActionAlreadyStopped},
+		{result.Missing, ContainerActionMissing},
+	} {
+		for _, target := range group.targets {
+			original, exists := targets[target.RuntimeID]
+			if !exists || settled[target.RuntimeID] || !original.Identity().Equal(target.Identity()) || target.Action != group.action {
+				return fmt.Errorf("reset container receipt contradicts planned target %q", target.RuntimeID)
+			}
+			settled[target.RuntimeID] = true
+		}
+	}
+	if len(settled) != len(targets) {
+		return fmt.Errorf("reset container receipt settled %d of %d planned targets", len(settled), len(targets))
+	}
+	selected := make(map[string]bool, len(result.Selected))
+	for _, target := range result.Selected {
+		original, exists := targets[target.RuntimeID]
+		if !exists || selected[target.RuntimeID] || !original.Identity().Equal(target.Identity()) || target.Action != ContainerActionStop {
+			return fmt.Errorf("reset container selection contradicts planned target %q", target.RuntimeID)
+		}
+		selected[target.RuntimeID] = true
+	}
+	if len(selected) != len(result.Stopped) {
+		return fmt.Errorf("reset container receipt did not stop its exact selected set")
+	}
+	for _, target := range result.Stopped {
+		if !selected[target.RuntimeID] {
+			return fmt.Errorf("reset container receipt stopped an unselected target %q", target.RuntimeID)
+		}
+	}
+	return nil
 }

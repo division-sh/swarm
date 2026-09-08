@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -36,7 +37,13 @@ type processLifecycleSupervisor struct {
 	resetGeneration           uint64
 	resetOperationID          string
 	resetConverged            bool
-	stopRunStalled            func()
+	resetStartup              bool
+	resetRecoveredProjections []destructivereset.SourceProjection
+	resetContainerRuntime     interface {
+		destructivereset.ManagedContainerRuntime
+		destructivereset.ManagedContainerInventoryReader
+	}
+	stopRunStalled func()
 }
 
 func newProcessLifecycleSupervisor(ready serveReadiness, initialRT *runtime.Runtime) *processLifecycleSupervisor {
@@ -181,7 +188,7 @@ func (s *processLifecycleSupervisor) settlePendingSourceSetTransitionLocked(ctx 
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	s.mu.RUnlock()
-	if manager == nil {
+	if manager == nil || manager.Len() == 0 {
 		return nil
 	}
 	plan, exists, err := s.processCapability.CurrentSourceSet(ctx)
