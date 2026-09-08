@@ -70,6 +70,8 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Transparent driver observation of the real diagnostic INSERT, not a fixture writer.
+	"internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go": 1,
 	// Canonically reminted, never-executed requests must fail real fork activation.
 	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":                         1,
 	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,

@@ -283,7 +283,11 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
+	started := time.Now()
 	output, err := cmd.CombinedOutput()
+	if cmd.ProcessState != nil {
+		t.Logf("release command %s: wall=%s user=%s system=%s", filepath.Base(command), time.Since(started), cmd.ProcessState.UserTime(), cmd.ProcessState.SystemTime())
+	}
 	if ctx.Err() != nil {
 		err = fmt.Errorf("%w after %s", ctx.Err(), timeout)
 	}

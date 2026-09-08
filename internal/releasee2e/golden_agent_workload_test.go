@@ -153,7 +153,19 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	})
 }
 
-func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
+func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 1)
+}
+
+func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 2)
+}
+
+func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
+	t.Helper()
+	if iteration < 1 || iteration > goldenBurstIterations {
+		t.Fatalf("invalid burst iteration %d", iteration)
+	}
 	profile, continuous := goldenContinuousProofProfile(t)
 	if !continuous {
 		t.Skipf("burst proof requires full/nightly profile, got %q", profile)
@@ -169,20 +181,16 @@ func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
 		processGOMAXPROCS: goldenBurstGOMAXPROCS,
 		runDeadline:       goldenBurstDeadline,
 	}
-	for iteration := 1; iteration <= goldenBurstIterations; iteration++ {
-		t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
-			t.Run("sqlite", func(t *testing.T) {
-				t.Parallel()
-				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
-			})
-			t.Run("postgres", func(t *testing.T) {
-				t.Parallel()
-				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
-			})
-		})
-	}
+	t.Run("sqlite", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
+		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
+		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+	})
 }
 
 func goldenBurstCandidateIDs() []string {
