@@ -196,7 +196,7 @@ func TestChannelActivationRetiresAuthorityBeforeRuntimeContextUnload(t *testing.
 func TestRuntimeContextRetirementRetainsCurrentBindingCredentialOnly(t *testing.T) {
 	ctx := context.Background()
 	identity := testTeardownInterface()
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestRuntimeContextRetirementRetainsCurrentBindingCredentialOnly(t *testing.
 	}
 	op := Operation{
 		OperationID: "operation-a", Interface: identity,
-		Coordinate: ChannelRuntimeContextCoordinate{BundleHash: bundleHash, BundleSource: "persisted", ContextPublicationGeneration: 7},
+		Coordinate: ChannelRuntimeContextCoordinate{BundleHash: bundleHash, ContextPublicationGeneration: 7},
 		CredentialReservations: []CredentialReservation{
 			{Role: "provider", StoreKey: "channel.telegram.provider"},
 			{Role: "signing", StoreKey: "channel.telegram.signing"},
@@ -241,7 +241,7 @@ func TestRuntimeContextRetirementRetainsCurrentBindingCredentialOnly(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.RetireContext(ctx, bundleHash, "persisted", 7, "context-key", "context-hash", "runtime_context_retired"); err != nil {
+	if _, err := service.RetireContext(ctx, bundleHash, 7, "context-key", "context-hash", "runtime_context_retired"); err != nil {
 		t.Fatal(err)
 	}
 	if value, found, err := credentialStore.Get(ctx, provider.StoreKey); err != nil || !found || value != "provider-secret" {
