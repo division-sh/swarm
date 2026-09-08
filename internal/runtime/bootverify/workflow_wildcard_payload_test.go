@@ -2,16 +2,16 @@ package bootverify
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestLocalWildcardPayloadReaderConsumesExactProducerSchema(t *testing.T) {
-	source := wildcardPayloadProofSource(t, "task.*", "text")
+	source := wildcardPayloadProofSource(t, canonicalrouting.LocalWildcardPayloadValid)
 	report := Run(context.Background(), source, Options{})
 	if errors := report.Errors(); len(errors) != 0 {
 		t.Fatalf("wildcard payload verification: %#v", errors)
@@ -27,13 +27,16 @@ func TestLocalWildcardPayloadReaderConsumesExactProducerSchema(t *testing.T) {
 }
 
 func TestLocalWildcardPayloadReaderRejectsMissingAndIncompatibleProducerSchemas(t *testing.T) {
-	for _, tc := range []struct{ name, pattern, secondType, want string }{
-		{"missing finite expansion", "missing.*", "text", "no finite producer schema expansion"},
-		{"incompatible type", "task.*", "integer", "incompatible producer schemas"},
-		{"incompatible presence", "task.*", "text?", "incompatible producer schemas"},
+	for _, tc := range []struct {
+		name, want string
+		variant    canonicalrouting.LocalWildcardPayloadVariant
+	}{
+		{"missing finite expansion", "no finite producer schema expansion", canonicalrouting.LocalWildcardPayloadMissing},
+		{"incompatible type", "incompatible producer schemas", canonicalrouting.LocalWildcardPayloadIncompatibleType},
+		{"incompatible presence", "incompatible producer schemas", canonicalrouting.LocalWildcardPayloadIncompatiblePresence},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			report := Run(context.Background(), wildcardPayloadProofSource(t, tc.pattern, tc.secondType), Options{})
+			report := Run(context.Background(), wildcardPayloadProofSource(t, tc.variant), Options{})
 			if !reportContains(report.Errors(), "condition_expression_validation", tc.want) {
 				t.Fatalf("verification errors = %#v, want %q", report.Errors(), tc.want)
 			}
@@ -41,24 +44,9 @@ func TestLocalWildcardPayloadReaderRejectsMissingAndIncompatibleProducerSchemas(
 	}
 }
 
-func wildcardPayloadProofSource(t *testing.T, pattern, secondType string) semanticview.Source {
+func wildcardPayloadProofSource(t *testing.T, variant canonicalrouting.LocalWildcardPayloadVariant) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	secondValue := "\"work-2\""
-	if secondType == "integer" {
-		secondValue = "7"
-	}
-	files := map[string]string{
-		"schema.yaml":          "name: wildcard-payload-proof\n",
-		"worker/schema.yaml":   "name: worker\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events:\n      - event: start\n        source: external\n",
-		"worker/entities.yaml": "work: {}\n",
-		"worker/events.yaml":   "start: {}\ntask.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
-		"worker/nodes.yaml":    "observer:\n  id: observer\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        accept:\n          condition: payload.work_id != \"\"\n",
-	}
-	files["worker/nodes.yaml"] += "producer:\n  id: producer\n  execution_type: system_node\n  subscribes_to: [start, task.done]\n  produces: [task.done, task.failed]\n  event_handlers:\n    start:\n      emit:\n        event: task.done\n        fields:\n          work_id: {literal: work-1}\n    task.done:\n      emit:\n        event: task.failed\n        fields:\n          work_id: {literal: " + secondValue + "}\n"
-	for path, contents := range files {
-		writeBootverifyFixtureFile(t, filepath.Join(root, path), contents)
-	}
+	root := canonicalrouting.CopyLocalWildcardPayload(t, variant)
 	repo := repoRootForBootverifyTest(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

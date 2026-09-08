@@ -24,11 +24,10 @@ type selectedEntityCollectionExecutionStore interface {
 type selectedEntityCollectionExecutionReader struct {
 	store  selectedEntityCollectionExecutionStore
 	source semanticview.Source
-	runID  string
 }
 
-func (r selectedEntityCollectionExecutionReader) QueryEntityCollection(ctx context.Context, flowID, entityType string) ([]map[string]any, error) {
-	owner, err := runtimepipeline.AdmitWorkflowEntityCollectionOwner(r.source, flowID, entityType, r.runID)
+func (r selectedEntityCollectionExecutionReader) QueryEntityCollection(ctx context.Context, runID, flowID, entityType string) ([]map[string]any, error) {
+	owner, err := runtimepipeline.AdmitWorkflowEntityCollectionOwner(r.source, flowID, entityType, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +85,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 			source := stateOnlyAcquisitionSourceWithMode(t, "child", runtimecontracts.FlowModeTemplate)
 			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 				Source:            source,
-				EntityCollections: selectedEntityCollectionExecutionReader{store: store, source: source, runID: runID},
+				EntityCollections: selectedEntityCollectionExecutionReader{store: store, source: source},
 				StateRepo:         selectedEntityCollectionExecutionState{},
 				MutationOwner:     selectedEntityCollectionExecutionMutation{},
 				Locker:            selectedEntityCollectionExecutionLocker{},

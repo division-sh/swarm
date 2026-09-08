@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -214,11 +215,16 @@ func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
 // projections, which may legitimately be absent for state-only entities.
 type WorkflowEntityCollectionOwner struct {
 	stateOwner WorkflowEntityStateSelectionOwner
+	runID      string
 	flowID     string
 	entityType string
 }
 
 func AdmitWorkflowEntityCollectionOwner(source semanticview.Source, flowID, entityType, runID string) (WorkflowEntityCollectionOwner, error) {
+	runID, err := runtimecurrentstate.ValidateRunID(runID)
+	if err != nil {
+		return WorkflowEntityCollectionOwner{}, err
+	}
 	flowID = strings.TrimSpace(flowID)
 	entityType = strings.TrimSpace(entityType)
 	contract, ok := entityruntime.ResolveForFlow(source, flowID)
@@ -232,12 +238,14 @@ func AdmitWorkflowEntityCollectionOwner(source semanticview.Source, flowID, enti
 	if err != nil {
 		return WorkflowEntityCollectionOwner{}, err
 	}
-	return WorkflowEntityCollectionOwner{stateOwner: stateOwner, flowID: flowID, entityType: entityType}, nil
+	return WorkflowEntityCollectionOwner{stateOwner: stateOwner, runID: runID, flowID: flowID, entityType: entityType}, nil
 }
 
 func (o WorkflowEntityCollectionOwner) Valid() bool {
-	return o.stateOwner.Valid() && strings.TrimSpace(o.flowID) != "" && strings.TrimSpace(o.entityType) != ""
+	return o.stateOwner.Valid() && o.runID != "" && strings.TrimSpace(o.flowID) != "" && strings.TrimSpace(o.entityType) != ""
 }
+
+func (o WorkflowEntityCollectionOwner) RunID() string { return o.runID }
 
 func (o WorkflowEntityCollectionOwner) ScopeKey() string {
 	if !o.Valid() {

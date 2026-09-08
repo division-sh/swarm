@@ -59,7 +59,7 @@ type StateRepository interface {
 // query.entities source. The contracts bundle owns which entity type is legal;
 // this port only returns run-scoped rows for that exact type.
 type EntityCollectionReader interface {
-	QueryEntityCollection(context.Context, string, string) ([]map[string]any, error)
+	QueryEntityCollection(ctx context.Context, runID, flowID, entityType string) ([]map[string]any, error)
 }
 
 type EmitPersistenceFieldPrerequisite struct {
