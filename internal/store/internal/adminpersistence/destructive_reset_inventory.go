@@ -2,6 +2,7 @@ package adminpersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -13,18 +14,28 @@ func (s *DestructiveResetPostgresOwner) ReadResetInventory(ctx context.Context) 
 	if s == nil || s.backend == nil {
 		return destructivereset.Inventory{}, fmt.Errorf("postgres store is required")
 	}
-	runs, err := s.readDestructiveResetInventoryRuns(ctx)
+	var out destructivereset.Inventory
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = readResetInventoryTx(ctx, tx, s.deliveries)
+		return err
+	})
+	return out, err
+}
+
+func readResetInventoryTx(ctx context.Context, tx *sql.Tx, deliveries *deliveryadapter.Adapter) (destructivereset.Inventory, error) {
+	runs, err := readDestructiveResetInventoryRuns(ctx, tx)
 	if err != nil {
 		return destructivereset.Inventory{}, err
 	}
-	deliveries, err := s.readDestructiveResetInventoryDeliveries(ctx)
+	activeDeliveries, err := readDestructiveResetInventoryDeliveries(ctx, tx, deliveries)
 	if err != nil {
 		return destructivereset.Inventory{}, err
 	}
 	out := destructivereset.Inventory{
 		CleanupRuns:        append([]destructivereset.RunRef(nil), runs...),
 		CleanupRunSetKnown: true,
-		ActiveDeliveries:   deliveries,
+		ActiveDeliveries:   activeDeliveries,
 		Preserved:          destructivereset.DefaultPreservedResources(),
 	}
 	for _, run := range runs {
@@ -47,11 +58,11 @@ func (s *DestructiveResetPostgresOwner) ReadResetInventory(ctx context.Context) 
 	return out, nil
 }
 
-func (s *DestructiveResetPostgresOwner) readDestructiveResetInventoryRuns(ctx context.Context) ([]destructivereset.RunRef, error) {
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT run_id::text, COALESCE(status, '')
+func readDestructiveResetInventoryRuns(ctx context.Context, tx *sql.Tx) ([]destructivereset.RunRef, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT CAST(run_id AS TEXT), COALESCE(status, '')
 		FROM runs
-		ORDER BY run_id::text
+		ORDER BY CAST(run_id AS TEXT)
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("read destructive reset inventory runs: %w", err)
@@ -71,12 +82,8 @@ func (s *DestructiveResetPostgresOwner) readDestructiveResetInventoryRuns(ctx co
 	return out, nil
 }
 
-func (s *DestructiveResetPostgresOwner) readDestructiveResetInventoryDeliveries(ctx context.Context) ([]destructivereset.DeliveryRef, error) {
-	adapter, err := deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
-	if err != nil {
-		return nil, err
-	}
-	snapshots, err := adapter.ActiveSnapshots(ctx, s.backend)
+func readDestructiveResetInventoryDeliveries(ctx context.Context, tx *sql.Tx, adapter *deliveryadapter.Adapter) ([]destructivereset.DeliveryRef, error) {
+	snapshots, err := adapter.ActiveSnapshots(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("read destructive reset inventory deliveries: %w", err)
 	}

@@ -12803,6 +12803,9 @@ platform_tables:
       - Reset quiescence commits its exact previous-status outcome with cancellation in the existing run-lifecycle transaction. Cleanup commits its receipt with deletion and any empty-source-topology mutation in the retained process transaction. Callers cannot advance either effect phase through a separate journal save.
       - A failed effect acknowledgment is not evidence of rollback. The reset coordinator reads the exact durable successor receipt under a bounded cancellation-independent context before proceeding; missing, contradictory, or unreadable evidence leaves execution fenced. Receipt reconciliation never repeats the effect or compensates an uncertain transaction.
       - PostgreSQL and SQLite cleanup consume the same closed cleanup catalog, scope predicates, preserved-reference severing, and retained-authority guards. Only run-set binding, timestamp comparison, and transaction locking differ privately. SQLite cleanup, topology mutation, and the cleanup receipt commit in one selected write transaction; no write transaction spans runtime quiescence or external container effects.
+      - Reset admission captures the canonical source-set plan, or its explicit absence, in the same retained transaction as operation identity. Historical identity lookup precedes reading current topology. This snapshot is immutable through every later phase. Cleanup validates the current source set against the recorded snapshot inside its transaction; source deletion requires the matching empty-topology mutation when admitted sources exist.
+      - Pending phase continuation consumes the recorded plan and every committed receipt rather than collecting fresh inventory or repeating completed quiescence, cleanup, or container settlement. A recorded partial response remains immutable even when pending resource recovery subsequently succeeds. Recovery that still has unsettled resources fails closed before startup admission.
+      - Process-local reset convergence is bound to the durable operation UUID. Retrying an uncertain final journal acknowledgment for that same converged operation cannot withdraw, reconstruct, or release its successor runtime or projections. A pending planning failure remains fenced until the operation can settle; planning errors alone do not authorize reconstruction and later re-planning over live execution.
     classifications:
       delete_by_event_join:
         - event_receipts
@@ -13750,6 +13753,7 @@ platform_tables:
         the API idempotency cache. Keyed admission binds actor and key permanently; unkeyed
         admission uses a fresh operation UUID. At most one unfinished reset owns active_slot.
         Cleanup evidence commits in the same retained-process transaction as cleanup and topology.
+        The record includes the immutable admitted source-set plan, with null denoting no installed topology.
         Historical completed outcomes never confer current-process runtime availability.
       ddl: |
         CREATE TABLE runtime_reset_operations (

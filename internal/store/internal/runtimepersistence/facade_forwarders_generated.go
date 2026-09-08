@@ -1298,6 +1298,10 @@ func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, identity agentmemory.I
 	return s.lLMSQLiteOwner.Acquire(ctx, identity, lockOwner)
 }
 
+func (s *SQLiteRuntimeStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
+	return s.destructiveResetSQLiteOwner.AcquireDestructiveReset(ctx)
+}
+
 func (s *SQLiteRuntimeStore) AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, llm.ConversationRecord, error) {
 	return s.lLMSQLiteOwner.AcquireLiveSession(ctx, identity, lockOwner)
 }
@@ -2152,6 +2156,10 @@ func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx 
 
 func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.Read(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
+	return s.destructiveResetSQLiteOwner.ReadResetInventory(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {

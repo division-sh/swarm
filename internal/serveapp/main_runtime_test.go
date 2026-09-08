@@ -1309,6 +1309,17 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 
 func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any, out any) {
 	t.Helper()
+	envelope := requestServedSessionCleanupMutation(t, proof, method, params)
+	if envelope.Error != nil {
+		t.Fatalf("%s error = %#v", method, envelope.Error)
+	}
+	if err := json.Unmarshal(envelope.Result, out); err != nil {
+		t.Fatalf("decode %s result: %v\n%s", method, err, string(envelope.Result))
+	}
+}
+
+func requestServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any) servedJSONRPCEnvelope {
+	t.Helper()
 	response := make(chan servedJSONRPCEnvelope, 1)
 	go func() {
 		response <- requestServedJSONRPC(t, proof.Endpoint, method, params)
@@ -1320,13 +1331,7 @@ func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupPro
 			proof.Release()
 			select {
 			case envelope := <-response:
-				if envelope.Error != nil {
-					t.Fatalf("%s error = %#v", method, envelope.Error)
-				}
-				if err := json.Unmarshal(envelope.Result, out); err != nil {
-					t.Fatalf("decode %s result: %v\n%s", method, err, string(envelope.Result))
-				}
-				return
+				return envelope
 			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 				t.Fatalf("timed out waiting for %s after runtime admission closed", method)
 			}
@@ -1335,6 +1340,7 @@ func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupPro
 	}
 	proof.Release()
 	t.Fatalf("timed out waiting for %s to close runtime admission", method)
+	return servedJSONRPCEnvelope{}
 }
 
 func assertServedSessionCleanupQuiesced(t *testing.T, proof servedSessionCleanupProof) {

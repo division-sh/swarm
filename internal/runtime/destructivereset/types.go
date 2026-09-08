@@ -278,7 +278,7 @@ type ContainerStopper interface {
 }
 
 type RuntimeContextLifecycle interface {
-	BeginDestructiveReset(context.Context) (RuntimeReset, error)
+	BeginDestructiveReset(context.Context, string) (RuntimeReset, error)
 }
 
 // RuntimeReset owns only process-local reconstruction. Durable reset phases and

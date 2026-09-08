@@ -69,6 +69,15 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				planned := op
+				if !reflect.DeepEqual(op.SourceSet, &initial) {
+					t.Fatalf("admission did not capture exact canonical source topology: %+v", op.SourceSet)
+				}
+				rewritten := op
+				rewritten.Revision++
+				rewritten.SourceSet = nil
+				if err := cap.AdvanceResetOperation(ctx, op, rewritten); err == nil {
+					t.Fatal("durable source snapshot could be rewritten")
+				}
 				planned.Phase, planned.Revision = destructivereset.PhasePlanned, op.Revision+1
 				planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: op.Request.RequestedAt, IncludeSourceArtifacts: include,
 					Plan: destructivereset.Plan{CleanupRunSetKnown: true, IncludeSourceArtifacts: include,
@@ -129,6 +138,26 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 						}
 						assertState(initial, 1, 1)
 					})
+				}
+				if include {
+					if _, err := cap.ApplyDestructiveResetCleanup(ctx, cleanup, nil); err == nil || !strings.Contains(err.Error(), "requires its atomic topology mutation") {
+						t.Fatalf("source deletion without topology mutation was not rejected: %v", err)
+					}
+					assertState(initial, 1, 1)
+				}
+				empty, err := agenttopology.EmptySourceSetPlan()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := cap.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: initial.Revision, Plan: empty}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := cap.ApplyDestructiveResetCleanup(ctx, cleanup, topology); err == nil || !strings.Contains(err.Error(), "differs from its admitted snapshot") {
+					t.Fatalf("reset consumed a later source topology: %v", err)
+				}
+				assertState(empty, 1, 1)
+				if _, err := cap.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: empty.Revision, Plan: initial}); err != nil {
+					t.Fatal(err)
 				}
 				drop := installResetReceiptFault(t, db, backend, "cleanup_committed")
 				if _, err := cap.ApplyDestructiveResetCleanup(ctx, cleanup, topology); err == nil {

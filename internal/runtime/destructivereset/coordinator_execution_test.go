@@ -138,7 +138,7 @@ func (f containerStopperFunc) Apply(ctx context.Context, req ContainerResetReque
 
 type runtimeContextQuiescerFunc func(context.Context) error
 
-func (f runtimeContextQuiescerFunc) BeginDestructiveReset(ctx context.Context) (RuntimeReset, error) {
+func (f runtimeContextQuiescerFunc) BeginDestructiveReset(ctx context.Context, _ string) (RuntimeReset, error) {
 	if err := f(ctx); err != nil {
 		return nil, err
 	}
