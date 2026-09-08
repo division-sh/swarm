@@ -29,7 +29,7 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
 			t.Fatalf("verify repo %q exit=%d stdout=%s stderr=%s", repo, code, out.String(), errOut.String())
 		}
-		for _, want := range []string{"pack inventory: base=embedded", "provider trigger pack provider.telegram AVAILABLE"} {
+		for _, want := range []string{"pack inventory: base=embedded", "provider.telegram"} {
 			if !strings.Contains(out.String(), want) {
 				t.Fatalf("verify repo %q omitted embedded inventory %q:\n%s", repo, want, out.String())
 			}
@@ -50,7 +50,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
-		if !strings.Contains(textOut.String(), "provider trigger pack provider."+provider+" AVAILABLE") {
+		if !strings.Contains(textOut.String(), "provider."+provider) {
 			t.Fatalf("verify text omitted installed %s trigger:\n%s", provider, textOut.String())
 		}
 	}
@@ -64,14 +64,11 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		result.PackInventory.BaseDigest == "" || result.PackInventory.EffectiveDigest == "" {
 		t.Fatalf("verify pack inventory = %#v", result.PackInventory)
 	}
-	installed := 0
-	for _, subject := range result.CapabilitySubjects {
-		if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "installed" {
-			installed++
-		}
+	if result.ValidationScope != "structural" || result.LiveReadiness != "not_evaluated" {
+		t.Fatalf("verify scope = %#v", result)
 	}
-	if installed != 8 {
-		t.Fatalf("verify installed trigger subjects=%d, want 8: %#v", installed, result.CapabilitySubjects)
+	if strings.Contains(jsonOut.String(), "\"capability_subjects\"") || strings.Contains(jsonOut.String(), "\"workspace_backend\"") {
+		t.Fatalf("structural verify leaked deployment observations: %s", jsonOut.String())
 	}
 }
 
@@ -122,31 +119,8 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 		t.Fatalf("verify JSON unsigned warnings=%d, want 1: %#v", unsignedWarnings, result.Warnings)
 	}
 
-	readback := map[string]packs.Subject{}
-	installed, effective := 0, 0
-	for _, subject := range result.CapabilitySubjects {
-		if subject.Kind != packs.SubjectProviderTrigger {
-			continue
-		}
-		switch subject.Applicability {
-		case "installed":
-			installed++
-		case "effective":
-			effective++
-			readback[subject.Provider] = subject
-		}
-	}
-	if installed != 8 || effective != 6 {
-		t.Fatalf("verify subject multiplicity installed=%d effective=%d", installed, effective)
-	}
-	for _, provider := range []string{"partner_open", "partner_ack"} {
-		subject, ok := readback[provider]
-		if !ok || subject.TriggerAdmission == nil || subject.TriggerAdmission.PolicySource != "raw_declaration" || subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" {
-			t.Fatalf("verify %s readback=%#v", provider, subject)
-		}
-		if rendered := packs.RenderSubject(subject, false); !strings.Contains(textOut.String(), rendered) {
-			t.Fatalf("verify text/JSON readback diverged for %s:\nwant %s\ntext:\n%s", provider, rendered, textOut.String())
-		}
+	if result.LiveReadiness != "not_evaluated" {
+		t.Fatalf("verify must not claim operational readiness: %#v", result)
 	}
 }
 
@@ -196,18 +170,18 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 	if installed != 8 || effective != 6 || raw != 4 {
 		t.Fatalf("subject multiplicity installed=%d effective=%d raw=%d", installed, effective, raw)
 	}
-	body, err := json.Marshal(verifyCommandResult{OK: true, CapabilitySubjects: subjects})
+	body, err := json.Marshal(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var projected verifyCommandResult
+	var projected []packs.Subject
 	if err := json.Unmarshal(body, &projected); err != nil {
 		t.Fatal(err)
 	}
-	if len(projected.CapabilitySubjects) != len(subjects) {
-		t.Fatalf("JSON subjects=%d, want %d", len(projected.CapabilitySubjects), len(subjects))
+	if len(projected) != len(subjects) {
+		t.Fatalf("JSON subjects=%d, want %d", len(projected), len(subjects))
 	}
-	for _, subject := range projected.CapabilitySubjects {
+	for _, subject := range projected {
 		if !strings.Contains(textProjection, subject.ID) {
 			t.Fatalf("text projection omitted JSON subject %q", subject.ID)
 		}

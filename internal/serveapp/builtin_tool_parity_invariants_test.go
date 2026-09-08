@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -81,15 +80,15 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 			}
 			assertToolResolutionFinding(t, result.BootReport.Errors(), tc.configuredTool, tc.wantReject)
 
-			verifyErr := cliapp.VerifyBundle(context.Background(), source, executionposture.Live)
+			_, verifyErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.WorkflowContractValidationOptions{Purpose: runtimebootverify.StructuralValidation, StrictEmitSchemas: true})
 			if tc.wantReject {
 				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.configuredTool) {
-					t.Fatalf("cliapp.VerifyBundle error = %v, want tool rejection", verifyErr)
+					t.Fatalf("structural validation error = %v, want tool rejection", verifyErr)
 				}
 				return
 			}
 			if verifyErr != nil {
-				t.Fatalf("cliapp.VerifyBundle: %v", verifyErr)
+				t.Fatalf("structural validation: %v", verifyErr)
 			}
 
 			assertBootProgressUsesRuntimeToolInventory(t, source)

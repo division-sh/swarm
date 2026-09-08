@@ -13,6 +13,9 @@ import (
 )
 
 func (c *checkerContext) credentials() []Finding {
+	if c.opts.Purpose == StructuralValidation {
+		return nil
+	}
 	if c.credentialLoaded {
 		return c.credentialFindings
 	}
@@ -218,7 +221,7 @@ func (c *checkerContext) ensureMCPDiscovery() {
 		return
 	}
 	c.mcpDiscoveryLoaded = true
-	if !c.opts.CheckMCPReachable {
+	if c.opts.Purpose == StructuralValidation || !c.opts.CheckMCPReachable {
 		return
 	}
 	client := runtimemcp.NewClient(c.opts.Credentials)

@@ -475,17 +475,9 @@ func ResolveModel(profile Profile, req ModelResolution) (ResolvedModel, error) {
 	if !profile.Active {
 		return ResolvedModel{}, fmt.Errorf("llm backend profile %q is not active", profile.ID)
 	}
-	alias, err := RequireModelAlias(req.Model)
+	alias, targets, err := ResolveDeclaredModelAlias(req)
 	if err != nil {
 		return ResolvedModel{}, err
-	}
-	models := EffectiveModelAliases(req.Models)
-	if err := ValidateModelAliases(models); err != nil {
-		return ResolvedModel{}, err
-	}
-	targets := models[alias]
-	if len(targets) == 0 {
-		return ResolvedModel{}, fmt.Errorf("%s alias %q is not configured", "llm.models", alias)
 	}
 	concrete := strings.TrimSpace(targets[profile.ID])
 	if concrete == "" {
@@ -499,6 +491,23 @@ func ResolveModel(profile Profile, req ModelResolution) (ResolvedModel, error) {
 		Transport:     profile.Transport,
 		RuntimeMode:   profile.RuntimeMode,
 	}, nil
+}
+
+// ResolveDeclaredModelAlias validates source metadata without selecting a live
+// backend. Concrete provider fulfillment is the additional ResolveModel step.
+func ResolveDeclaredModelAlias(req ModelResolution) (string, map[string]string, error) {
+	alias, err := RequireModelAlias(req.Model)
+	if err != nil {
+		return "", nil, err
+	}
+	models := EffectiveModelAliases(req.Models)
+	if err := ValidateModelAliases(models); err != nil {
+		return "", nil, err
+	}
+	if len(models[alias]) == 0 {
+		return "", nil, fmt.Errorf("llm.models alias %q is not configured", alias)
+	}
+	return alias, models[alias], nil
 }
 
 func ResolveModelName(profile Profile, req ModelResolution) (string, error) {

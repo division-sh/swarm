@@ -124,14 +124,6 @@ func resolveWorkspaceBackendDecision(flagBackend string, flagSet bool, cfg *conf
 	return DecideWorkspaceBackend(preference, cfg, source)
 }
 
-func resolveWorkspaceBackendDiagnostic(repo, configPath string, source semanticview.Source) (WorkspaceBackendSelection, error) {
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
-	if err != nil {
-		return WorkspaceBackendSelection{}, err
-	}
-	return resolveWorkspaceBackendDecision("", false, cfgResult.Config, source)
-}
-
 func resolveWorkspaceBackendFromInput(in workspaceBackendInput) (WorkspaceBackendSelection, error) {
 	switch {
 	case in.FlagSet:

@@ -7816,6 +7816,28 @@ engine:
       note: Chain depth overflow is NOT a handler failure. It is an emission interception. The dead_letter is for the downstream
         event, not the handler that produced it.
   boot_verification:
+    structural_validation:
+      owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
+      source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
+      rule: >
+        Bare verify, describe, describe --graph and describe routes validate one admitted effective source,
+        including provider/channel declarations. Structural validation is an explicit validation purpose,
+        not a live or mock execution selection. It acquires no credential owner, probes no MCP/Claude/Docker,
+        constructs no actor and claims no selected store. It keeps declared schema, field, scope, model
+        grammar, tool permission, workspace class, source capability and supplied mock validation.
+        Missing test performances and live machine readiness are separate admission concerns.
+      check_boundary: >
+        Existing bootcheck and post-boot declaration owners remain authoritative. Credential state and
+        concrete MCP availability/discovery are execution observations, absent from structural reports.
+        Mixed tool/model checks retain declaration validation without inventing successful discovery or
+        selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
+      output: >
+        Verify and describe report validation_scope: structural and live_readiness: not_evaluated.
+        Structural workspace_backend and verify capability_subjects are retired without aliases.
+        Verify retains pack_inventory and source capability validation. Operational capability subjects
+        remain on their existing live diagnostic surfaces. production_valid continues to mean absence
+        of validation-only harness dependence, never machine or credential readiness. Describe routes
+        preserves routing-topology/v1 and stable quiet IDs over the admitted source/report.
     description: The platform runs contract verification at boot, after loading all contracts and before starting any nodes
       or agents. If any check fails, boot aborts. These checks are the authoritative integration test.
     checks:
@@ -9266,7 +9288,7 @@ tool_model:
         grant_model, client_auth, body, and static non-secret token headers, and supports GitHub App `--installation-id` and
         optional `--api-base-url` metadata.
     boot_validation: >
-      Boot/verify consumes managed_credential requirements and reports managed_credential_state for missing, pending,
+      Execution boot/doctor consumes managed_credential requirements and reports managed_credential_state for missing, pending,
       refresh_failed, scope_insufficient, grant-type/grant-model/token-profile mismatches, installation-input requirements,
       or otherwise unusable records. When boot warnings are fatal, these findings block startup. Connector readback/doctor
       MUST compare declared tool grant_type, scopes, grant_model, token_request profile, and installation_id_input against
@@ -19145,8 +19167,9 @@ workspace_model:
     canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
     scope: >
       Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
-      selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`, `swarm
-      verify`, `swarm describe`, and the `conversation.fork_chat` sandbox runtime. The loaded contract and effective runtime
+      selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`,
+      and the `conversation.fork_chat` sandbox runtime. Bare verify and describe are structural readers and
+      do not select a workspace backend or observe machine readiness. The loaded contract and effective runtime
       backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
       Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
     cli_flag: --workspace-backend <docker|host>
@@ -22560,7 +22583,10 @@ cli_specification:
               classification: shared_output
               fact_owner: local contract verification
               json_shape: >
-                object with ok, source_root, workspace_backend, errors, warnings, and lint_evidence. `errors`, `warnings`,
+                object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
+                production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
+                workspace_backend and operational capability_subjects are retired from structural verify.
+                production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
                 `severity`, `location`, and `message` fields plus optional additive `remediation` and `evidence` fields.
                 `message` remains the problem text. `--json` renders
@@ -22882,14 +22908,17 @@ cli_specification:
             describe:
               command: swarm describe
               classification: shared_output
-              fact_owner: local authoring view
-              json_shape: describe authoring view result object
+              fact_owner: local authoring view over the same admitted effective source and structural validation report as verify
+              json_shape: >
+                describe authoring view result object with validation_scope: structural and live_readiness: not_evaluated.
+                workspace_backend is retired. Preserve source identity/authority, graph, routing topology, diagnostics,
+                root, flows and approvals. Diagnostic views retain invalid-source findings instead of asserting live readiness.
               quiet_values:
               - flow ids and summary values declared by the command implementation
             describe_routes:
               command: swarm describe routes
               classification: shared_output
-              fact_owner: routing-topology/v1 projection over the authored endpoint census and lowered connect plans
+              fact_owner: routing-topology/v1 projection over the admitted effective source endpoint census, lowered connect plans and shared structural report
               json_shape: routing-topology/v1 object
               quiet_values:
               - stable route edge ids followed by stable typed route issue ids

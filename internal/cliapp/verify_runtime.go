@@ -7,20 +7,19 @@ import (
 	"io"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type verifyCommandResult struct {
 	OK                      bool                  `json:"ok"`
 	SourceRoot              string                `json:"source_root"`
-	WorkspaceBackend        string                `json:"workspace_backend"`
+	ValidationScope         string                `json:"validation_scope"`
+	LiveReadiness           string                `json:"live_readiness"`
 	HarnessInjectedInputs   int                   `json:"harness_injected_inputs"`
 	HarnessObservedOutputs  int                   `json:"harness_observed_outputs"`
 	HarnessInputProvenance  []string              `json:"harness_input_provenance,omitempty"`
@@ -29,7 +28,6 @@ type verifyCommandResult struct {
 	Errors                  []verifyFindingOutput `json:"errors"`
 	Warnings                []verifyFindingOutput `json:"warnings"`
 	LintEvidence            []verifyFindingOutput `json:"lint_evidence"`
-	CapabilitySubjects      []packs.Subject       `json:"capability_subjects"`
 	PackInventory           packInventoryReadback `json:"pack_inventory"`
 }
 
@@ -97,51 +95,17 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		return CLIExitValidation
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
-		source := semanticview.Wrap(bundle)
-		validationOpts, err := verifyWorkflowContractValidationOptions(repo, opts.configPath, source)
-		if err != nil {
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: configure validation: %v\n", err)
-			}
-			return 1
-		}
-		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
-		if err != nil {
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: resolve workspace backend: %v\n", err)
-			}
-			return 1
-		}
-		workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
-		bundleHash, err := runtimecontracts.BundleHash(bundle)
-		if err != nil {
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: hash bundle: %v\n", err)
-			}
-			return 1
-		}
-		sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
-		if err != nil {
-			if errOut != nil {
-				fmt.Fprintf(errOut, "verify failed: source identity: %v\n", err)
-			}
-			return 1
-		}
-		projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
-			Source: source, SourceArtifactFact: sourceFact,
-			ProviderTriggerCatalog: validationOpts.ProviderTriggerCatalog,
-			ChannelPlans:           validationOpts.ChannelPlans,
-		})
+		source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: admit effective source: %v\n", err)
 			}
 			return 1
 		}
-		result, err := verifyBundleResultWithOptions(ctx, projection.Source(), validationOpts)
+		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if err != nil {
 			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
-				output := verifyCommandOutput(false, sourceRoot, workspaceBackendDetail, result, packReadback)
+				output := verifyCommandOutput(false, sourceRoot, result, packReadback)
 				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
 					return 2
 				}
@@ -152,7 +116,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			}
 			return 1
 		}
-		output := verifyCommandOutput(true, sourceRoot, workspaceBackendDetail, result, packReadback)
+		output := verifyCommandOutput(true, sourceRoot, result, packReadback)
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
@@ -162,11 +126,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 				} else {
 					fmt.Fprintf(out, "verify ok: source=%s\n", sourceRoot)
 				}
-				fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
+				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated (production_valid describes harness independence only)")
 				writePackInventory(out, packReadback)
-				for _, subject := range result.CapabilitySubjects {
-					fmt.Fprintln(out, packs.RenderSubject(subject, false))
-				}
 			}
 		}, func() ([]string, error) {
 			return []string{"ok"}, nil
@@ -188,11 +149,12 @@ func harnessValidationSummary(result runtime.WorkflowContractValidationResult) s
 	return strings.Join(parts, ", ")
 }
 
-func verifyCommandOutput(ok bool, sourceRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback) verifyCommandResult {
+func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback) verifyCommandResult {
 	return verifyCommandResult{
 		OK:                      ok,
 		SourceRoot:              sourceRoot,
-		WorkspaceBackend:        workspaceBackend,
+		ValidationScope:         "structural",
+		LiveReadiness:           "not_evaluated",
 		HarnessInjectedInputs:   result.HarnessInjectedInputCount,
 		HarnessObservedOutputs:  result.HarnessObservedOutputCount,
 		HarnessInputProvenance:  append([]string(nil), result.HarnessInputDeclarations...),
@@ -201,7 +163,6 @@ func verifyCommandOutput(ok bool, sourceRoot string, workspaceBackend string, re
 		Errors:                  verifyFindingOutputs(result.BootReport.Errors()),
 		Warnings:                verifyFindingOutputs(result.BootReport.Warnings()),
 		LintEvidence:            verifyFindingOutputs(result.BootReport.LintEvidence()),
-		CapabilitySubjects:      append([]packs.Subject(nil), result.CapabilitySubjects...),
 		PackInventory:           packInventory,
 	}
 }
@@ -263,25 +224,6 @@ func trimmedStringSlice(items []string) []string {
 	return out
 }
 
-func VerifyBundle(ctx context.Context, source semanticview.Source, posture executionposture.Posture) error {
-	_, err := verifyBundleResult(ctx, source, posture)
-	return err
-}
-
-func verifyBundleResult(ctx context.Context, source semanticview.Source, posture executionposture.Posture) (runtime.WorkflowContractValidationResult, error) {
-	credentialStore, err := BuildCredentialStore()
-	if err != nil {
-		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure credentials: %w", err)
-	}
-	managedCredentialStore, err := BuildManagedCredentialStore()
-	if err != nil {
-		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure managed credentials: %w", err)
-	}
-	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
-	opts.ManagedCredentials = managedCredentialStore
-	return verifyBundleResultWithOptions(ctx, source, opts)
-}
-
 func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Source, opts runtime.WorkflowContractValidationOptions) (runtime.WorkflowContractValidationResult, error) {
 	if source == nil {
 		return runtime.WorkflowContractValidationResult{}, errors.New("semantic source is required")
@@ -290,53 +232,48 @@ func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Sour
 }
 
 func verifyWorkflowContractValidationOptions(repo, configPath string, source semanticview.Source) (runtime.WorkflowContractValidationOptions, error) {
-	credentialStore, err := BuildCredentialStore()
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
-	}
-	managedCredentialStore, err := BuildManagedCredentialStore()
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure managed credentials: %w", err)
-	}
 	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
 	}
-	profile, err := configResult.Config.LLMBackendProfile()
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("resolve llm backend profile: %w", err)
-	}
-	posture, err := configResult.Config.ProcessExecutionPosture()
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, err
-	}
-	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
-	opts.ManagedCredentials = managedCredentialStore
-	opts.AllowHarnessInputs = true
-	opts.AllowHarnessOutputs = true
-	opts.ValidateLLMModelResolution = true
-	opts.LLMProfile = profile
-	opts.ModelAliases = configResult.Config.LLM.Models
-	providerCredentials, err := BuildProviderCredentialStore()
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure provider credentials: %w", err)
-	}
-	opts.ProviderCredentials = providerCredentials
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("workflow validation source must be bundle-backed")
 	}
-	packRuntime, err := LoadBundlePackRuntime(context.Background(), configResult, bundle, providerCredentials, managedCredentialStore)
+	metadata, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load bundle pack runtime: %w", err)
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("admit pack metadata: %w", err)
 	}
-	opts.ProviderTriggerCatalog = packRuntime.ProviderTriggers.Catalog
-	opts.ChannelPlans = packRuntime.Channels.Plans
-	opts.ChannelActivationPublication, err = channelonboarding.NewDeclaredOnlyChannelActivationPublication(packRuntime.Channels.Bindings)
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
-	}
+	opts := runtime.StructuralWorkflowContractValidationOptions()
+	opts.ModelAliases = configResult.Config.LLM.Models
+	opts.AllowHarnessInputs, opts.AllowHarnessOutputs = true, true
+	opts.ProviderTriggerCatalog = metadata.ProviderTriggers
+	opts.ChannelPlans = metadata.ChannelPlans
 	return opts, nil
+}
+
+func admitStructuralSource(repo, configPath string, bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, runtime.WorkflowContractValidationOptions, error) {
+	source := semanticview.Wrap(bundle)
+	opts, err := verifyWorkflowContractValidationOptions(repo, configPath, source)
+	if err != nil {
+		return nil, opts, err
+	}
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		return nil, opts, err
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
+	if err != nil {
+		return nil, opts, err
+	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		Source: source, SourceArtifactFact: fact,
+		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+	})
+	if err != nil {
+		return nil, opts, err
+	}
+	return projection.Source(), opts, nil
 }
 
 func writeVerifyFindings(out io.Writer, findings []runtimebootverify.Finding, blocking bool) {
