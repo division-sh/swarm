@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source_run_id": "github-actions-32616744789",
   "packages": {
     "github.com/division-sh/swarm": 0,

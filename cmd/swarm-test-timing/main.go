@@ -28,6 +28,9 @@ type config struct {
 	matrixPath      string
 	evidencePath    string
 	evidenceRoot    string
+	jobsPath        string
+	workflowRunID   int64
+	workflowAttempt int
 	budgetPath      string
 	resultJSONPath  string
 	event           string
@@ -42,7 +45,6 @@ type config struct {
 	elapsedSeconds  float64
 	planCI          bool
 	recordEvidence  bool
-	checkConfirm    bool
 	evaluateBudget  bool
 	updateWeights   bool
 	validatePublish bool
@@ -61,6 +63,9 @@ func main() {
 	flag.StringVar(&cfg.matrixPath, "matrix", "", "GitHub Actions matrix output path")
 	flag.StringVar(&cfg.evidencePath, "evidence", "", "typed command evidence path")
 	flag.StringVar(&cfg.evidenceRoot, "evidence-root", "", "directory containing evidence JSON")
+	flag.StringVar(&cfg.jobsPath, "jobs", "", "paginated Actions jobs evidence for the exact attempt")
+	flag.Int64Var(&cfg.workflowRunID, "workflow-run-id", 0, "exact workflow run ID")
+	flag.IntVar(&cfg.workflowAttempt, "workflow-attempt", 0, "exact workflow run attempt")
 	flag.StringVar(&cfg.budgetPath, "policy", ".github/test-timing-budgets.yaml", "timing budget policy")
 	flag.StringVar(&cfg.resultJSONPath, "result-json", "", "machine-readable budget result path")
 	flag.StringVar(&cfg.event, "event", "", "GitHub event name")
@@ -68,14 +73,13 @@ func main() {
 	flag.StringVar(&cfg.headSHA, "head-sha", "", "exact tested commit SHA")
 	flag.StringVar(&cfg.executionSHA, "execution-sha", "", "actual checked-out commit SHA")
 	flag.StringVar(&cfg.unitID, "unit", "", "proof unit ID")
-	flag.StringVar(&cfg.attempt, "attempt", "", "primary or confirmation")
+	flag.StringVar(&cfg.attempt, "attempt", "", "primary")
 	flag.StringVar(&cfg.sourceRunID, "source-run-id", "", "successful source run for generated weights")
 	flag.IntVar(&cfg.topN, "top", 20, "number of slow packages/tests in Markdown")
 	flag.IntVar(&cfg.exitCode, "exit-code", -1, "recorded go test exit code")
 	flag.Float64Var(&cfg.elapsedSeconds, "elapsed-seconds", -1, "recorded command elapsed seconds")
 	flag.BoolVar(&cfg.planCI, "plan-ci", false, "emit a digest-bound CI run plan and matrix")
 	flag.BoolVar(&cfg.recordEvidence, "record-evidence", false, "record evidence bound to a plan unit")
-	flag.BoolVar(&cfg.checkConfirm, "check-confirmation", false, "print whether this exact unit needs confirmation")
 	flag.BoolVar(&cfg.evaluateBudget, "evaluate-budget", false, "evaluate complete evidence against the emitted plan")
 	flag.BoolVar(&cfg.updateWeights, "update-weight-model", false, "update generated weights from successful plan evidence")
 	flag.BoolVar(&cfg.validatePublish, "validate-publish-diff", false, "fail unless changed-files contains only the generated model")
@@ -90,7 +94,7 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.checkConfirm, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
+	for _, enabled := range []bool{cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
@@ -103,8 +107,6 @@ func run(cfg config) error {
 		return planCI(cfg)
 	case cfg.recordEvidence:
 		return recordEvidence(cfg)
-	case cfg.checkConfirm:
-		return checkConfirmation(cfg)
 	case cfg.evaluateBudget:
 		return evaluateBudget(cfg)
 	case cfg.updateWeights:
@@ -171,7 +173,7 @@ func planCI(cfg config) error {
 }
 
 func recordEvidence(cfg config) error {
-	if cfg.planPath == "" || cfg.unitID == "" || cfg.evidencePath == "" || cfg.elapsedSeconds < 0 || cfg.exitCode < 0 {
+	if cfg.planPath == "" || cfg.unitID == "" || cfg.evidencePath == "" || cfg.elapsedSeconds < 0 || cfg.exitCode < 0 || cfg.workflowRunID <= 0 || cfg.workflowAttempt <= 0 {
 		return fmt.Errorf("-plan, -unit, -evidence, non-negative -elapsed-seconds, and non-negative -exit-code are required with -record-evidence")
 	}
 	plan, err := readPlan(cfg.planPath)
@@ -192,46 +194,27 @@ func recordEvidence(cfg config) error {
 		return err
 	}
 	countMode := unit.CountMode
-	if cfg.attempt == testtiming.AttemptConfirmation {
-		countMode = testtiming.CountModeOne
-	}
 	evidence := testtiming.CommandEvidence{
-		Version:        testtiming.CommandEvidenceVersion,
-		PlanDigest:     plan.Digest,
-		Profile:        plan.Profile,
-		HeadSHA:        plan.HeadSHA,
-		UnitID:         unit.ID,
-		Surface:        unit.ID,
-		Attempt:        cfg.attempt,
-		ElapsedSeconds: cfg.elapsedSeconds,
-		ExitCode:       cfg.exitCode,
-		Packages:       append([]string(nil), unit.Packages...),
-		EnvironmentID:  unit.EnvironmentID,
-		CountMode:      countMode,
-		Report:         report,
+		WorkflowRunID:   cfg.workflowRunID,
+		WorkflowAttempt: cfg.workflowAttempt,
+		Version:         testtiming.CommandEvidenceVersion,
+		PlanDigest:      plan.Digest,
+		Profile:         plan.Profile,
+		HeadSHA:         plan.HeadSHA,
+		UnitID:          unit.ID,
+		Surface:         unit.ID,
+		Attempt:         cfg.attempt,
+		ElapsedSeconds:  cfg.elapsedSeconds,
+		ExitCode:        cfg.exitCode,
+		Packages:        append([]string(nil), unit.Packages...),
+		EnvironmentID:   unit.EnvironmentID,
+		CountMode:       countMode,
+		Report:          report,
+	}
+	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) != 0 {
+		return fmt.Errorf("invalid command evidence: %s", strings.Join(problems, "; "))
 	}
 	return writeJSON(cfg.evidencePath, evidence)
-}
-
-func checkConfirmation(cfg config) error {
-	plan, err := readPlan(cfg.planPath)
-	if err != nil {
-		return err
-	}
-	policy, err := readBudgetPolicy(cfg.budgetPath)
-	if err != nil {
-		return err
-	}
-	evidence, err := readEvidence(cfg.evidencePath)
-	if err != nil {
-		return err
-	}
-	required, err := testtiming.ConfirmationRequired(policy, plan, evidence)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(os.Stdout, required)
-	return err
 }
 
 func evaluateBudget(cfg config) error {
@@ -252,10 +235,23 @@ func evaluateBudget(cfg config) error {
 	}
 	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
 	result := testtiming.EvaluateBudget(policy, testtiming.EvaluationOptions{
+		WorkflowRunID:     cfg.workflowRunID,
+		WorkflowAttempt:   cfg.workflowAttempt,
 		Plan:              plan,
 		HistoricalWeights: model.Packages,
 		LoadProblems:      problems,
 	}, evidence)
+	jobsFile, jobsErr := os.Open(cfg.jobsPath)
+	var jobs []testtiming.ActionJob
+	if jobsErr == nil {
+		jobs, jobsErr = testtiming.ReadActionJobs(jobsFile)
+		_ = jobsFile.Close()
+	}
+	if jobsErr != nil {
+		result.Problems = append(result.Problems, fmt.Sprintf("read whole-job evidence: %v", jobsErr))
+		result.Status = testtiming.BudgetIncomplete
+	}
+	testtiming.AttachJobEvidence(&result, plan, cfg.workflowRunID, cfg.workflowAttempt, jobs)
 	if err := writeJSON(cfg.resultJSONPath, result); err != nil {
 		return err
 	}
@@ -274,7 +270,7 @@ func evaluateBudget(cfg config) error {
 }
 
 func updateWeightModel(cfg config) error {
-	if cfg.planPath == "" || cfg.evidenceRoot == "" || cfg.sourceRunID == "" {
+	if cfg.planPath == "" || cfg.evidenceRoot == "" || cfg.sourceRunID == "" || cfg.workflowRunID <= 0 || cfg.workflowAttempt <= 0 {
 		return fmt.Errorf("-plan, -evidence-root, and -source-run-id are required with -update-weight-model")
 	}
 	plan, err := readPlan(cfg.planPath)
@@ -290,10 +286,17 @@ func updateWeightModel(cfg config) error {
 		return fmt.Errorf("cannot update weights from incomplete evidence: %s", strings.Join(problems, "; "))
 	}
 	observed := map[string]float64{}
+	unitWeights := map[string]testplanning.UnitWeight{}
 	seenUnits := map[string]bool{}
 	for _, item := range evidence {
 		if item.Attempt != testtiming.AttemptPrimary {
-			continue
+			return fmt.Errorf("unit %s has unsupported attempt %q", item.UnitID, item.Attempt)
+		}
+		if item.WorkflowRunID != cfg.workflowRunID || item.WorkflowAttempt != cfg.workflowAttempt {
+			return fmt.Errorf("unit %s evidence is from a different workflow run or attempt", item.UnitID)
+		}
+		if seenUnits[item.UnitID] {
+			return fmt.Errorf("duplicate primary evidence for unit %s", item.UnitID)
 		}
 		if problems := testtiming.ValidateCommandEvidence(item, plan); len(problems) > 0 {
 			return fmt.Errorf("invalid evidence for %s: %s", item.UnitID, strings.Join(problems, "; "))
@@ -302,6 +305,8 @@ func updateWeightModel(cfg config) error {
 			return fmt.Errorf("unit %s failed; refusing weight update", item.UnitID)
 		}
 		seenUnits[item.UnitID] = true
+		unit, _ := plan.Unit(item.UnitID)
+		unitWeights[item.UnitID] = testplanning.MeasureUnit(unit, item.ElapsedSeconds)
 		for _, timing := range item.Report.Packages {
 			observed[timing.Package] += timing.Elapsed
 		}
@@ -311,8 +316,25 @@ func updateWeightModel(cfg config) error {
 			return fmt.Errorf("unit %s has no primary evidence", unit.ID)
 		}
 	}
-	next := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: current.SourceRunID, Packages: map[string]float64{}}
+	next := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: current.SourceRunID, Packages: map[string]float64{}, Units: map[string]map[string]testplanning.UnitWeight{}}
+	for profile, weights := range current.Units {
+		if profile != plan.Profile {
+			next.Units[profile] = weights
+		}
+	}
+	next.Units[plan.Profile] = unitWeights
 	changed := false
+	for id, weight := range unitWeights {
+		old, ok := current.Units[plan.Profile][id]
+		if ok && old.Selection == weight.Selection && math.Abs(weight.Seconds-old.Seconds) <= math.Max(1, old.Seconds*0.10) {
+			unitWeights[id] = old
+		} else {
+			changed = true
+		}
+	}
+	if len(current.Units[plan.Profile]) != len(unitWeights) {
+		changed = true
+	}
 	for pkg, value := range observed {
 		old, ok := current.Packages[pkg]
 		if ok && math.Abs(value-old) <= math.Max(1, old*0.10) {

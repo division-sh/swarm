@@ -1302,6 +1302,19 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 	return nil
 }
 
+func (eb *EventBus) ProjectLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic) error {
+	if eb == nil {
+		return fmt.Errorf("lifecycle diagnostic logger is required")
+	}
+	eb.mu.RLock()
+	logger := eb.logger
+	eb.mu.RUnlock()
+	if logger == nil {
+		return fmt.Errorf("lifecycle diagnostic logger is required")
+	}
+	return logger.ProjectLifecycleDiagnostic(ctx, item)
+}
+
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	if eb == nil {
 		return nil

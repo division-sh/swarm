@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -54,6 +55,7 @@ type RuntimeLogger struct {
 // RuntimeLogPersistence owns backend-specific platform.runtime_log persistence
 // and lineage lookup while RuntimeLogger owns canonical payload construction.
 type RuntimeLogPersistence interface {
+	PersistLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic, RuntimeLogPersistenceRecord) (bool, error)
 	RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error)
 	PersistRuntimeLog(ctx context.Context, record RuntimeLogPersistenceRecord) error
 }
@@ -67,6 +69,68 @@ type RuntimeLogPersistenceRecord struct {
 
 func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture) *RuntimeLogger {
 	return &RuntimeLogger{persistence: persistence, posture: posture}
+}
+
+// EncodeLifecycleDiagnosticLog is the canonical lifecycle diagnostic payload
+// owner shared by presentation and exact selected-store admission.
+func EncodeLifecycleDiagnosticLog(item diaglog.LifecycleDiagnostic) ([]byte, error) {
+	if err := item.Validate(); err != nil {
+		return nil, err
+	}
+	detail := make(map[string]any, len(item.Payload)+4)
+	for key, value := range item.Payload {
+		detail[key] = value
+	}
+	detail["outbox_id"] = item.OutboxID
+	detail["operation_id"] = item.OperationID
+	detail["event_name"] = item.EventName
+	fields, err := item.Identity.StorageFields()
+	if err != nil {
+		return nil, err
+	}
+	detail["agent_identity"] = fields
+	entry := RuntimeLogEntry{Level: diaglog.LevelInfo, Component: "agent-lifecycle", Action: item.EventName, AgentID: item.AgentID}
+	if stored, ok := item.Payload["producer_lineage"]; ok {
+		raw, err := json.Marshal(stored)
+		if err != nil {
+			return nil, err
+		}
+		var lineage runtimecorrelation.RuntimeLineage
+		if err := json.Unmarshal(raw, &lineage); err != nil {
+			return nil, err
+		}
+		if lineage.RunID != item.Identity.RunID {
+			return nil, fmt.Errorf("lifecycle diagnostic producer lineage differs from immutable run")
+		}
+		runtimeLogAddLineageDetails(detail, runtimeLogLineageForEntry(lineage, entry))
+	}
+	return json.Marshal(runtimeLogPayload("info", entry.Component, entry.Action, entry, detail, item.Identity.RunID, "", ""))
+}
+
+func (l *RuntimeLogger) ProjectLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic) error {
+	if l == nil || l.persistence == nil {
+		return fmt.Errorf("lifecycle diagnostic persistence is required")
+	}
+	encoded, err := EncodeLifecycleDiagnosticLog(item)
+	if err != nil {
+		return err
+	}
+	payload, err := DecodeCanonicalRuntimeLogPayload(encoded)
+	if err != nil {
+		return err
+	}
+	inserted, err := l.persistence.PersistLifecycleDiagnostic(ctx, item, RuntimeLogPersistenceRecord{
+		Payload: encoded, ExecutionMode: executionmode.Mode(l.posture.RootMode()),
+	})
+	if err != nil {
+		return err
+	}
+	if inserted {
+		if recorder, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && recorder != nil {
+			recorder.AppendRuntimeLog(runtimeLogRecorderEntry(payload))
+		}
+	}
+	return nil
 }
 
 func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {

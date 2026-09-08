@@ -572,6 +572,10 @@ type selectedContractRuntimeContainerLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
+func (h selectedContractRuntimeContainerLoggerHook) ProjectLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic) error {
+	return h.logger.ProjectLifecycleDiagnostic(ctx, item)
+}
+
 func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence, posture executionposture.Posture) runtimebus.LoggerHook {
 	if persistence == nil {
 		return nil

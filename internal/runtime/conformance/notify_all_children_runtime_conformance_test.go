@@ -132,6 +132,7 @@ type notifyAllChildrenRuntime struct {
 }
 
 type notifyAllChildrenRuntimeOptions struct {
+	diagnosticOverlap      bool
 	realMockAgents         bool
 	agentGate              *notifyAllChildrenAgentGate
 	processTopology        *notifyAllChildrenProcessTopology
@@ -801,6 +802,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
 		}
 	}
+	requireSourceRevisionLifecycleDiagnosticReceipts(t, db, runID)
 }
 
 func countNotifyAllChildrenLifecycleTransitions(
@@ -993,7 +995,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						db,
 						source,
 						time.Now,
-						notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate},
+						notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate, diagnosticOverlap: cardinality == 3},
 					)
 					t.Cleanup(func() {
 						if t.Failed() {
@@ -1616,6 +1618,10 @@ func newNotifyAllChildrenRuntime(
 
 	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
+	roles := conformanceManagerPersistenceRoles(backend, eventBus, coordinator)
+	if opts.diagnosticOverlap {
+		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
+	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact),
@@ -1627,7 +1633,7 @@ func newNotifyAllChildrenRuntime(
 		SemanticSource:     source,
 		Sessions:           sessionStore,
 		LLMBackend:         llmBackend,
-		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
+		PersistenceRoles:   roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)

@@ -10,7 +10,7 @@ import (
 
 func TestBuildPlanDiscoversUnknownPackagesAndBalancesDeterministically(t *testing.T) {
 	policy := testPolicy()
-	model := WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{"module/a": 200, "module/b": 100}}
+	model := WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/a": 200, "module/b": 100}}
 	packages := []string{"module/catalog", "module/new", "module/b", "module/a"}
 	first, err := BuildPlan(policy, model, packages, ProfilePREscalated, "changed path", "abc")
 	if err != nil {
@@ -70,7 +70,7 @@ func TestResolveProfileCoversEveryEventAndEscalationFamily(t *testing.T) {
 }
 
 func TestRunPlanRejectsWrongDigestAndDuplicatePackage(t *testing.T) {
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "full", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "full", "abc")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestRunPlanRejectsWrongDigestAndDuplicatePackage(t *testing.T) {
 }
 
 func TestRunPlanRejectsWrongExecutionSHA(t *testing.T) {
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "full", "executed-sha")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "full", "executed-sha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,14 @@ func TestBuildPlanAllowsExplicitFilteredPartitionsOfOneSpecialPackage(t *testing
 	policy.Units["catalog-b"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^Test[N-Z]", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
 	policy.Profiles[ProfilePRCommon] = ProfilePolicy{CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-a", "catalog-b"}}
 
-	plan, err := BuildPlan(policy, WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{"module/catalog": 100}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "partitioned", "abc")
+	model := WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/catalog": 100},
+		Units: map[string]map[string]UnitWeight{ProfilePRCommon: {}}}
+	for id, seconds := range map[string]float64{"catalog-a": 80, "catalog-b": 20} {
+		u := policy.Units[id]
+		model.Units[ProfilePRCommon][id] = MeasureUnit(ProofUnit{ID: id, Packages: u.Packages, Run: u.Run,
+			CountMode: u.CountMode, EnvironmentID: u.EnvironmentID, BudgetClass: u.BudgetClass}, seconds)
+	}
+	plan, err := BuildPlan(policy, model, []string{"module/a", "module/catalog"}, ProfilePRCommon, "partitioned", "abc")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -123,8 +130,23 @@ func TestBuildPlanAllowsExplicitFilteredPartitionsOfOneSpecialPackage(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.WeightSeconds != 50 || second.WeightSeconds != 50 {
-		t.Fatalf("partition weights = %.1f/%.1f, want 50/50", first.WeightSeconds, second.WeightSeconds)
+	if first.WeightSeconds != 80 || second.WeightSeconds != 20 {
+		t.Fatalf("exact partition weights = %.1f/%.1f, want 80/20", first.WeightSeconds, second.WeightSeconds)
+	}
+	for _, mutate := range []func(*ProofUnit){
+		func(u *ProofUnit) { u.Run = "^TestChanged$" },
+		func(u *ProofUnit) { u.CountMode = "cache-default" },
+		func(u *ProofUnit) { u.EnvironmentID = "different-environment" },
+		func(u *ProofUnit) { u.Packages = []string{"module/other"} },
+	} {
+		changed := first
+		mutate(&changed)
+		if _, ok := model.UnitSeconds(ProfilePRCommon, changed); ok {
+			t.Fatal("changed executable selection reused stale timing")
+		}
+	}
+	if _, ok := model.UnitSeconds(ProfileFull, first); ok {
+		t.Fatal("different profile reused timing")
 	}
 }
 
@@ -133,7 +155,7 @@ func TestBuildPlanRejectsFilteredAndUnfilteredDuplicateSpecialPackage(t *testing
 	policy.Units["catalog-filtered"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^TestFiltered$", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
 	policy.Profiles[ProfileFull] = ProfilePolicy{CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full", "catalog-filtered"}}
 
-	_, err := BuildPlan(policy, WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "invalid partition", "abc")
+	_, err := BuildPlan(policy, WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "invalid partition", "abc")
 	if err == nil || !strings.Contains(err.Error(), "duplicated across unfiltered units") {
 		t.Fatalf("BuildPlan error = %v, want unfiltered duplicate rejection", err)
 	}
@@ -141,7 +163,7 @@ func TestBuildPlanRejectsFilteredAndUnfilteredDuplicateSpecialPackage(t *testing
 
 func TestNightlyProfileRunsFormerExtrasExactlyOnceAsBroadPackages(t *testing.T) {
 	packages := []string{"module/catalog", "module/python", "module/fork"}
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileNightly, "nightly", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileNightly, "nightly", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +205,7 @@ unknown: true
 }
 
 func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "common", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "common", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}

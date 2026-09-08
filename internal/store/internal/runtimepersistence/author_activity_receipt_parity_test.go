@@ -152,11 +152,7 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) {
 	t.Helper()
 	startedAt := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	if fixture.dialect == authoractivityfixture.DialectPostgres {
-		requireRunningPostgresRunForTest(t, ctx, fixture.db, runID, startedAt)
-	} else {
-		requireRunningSQLiteRunForTest(t, ctx, fixture.db, runID, startedAt)
-	}
+	requireRunningRunForTest(t, ctx, fixture.store, runID, startedAt)
 }
 
 func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID string) (string, string) {

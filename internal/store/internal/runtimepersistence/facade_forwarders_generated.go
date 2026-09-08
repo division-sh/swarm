@@ -29,6 +29,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	deliverylifecycle "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	destructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	diaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
 	entityquery "github.com/division-sh/swarm/internal/runtime/entityquery"
 	executionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -610,7 +611,7 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 	return s.operatorAgentPostgres.ListPendingAgentDeliveryFacts(ctx, identities, since)
 }
 
-func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
+func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	return s.agentPostgresOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
@@ -854,10 +855,6 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.agentPostgresOwner.MarkAgentLifecycleDiagnosticProjected(ctx, outboxID, at)
-}
-
 func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
 	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
@@ -900,6 +897,10 @@ func (s *PostgresStore) Outcomes(ctx context.Context, deliveryID string) ([]deli
 
 func (s *PostgresStore) PauseRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecyclePostgresOwner.PauseRunControl(ctx, req)
+}
+
+func (s *PostgresStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
+	return s.eventPostgresOwner.PersistLifecycleDiagnostic(ctx, item, record)
 }
 
 func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtime.RuntimeLogPersistenceRecord) error {
@@ -1834,7 +1835,7 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts o
 	return s.operatorObservabilitySQLite.ListOperatorRuntimeLogs(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
+func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	return s.agentSQLiteOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
@@ -2062,10 +2063,6 @@ func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, r
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.agentSQLiteOwner.MarkAgentLifecycleDiagnosticProjected(ctx, outboxID, at)
-}
-
 func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
 	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
@@ -2108,6 +2105,10 @@ func (s *SQLiteRuntimeStore) Outcomes(ctx context.Context, deliveryID string) ([
 
 func (s *SQLiteRuntimeStore) PauseRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecycleSQLiteOwner.PauseRunControl(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
+	return s.eventSQLiteOwner.PersistLifecycleDiagnostic(ctx, item, record)
 }
 
 func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runtime.RuntimeLogPersistenceRecord) error {

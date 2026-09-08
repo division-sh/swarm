@@ -14019,7 +14019,9 @@ platform_tables:
             event_name         TEXT NOT NULL,
             payload            JSONB NOT NULL,
             projected_at       TIMESTAMPTZ,
+            projection         JSONB,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((projected_at IS NULL) = (projection IS NULL)),
             INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
         );
     runtime_external_effect_operations:
@@ -35967,6 +35969,26 @@ agent_lifecycle_authority:
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
+    diagnostic_settlement: >-
+      RuntimeLogger constructs the lifecycle diagnostic payload from the immutable outbox agent/run identity rather
+      than the consuming runtime context. The lifecycle producer snapshots its typed diagnostic lineage in the
+      outbox payload using the existing diagnostic-lineage owner; its run must match the immutable agent identity.
+      Later projection retains that lineage and cannot adopt a consuming runtime's lineage.
+      PersistLifecycleDiagnostic validates the exact outbox snapshot and commits
+      the admitted diagnostic-direct event with projected_at and its projection receipt in one selected-store
+      transaction. The receipt retains the event identity, admitted run-or-standalone disposition, canonical payload,
+      timestamp and execution mode. The diagnostic logger's root posture determines mode at first settlement; replay
+      consumes the recorded receipt, never the retry caller's posture or lineage. This non-routed diagnostic mode is
+      not executable authority. Concurrent consumers return the same committed outcome. Missing persistence, conflicting
+      identity or payload, rollback and unreadable acknowledgment evidence cannot acknowledge the row. The independent
+      MarkAgentLifecycleDiagnosticProjected operation is forbidden.
+    diagnostic_history: >-
+      Pending diagnostics retain original run coordinates as audit payload even when cleanup has deleted that run.
+      Under the same transaction, existing runs are protected against concurrent deletion and receive ordinary
+      run-scoped diagnostics; absent runs receive standalone diagnostic-direct events. There is no failed-insert
+      fallback and no synthesized run. An acknowledged outbox replays its retained receipt without requiring the
+      event to remain present, so later cleanup cannot cause log resurrection. Only newly committed projection
+      publishes a process-local recorder notification; recorder notification is not durable acknowledgment authority.
   destructive_cleanup_quiescence:
     runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
     reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.

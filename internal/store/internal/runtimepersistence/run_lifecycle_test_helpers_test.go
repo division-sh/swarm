@@ -391,10 +391,17 @@ func requireRunFixtureForTest(
 	t.Helper()
 	switch store := selected.(type) {
 	case *PostgresStore:
-		bootstrapTestPostgresStore(t, store)
+		if store.requireCurrentSchema() != nil {
+			bootstrapTestPostgresStore(t, store)
+		}
 	case *SQLiteRuntimeStore:
-		if err := store.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
-			t.Fatalf("BootstrapSchema: %v", err)
+		// Run setup consumes the handle's existing schema admission. Tests of
+		// schema drift explicitly call BootstrapSchema rather than revalidating
+		// the entire database for every additional run fixture.
+		if store.requireCurrentSchema() != nil {
+			if err := store.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
+				t.Fatalf("BootstrapSchema: %v", err)
+			}
 		}
 	}
 	if err := materializeRunFixtureForTest(ctx, selected, fixture); err != nil {

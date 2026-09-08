@@ -53,6 +53,10 @@ type catalogRunScopedPublicationSignal struct {
 	runs     map[string]chan<- struct{}
 }
 
+func (l catalogRunScopedPublicationSignal) ProjectLifecycleDiagnostic(ctx context.Context, item runtimediaglog.LifecycleDiagnostic) error {
+	return l.delegate.ProjectLifecycleDiagnostic(ctx, item)
+}
+
 func (l catalogRunScopedPublicationSignal) Log(
 	ctx context.Context,
 	level runtimediaglog.Level,

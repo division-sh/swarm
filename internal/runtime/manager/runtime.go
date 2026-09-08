@@ -959,12 +959,15 @@ func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error 
 }
 
 func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
-	if am == nil || am.bus == nil || am.lifecycle == nil {
+	if am == nil {
 		return nil
 	}
 	store := am.roles.LifecycleDiagnostics
 	if store == nil {
 		return nil
+	}
+	if am.bus == nil || am.lifecycle == nil {
+		return fmt.Errorf("lifecycle diagnostic projector is not configured")
 	}
 	for {
 		items, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
@@ -972,20 +975,7 @@ func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
 			return err
 		}
 		for _, item := range items {
-			detail := make(map[string]any, len(item.Payload)+3)
-			for key, value := range item.Payload {
-				detail[key] = value
-			}
-			detail["outbox_id"] = item.OutboxID
-			detail["operation_id"] = item.OperationID
-			detail["event_name"] = item.EventName
-			if err := am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-				Level: "info", Component: "agent-lifecycle", Action: item.EventName,
-				AgentID: item.AgentID, Detail: detail,
-			}); err != nil {
-				return err
-			}
-			if err := store.MarkAgentLifecycleDiagnosticProjected(ctx, item.OutboxID, time.Now().UTC()); err != nil {
+			if err := am.bus.ProjectLifecycleDiagnostic(ctx, item); err != nil {
 				return err
 			}
 		}

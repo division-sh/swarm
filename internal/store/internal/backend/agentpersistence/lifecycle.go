@@ -13,6 +13,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -268,7 +270,7 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 	return states, nil
 }
 
-func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -289,7 +291,7 @@ func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Co
 	return scanAgentLifecycleDiagnostics(rows)
 }
 
-func (s *AgentSQLiteOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+func (s *AgentSQLiteOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -310,10 +312,10 @@ func (s *AgentSQLiteOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Cont
 	return scanAgentLifecycleDiagnostics(rows)
 }
 
-func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
-	out := make([]runtimemanager.AgentLifecycleDiagnostic, 0)
+func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]diaglog.LifecycleDiagnostic, error) {
+	out := make([]diaglog.LifecycleDiagnostic, 0)
 	for rows.Next() {
-		var item runtimemanager.AgentLifecycleDiagnostic
+		var item diaglog.LifecycleDiagnostic
 		var raw []byte
 		var rawCreatedAt any
 		var runID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
@@ -353,38 +355,12 @@ func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecy
 			return nil, fmt.Errorf("decode lifecycle diagnostic created_at: %w", err)
 		}
 		item.CreatedAt = createdAt
-		if err := json.Unmarshal(raw, &item.Payload); err != nil {
+		if err := canonicaljson.DecodeInto(raw, &item.Payload); err != nil {
 			return nil, fmt.Errorf("decode lifecycle diagnostic payload: %w", err)
 		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
-}
-
-func (s *AgentPostgresOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	res, err := s.backend.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
-	return requireSingleLifecycleDiagnosticProjection(res, err)
-}
-
-func (s *AgentSQLiteOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.backend.RunTransaction(ctx, "sqlite mark lifecycle diagnostic projected", func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = ? WHERE outbox_id = ? AND projected_at IS NULL`, at.UTC(), outboxID)
-		return requireSingleLifecycleDiagnosticProjection(res, err)
-	})
-}
-
-func requireSingleLifecycleDiagnosticProjection(res sql.Result, err error) error {
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return fmt.Errorf("lifecycle diagnostic projection conflict")
-	}
-	return nil
 }
 
 func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -1382,6 +1358,10 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 		req.Now.UTC(), fields.RunID); err != nil {
 		return err
 	}
+	diagnostic, err := lifecycleDiagnosticProducerPayload(ctx, fields.RunID, result)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_lifecycle_diagnostic_outbox (
 			outbox_id, operation_id, agent_id, agent_name_owner,
@@ -1393,8 +1373,23 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 		)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID)
+		fields.FlowInstanceID, fields.FlowInstancePath, string(diagnostic), req.Now.UTC(), fields.RunID)
 	return err
+}
+
+func lifecycleDiagnosticProducerPayload(ctx context.Context, runID string, result runtimemanager.AgentLifecycleTransitionResult) ([]byte, error) {
+	payload := struct {
+		runtimemanager.AgentLifecycleTransitionResult
+		ProducerLineage *runtimecorrelation.RuntimeLineage `json:"producer_lineage,omitempty"`
+	}{AgentLifecycleTransitionResult: result}
+	diagnosticCtx := runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, "", "")
+	if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(diagnosticCtx); ok {
+		if lineage.RunID != runID {
+			return nil, fmt.Errorf("lifecycle diagnostic producer lineage differs from exact run")
+		}
+		payload.ProducerLineage = &lineage
+	}
+	return json.Marshal(payload)
 }
 
 func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
@@ -1448,6 +1443,10 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 		req.Now.UTC(), fields.RunID); err != nil {
 		return err
 	}
+	diagnostic, err := lifecycleDiagnosticProducerPayload(ctx, fields.RunID, result)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_lifecycle_diagnostic_outbox (
 			outbox_id, operation_id, agent_id, agent_name_owner,
@@ -1456,6 +1455,6 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 		) VALUES (?,?,?,?,?,?,?,?,?,'platform.agent_lifecycle_transition',?,?,?)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID)
+		fields.FlowInstanceID, fields.FlowInstancePath, string(diagnostic), req.Now.UTC(), fields.RunID)
 	return err
 }
