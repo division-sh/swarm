@@ -20,8 +20,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 const (
@@ -571,6 +569,13 @@ func releasePathsEqual(left, right string) bool {
 	return leftErr == nil && rightErr == nil && filepath.Clean(resolvedLeft) == filepath.Clean(resolvedRight)
 }
 
+// This is the on-disk wire shape, checked independently of Swarm's decoder.
+type releaseSourceProjectionMarker struct {
+	BundleHash string `json:"bundle_hash"`
+	Identity   string `json:"identity"`
+	Root       string `json:"root"`
+}
+
 func validateReleaseSourceProjection(projectionRoot, admittedRoot, bundleHash, projectionID string) error {
 	if releasePathsEqual(projectionRoot, admittedRoot) {
 		return fmt.Errorf("uses ambient source directory %s", admittedRoot)
@@ -593,12 +598,12 @@ func validateReleaseSourceProjection(projectionRoot, admittedRoot, bundleHash, p
 	if err != nil {
 		return err
 	}
-	var intent sourceartifact.RuntimeProjectionCleanup
+	var intent releaseSourceProjectionMarker
 	if err := json.Unmarshal(marker, &intent); err != nil {
 		return err
 	}
-	if err := intent.Validate(); err != nil {
-		return err
+	if !validReleaseBundleHash(intent.BundleHash) || !validReleaseSourceProjectionID(intent.Identity) {
+		return errors.New("projection marker has invalid source identity")
 	}
 	if intent.Root != envelope || intent.BundleHash != bundleHash || intent.Identity != projectionID {
 		return errors.New("projection marker does not match mounted source identity")
