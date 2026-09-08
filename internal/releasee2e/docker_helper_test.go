@@ -320,6 +320,13 @@ func validateReleaseDockerCommand(root string, args []string) error {
 			return fmt.Errorf("unsupported Docker container removal shape")
 		}
 	case "container":
+		if len(args) == 12 && args[0] == "container" && args[1] == "ls" && args[2] == "--all" &&
+			args[3] == "--filter" && args[4] == "label=dev.swarm.owner=runtime" &&
+			args[5] == "--filter" && strings.HasPrefix(args[6], "label=dev.swarm.bundle_hash=") && validReleaseBundleHash(strings.TrimPrefix(args[6], "label=dev.swarm.bundle_hash=")) &&
+			args[7] == "--filter" && strings.HasPrefix(args[8], "label=dev.swarm.source_projection=") && validReleaseSourceProjectionID(strings.TrimPrefix(args[8], "label=dev.swarm.source_projection=")) &&
+			args[9] == "--format" && args[10] == "{{.ID}}" && args[11] == "--no-trunc" {
+			return nil
+		}
 		want := []string{
 			"container", "ls", "--all",
 			"--filter", "label=dev.swarm.owner=runtime",
@@ -972,9 +979,19 @@ func fakeDockerContainerCommand(root string, args []string) int {
 		return fakeDockerUnexpected(root, args, "unsupported container operation")
 	}
 	var names []string
+	projectionInventory := len(args) == 12
 	withFakeDockerState(root, func(state *fakeDockerState) {
-		for name := range state.Containers {
-			names = append(names, name)
+		for name, container := range state.Containers {
+			if container.Labels["dev.swarm.owner"] != "runtime" {
+				continue
+			}
+			if projectionInventory {
+				if container.Labels["dev.swarm.bundle_hash"] == strings.TrimPrefix(args[6], "label=dev.swarm.bundle_hash=") && container.Labels["dev.swarm.source_projection"] == strings.TrimPrefix(args[8], "label=dev.swarm.source_projection=") {
+					names = append(names, container.ID)
+				}
+			} else if container.Labels["dev.swarm.reset.eligible"] == "true" {
+				names = append(names, name)
+			}
 		}
 	})
 	sort.Strings(names)

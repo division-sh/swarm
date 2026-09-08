@@ -39,9 +39,12 @@ profiles:
       - catalog-required-smoke
       - hitl-llm-full
       - hitl-releasee2e-rest
+      - hitl-releasee2e-burst
       - hitl-releasee2e-invocation
       - runtime-full
-      - serveapp-full
+      - serveapp-channel
+      - serveapp-runtime
+      - serveapp-surfaces
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
@@ -54,12 +57,16 @@ profiles:
     units:
       - catalog-required-inventory
       - catalog-required-verify
-      - catalog-full
+      - catalog-replay
+      - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
+      - hitl-releasee2e-burst
       - hitl-releasee2e-invocation
       - runtime-full
-      - serveapp-full
+      - serveapp-channel
+      - serveapp-runtime
+      - serveapp-surfaces
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
@@ -72,12 +79,16 @@ profiles:
     units:
       - catalog-required-inventory
       - catalog-required-verify
-      - catalog-full
+      - catalog-replay
+      - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
+      - hitl-releasee2e-burst
       - hitl-releasee2e-invocation
       - runtime-full
-      - serveapp-full
+      - serveapp-channel
+      - serveapp-runtime
+      - serveapp-surfaces
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
@@ -90,12 +101,16 @@ profiles:
     units:
       - catalog-required-inventory
       - catalog-required-verify
-      - catalog-full
+      - catalog-replay
+      - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
+      - hitl-releasee2e-burst
       - hitl-releasee2e-invocation
       - runtime-full
-      - serveapp-full
+      - serveapp-channel
+      - serveapp-runtime
+      - serveapp-surfaces
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
@@ -129,6 +144,20 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
+  catalog-replay:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^TestC.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  catalog-runtime:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^(Test($|[^C].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
   hitl-llm-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime/llm
@@ -138,7 +167,14 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^D].*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^DG].*|Golden($|[^A].*|AgentWorkload($|[^B].*)))|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-burst:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestGoldenAgentWorkloadB.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -155,9 +191,24 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  serveapp-full:
+  serveapp-channel:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestC.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-runtime:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^(Test($|[^CS-Z].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-surfaces:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test[S-Z].*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

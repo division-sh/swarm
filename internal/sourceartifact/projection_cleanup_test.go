@@ -7,6 +7,52 @@ import (
 	"testing"
 )
 
+func TestPlannedProjectionAllocatesOnlyAfterExactIntentAdmission(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: planned\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := PlanRuntimeProjection(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(intent.Root); !os.IsNotExist(err) {
+		t.Fatalf("planning allocated before durable admission: %v", err)
+	}
+	if err := SettleRuntimeProjectionCleanup(intent); err != nil {
+		t.Fatal(err)
+	}
+	projection, err := MaterializePlannedRuntimeProjection(artifact, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := projection.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	got, err := projection.CleanupIntent()
+	if err != nil || got != intent {
+		t.Fatalf("materialization replaced the journaled identity: %+v, %v", got, err)
+	}
+	if _, err := MaterializePlannedRuntimeProjection(artifact, intent); err == nil {
+		t.Fatal("duplicate allocation reused an existing projection")
+	}
+	if content, err := os.ReadFile(filepath.Join(projection.PrivateRoot(), "schema.yaml")); err != nil || string(content) != "name: planned\n" {
+		t.Fatalf("duplicate allocation altered admitted source: %q, %v", content, err)
+	}
+	if err := SettleRuntimeProjectionCleanup(intent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(intent.Root); !os.IsNotExist(err) {
+		t.Fatalf("journaled projection remains: %v", err)
+	}
+}
+
 func TestProjectionCleanupIntentSurvivesProcessHandlesWithoutTouchingSuccessor(t *testing.T) {
 	artifactRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {

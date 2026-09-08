@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 )
@@ -37,15 +39,16 @@ func (e *OperationConflictError) Error() string { return ErrOperationConflict.Er
 func (e *OperationConflictError) Unwrap() error { return ErrOperationConflict }
 
 type Operation struct {
-	Request    Request                      `json:"request"`
-	Revision   int64                        `json:"revision"`
-	Phase      OperationPhase               `json:"phase"`
-	SourceSet  *agenttopology.SourceSetPlan `json:"source_set"`
-	Plan       *Result                      `json:"plan,omitempty"`
-	Quiescence *QuiescenceResult            `json:"quiescence,omitempty"`
-	Cleanup    *CleanupResult               `json:"cleanup,omitempty"`
-	Containers *ContainerResetResult        `json:"containers,omitempty"`
-	Response   *ExecutionResult             `json:"response,omitempty"`
+	Request     Request                      `json:"request"`
+	Revision    int64                        `json:"revision"`
+	Phase       OperationPhase               `json:"phase"`
+	SourceSet   *agenttopology.SourceSetPlan `json:"source_set"`
+	Plan        *Result                      `json:"plan,omitempty"`
+	Quiescence  *QuiescenceResult            `json:"quiescence,omitempty"`
+	Cleanup     *CleanupResult               `json:"cleanup,omitempty"`
+	Containers  *ContainerResetResult        `json:"containers,omitempty"`
+	Response    *ExecutionResult             `json:"response,omitempty"`
+	Allocations []SourceProjection           `json:"allocations,omitempty"`
 }
 
 // OperationStore is reset-family authority retained independently of the API
@@ -95,6 +98,31 @@ func (o Operation) Validate() error {
 		if !reflect.DeepEqual(&canonical, o.SourceSet) {
 			return errors.New("reset source-set snapshot is not canonical")
 		}
+	}
+	seenAllocations := make(map[string]bool)
+	seenRoots := make(map[string]bool)
+	for _, predecessor := range o.Request.SourceProjections {
+		seenAllocations[predecessor.Cleanup.Identity] = true
+		seenRoots[predecessor.Cleanup.Root] = true
+	}
+	for _, allocation := range o.Allocations {
+		if err := allocation.Cleanup.Validate(); err != nil {
+			return err
+		}
+		if o.Request.IncludeSourceArtifacts || (o.Phase != PhaseContainersSettled && o.Phase != PhaseCompleted) || seenAllocations[allocation.Cleanup.Identity] || seenRoots[allocation.Cleanup.Root] {
+			return errors.New("invalid reset reconstruction allocation")
+		}
+		found := false
+		if o.SourceSet != nil {
+			for _, source := range o.SourceSet.Sources {
+				found = found || source.BundleHash == allocation.Cleanup.BundleHash
+			}
+		}
+		if !found {
+			return errors.New("reset allocation is outside its admitted source set")
+		}
+		seenAllocations[allocation.Cleanup.Identity] = true
+		seenRoots[allocation.Cleanup.Root] = true
 	}
 	phase := map[OperationPhase]int{PhaseAdmitted: 0, PhasePlanned: 1, PhaseQuiesced: 2, PhaseCleanupCommitted: 3, PhaseContainersSettled: 4, PhaseCompleted: 5}
 	step, ok := phase[o.Phase]
@@ -170,7 +198,11 @@ func ValidateOperationTransition(before, after Operation) error {
 		PhaseContainersSettled: PhaseCompleted,
 	}
 	recordPartialResponse := before.Phase == PhaseCleanupCommitted && after.Phase == before.Phase && before.Response == nil && after.Response != nil
-	if (!recordPartialResponse && next[before.Phase] != after.Phase) || after.Revision != before.Revision+1 ||
+	recordAllocation := before.Phase == PhaseContainersSettled && after.Phase == before.Phase &&
+		len(after.Allocations) == len(before.Allocations)+1 &&
+		slices.Equal(before.Allocations, after.Allocations[:len(before.Allocations)]) && reflect.DeepEqual(before.Response, after.Response)
+	if (!recordPartialResponse && !recordAllocation && next[before.Phase] != after.Phase) || after.Revision != before.Revision+1 ||
+		(!recordAllocation && !reflect.DeepEqual(before.Allocations, after.Allocations)) ||
 		!reflect.DeepEqual(before.Request, after.Request) ||
 		!reflect.DeepEqual(before.SourceSet, after.SourceSet) ||
 		(before.Plan != nil && !reflect.DeepEqual(before.Plan, after.Plan)) ||
@@ -179,6 +211,46 @@ func ValidateOperationTransition(before, after Operation) error {
 		(before.Containers != nil && !reflect.DeepEqual(before.Containers, after.Containers)) ||
 		(before.Response != nil && !reflect.DeepEqual(before.Response, after.Response)) {
 		return errors.New("invalid reset operation transition or rewritten evidence")
+	}
+	return nil
+}
+
+func validateReconstructionEvidence(before, after Operation) error {
+	if err := after.Validate(); err != nil {
+		return err
+	}
+	if len(after.Allocations) < len(before.Allocations) || !slices.Equal(before.Allocations, after.Allocations[:len(before.Allocations)]) {
+		return errors.New("reset reconstruction rewrote allocation history")
+	}
+	expected := before
+	expected.Revision += int64(len(after.Allocations) - len(before.Allocations))
+	expected.Allocations = after.Allocations
+	if !reflect.DeepEqual(expected, after) {
+		return errors.New("reset reconstruction changed immutable operation evidence")
+	}
+	return nil
+}
+
+// RecordProjectionAllocation is serialized by the existing reset operation
+// lease. A lost acknowledgment is reconciled before callers may allocate.
+func RecordProjectionAllocation(ctx context.Context, store OperationStore, id string, allocation SourceProjection) error {
+	before, err := store.ReadResetOperation(ctx, id)
+	if err != nil {
+		return err
+	}
+	after := before
+	after.Revision++
+	after.Allocations = append(append([]SourceProjection(nil), before.Allocations...), allocation)
+	if err := ValidateOperationTransition(before, after); err != nil {
+		return err
+	}
+	if err := store.AdvanceResetOperation(ctx, before, after); err != nil {
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		current, readErr := store.ReadResetOperation(readCtx, id)
+		if readErr != nil || !reflect.DeepEqual(current, after) {
+			return errors.Join(err, readErr)
+		}
 	}
 	return nil
 }

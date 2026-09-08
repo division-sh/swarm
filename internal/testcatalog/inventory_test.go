@@ -278,7 +278,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if !regexp.MustCompile(policy.Units["catalog-required-inventory"].Run).MatchString("TestCatalogExternalProofPartitionsThroughInventory") {
 		t.Fatal("required inventory unit omits the partition mutation proof")
 	}
-	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-invocation"}
+	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst", "hitl-releasee2e-invocation"}
 	var runs []string
 	for _, id := range releaseUnits {
 		unit, ok := policy.Units[id]
@@ -289,6 +289,26 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	}
 	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
 		t.Fatal(err)
+	}
+	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces"}
+	catalogUnits := []string{"catalog-replay", "catalog-runtime"}
+	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
+		var selectors []string
+		for _, id := range ids {
+			unit, ok := policy.Units[id]
+			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+				t.Fatalf("invalid full-coverage partition %s: %+v", id, unit)
+			}
+			selectors = append(selectors, unit.Run)
+		}
+		if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), selectors); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The standalone catalog command still selects the complete unfiltered
+	// package; only CI schedules its disjoint groups on independent workers.
+	if policy.Projections["catalog-full"].Unit != "catalog-full" || policy.Units["catalog-full"].Run != "" {
+		t.Fatal("standalone catalog projection no longer covers the full package")
 	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
 	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
@@ -309,12 +329,14 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 				t.Errorf("profile %s omits %s", profileName, id)
 			}
 		}
-		catalogUnit := "catalog-full"
+		expectedCatalogUnits := catalogUnits
 		if profileName == testplanning.ProfilePRCommon {
-			catalogUnit = "catalog-required-smoke"
+			expectedCatalogUnits = []string{"catalog-required-smoke"}
 		}
-		if !containsString(profile.Units, catalogUnit) {
-			t.Errorf("profile %s omits %s", profileName, catalogUnit)
+		for _, id := range append(append([]string{}, serveUnits...), expectedCatalogUnits...) {
+			if !containsString(profile.Units, id) {
+				t.Errorf("profile %s omits %s", profileName, id)
+			}
 		}
 		plan, err := testplanning.BuildPlan(policy, model, planPackages, profileName, "catalog CI owner guard", "issue-2143")
 		if err != nil {
