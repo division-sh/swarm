@@ -137,7 +137,7 @@ func TestSelectedForkReceiverEngineAgreementBothStores(t *testing.T) {
 					go func() {
 						defer close(done)
 						_, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
-							SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ConfirmSourceFreeze: true,
+							SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 							SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 							ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 							AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},

@@ -92,7 +92,7 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), servedProofPollDeadline)
 	defer cancel()
 	result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: frontierEventID, ConfirmSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+		SourceRunID: sourceRunID, At: frontierEventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 		},

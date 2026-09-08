@@ -113,7 +113,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 30*time.Second)
 				defer cancel()
 				request := runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: seed.RunID, At: frontier, ConfirmSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 					},

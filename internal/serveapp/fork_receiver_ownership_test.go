@@ -490,7 +490,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Error("fork changed source business notices")
 		}
 	}()
-	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "ownership-fork"}
+	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "ownership-fork"}
 	if option.afterSource != nil {
 		option.afterSource(t, rt, selected, root, seed.RunID, frontier, receivers)
 		return
@@ -512,7 +512,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		beforeRefusal := snapshotForkReceiverApplication(t, rt)
 		for attempt := 0; attempt < 2; attempt++ {
 			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: frontier, ConfirmSourceFreeze: true, ExpectedBundleHash: selectedHash,
+				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
 				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
@@ -625,7 +625,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			}
 			requireReceiverPublicReadback(t, rt, seed.RunID)
 			before := snapshotForkReceiverApplication(t, rt)
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "capability-fork"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
 				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
 				details, ok := rpcErr.Data["details"].(map[string]any)
@@ -946,7 +946,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 						t.Error("business fork changed settled source domain or companions")
 					}
 				}()
-				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "business-fork"}
+				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "business-fork"}
 				var fork, replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {

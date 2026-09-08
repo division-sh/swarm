@@ -149,7 +149,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					if after := snapshotOwnershipCounts(t, f, materialized.ForkRunID); after != before {
 						t.Fatalf("exact replay wrote facts: before=%v after=%v", before, after)
 					}
-					if _, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true}); err == nil {
+					if _, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true}); err == nil {
 						t.Fatal("state-only activation accepted source advancement")
 					} else if _, fact, ok := runForkReplayResumeBlockerFromError(err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced {
 						t.Fatalf("activation refused for wrong reason: %v", err)

@@ -51,7 +51,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
 				staged, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-					SourceRunID: catalogRuntimeRunID, At: event.ID(), ConfirmSourceFreeze: true,
+					SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
 					Owner:        selectedContractExecutionOwnerForCatalogHarness(t, h, stopAfterSelectedForkCommit{forkStore}),
 					SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				})
@@ -83,7 +83,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				}
 				before := selectedForkRecoveredPhysicalSnapshot(t, ctx, h, child)
 				activated, err := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
-					ForkRunID: child, ConfirmSourceFreeze: true, Store: selected,
+					ForkRunID: child, AllowSourceFreeze: true, Store: selected,
 					ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
 				})
 				if change == "valid" || change == "reconstructed_store" {
