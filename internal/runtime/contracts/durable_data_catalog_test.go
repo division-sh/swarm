@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestStaticDataCatalogUsesExactOwningFlowAndFreezesBytes(t *testing.T) {
@@ -48,6 +51,41 @@ func TestStaticDataCatalogUsesExactOwningFlowAndFreezesBytes(t *testing.T) {
 	for _, item := range bundle.StaticData() {
 		if !bytes.Equal(item.Content, []byte("same bytes\n")) {
 			t.Fatalf("compiled static bytes changed with source filesystem: %#v", item)
+		}
+	}
+}
+
+func TestStaticDataArtifactReconstructionIgnoresOriginalRoot(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := filepath.Join(t.TempDir(), "source")
+	if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "internal/releasee2e/testdata/static_data_invocation"))); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "data/resume.md"), []byte("different generation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := sourceartifact.DecodeLogical(artifact.LogicalBlob())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owned := range []*sourceartifact.AdmittedSourceArtifact{artifact, decoded} {
+		bundle, err := LoadWorkflowContractBundleFromArtifact(repo, owned, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(owned.LogicalBlob(), artifact.LogicalBlob()) || owned.BundleHash() != artifact.BundleHash() || !reflect.DeepEqual(bundle.StaticData(), baseline.StaticData()) {
+			t.Fatal("reconstruction changed hash, labels, static IDs, digests or bytes")
 		}
 	}
 }

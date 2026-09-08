@@ -166,6 +166,8 @@ jobs:
         run: go test ./internal/store/internal/runtimepersistence -run '^TestSQLiteProcessCapability(File|Coordinate)ReplacementTerminalizesIdleOwner$' -count=1
       - name: Prove read-only status remains possession-free
         run: go test ./internal/cliapp -run '^TestStoreStatusReads(CurrentSQLiteStoreWithoutMutationBootstrap|SelectedStoreOwnershipWithoutContextInference)$' -count=1
+      - name: Prove selected-root aliases preserve strict source admission
+        run: go test ./internal/cliapp ./internal/sourceartifact -run '^(TestSourceRootSelectionAliasMatrix|TestStaticDataCatalogInvocationInvariance|TestResolveCLISourcePlatformSpecPaths.*|TestCLIContractPathResolutionIgnoresLegacyContractsDir|TestRunCommandLocalForegroundConsumesServeOwnerAndV1API|TestStartLocalRunServeConsumesPositionalSourceOwner|TestAdmissionLinksDoNotChangeWithSelectedRootSpelling|TestAdmitDirectoryRejectsIncludedSymlinkBeforeClassification|TestExcludedNameIsNeverOpened)$' -count=1
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
 

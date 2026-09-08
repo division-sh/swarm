@@ -1,0 +1,16 @@
+name: static-data-invocation
+stages:
+  pending: {initial: true}
+  reading: {}
+  child_reading: {}
+  complete: {terminal: true}
+pins:
+  inputs:
+    events:
+      - {event: read.requested, source: external}
+      - child.completed
+  outputs:
+    events: [child.requested]
+connect:
+  - {event: child.requested, from: ., to: registry}
+  - {event: child.completed, from: registry, to: .}

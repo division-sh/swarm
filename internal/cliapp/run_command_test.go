@@ -62,12 +62,16 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")
+	if err := os.Mkdir(filepath.Join(repo, "contracts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantSource := mustInvocationRootForTest(filepath.Join(repo, "contracts")).Path()
 	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.SourceRoot != filepath.Join(repo, "contracts") || serveOpts.DataSource != "" {
+		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.SourceRoot != wantSource || serveOpts.DataSource != "" {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		if serveOpts.Verbose {
@@ -184,6 +188,9 @@ func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
+	if err := os.Mkdir(configContracts, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"platform_spec_path": configPlatform,
@@ -213,8 +220,8 @@ func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	}
 	stop()
 	serveOpts := <-serveStarted
-	if serveOpts.SourceRoot != configContracts {
-		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, configContracts)
+	if want := mustInvocationRootForTest(configContracts).Path(); serveOpts.SourceRoot != want {
+		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, want)
 	}
 	if serveOpts.PlatformSpecPath != configPlatform {
 		t.Fatalf("platform spec path = %q, want %q", serveOpts.PlatformSpecPath, configPlatform)
@@ -240,6 +247,9 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
+	if err := os.Mkdir(configContracts, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"platform_spec_path": configPlatform,

@@ -13,6 +13,10 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
 	sourceRoot := filepath.Join(t.TempDir(), "source")
+	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantSource := mustInvocationRootForTest(sourceRoot).Path()
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"platform_spec_path": configPlatform,
@@ -24,8 +28,8 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 	if err != nil {
 		t.Fatalf("resolve paths: %v", err)
 	}
-	if got.SourceRoot != sourceRoot {
-		t.Fatalf("source path = %q, want %q", got.SourceRoot, sourceRoot)
+	if got.SourceRoot != wantSource {
+		t.Fatalf("source path = %q, want %q", got.SourceRoot, wantSource)
 	}
 	if got.PlatformSpecPath != configPlatform {
 		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, configPlatform)
@@ -48,8 +52,8 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 		if err != nil {
 			t.Fatalf("resolve omitted source: %v", err)
 		}
-		if got.SourceRoot != repo {
-			t.Fatalf("omitted source root = %q, want invocation cwd %q", got.SourceRoot, repo)
+		if want := mustInvocationRootForTest(repo).Path(); got.SourceRoot != want {
+			t.Fatalf("omitted source root = %q, want invocation cwd %q", got.SourceRoot, want)
 		}
 	})
 }
@@ -58,6 +62,9 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	isolateCLIAPIConfigEnv(t)
 	outsideRepo := t.TempDir()
 	sourceRoot := filepath.Join(t.TempDir(), "contracts")
+	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	chdirForTest(t, outsideRepo)
 
@@ -67,8 +74,8 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	if err != nil {
 		t.Fatalf("resolve paths: %v", err)
 	}
-	if got.SourceRoot != sourceRoot {
-		t.Fatalf("contracts path = %q, want %q", got.SourceRoot, sourceRoot)
+	if want := mustInvocationRootForTest(sourceRoot).Path(); got.SourceRoot != want {
+		t.Fatalf("contracts path = %q, want %q", got.SourceRoot, want)
 	}
 	want, err := EmbeddedPlatformSpecPath()
 	if err != nil {
@@ -105,8 +112,8 @@ func TestCLIContractPathResolutionIgnoresLegacyContractsDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve paths: %v", err)
 	}
-	if got.SourceRoot != repo {
-		t.Fatalf("source path = %q, want invocation root %q; SWARM_CONTRACTS_DIR must not be a CLI source", got.SourceRoot, repo)
+	if want := mustInvocationRootForTest(repo).Path(); got.SourceRoot != want {
+		t.Fatalf("source path = %q, want invocation root %q; SWARM_CONTRACTS_DIR must not be a CLI source", got.SourceRoot, want)
 	}
 }
 

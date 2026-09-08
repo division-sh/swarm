@@ -36241,6 +36241,10 @@ filesystem_source_model:
   local_root_selection:
     default: the captured invocation directory
     current_directory_spelling: omission or dot (`.`)
+    selected_root_aliases: |
+      ResolveSourceRoot requires a nonempty absolute invocation coordinate already owned by the CLI; it never consults ambient cwd. Relative operands are projected from that coordinate without lexically collapsing parent traversals before resolving symlinks. The selected root is canonicalized once, resolving symlink aliases (including ancestor aliases), and must be an existing directory. Missing, broken, cyclic, or file-valued selections fail closed. Omission and dot retain the captured invocation-directory authority. This selection rule does not relax included-member no-follow admission or promise transactional filesystem selection.
+    invocation_invariance: |
+      With effective config and platform inputs fixed, relative/absolute operands under or outside cwd, omission/dot, explicit root aliases, and symlinked invocation directories selecting the same tree have identical verification outcomes, bundle hashes, catalog labels, static-data IDs, and static content. Host paths in diagnostics are not semantic identity. Catalog reconstruction and runtime read_flow_data consume admitted bytes, not the original directory.
     rule: |
       Omission and `.` select exactly the captured invocation directory. One positional root is the only alternate. There is no ancestor, repository, manifest, package, config, environment, selected-context, or inferred-project fallback. For `swarm test`, the first positional slot is always the root; targeting one scenario from cwd therefore uses `swarm test . <scenario-label>`.
     source_aware_commands:
