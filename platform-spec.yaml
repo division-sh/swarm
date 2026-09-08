@@ -14675,9 +14675,15 @@ platform_tables:
       description: >-
         Append-only state transitions for exact revocable runtime-generation grants issued
         by the retained process capability. A grant binds one runtime instance, generation,
-        immutable source artifact hash, and complete source-set revision. Copied evidence is not
-        authority and every readiness/execution/lifecycle admission re-proves the retained
-        selected-store session.
+        immutable source artifact hash, and exactly one authority variant. Ordinary grants bind
+        a complete source-set revision. Selected-fork grants instead bind the exact durable
+        selected binding, fork run, runtime execution generation, execution owner, fence and
+        admission/container/actor/configuration fingerprints. They do not consume the live
+        source-set head. Copied evidence is not authority: issuance and every selected-grant
+        transition/use verify a claimed running selected execution against its immutable binding and target
+        run coordinate in the selected store. Retirement records terminal grant evidence even
+        when the selected execution has already ended; it never authorizes successor work.
+        Every readiness/execution/lifecycle admission also re-proves the retained process session.
       ddl: |
         CREATE TABLE runtime_generation_grants (
             fact_id               UUID PRIMARY KEY,
@@ -14689,10 +14695,16 @@ platform_tables:
             bundle_hash           TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             runtime_instance_id   UUID NOT NULL,
             runtime_generation    BIGINT NOT NULL CHECK (runtime_generation > 0),
-            source_set_revision   TEXT NOT NULL,
+            source_set_revision   TEXT,
+            selected_binding_id   UUID REFERENCES run_fork_selected_contract_bindings(binding_id),
+            selected_fork_run_id   UUID REFERENCES runs(run_id),
+            selected_execution_id  UUID,
             snapshot              JSONB NOT NULL,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (grant_id, state_version),
+            UNIQUE (selected_execution_id, state_version),
+            CHECK ((source_set_revision IS NOT NULL AND source_set_revision <> '' AND selected_binding_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_id IS NULL) OR (source_set_revision IS NULL AND selected_binding_id IS NOT NULL AND selected_fork_run_id IS NOT NULL AND selected_execution_id IS NOT NULL)),
+            FOREIGN KEY (selected_execution_id, selected_fork_run_id, runtime_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
             INDEX idx_runtime_generation_grant_head (grant_id, state_version),
             INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );

@@ -67,6 +67,10 @@ func (*supervisorTestRetainedSession) RecordGenerationGrantTransition(context.Co
 	return nil
 }
 
+func (*supervisorTestRetainedSession) ProveSelectedForkGenerationGrant(context.Context, runtimestartupownership.GrantEvidence) error {
+	return errors.New("ordinary supervisor test session has no selected-fork execution authority")
+}
+
 func (s *supervisorTestRetainedSession) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

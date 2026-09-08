@@ -225,6 +225,12 @@ func (s *postgresSession) RecordGenerationGrantTransition(ctx context.Context, p
 	})
 }
 
+func (s *postgresSession) ProveSelectedForkGenerationGrant(ctx context.Context, evidence runtimestartupownership.GrantEvidence) error {
+	return s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return proveSelectedForkGrantTx(txctx, tx, evidence, false)
+	})
+}
+
 func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -264,6 +270,9 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 func (s *postgresSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := storeagent.AuthorizeRetainedGrantLifecycleTx(txctx, tx, req, false); err != nil {
+			return err
+		}
 		var err error
 		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
 		return err
@@ -391,6 +400,12 @@ func (s *sqliteSession) RecordGenerationGrantTransition(ctx context.Context, pre
 	})
 }
 
+func (s *sqliteSession) ProveSelectedForkGenerationGrant(ctx context.Context, evidence runtimestartupownership.GrantEvidence) error {
+	return s.owner.backend.RunTransaction(ctx, "prove selected-fork generation grant", func(txctx context.Context, tx *sql.Tx) error {
+		return proveSelectedForkGrantTx(txctx, tx, evidence, true)
+	})
+}
+
 func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
@@ -419,6 +434,9 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(context.Context, runtimedes
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err := s.owner.backend.RunTransaction(ctx, "commit retained agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+		if err := storeagent.AuthorizeRetainedGrantLifecycleTx(txctx, tx, req, true); err != nil {
+			return err
+		}
 		var err error
 		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
 		return err
@@ -686,6 +704,11 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	if err := next.Validate(); err != nil {
 		return err
 	}
+	if next.SelectedFork != nil && next.State != runtimestartupownership.GrantRetired {
+		if err := storeagent.ProveSelectedForkGenerationGrantTx(ctx, tx, next, sqlite); err != nil {
+			return err
+		}
+	}
 	loadCurrent := `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = ? ORDER BY state_version DESC LIMIT 1`
 	if !sqlite {
 		loadCurrent = `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = $1::uuid ORDER BY state_version DESC LIMIT 1 FOR UPDATE`
@@ -731,10 +754,16 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	if err != nil {
 		return err
 	}
+	var selectedBindingID, selectedRunID, selectedExecutionID any
+	if next.SelectedFork != nil {
+		selectedBindingID = next.SelectedFork.BindingID
+		selectedRunID = next.SelectedFork.ForkRunID
+		selectedExecutionID = next.SelectedFork.ExecutionID
+	}
 	if sqlite {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at,selected_binding_id,selected_fork_run_id,selected_execution_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, nullableString(next.SourceSetRevision), string(raw), time.Now().UTC(), selectedBindingID, selectedRunID, selectedExecutionID)
 	} else {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::uuid,$9,$10,$11::jsonb,$12)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, next.SourceSetRevision, string(raw), time.Now().UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_generation_grants (fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,runtime_instance_id,runtime_generation,source_set_revision,snapshot,created_at,selected_binding_id,selected_fork_run_id,selected_execution_id) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::uuid,$9,$10,$11::jsonb,$12,$13::uuid,$14::uuid,$15::uuid)`, uuid.NewString(), next.GrantID, next.ProcessAuthorityID, next.ProcessOwnerID, next.StateVersion, string(next.State), next.BundleHash, next.RuntimeInstanceID, next.RuntimeGeneration, nullableString(next.SourceSetRevision), string(raw), time.Now().UTC(), selectedBindingID, selectedRunID, selectedExecutionID)
 	}
 	return err
 }

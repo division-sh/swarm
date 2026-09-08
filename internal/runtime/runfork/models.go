@@ -557,6 +557,7 @@ type RunForkSelectedContractBindingRequest struct {
 
 type RunForkSelectedContractBinding struct {
 	Owner             string                   `json:"owner"`
+	BindingID         string                   `json:"binding_id"`
 	ForkRunID         string                   `json:"fork_run_id"`
 	SourceRunID       string                   `json:"source_run_id"`
 	ForkEventID       string                   `json:"fork_event_id"`

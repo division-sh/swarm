@@ -113,6 +113,10 @@ func (s *retainedSessionProbe) RecordGenerationGrantTransition(_ context.Context
 	return err
 }
 
+func (s *retainedSessionProbe) ProveSelectedForkGenerationGrant(context.Context, GrantEvidence) error {
+	return errors.New("test retained session has no selected-fork execution authority")
+}
+
 func (s *retainedSessionProbe) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

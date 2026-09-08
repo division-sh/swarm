@@ -110,6 +110,10 @@ func (s *runtimeTestRetainedSession) RecordGenerationGrantTransition(_ context.C
 	return nil
 }
 
+func (*runtimeTestRetainedSession) ProveSelectedForkGenerationGrant(context.Context, runtimestartupownership.GrantEvidence) error {
+	return errors.New("normal-runtime test session has no selected-fork execution authority")
+}
+
 func (s *runtimeTestRetainedSession) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
