@@ -274,17 +274,8 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.ErrRevisionConflict
 		}
 		coordinateOnlyTerminalRebind := req.RebindCoordinate != nil && op.Phase == domain.PhaseSucceeded && req.Phase == op.Phase
-		credentialStaleReset := op.Phase == domain.PhaseAwaitingOperatorConfirmation && req.Phase == domain.PhasePreparing &&
-			req.ClearIdentityOperationID && req.ClearBindingRevision && !req.RetainBindingRevision &&
-			req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
-		boundCredentialStaleReset := (op.Phase == domain.PhaseAwaitingOperatorConfirmation || op.Phase == domain.PhasePublishingActivation) &&
-			req.Phase == domain.PhasePreparing && req.ClearIdentityOperationID && !req.ClearBindingRevision && req.RetainBindingRevision &&
-			op.BindingRevision > 0 && req.ReplaceCredentialAdmissions && len(req.CredentialAdmissions) == 0
-		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !credentialStaleReset && !boundCredentialStaleReset {
+		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind {
 			return domain.ErrConflict
-		}
-		if (req.ClearIdentityOperationID || req.ClearBindingRevision || req.RetainBindingRevision) && !credentialStaleReset && !boundCredentialStaleReset {
-			return domain.ErrInvalidRequest
 		}
 		var reboundActivation *domain.ConnectedChannelActivation
 		if req.RebindCoordinate != nil && !op.Coordinate.Matches(*req.RebindCoordinate) {
@@ -318,14 +309,8 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if strings.TrimSpace(req.IdentityOperationID) != "" {
 			op.IdentityOperationID = strings.TrimSpace(req.IdentityOperationID)
 		}
-		if req.ClearIdentityOperationID {
-			op.IdentityOperationID = ""
-		}
 		if req.BindingRevision > 0 {
 			op.BindingRevision = req.BindingRevision
-		}
-		if req.ClearBindingRevision {
-			op.BindingRevision = 0
 		}
 		if strings.TrimSpace(req.ConfirmationOperationID) != "" {
 			op.ConfirmationOperationID = strings.TrimSpace(req.ConfirmationOperationID)

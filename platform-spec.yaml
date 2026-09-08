@@ -9406,10 +9406,32 @@ tool_model:
         proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
         trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
         pending identity ceremony as credential_stale; its parent onboarding responsibility releases the old admissions,
-        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. If currentness changes
+        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. One selected-store
+        pending-reset decision serves public confirmation, live retry, and local recovery, admitting either
+        awaiting_external_identity or awaiting_operator_confirmation only for the parent's exact durably stale child.
+        It verifies child back-reference, principal, interface, and admitted credential evidence before cleanup and again
+        under the same parent revision before reset commits; admissions remain durable until cleanup completes.
+        An inherited bound-reset revision must match that stale reconnect child's expected predecessor and the exact
+        current binding, and survives every repeated pending reset. Without an inherited obligation the revision remains
+        zero. A pending stale child never creates a bound revision or proof, and cannot authorize a publishing-phase reset.
+        Missing, contradictory, retired, or superseded ownership fails closed; an old stale replay cannot reset a new child.
+        Generic advance/clear flags do not authorize this reset. If currentness changes
         after the child commits bound but before its parent publishes activation, the parent likewise releases the old
         admissions and resets while retaining the exact bound revision; fresh evidence may then create only an exact
-        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb. After
+        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb.
+        Live drive and local recovery consume one confirmed-child reconciliation decision, including an existing child
+        confirmed before its parent's awaiting_external_identity phase advances, irrespective of the journey verb.
+        The selected-store owner
+        admits its checkpoint or reset only under the exact active parent revision, validating the child's parent,
+        principal, interface, committed binding, and predecessor revision against the current binding in the same
+        parent-locked transaction. A zero parent binding revision is a valid uncheckpointed handoff, not evidence that
+        no binding committed; after a fresh reconnect the parent may likewise still carry that exact child's predecessor
+        revision. Unrelated child/binding revisions and retired parents cannot authorize reconciliation. Cleanup retains
+        checkpointed admissions until completion and revalidates the same selected-store handoff before reset commits.
+        The retained revision requires a fresh claimant and operator confirmation whether its old credential evidence
+        now compares current or successfully stale, including original-value restoration at the same key. Observation
+        errors do not authorize reset. Pending or failed proof responsibility prevents activation publication and remains
+        a new-ceremony fence after reset; exact terminal confirmation replay may complete it. After
         same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.

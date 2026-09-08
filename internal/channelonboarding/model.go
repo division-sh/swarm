@@ -550,12 +550,28 @@ type AdvanceRequest struct {
 	BindingRevision              int64
 	ConfirmationOperationID      string
 	ClearConfirmationOperationID bool
-	ClearIdentityOperationID     bool
-	ClearBindingRevision         bool
-	RetainBindingRevision        bool
 	FailureCode                  string
 	FailureMessage               string
 	Now                          time.Time
+}
+
+// ReconcileBindingRequest fences the committed identity handoff before either
+// checkpointing it or resetting its unpublished parent for a fresh ceremony.
+type ReconcileBindingRequest struct {
+	OperationID             string
+	ExpectedRevision        int64
+	ExpectedBindingRevision int64
+	ResetCredentials        bool
+	Now                     time.Time
+}
+
+// PendingResetRequest validates the exact stale-child responsibility before
+// cleanup, then revalidates it when Commit clears the completed responsibility.
+type PendingResetRequest struct {
+	OperationID      string
+	ExpectedRevision int64
+	Commit           bool
+	Now              time.Time
 }
 
 type ActivationStatus string
@@ -613,6 +629,8 @@ type Store interface {
 	GetChannelOnboarding(context.Context, string) (Operation, error)
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 	AdvanceChannelOnboarding(context.Context, AdvanceRequest) (Operation, error)
+	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)
+	ResetChannelOnboardingPendingIdentity(context.Context, PendingResetRequest) (Operation, error)
 	PublishConnectedChannelActivation(context.Context, PublishActivationRequest) (Operation, ConnectedChannelActivation, error)
 	GetConnectedChannelActivation(context.Context, string) (ConnectedChannelActivation, error)
 	ListCurrentConnectedChannelActivations(context.Context) ([]ConnectedChannelActivation, error)
