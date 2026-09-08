@@ -439,7 +439,7 @@ func catalogRequireSecondRun(t testing.TB, h *runtimeHarness, runID string) {
 }
 
 func catalogRunContext(h *runtimeHarness, runID string) context.Context {
-	return runtimecorrelation.WithRunID(h.ctx, runID)
+	return worklifetime.WithProcess(runtimecorrelation.WithRunID(h.ctx, runID), h.processOwner)
 }
 
 func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {

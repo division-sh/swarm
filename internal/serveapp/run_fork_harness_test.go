@@ -507,6 +507,7 @@ func runForkSelectedExecutionContext(ctx context.Context, bundleHash string) (co
 		return ctx, nil, err
 	}
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, owner)
+	ctx = worklifetime.WithProcess(ctx, process)
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash))
 	settle := func() error {

@@ -135,7 +135,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				_, err = family.Materialize(ctx, runfork.RunForkMaterializeRequest{SourceRunID: seed.RunID, At: at})
 				requireHistoricalRefusal(err)
 				result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: seed.RunID, At: at, ConfirmSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+					SourceRunID: seed.RunID, At: at, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rt.BundleHash},
 					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
@@ -182,7 +182,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true,
+				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true,
 				AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission,
 				RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
 			})
@@ -191,7 +191,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal("direct selected activation accepted corrupt R")
 			}
 			recovered, err := family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true, SourceLoader: loader,
+				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, SourceLoader: loader,
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
 			})
 			requireHistoricalRefusal(err)

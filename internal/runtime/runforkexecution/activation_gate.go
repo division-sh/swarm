@@ -47,7 +47,7 @@ type SelectedContractActivationGateResult struct {
 	ForkEvents                         []SelectedContractExecutionForkEvent                   `json:"fork_events,omitempty"`
 }
 
-func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
+func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (out SelectedContractActivationGateResult, finalErr error) {
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires fork run_id")
@@ -249,6 +249,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			return result, err
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
+		operation, err := beginSelectedContractOperation(ctx)
+		if err != nil {
+			return result, err
+		}
+		defer func() { finalErr = errors.Join(finalErr, operation.Finish()) }()
 		if req.AgentRuntime.ProcessCapability == nil {
 			return result, errors.New("selected-contract activation requires process capability before readiness binding")
 		}
@@ -262,6 +267,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return result, err
 		}
+		defer func() { finalErr = errors.Join(finalErr, agentRuntime.releaseWorkspaceProjection()) }()
 		prepared, err := readiness.Projection()
 		if err != nil {
 			return result, err
@@ -273,7 +279,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return result, err
 		}
+		ctx = operation.Context()
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+			Operation:             operation,
 			Owner:                 req.ExecutionOwner,
 			Admission:             admission,
 			LoadedSource:          loadedSource,
@@ -289,6 +297,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
+		ctx = operation.Context()
 		containerProof := container.Proof()
 		result.ForkLocalRuntimeContainer = &containerProof
 		published, err := container.Publish(ctx)

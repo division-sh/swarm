@@ -54,7 +54,7 @@ type SelectedContractExecutionResult struct {
 	ForkEvents                         []SelectedContractExecutionForkEvent               `json:"fork_events,omitempty"`
 }
 
-func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
+func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {
 	ports, err := req.Owner.require()
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
@@ -119,6 +119,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, fmt.Errorf("register selected-contract author activity descriptors: %w", err)
 	}
 	defer descriptorLease.Release()
+	operation, err := beginSelectedContractOperation(ctx)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
+	defer func() { finalErr = errors.Join(finalErr, operation.Finish()) }()
 	plan, err := ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),
@@ -178,7 +183,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
 		}, err
 	}
-	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
+	defer func() { finalErr = errors.Join(finalErr, agentRuntime.releaseWorkspaceProjection()) }()
 	if req.AgentRuntime.ProcessCapability == nil {
 		return SelectedContractExecutionResult{}, errors.New("selected-contract execution requires process capability before materialization")
 	}
@@ -201,6 +206,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
+	ctx = operation.Context()
 	agentRuntime, err = agentRuntime.bindRun(materialization.ForkRunID, materialization.AgentTopologies)
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -231,9 +237,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		DeferredWorkAdmission: deferredWorkAdmission,
 	})
 	if err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+		Operation:             operation,
 		Owner:                 req.Owner,
 		Admission:             admission,
 		LoadedSource:          loadedSource,
@@ -254,6 +261,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			AgentRuntimeMaterialization:        &agentRuntime.Proof,
 		}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
+	ctx = operation.Context()
 	containerProof := container.Proof()
 	published, err := container.Publish(ctx)
 	if err != nil {
@@ -343,13 +351,14 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 	if store == nil || strings.TrimSpace(forkRunID) == "" {
 		return cause
 	}
-	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID); err != nil {
-		return fmt.Errorf("%w; cleanup selected-contract fork %s: %v", cause, forkRunID, err)
+	if err := store.DiscardMaterializedSelectedContractExecutionFork(context.WithoutCancel(ctx), forkRunID); err != nil {
+		return errors.Join(cause, fmt.Errorf("cleanup selected-contract fork %s: %w", forkRunID, err))
 	}
 	return cause
 }
 
 type publishSelectedContractForkEventsRequest struct {
+	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner
 	Admission             runfork.RunForkSelectedContractExecutionAdmission
 	LoadedSource          LoadedSelectedContractSource

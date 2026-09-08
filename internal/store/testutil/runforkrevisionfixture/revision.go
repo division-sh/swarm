@@ -39,3 +39,15 @@ func Capture(ctx context.Context, tx *sql.Tx, runID string, families ...Family) 
 	}
 	return results[runID].Revision, nil
 }
+
+func CaptureSQLite(ctx context.Context, tx *sql.Tx, runID string, families ...Family) (int64, error) {
+	effects := private.NewEffects()
+	if err := effects.Add(runID, families...); err != nil {
+		return 0, err
+	}
+	results, err := private.FinalizeSQLite(ctx, tx, effects)
+	if err != nil {
+		return 0, err
+	}
+	return results[runID].Revision, nil
+}

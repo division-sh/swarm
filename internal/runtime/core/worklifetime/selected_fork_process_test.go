@@ -179,10 +179,9 @@ func TestSelectedForkWorkProjectsOwningProcess(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				selected, err = loaded.NewSelectedFork(foreign, identity)
-			} else {
-				selected, err = process.NewSelectedFork(foreign, identity)
+				foreign = WithRuntimeOccurrence(foreign, loaded)
 			}
+			selected, err = process.NewSelectedFork(foreign, identity)
 			if err != nil {
 				t.Fatal(err)
 			}

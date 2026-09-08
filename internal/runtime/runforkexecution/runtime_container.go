@@ -74,9 +74,12 @@ type selectedContractForkLocalRuntimeContainer struct {
 	runtimeInstanceID string
 }
 
-func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (selectedContractForkLocalRuntimeContainer, error) {
+func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (out selectedContractForkLocalRuntimeContainer, finalErr error) {
 	if err := ctx.Err(); err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
+	}
+	if req.Operation == nil {
+		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires its admitted operation")
 	}
 	ports, err := req.Owner.require()
 	if err != nil {
@@ -190,6 +193,11 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err := validateSelectedContractAgentExecutionSelections(profile, req.AgentRuntime.Records); err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
+	bundleHash := req.LoadedSource.SourceArtifactFact.BundleHash()
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.RuntimeInstanceID) == "" || scope.BundleHash != bundleHash {
+		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires exact selected bundle scope")
+	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 		DeclarationPlan: req.AgentRuntime.Declarations,
 		Admission:       req.Admission, ContainerPlanFingerprint: containerFingerprint,
@@ -203,6 +211,12 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
+	defer func() {
+		if finalErr != nil {
+			failed := selectedContractForkLocalRuntimeContainer{ports: ports, authority: authority}
+			finalErr = errors.Join(finalErr, failed.Fail(ctx, finalErr))
+		}
+	}()
 	proof.RuntimeExecutionID = issued.ExecutionID
 	proof.RuntimeGeneration = issued.Generation
 	proof.AuthorityExecutionOwner = authorityOwner
@@ -210,16 +224,16 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	bundleHash := req.LoadedSource.SourceArtifactFact.BundleHash()
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
 		bundleHash, nil)
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.RuntimeInstanceID) == "" || scope.BundleHash != bundleHash {
-		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires exact selected bundle scope")
+	if err := req.Operation.Bind(worklifetime.SelectedForkIdentity{
+		ExecutionID: issued.ExecutionID, RunID: forkRunID, Generation: issued.Generation,
+	}); err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	return selectedContractForkLocalRuntimeContainer{
 		proof: proof, req: req, ports: ports, authority: authority, admission: admission,
@@ -248,23 +262,16 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 	return c.proof
 }
 
-func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) ([]SelectedContractExecutionForkEvent, error) {
+func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) (published []SelectedContractExecutionForkEvent, finalErr error) {
 	req := c.req
 	req.RuntimeInstanceID = c.runtimeInstanceID
-	parent, ok := worklifetime.RuntimeOccurrenceFromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("selected-contract fork requires an acquired runtime occurrence")
+	forkOwner := req.Operation.selected
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok || forkOwner == nil || owner != forkOwner || forkOwner.Identity() != (worklifetime.SelectedForkIdentity{
+		ExecutionID: c.proof.RuntimeExecutionID, RunID: req.ForkRunID, Generation: c.proof.RuntimeGeneration,
+	}) {
+		return nil, errors.New("selected-contract publication requires its exact bound operation context")
 	}
-	forkOwner, err := parent.NewSelectedFork(ctx, worklifetime.SelectedForkIdentity{
-		ExecutionID: c.proof.RuntimeExecutionID,
-		RunID:       req.ForkRunID,
-		Generation:  c.proof.RuntimeGeneration,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create selected-fork process occurrence: %w", err)
-	}
-	defer func() { _ = forkOwner.RetireAndWait(context.Background()) }()
-	ctx = worklifetime.WithOccurrence(ctx, forkOwner)
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
 	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
@@ -348,15 +355,25 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	defer cancelRuntime()
 	heartbeatErr := make(chan error, 1)
 	stopHeartbeat := make(chan struct{})
+	heartbeatDone := make(chan error, 1)
 	var stopHeartbeatOnce sync.Once
-	stopHeartbeatWork := func() { stopHeartbeatOnce.Do(func() { close(stopHeartbeat) }) }
-	defer stopHeartbeatWork()
+	var heartbeatJoinErr error
+	stopHeartbeatWork := func() {
+		stopHeartbeatOnce.Do(func() {
+			close(stopHeartbeat)
+			heartbeatJoinErr = <-heartbeatDone
+		})
+	}
 	heartbeatLease, err := forkOwner.Begin(runCtx)
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-fork heartbeat: %w", err)
 	}
+	defer func() {
+		stopHeartbeatWork()
+		finalErr = errors.Join(finalErr, heartbeatJoinErr)
+	}()
 	go func() {
-		defer func() { _ = heartbeatLease.Done() }()
+		defer func() { heartbeatDone <- heartbeatLease.Done() }()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -387,7 +404,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if agentRuntime != nil {
 		defer func() {
 			if !agentRuntimeStopped {
-				_ = agentRuntime.Shutdown()
+				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
 			}
 		}()
 	}

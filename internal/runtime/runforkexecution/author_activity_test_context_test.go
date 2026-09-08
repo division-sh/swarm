@@ -89,6 +89,8 @@ func testGatewayWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 func runForkTestContext(t testing.TB) context.Context {
 	t.Helper()
 	ctx := worklifetime.WithOccurrence(context.Background(), testGatewayWorkOwner(t))
+	fixture, _ := runForkTestWorkFixtures.Load(t)
+	ctx = worklifetime.WithProcess(ctx, fixture.(*runForkTestWorkFixture).process)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(
 		ctx,

@@ -22,7 +22,7 @@ import (
 
 func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
-		for _, change := range []string{"valid", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
+		for _, change := range []string{"valid", "runtime_replacement", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				root := selectedForkReadinessCatalogFixture(t, 1, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
@@ -70,6 +70,10 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						h.pg = storetest.AdmitPostgresRuntimeStore(t, h.db)
 					}
 					selected = runScopedCatalogStore(t, h)
+				} else if change == "runtime_replacement" {
+					if err := h.rt.Shutdown(); err != nil {
+						t.Fatalf("retire loaded runtime before selected recovery: %v", err)
+					}
 				} else if change == "terminal_run" {
 					if _, err := selected.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: child, Reason: "terminal recovery refusal", ControlledBy: "cataloge2e"}); err != nil {
 						t.Fatal(err)
@@ -86,7 +90,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					ForkRunID: child, AllowSourceFreeze: true, Store: selected,
 					ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
 				})
-				if change == "valid" || change == "reconstructed_store" {
+				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" {
 					if err != nil || !activated.Activated || activated.ExecutedEventCount != 1 {
 						logSelectedForkRecoveryFailure(t, ctx, h, child, err)
 						t.Fatalf("lawful persisted recovery: %#v, %v", activated, err)

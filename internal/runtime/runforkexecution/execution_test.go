@@ -708,6 +708,9 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
+	if _, err := testGatewayWorkOwner(t).RetireAndWait(ctx); err != nil {
+		t.Fatalf("retire unrelated loaded runtime before selected execution: %v", err)
+	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -2650,6 +2653,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		t.Fatal(err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+		Operation: selectedContractOperationForTest(t, ctx),
 		Admission: admission, RecipientPlanning: planning, Owner: selectedContractExecutionOwnerForTest(t, selected),
 		LoadedSource: LoadedSelectedContractSource{
 			Selection:          selection,
@@ -3025,9 +3029,11 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	}
 	for _, contender := range contenders {
 		contender := contender
+		operation := selectedContractOperationForTest(t, ctx)
 		go func() {
 			<-start
 			req := baseRequest
+			req.Operation = operation
 			req.Owner = selectedContractExecutionOwnerForTest(t, contender.store)
 			container, buildErr := buildSelectedContractForkLocalRuntimeContainer(ctx, req)
 			results <- contenderResult{surface: contender.surface, container: container, store: contender.store, err: buildErr}

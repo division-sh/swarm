@@ -1006,22 +1006,6 @@ type SelectedForkOccurrence struct {
 	process    *Process
 }
 
-func (r *RuntimeOccurrence) NewSelectedFork(ctx context.Context, identity SelectedForkIdentity) (*SelectedForkOccurrence, error) {
-	if r == nil {
-		return nil, errors.New("runtime occurrence is required")
-	}
-	if err := identity.validate(); err != nil {
-		return nil, err
-	}
-	parentLease, err := r.BeginStanding(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("admit selected-fork occurrence: %w", err)
-	}
-	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
-	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity, process: r.process}, nil
-}
-
 func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIdentity) (*SelectedForkOccurrence, error) {
 	if p == nil {
 		return nil, errors.New("process work owner is required")
