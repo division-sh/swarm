@@ -42,6 +42,7 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 		Now: func() time.Time { return now },
 	}
 
+	installCoordinatorOperationFixture(t, coord)
 	got, err := coord.Execute(context.Background(), Request{OperationID: destructiveResetOperationID, ActorTokenID: "operator", RequestHash: "hash"})
 	if err != nil {
 		t.Fatalf("Execute error = %v", err)

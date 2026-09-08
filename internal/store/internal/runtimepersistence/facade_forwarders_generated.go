@@ -118,6 +118,10 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	return s.destructiveResetPostgresOwner.ApplyDestructiveResetCleanup(ctx, req)
 }
 
+func (s *PostgresStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	return s.runLifecyclePostgresOwner.ApplyDestructiveResetQuiescence(ctx, req)
+}
+
 func (s *PostgresStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {
 	return s.runLifecyclePostgresOwner.ApplyServeAbandonActiveRunQuiescence(ctx, at)
 }
@@ -1344,6 +1348,10 @@ func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts
 
 func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req runquiescence.Request) (runquiescence.Result, error) {
 	return s.runLifecycleSQLiteOwner.ApplyActiveRunQuiescence(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	return s.runLifecycleSQLiteOwner.ApplyDestructiveResetQuiescence(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {

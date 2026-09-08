@@ -249,6 +249,16 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if !req.Result.DryRun {
+			previous, err := storeadmin.ReadResetCleanupTx(txctx, tx, req)
+			if err != nil {
+				return err
+			}
+			if previous != nil {
+				result = *previous
+				return nil
+			}
+		}
 		if topology != nil {
 			if _, err := commitSourceSetTx(txctx, tx, *topology, false); err != nil {
 				return err
@@ -256,6 +266,9 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 		}
 		var err error
 		result, err = storeadmin.ApplyDestructiveResetCleanupInRetainedTransaction(s.owner.destructiveReset, txctx, tx, req)
+		if err == nil && !req.Result.DryRun {
+			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, false)
+		}
 		return err
 	})
 	return result, err

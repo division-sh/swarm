@@ -74,7 +74,8 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 			Reader: family.Inventory(), Containers: req.RuntimeSupervisor,
 		}}
 		caps.ResetCoordinator = &runtimedestructivereset.Coordinator{
-			Planner: planner, Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
+			Operations: req.ProcessCapability,
+			Planner:    planner, Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
 			Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: req.ProcessCapability}},
 			Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: req.RuntimeSupervisor}, RuntimeContexts: req.RuntimeSupervisor,
 		}

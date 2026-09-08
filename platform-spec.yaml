@@ -12799,6 +12799,8 @@ platform_tables:
       - Schema, auth/idempotency-like, operator/system, authored product config/topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - 'Admitted source retention is request-scoped by `runtime.nuke.include_source_artifacts`: `false` preserves `source_artifacts`; `true` deletes `source_artifacts` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted-source run remains outside the cleanup plan.'
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
+      - runtime_reset_operations survives cleanup. The retained process capability owns reset admission and immutable phase receipts independently of the API completion cache. Keyed retries bind the original actor, key and request hash; unkeyed admission has a fresh UUID. Conflicts and completed-result replay precede context withdrawal or fresh inventory.
+      - Reset quiescence commits its exact previous-status outcome with cancellation in the existing run-lifecycle transaction. Cleanup commits its receipt with deletion and any empty-source-topology mutation in the retained process transaction. Callers cannot advance either effect phase through a separate journal save.
     classifications:
       delete_by_event_join:
         - event_receipts
@@ -12862,6 +12864,7 @@ platform_tables:
         - standing_services
         - runs
       preserve:
+        - runtime_reset_operations
         - runtime_store_metadata
         - resource_declarations
         - resource_bundle_declarations
@@ -13738,6 +13741,25 @@ platform_tables:
             reason TEXT NOT NULL,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
+        );
+    runtime_reset_operations:
+      description: >-
+        Reset-family durable identity, immutable plan and exact phase outcomes, independent of
+        the API idempotency cache. Keyed admission binds actor and key permanently; unkeyed
+        admission uses a fresh operation UUID. At most one unfinished reset owns active_slot.
+        Cleanup evidence commits in the same retained-process transaction as cleanup and topology.
+        Historical completed outcomes never confer current-process runtime availability.
+      ddl: |
+        CREATE TABLE runtime_reset_operations (
+            operation_id UUID PRIMARY KEY,
+            actor_token_id TEXT NOT NULL,
+            idempotency_key TEXT,
+            revision BIGINT NOT NULL CHECK (revision > 0),
+            phase TEXT NOT NULL CHECK (phase IN ('admitted','planned','quiesced','cleanup_committed','containers_settled','completed')),
+            active_slot INTEGER UNIQUE CHECK (active_slot = 1),
+            record JSONB NOT NULL,
+            UNIQUE (actor_token_id, idempotency_key),
+            CHECK ((phase = 'completed' AND active_slot IS NULL) OR (phase <> 'completed' AND active_slot IS NOT NULL AND active_slot = 1))
         );
     agent_topology_source_set_head:
       description: >-
@@ -35033,7 +35055,7 @@ api_specification:
       description: |
         Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
-        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -> complete-context admission withdrawal and join -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
+        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences durable operation admission/replay -> complete-context admission withdrawal and join -> persisted plan -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
       scope:
         required:
         - control:runtime

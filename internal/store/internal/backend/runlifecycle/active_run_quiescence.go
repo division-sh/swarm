@@ -15,6 +15,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -45,6 +46,10 @@ func (s *RunLifecycleSQLiteOwner) ApplyServeAbandonActiveRunQuiescence(ctx conte
 }
 
 func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request) (runtimerunquiescence.Result, error) {
+	return s.applyActiveRunQuiescence(ctx, req, nil)
+}
+
+func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest) (runtimerunquiescence.Result, error) {
 	if s == nil || s.backend == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("postgres store is required")
 	}
@@ -77,7 +82,7 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 	}
 
 	runIDs := normalizeQuiescenceRunIDs(req.RunIDs)
-	if len(runIDs) == 0 && !req.AllActiveRuns {
+	if len(runIDs) == 0 && !req.AllActiveRuns && reset == nil {
 		return out, nil
 	}
 
@@ -106,7 +111,7 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 		return runtimerunquiescence.Result{}, err
 	}
 	runIDs = quiescenceRunIDs(runs)
-	if len(runIDs) == 0 {
+	if len(runIDs) == 0 && reset == nil {
 		return out, nil
 	}
 	active := []runtimedelivery.Snapshot{}
@@ -191,6 +196,11 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 	if err := story.Finalize(ctx); err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
+	if reset != nil {
+		if err := adminpersistence.CommitResetQuiescenceTx(ctx, tx, *reset, destructiveResetQuiescenceResult(out), false); err != nil {
+			return runtimerunquiescence.Result{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("commit active run quiescence tx: %w", err)
 	}
@@ -199,6 +209,10 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 }
 
 func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request) (runtimerunquiescence.Result, error) {
+	return s.applyActiveRunQuiescence(ctx, req, nil)
+}
+
+func (s *RunLifecycleSQLiteOwner) applyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest) (runtimerunquiescence.Result, error) {
 	if s == nil || s.backend == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("sqlite runtime store is required")
 	}
@@ -231,7 +245,7 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 	}
 
 	requestedRunIDs := normalizeQuiescenceRunIDs(req.RunIDs)
-	if len(requestedRunIDs) == 0 && !req.AllActiveRuns {
+	if len(requestedRunIDs) == 0 && !req.AllActiveRuns && reset == nil {
 		return out, nil
 	}
 
@@ -250,7 +264,7 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 			return err
 		}
 		attemptRunIDs := quiescenceRunIDs(runs)
-		if len(attemptRunIDs) == 0 {
+		if len(attemptRunIDs) == 0 && reset == nil {
 			out = attemptOut
 			return nil
 		}
@@ -330,6 +344,9 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 			}
 		}
 		out = attemptOut
+		if reset != nil {
+			return adminpersistence.CommitResetQuiescenceTx(txctx, tx, *reset, destructiveResetQuiescenceResult(out), true)
+		}
 		return nil
 	}); err != nil {
 		return runtimerunquiescence.Result{}, err
