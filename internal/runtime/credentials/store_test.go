@@ -273,21 +273,77 @@ func TestFileStoreDeleteWithReceiptCannotDeleteSuccessorOccurrence(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	firstEvidence, err := SealCurrentValue(ctx, store, first.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, err := store.AdmitWithReceipt(ctx, "channel.telegram.provider", "second", "operation-b/provider")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if deleted, err := store.DeleteWithReceipt(ctx, first.Key, first.Receipt); err != nil || deleted {
+	secondEvidence, err := SealCurrentValue(ctx, store, second.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := store.DeleteWithReceiptAndSeal(ctx, first.Key, first.Receipt, firstEvidence.Seal); err != nil || deleted {
 		t.Fatalf("stale delete = %v, %v; want false, nil", deleted, err)
 	}
 	if value, found, err := store.Get(ctx, second.Key); err != nil || !found || value != "second" {
 		t.Fatalf("successor after stale delete = %q, %v, %v", value, found, err)
 	}
-	if deleted, err := store.DeleteWithReceipt(ctx, second.Key, second.Receipt); err != nil || !deleted {
+	if deleted, err := store.DeleteWithReceiptAndSeal(ctx, second.Key, second.Receipt, secondEvidence.Seal); err != nil || !deleted {
 		t.Fatalf("current delete = %v, %v; want true, nil", deleted, err)
 	}
 	if _, found, err := store.Get(ctx, second.Key); err != nil || found {
 		t.Fatalf("credential after current delete found=%v err=%v", found, err)
+	}
+}
+
+func TestReceiptDeleteCannotDeleteSameReceiptSuccessor(t *testing.T) {
+	for _, posture := range []string{"file", "overlay"} {
+		t.Run(posture, func(t *testing.T) {
+			ctx := context.Background()
+			file, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var store Store = file
+			if posture == "overlay" {
+				store = NewOverlayStore(nil, file)
+			}
+			writer := store.(ReceiptWriter)
+			deleter := store.(ReceiptDeleter)
+			const key = "channel.telegram.provider"
+			const receipt = "operation/provider"
+			first, err := writer.AdmitWithReceipt(ctx, key, "first-token", receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstEvidence, err := SealCurrentValue(ctx, store, first.Key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deleted, err := deleter.DeleteWithReceiptAndSeal(ctx, first.Key, first.Receipt, firstEvidence.Seal); err != nil || !deleted {
+				t.Fatalf("remove first occurrence = %v, %v", deleted, err)
+			}
+			second, err := writer.AdmitWithReceipt(ctx, key, "corrected-token", receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondEvidence, err := SealCurrentValue(ctx, store, second.Key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deleted, err := deleter.DeleteWithReceiptAndSeal(ctx, first.Key, first.Receipt, firstEvidence.Seal); err != nil || deleted {
+				t.Fatalf("stale same-receipt delete = %v, %v; want false, nil", deleted, err)
+			}
+			if value, found, err := store.Get(ctx, second.Key); err != nil || !found || value != "corrected-token" {
+				t.Fatalf("same-receipt successor = %q found=%v err=%v", value, found, err)
+			}
+			if deleted, err := deleter.DeleteWithReceiptAndSeal(ctx, second.Key, second.Receipt, secondEvidence.Seal); err != nil || !deleted {
+				t.Fatalf("exact successor delete = %v, %v", deleted, err)
+			}
+		})
 	}
 }
 

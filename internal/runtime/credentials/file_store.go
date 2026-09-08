@@ -169,11 +169,14 @@ func (s *FileStore) Delete(_ context.Context, key string) error {
 	})
 }
 
-func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt string) (bool, error) {
+func (s *FileStore) DeleteWithReceiptAndSeal(_ context.Context, key, receipt string, seal ValueSeal) (bool, error) {
 	key = strings.TrimSpace(key)
 	receipt = strings.TrimSpace(receipt)
 	if key == "" || receipt == "" {
 		return false, fmt.Errorf("credential key and write receipt are required")
+	}
+	if err := (ValueEvidence{Key: key, Seal: seal}).Validate(); err != nil {
+		return false, fmt.Errorf("credential cleanup value seal is invalid: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -185,6 +188,13 @@ func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt string) (b
 		}
 		item, found := doc.Entries[key]
 		if !found || strings.TrimSpace(item.Receipt) != receipt {
+			return nil
+		}
+		matches, err := valueMatchesSealInDocument(doc, key, item.Value, seal)
+		if err != nil {
+			return fmt.Errorf("validate credential cleanup value seal: %w", err)
+		}
+		if !matches {
 			return nil
 		}
 		delete(doc.Entries, key)
@@ -271,19 +281,12 @@ func (s *FileStore) currentValueMatchesSeal(_ context.Context, evidence ValueEvi
 	if err != nil {
 		return false, err
 	}
-	key, err := decodeValueSealKey(doc.ValueSealKey)
+	item, found := doc.Entries[strings.TrimSpace(evidence.Key)]
+	matches, err := valueMatchesSealInDocument(doc, evidence.Key, item.Value, evidence.Seal)
 	if err != nil {
 		return false, fmt.Errorf("%w: restore the credential key home and repeat the channel identity ceremony", err)
 	}
-	item, found := doc.Entries[strings.TrimSpace(evidence.Key)]
-	if !found {
-		return false, nil
-	}
-	if !credentialValueUsable(item.Value) {
-		return false, nil
-	}
-	want := credentialValueSeal(key, evidence.Key, item.Value)
-	return subtleSealEqual(want, evidence.Seal), nil
+	return found && credentialValueUsable(item.Value) && matches, nil
 }
 
 func (s *FileStore) observedValueMatchesSeal(ctx context.Context, evidence ValueEvidence, value string) (bool, error) {
@@ -335,9 +338,17 @@ func (s *FileStore) matchExactValue(_ context.Context, key, value string, seal V
 	if err != nil {
 		return false, err
 	}
-	sealKey, err := decodeValueSealKey(doc.ValueSealKey)
+	matches, err := valueMatchesSealInDocument(doc, key, value, seal)
 	if err != nil {
 		return false, fmt.Errorf("%w: restore the credential key home and repeat the channel identity ceremony", err)
+	}
+	return matches, nil
+}
+
+func valueMatchesSealInDocument(doc fileCredentialSet, key, value string, seal ValueSeal) (bool, error) {
+	sealKey, err := decodeValueSealKey(doc.ValueSealKey)
+	if err != nil {
+		return false, err
 	}
 	return subtleSealEqual(credentialValueSeal(sealKey, strings.TrimSpace(key), value), seal), nil
 }
