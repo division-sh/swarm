@@ -9,7 +9,7 @@ import (
 )
 
 func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
-	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter", "activity"} {
+	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter", "activity", "mailbox", "artifact"} {
 		for _, safe := range []bool{false, true} {
 			name := consumer + "/unsafe"
 			value := `entity.profile.note`
@@ -32,6 +32,10 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 					handler.Filter = &rc.FilterSpec{ItemsFrom: "payload.items", Condition: value + ` == "fallback"`, StoreAs: "computed.filtered"}
 				case "activity":
 					handler.Activity = rc.ActivitySpec{Tool: "notify", Input: map[string]rc.ExpressionValue{"value": rc.CELExpression(value)}}
+				case "mailbox":
+					handler.Action = rc.ActionSpec{ID: "mailbox_write", Mailbox: &rc.MailboxWriteSpec{Summary: rc.CELExpression(value)}}
+				case "artifact":
+					handler.Action = rc.ActionSpec{ID: "artifact_repo_commit", ArtifactRepo: &rc.ArtifactRepoSpec{Namespace: rc.CELExpression(value)}}
 				}
 				source := collectionItemSemanticsSource(handler)
 				bundle, _ := semanticview.Bundle(source)
@@ -66,6 +70,26 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 					}
 				}
 			})
+		}
+	}
+}
+
+func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
+	for _, safe := range []bool{false, true} {
+		expression := `entity.profile.note`
+		if safe {
+			expression = `entity.profile.?note.orValue("fallback")`
+		}
+		plan := rc.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "review", Context: map[string]rc.ExpressionValue{"note": rc.CELExpression(expression)}, Outcomes: map[string]rc.WorkflowGateOutcomePlan{"accept": {AdvancesTo: "complete"}}}
+		bundle := stageGateValidationBundle(plan, nil, nil)
+		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
+		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}}
+		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
+		if safe && len(findings) != 0 {
+			t.Fatalf("safe gate context: %#v", findings)
+		}
+		if !safe && (len(findings) != 1 || !strings.Contains(findings[0].Message, "presence decision")) {
+			t.Fatalf("unsafe gate context: %#v", findings)
 		}
 	}
 }
