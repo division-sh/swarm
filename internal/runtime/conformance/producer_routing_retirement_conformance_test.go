@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testcatalog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,11 +36,12 @@ type producerRoutingRetirementLedger struct {
 }
 
 type producerRoutingRetirementLedgerRow struct {
-	ID          string `yaml:"id"`
-	Path        string `yaml:"path"`
-	Event       string `yaml:"event"`
-	Disposition string `yaml:"disposition"`
-	Proof       string `yaml:"proof"`
+	ID             string `yaml:"id"`
+	Path           string `yaml:"path"`
+	Event          string `yaml:"event"`
+	Disposition    string `yaml:"disposition"`
+	Proof          string `yaml:"proof"`
+	RetiredFixture string `yaml:"retired_fixture,omitempty"`
 }
 
 func TestProducerRoutingRetirementLedger(t *testing.T) {
@@ -54,6 +56,14 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 		t.Fatalf("historical evidence is not commit-qualified: %#v", ledger)
 	}
 	testEntrypoints := repositoryTestEntrypoints(t, repoRoot)
+	inventory, err := testcatalog.Load(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures := map[string]testcatalog.Fixture{}
+	for _, fixture := range inventory.Fixtures {
+		fixtures[fixture.RelativePath] = fixture
+	}
 	wantDispositionCounts := map[string]int{
 		"harness": 93, "negative_removal": 39, "dead_removal": 47,
 		"same_flow": 7, "external": 3, "historical_connect": 8,
@@ -75,6 +85,18 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			baseProof := strings.Split(strings.TrimSpace(row.Proof), "/")[0]
 			if _, exists := testEntrypoints[baseProof]; !exists {
 				t.Fatalf("proof %q does not identify an actual TestXxx entrypoint", row.Proof)
+			}
+			if row.RetiredFixture != "" {
+				fixture, exists := fixtures[row.RetiredFixture]
+				if !exists || fixture.Metadata.Disposition != testcatalog.DispositionRetired ||
+					fixture.Metadata.Retirement == nil ||
+					!strings.HasPrefix(row.Path, row.RetiredFixture+"/") ||
+					row.Proof != "TestStaticMultiEntityRetirementConformance" ||
+					!strings.Contains(fixture.Metadata.Retirement.Replacement, row.Proof) {
+					t.Fatalf("row %s has invalid retired-fixture replacement evidence: %#v", row.ID, row)
+				}
+				// The checks below still prove routing removal in the historical
+				// source. The replacement does not execute this retired fixture.
 			}
 			if row.Disposition == "same_flow" || row.Disposition == "external" {
 				if _, exists := testEntrypoints[strings.TrimSpace(row.Proof)]; !exists {

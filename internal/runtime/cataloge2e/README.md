@@ -16,14 +16,14 @@ SWARM_CATALOG_E2E_DEBUG=1 go test ./internal/runtime/cataloge2e -run '^TestTier1
 
 | Family / tier | Proof owner | Semantic proof | Tier |
 |---|---|---|---|
-| Required catalog inventory | `internal/testcatalog.TestCatalogRequiredInventory` | strict 155-row discovery, canonical claim coverage, disposition taxonomy, structural ownership guards | required PR proof |
+| Required catalog inventory | `internal/testcatalog.TestCatalogRequiredInventory` | strict 157-row discovery, canonical claim coverage, disposition taxonomy, structural ownership guards | required PR proof |
 | Required supported verify | `internal/cliapp.TestCatalogRequiredVerifyAll` | supported verification of every fixture plus exact teaching diagnostics and protocol-only companion accounting | required PR proof |
 | Required catalog smoke | `TestCatalogRequiredSmoke` | startup policy, boot warning truth, assertion harness behavior, and one real PostgreSQL runtime fixture | required PR smoke |
 | SQLite local smoke | `.github/workflows/ci.yml` `sqlite-local-dev` | no-selector CLI run on default SQLite using `examples/routing/root-ingress` | required PR smoke |
 | Catalog assertion harness | `assertions_test.go`, `assertions_harness_test.go` | causal entity lookup, handler outcome recognition, emitted-event assertion rules | required PR smoke through `TestCatalogRequiredSmoke`; full conformance also runs the focused tests |
 | Startup policy | `startup_policy_test.go` | strict/runtime catalog startup policy and warning-fixture authoritative startup truth | required PR smoke through `TestCatalogRequiredSmoke`; full conformance also runs the focused tests |
-| Replay-clean ordinary runtime | `TestCatalogReplayClean_SelectedStores`, 94 fixtures across tiers 1, 3-7, and 9-11 | one immutable transcript, exact operation outcomes and fixture assertions, causal event/delivery/dead-letter bytes, real PostgreSQL/SQLite stores, and reopen stability | full conformance/manual/nightly; sole ordinary runtime executor |
-| Replay-clean census | `TestCatalogReplayCleanCensus` | exact 98 = 94 + 2 selected-contract fork + 1 direct tool + 1 boot-only ownership, with structural exclusion from the replay primitive | required structural proof |
+| Replay-clean ordinary runtime | `TestCatalogReplayClean_SelectedStores1`, `...2`, `...3`, 94 fixtures across tiers 1, 3-7, and 9-11 | one immutable transcript, exact operation outcomes and fixture assertions, causal event/delivery/dead-letter bytes, real PostgreSQL/SQLite stores, and reopen stability | full conformance/manual/nightly; sole ordinary runtime executor |
+| Replay-clean census | `TestCatalogReplayCleanCensus` | exact 99 = 94 replay fixtures + 5 explicitly excluded runtime fixtures, with structural exclusion from the replay primitive | required structural proof |
 | Tier routing ownership | `TestTier*CanonicalRoutingOwnership` | direct canonical-routing registry checks only; no fixture execution or conformance credit | structural ownership proof |
 | Tier 8 boot verification | `tier8_boot_e2e_test.go`, `tests/tier8-boot-verification` | bootverify/runtime startup agreement for success, warning, and error fixtures | full conformance/manual/nightly; targeted warning truth is included in required smoke |
 | Tier 11 probe | `tier11_probe_test.go` | diagnostic output around Tier 11 fixtures | no conformance credit; manual debug only |
