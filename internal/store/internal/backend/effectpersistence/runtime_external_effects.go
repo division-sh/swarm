@@ -372,6 +372,11 @@ func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.Chann
 }
 
 func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	var err error
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
@@ -435,6 +440,11 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 }
 
 func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	var err error
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
@@ -1448,6 +1458,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 		return "", fmt.Errorf("external effect operation requires exact author activity bundle scope")
 	}
 	bundleHash := strings.TrimSpace(scope.BundleHash)
+	if preparation := authority.StartupProbe.Preparation; preparation != nil && bundleHash != preparation.BundleHash {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with selected preparation")
+	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && bundleHash != strings.TrimSpace(authority.ForkChat.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with forkchat source bundle")
 	}
@@ -1458,6 +1471,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 }
 
 func externalEffectStartupAuthorityID(authority runtimeeffects.Authority) string {
+	if preparation := authority.StartupProbe.Preparation; preparation != nil {
+		return preparation.ProcessAuthorityID
+	}
 	if authority.Kind == runtimeeffects.AuthorityServeRegistration {
 		return authority.ServeRegistration.StartupAuthorityID
 	}

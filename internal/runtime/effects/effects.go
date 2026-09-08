@@ -1184,6 +1184,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if !ok {
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 	}
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return Attempt{}, err
+		}
+	}
 	if !c.executionPosture.Valid() {
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_missing", "external-effects", "authorize_attempt", map[string]any{
 			"action": "execute_external_effect", "adapter": strings.TrimSpace(req.Adapter),
@@ -1274,6 +1279,13 @@ func startupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, au
 	}
 	switch authority.Kind {
 	case AuthorityStartupProbe:
+		if preparation := authority.StartupProbe.Preparation; preparation != nil {
+			return authority.Valid() && surface.Authority.Preparation != nil &&
+				*surface.Authority.Preparation == *preparation &&
+				surface.Authority.ID == authority.StartupProbe.ProbeID &&
+				surface.ActorID == authority.StartupProbe.ActorID &&
+				surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID
+		}
 		return surface.Authority.ID == authority.StartupProbe.ProbeID &&
 			surface.Authority.ExecutionKind == managedcapabilities.ExecutionKind(authority.StartupProbe.ExecutionKind) &&
 			surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID

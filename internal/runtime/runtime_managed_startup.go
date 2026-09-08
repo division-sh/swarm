@@ -52,7 +52,7 @@ func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupown
 		EffectAuthority: func(probeID, actorID string) (runtimeeffects.Authority, error) {
 			effectAuthority := runtimeeffects.Authority{
 				Kind: runtimeeffects.AuthorityStartupProbe, ID: strings.TrimSpace(probeID),
-				ExecutionOwner: authority.ProcessOwnerID, LeaseExpiresAt: time.Now().UTC().Add(15 * time.Minute), FenceGeneration: authority.RuntimeGeneration,
+				ExecutionOwner: authority.ProcessOwnerID, LeaseExpiresAt: time.Now().UTC().Add(managedProviderStartupProbeLease), FenceGeneration: authority.RuntimeGeneration,
 				ExecutionMode: runtimeeffects.ExecutionMode(rt.ExecutionPosture.RootMode()),
 				StartupProbe: runtimeeffects.StartupProbeAuthority{
 					ProbeID: probeID, StartupAuthorityID: authority.GrantID, StartupStateVersion: authority.StateVersion,
