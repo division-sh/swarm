@@ -489,7 +489,11 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 			}
 		case "container_remove":
 			if len(record.Args) == 3 && record.Args[0] == "rm" && record.Args[1] == "--force" {
-				removed[record.Args[2]]++
+				name, ok := state.ContainerIDs[record.Args[2]]
+				if !ok {
+					t.Fatalf("projection teardown did not select a created immutable Docker object: %v", record.Args)
+				}
+				removed[name]++
 			}
 		}
 	}

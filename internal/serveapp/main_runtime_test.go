@@ -465,17 +465,27 @@ func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.Ter
 func TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailure(t *testing.T) {
 	settlementErr := errors.New("ownership session is terminal")
 	stopped := false
+	rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
+	hash := runtimeContextTestHash("a")
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
+		Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	supervisor := &processLifecycleSupervisor{
 		processCapability: terminalSourceSetCapability{err: settlementErr},
-		runtimeContexts:   &runtimepkg.RuntimeContextManager{},
-		currentRT:         &runtimepkg.Runtime{},
+		runtimeContexts:   manager,
+		currentRT:         rt,
 		shutdownRuntime: func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
 			stopped = true
 			return nil
 		},
 	}
 
-	err := supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
+	err = supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
 	if !errors.Is(err, settlementErr) {
 		t.Fatalf("shutdown error = %v, want settlement error", err)
 	}

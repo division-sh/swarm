@@ -350,7 +350,7 @@ func scanRunForkRevisionPhysicalWriters(t *testing.T, root string) map[string]st
 				continue
 			}
 			if rel == "internal/store/internal/adminpersistence/destructive_reset_cleanup.go" && fn.Name.Name == "destructiveResetCleanupStatementsForTable" {
-				// This closed builder shares a predicate between count and delete.
+				// This closed SQL constructor shares a predicate between count and delete.
 				// Census its actual table cases instead of losing dynamic targets
 				// from a scanner that only recognizes literal DELETE FROM names.
 				body, err := os.ReadFile(path)
@@ -360,7 +360,7 @@ func scanRunForkRevisionPhysicalWriters(t *testing.T, root string) map[string]st
 				function := productionFunctionBody(t, string(body), fn.Name.Name)
 				for _, required := range []string{`from := quoteIdent(table) + " AS target WHERE " + fmt.Sprintf(predicate, runSet)`, `count: "SELECT COUNT(*) FROM " + from`, `out.delete = "DELETE FROM " + from`} {
 					if !strings.Contains(function, required) {
-						t.Fatalf("reset cleanup builder changed its scope construction: missing %s", required)
+						t.Fatalf("reset cleanup SQL changed its scope construction: missing %s", required)
 					}
 				}
 				ast.Inspect(fn.Body, func(node ast.Node) bool {
