@@ -213,7 +213,7 @@ func retireChannelOnboardingParent(t *testing.T, store channelOnboardingConfirma
 		RequestHash: "confirmation-retire-input-" + parent.OperationID, Kind: channelonboarding.TeardownContextRetirement,
 		PrincipalID: parent.PrincipalID,
 		Scope: channelonboarding.TeardownScope{
-			BundleHash: parent.Coordinate.BundleHash, BundleSource: parent.Coordinate.BundleSource,
+			BundleHash:                   parent.Coordinate.BundleHash,
 			ContextPublicationGeneration: parent.Coordinate.ContextPublicationGeneration,
 		},
 		RequestedAt: now,
