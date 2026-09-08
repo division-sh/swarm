@@ -16433,6 +16433,13 @@ run_model:
         or nonterminal evidence fails closed without changing PlanRunFork membership or readiness. Fresh
         source-advancement validation is likewise an activation safety owner and is not answered from the historical
         snapshot.
+        Shared fork current-row readers decode PostgreSQL native timestamps and SQLite timestamp text through the same
+        timestamp-value decoder, preserving exact UTC instants and stored precision. Terminal activity evidence requires
+        valid nonzero started_at, completed_at and updated_at values; decoding does not relax recorded-result reuse or
+        approved-effect policy. Exact repeated fan-out materialization requires valid nonzero outcome created_at values
+        and SQL NULL lease_expires_at and last_served_at. Any non-NULL claim/service time remains a conflict, including
+        empty or zero representations; malformed timestamp values fail closed. No timestamp is replaced with a default,
+        used to select historical membership, or discarded to admit advanced child state.
       retention: >-
         The thirteen authoritative source families remain available while a live dependent fork requires them. A named
         operation that retains the run while deleting current governed facts MUST retain prior revision authority and
