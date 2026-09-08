@@ -63,9 +63,7 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 }
 
 func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, func(subscriber Subscriber) bool {
-		return subscriber.routeSource != subscriberRouteSourceConnectRoutePlan
-	})
+	return r.resolve(evt, independentPubsubSubscriber)
 }
 
 func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber) bool) deliveryRoutingResult {

@@ -303,7 +303,7 @@ func assertRouteEvidenceStampedConsumers(t testing.TB, source semanticview.Sourc
 	if err != nil {
 		t.Fatal(err)
 	}
-	var recipients []runfork.RunForkContractFrontierRecipient
+	var historical []events.DeliveryRoute
 	if completed {
 		history, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, FrontierAdmission: frontier})
 		if err != nil {
@@ -311,26 +311,18 @@ func assertRouteEvidenceStampedConsumers(t testing.TB, source semanticview.Sourc
 		}
 		for _, event := range history.SelectedRouteEvents {
 			if event.SourceEventID == eventID {
-				recipients = event.DerivedRecipients
+				historical = event.HistoricalDeliveryRoutes
 			}
 		}
 	} else {
 		for _, event := range frontier.FrontierEvents {
 			if event.SourceEventID == eventID {
-				recipients = event.DerivedRecipients
+				historical = event.HistoricalDeliveryRoutes
 			}
 		}
 	}
-	var expectedPlan agentidentity.Plan
-	if route.Recipient.IsAgent() {
-		var err error
-		expectedPlan, err = route.AgentIdentity.Plan()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(recipients) != 1 || recipients[0].Recipient != route.Recipient || recipients[0].AgentPlan != expectedPlan || recipients[0].Path != route.Target.Route().FlowInstance || recipients[0].RouteSourceCode() != "stamped_connect_claim" {
-		t.Fatalf("completed=%v consumer lost exact stamped recipient: %#v, route=%#v", completed, recipients, route)
+	if len(historical) != 1 || !reflect.DeepEqual(historical[0], route) {
+		t.Fatalf("completed=%v consumer lost complete historical route: %#v, route=%#v", completed, historical, route)
 	}
 }
 

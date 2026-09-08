@@ -360,9 +360,10 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
+			EventName: "work.requested",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("shared-agent", "review/inst-1", "", mustTestAgentPlan(first)),
-				testAgentFrontierRecipient("shared-agent", "review/inst-2", "", mustTestAgentPlan(second)),
+				testAgentFrontierRecipient(mustTestAgentPlan(first), "work.requested", "review/inst-1", ""),
+				testAgentFrontierRecipient(mustTestAgentPlan(second), "work.requested", "review/inst-2", ""),
 			},
 		}},
 	}

@@ -14,8 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -295,28 +294,17 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
+	truth, ok := am.SelectedContractRouteRecoverySnapshot()[forkRunID]
 	if !ok {
-		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
+		t.Fatalf("missing recovered route evidence for fork %s", forkRunID)
 	}
-	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000991", eventID)
-	evt := selectedRouteRecoveryGuardEvent(
-		t,
-		"00000000-0000-0000-0000-000000000991",
-		forkRunID,
-		sourceRunID,
-		eventID,
-	)
-
-	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
-		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          mustPersistenceRootNode("node-a").Key(),
-			Path:        "flow-a/node-a",
-			RouteSource: "selected_contracts",
-		}},
-	}); err != nil {
-		t.Fatalf("Authorize recovered JSONB recipient plan: %v", err)
+	if truth.Record.SourceRunID != sourceRunID || len(truth.RecipientPlanning.RecipientPlanEvents) != 1 {
+		t.Fatalf("recovered JSONB ownership differs: %#v", truth)
+	}
+	got := truth.RecipientPlanning.RecipientPlanEvents[0]
+	want := planning.RecipientPlanEvents[0]
+	if got.SourceEventID != want.SourceEventID || got.EventName != want.EventName || !reflect.DeepEqual(got.Recipients, want.Recipients) {
+		t.Fatalf("recovered JSONB recipient evidence differs: got=%#v want=%#v", got, want)
 	}
 }
 
@@ -358,55 +346,18 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
+	truth, ok := am.SelectedContractRouteRecoverySnapshot()[forkRunID]
 	if !ok {
-		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
+		t.Fatalf("missing recovered route evidence for fork %s", forkRunID)
 	}
-	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000992", eventID)
-	evt := selectedRouteRecoveryGuardEvent(
-		t,
-		"00000000-0000-0000-0000-000000000992",
-		forkRunID,
-		sourceRunID,
-		eventID,
-	)
-
-	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
-		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          mustPersistenceRootNode("node-a").Key(),
-			Path:        "flow-a/node-a",
-			RouteSource: "selected_contracts",
-		}},
-	}); err != nil {
-		t.Fatalf("Authorize recovered bundle_hash JSONB recipient plan: %v", err)
+	if truth.Record.SourceRunID != sourceRunID || len(truth.RecipientPlanning.RecipientPlanEvents) != 1 {
+		t.Fatalf("recovered JSONB ownership differs: %#v", truth)
 	}
-}
-
-func selectedRouteRecoveryGuardEvent(t *testing.T, eventID, forkRunID, sourceRunID, sourceEventID string) events.Event {
-	t.Helper()
-	lineage, err := events.NewSelectedForkLineage(
-		forkRunID,
-		sourceRunID,
-		sourceEventID,
-		"selected-contract-route-recovery-test",
-		"",
-		executionmode.Live,
-	)
-	if err != nil {
-		t.Fatalf("NewSelectedForkLineage: %v", err)
+	got := truth.RecipientPlanning.RecipientPlanEvents[0]
+	want := planning.RecipientPlanEvents[0]
+	if got.SourceEventID != want.SourceEventID || got.EventName != want.EventName || !reflect.DeepEqual(got.Recipients, want.Recipients) {
+		t.Fatalf("recovered JSONB recipient evidence differs: got=%#v want=%#v", got, want)
 	}
-	return eventtest.SelectedForkReplay(
-		eventID,
-		events.EventType("item.received"),
-		eventtest.Producer(events.EventProducerPlatform, runfork.RunForkSelectedContractExecutionOwner),
-		"",
-		nil,
-		0,
-		lineage,
-		events.EventEnvelope{},
-		time.Time{},
-	)
 }
 
 func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {
@@ -479,6 +430,14 @@ func prepareSelectedRouteRecoveryStartup(
 }
 
 func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractSelection, runfork.RunForkSelectedContractRouteTopology, runfork.RunForkSelectedContractRecipientPlanning) {
+	node := mustPersistenceRootNode("node-a")
+	recipient, err := forkrecipient.NewLocal(forkrecipient.Input{
+		Recipient: events.MustNodeDeliveryRecipient(node), Path: "flow-a/node-a",
+		HandlerNode: node, HandlerEvent: "item.received", RouteSource: "selected_contracts",
+	})
+	if err != nil {
+		panic(err)
+	}
 	selection := runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	}
@@ -499,7 +458,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Plan{}),
+				recipient,
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
@@ -520,7 +479,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Plan{}),
+				recipient,
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},

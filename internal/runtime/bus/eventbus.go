@@ -240,6 +240,9 @@ type PublishRecipientPlan struct {
 	DeliveryRoutes         []events.DeliveryRoute
 	TargetFailure          string
 	canonicalAuthority     bool
+	actualPresent          bool
+	actuals                []PublishRecipientActual
+	actualErr              error
 }
 
 type ExactDirectRouteStatus struct {

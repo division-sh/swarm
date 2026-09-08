@@ -913,9 +913,15 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		}
 		if intent.Recipient.IsAgent() {
 			if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
+				out = append(out, intent)
 				continue
 			}
 		} else if !intent.Recipient.IsNode() || !intent.AgentIdentity.IsZero() {
+			out = append(out, intent)
+			continue
+		}
+		if err := validateRecipientIntentProducer(intent); err != nil {
+			out = append(out, intent)
 			continue
 		}
 		key := deliveryIntentKey{

@@ -79,8 +79,9 @@ func TestSelectedContractWorkflowStateProjectionDoesNotInventUndeclaredAgentRead
 		source,
 		runfork.RunForkSelectedContractRecipientPlanning{RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			SourceEventID: eventID,
+			EventName: "review.requested",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient(agent.AgentID(), path, "selected_contracts", mustTestAgentPlan(agent)),
+				testAgentFrontierRecipient(mustTestAgentPlan(agent), "review.requested", path, "selected_contracts"),
 			},
 		}}},
 		map[string]executionmode.Mode{eventID: executionmode.Mock},
@@ -122,7 +123,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 						modes[id] = executionmode.Mock
 					}
 					if frontier != "activity" {
-						add("node", "review.requested", []runfork.RunForkContractFrontierRecipient{testNodeFrontierRecipient(nodeID, path, "selected_contracts")})
+						add("node", "review.requested", []runfork.RunForkContractFrontierRecipient{testNodeFrontierRecipient(mustRunForkNode(flowID, nodeID), "review.requested", path, "selected_contracts")})
 					}
 					if frontier != "node" {
 						add("activity", runfork.RunForkSelectedContractPlatformActivityEvent, nil)
@@ -134,7 +135,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 							t.Fatal(err)
 						}
 						id := fmt.Sprintf("agent-%d", i)
-						add(id, "worker.ready", []runfork.RunForkContractFrontierRecipient{testAgentFrontierRecipient(identity.AgentID(), path, "selected_contracts", blueprint.Identity)})
+						add(id, "worker.ready", []runfork.RunForkContractFrontierRecipient{testAgentFrontierRecipient(blueprint.Identity, "worker.ready", path, "selected_contracts")})
 						plan.PendingWork[len(plan.PendingWork)-1].DeliveryRoute = events.DeliveryRoute{
 							Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 							Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: "entity-1"}),

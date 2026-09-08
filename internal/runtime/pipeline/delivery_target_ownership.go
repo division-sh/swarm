@@ -75,6 +75,12 @@ func (h DeliveryTargetHandler) Node() runtimeidentity.ExecutableNode {
 	return h.node
 }
 
+// EventOverride returns the admitted handler-local event without localizing or
+// inferring a replacement from a publication envelope.
+func (h DeliveryTargetHandler) EventOverride() (events.EventType, bool) {
+	return h.eventType, h.present && h.eventType != ""
+}
+
 // ExecutionFlowID derives the runtime flow scope without changing the
 // declaration coordinate. Root project nodes have an explicitly empty owning
 // flow in ExecutableNode and execute in the bundle's root flow.

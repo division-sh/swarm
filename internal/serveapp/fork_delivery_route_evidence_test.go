@@ -145,8 +145,8 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 						if event.SourceEventID != want.eventID {
 							continue
 						}
-						for _, recipient := range event.DerivedRecipients {
-							if recipient.RouteSourceCode() == "stamped_connect_claim" && recipient.Recipient == want.route.Recipient && recipient.Path == want.route.Target.Route().FlowInstance && recipient.AgentIdentity == want.route.AgentIdentity {
+						for _, route := range event.HistoricalDeliveryRoutes {
+							if reflect.DeepEqual(route, want.route) {
 								matches++
 							}
 						}
@@ -155,8 +155,8 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 						if event.SourceEventID != want.eventID {
 							continue
 						}
-						for _, recipient := range event.DerivedRecipients {
-							if recipient.RouteSourceCode() == "stamped_connect_claim" && recipient.Recipient == want.route.Recipient && recipient.Path == want.route.Target.Route().FlowInstance && recipient.AgentIdentity == want.route.AgentIdentity {
+						for _, route := range event.HistoricalDeliveryRoutes {
+							if reflect.DeepEqual(route, want.route) {
 								matches++
 							}
 						}

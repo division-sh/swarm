@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -19,7 +19,9 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -471,6 +473,8 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		got.Record.RuntimeRecoveryOwner != SelectedContractRouteRecoveryOwner ||
 		got.RouteTopology.Owner != selectedContractRouteTopologyOwner ||
 		got.RecipientPlanning.Owner != selectedContractRecipientPlanningOwner ||
+		len(got.RouteTopology.StaticRouteEvents) != 1 ||
+		len(got.RouteTopology.DynamicTopologyProofs) != 1 ||
 		len(got.RecipientPlanning.RecipientPlanEvents) != 1 {
 		t.Fatalf("selected route recovery truth = %#v, want canonical recovered topology and recipient planning", got)
 	}
@@ -480,7 +484,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		classification string
 		consumedOwners []string
 	}{
-		consumer:       "internal/runtime/manager.restoreSelectedContractRouteRecoveries/SelectedContractRouteRecoveryRecipientGuard",
+		consumer:       "internal/runtime/manager.restoreSelectedContractRouteRecoveries/SelectedContractRouteRecoverySnapshot",
 		owner:          got.Record.RuntimeRecoveryOwner,
 		classification: "carrier_readiness_consumer",
 		consumedOwners: []string{
@@ -501,51 +505,21 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 			t.Fatalf("%s has empty consumed owner in classification row %#v", classification.consumer, classification)
 		}
 	}
-	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
-	if !ok {
-		t.Fatalf("missing selected route recovery recipient guard for %s", forkRunID)
+	wantRecipient := selectedContractRecoveryRecipient(t)
+	for name, recipients := range map[string][]forkrecipient.Evidence{
+		"static topology":    got.RouteTopology.StaticRouteEvents[0].DerivedRecipients,
+		"dynamic topology":   got.RouteTopology.DynamicTopologyProofs[0].DerivedRecipients,
+		"recipient planning": got.RecipientPlanning.RecipientPlanEvents[0].Recipients,
+	} {
+		if len(recipients) != 1 || !reflect.DeepEqual(recipients[0], wantRecipient) {
+			t.Fatalf("%s recovered recipients = %#v, want exact canonical evidence %#v", name, recipients, wantRecipient)
+		}
+		if err := recipients[0].Validate(); err != nil {
+			t.Fatalf("%s recovered evidence: %v", name, err)
+		}
 	}
-	guard.ExpectForkEvent("fork-event-1", "source-event-1")
-	lineage, err := events.NewSelectedForkLineage(
-		"fork-run-1",
-		"source-run-1",
-		"source-event-1",
-		"selected-contract-recovery-test",
-		"",
-		executionmode.Live,
-	)
-	if err != nil {
-		t.Fatalf("NewSelectedForkLineage: %v", err)
-	}
-	evt := eventtest.SelectedForkReplay(
-		"fork-event-1",
-		events.EventType("work.ready"),
-		eventtest.Producer(events.EventProducerPlatform, selectedContractExecutionOwner),
-		"",
-		nil,
-		0,
-		lineage,
-		events.EventEnvelope{},
-		time.Time{},
-	)
-
-	if err := guard.AuthorizeEvent(testAuthorActivityContext(context.Background()), evt); err != nil {
-		t.Fatalf("AuthorizeEvent recovered guard: %v", err)
-	}
-	if err := guard.Authorize(testAuthorActivityContext(context.Background()), evt, runtimebus.PublishRecipientPlan{
-		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
-			Type:        "agent",
-			ID:          "agent-a",
-			Path:        "review/inst-1",
-			RouteSource: "selected_contract_route_topology",
-		}},
-	}); err != nil {
-		t.Fatalf("Authorize recovered recipients: %v", err)
-	}
-	if err := guard.Authorize(testAuthorActivityContext(context.Background()), evt, runtimebus.PublishRecipientPlan{
-		SubscriptionRecipients: []string{"agent-a"},
-	}); err == nil || !strings.Contains(err.Error(), "live subscriptions") {
-		t.Fatalf("Authorize subscription bypass error = %v, want live subscription rejection", err)
+	if !reflect.DeepEqual(got.Record, bus.selectedRouteRecoveries[0]) {
+		t.Fatal("recovery changed the persisted record or its fingerprints/counts")
 	}
 	if len(bus.restored) != 0 {
 		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
@@ -609,6 +583,34 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch(t *testi
 	}
 }
 
+func selectedContractRecoveryRecipient(t *testing.T) forkrecipient.Evidence {
+	t.Helper()
+	name, err := agentidentity.RuntimeName("agent-a", "test://recovery/agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := agentidentity.PresentRoute("review", "inst-1", "review/inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agentidentity.NewPlan(name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient, err := events.NewAgentDeliveryRecipient("agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := forkrecipient.NewLocal(forkrecipient.Input{
+		Recipient: recipient, Path: "review/inst-1", AgentPlan: plan,
+		HandlerEvent: "work.ready", RouteSource: "selected_contract_route_topology",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evidence
+}
+
 func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) SelectedContractRouteRecoveryRecord {
 	t.Helper()
 	routeTopology := mustRecoveryJSON(t, map[string]any{
@@ -618,27 +620,17 @@ func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) Selecte
 		"executable_recipients_supported": false,
 		"frontier_evidence_fingerprint":   "frontier-fp",
 		"static_route_events": []map[string]any{{
-			"source_event_id": "source-event-1",
-			"event_name":      "work.ready",
-			"derived_recipients": []map[string]any{{
-				"subscriber_type": "agent",
-				"subscriber_id":   "agent-a",
-				"path":            "review/inst-1",
-				"route_source":    "selected_contract_route_topology",
-			}},
-			"disposition": "selected_contract_route_topology",
+			"source_event_id":    "source-event-1",
+			"event_name":         "work.ready",
+			"derived_recipients": []forkrecipient.Evidence{selectedContractRecoveryRecipient(t)},
+			"disposition":        "selected_contract_route_topology",
 		}},
 		"dynamic_topology_proofs": []map[string]any{{
-			"flow_instance":    "review/inst-1",
-			"source_event_ids": []string{"source-event-1"},
-			"event_names":      []string{"work.ready"},
-			"derived_recipients": []map[string]any{{
-				"subscriber_type": "agent",
-				"subscriber_id":   "agent-a",
-				"path":            "review/inst-1",
-				"route_source":    "selected_contract_route_topology",
-			}},
-			"disposition": "selected_contract_dynamic_route_topology",
+			"flow_instance":      "review/inst-1",
+			"source_event_ids":   []string{"source-event-1"},
+			"event_names":        []string{"work.ready"},
+			"derived_recipients": []forkrecipient.Evidence{selectedContractRecoveryRecipient(t)},
+			"disposition":        "selected_contract_dynamic_route_topology",
 		}},
 	})
 	recipientPlanning := mustRecoveryJSON(t, map[string]any{
@@ -651,13 +643,8 @@ func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) Selecte
 		"recipient_plan_events": []map[string]any{{
 			"source_event_id": "source-event-1",
 			"event_name":      "work.ready",
-			"recipients": []map[string]any{{
-				"subscriber_type": "agent",
-				"subscriber_id":   "agent-a",
-				"path":            "review/inst-1",
-				"route_source":    "selected_contract_route_topology",
-			}},
-			"disposition": "selected_contract_recipient_planning",
+			"recipients":      []forkrecipient.Evidence{selectedContractRecoveryRecipient(t)},
+			"disposition":     "selected_contract_recipient_planning",
 		}},
 	})
 	return SelectedContractRouteRecoveryRecord{
@@ -682,7 +669,17 @@ func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) Selecte
 }
 
 func recoveryJSONFingerprint(raw json.RawMessage) string {
-	sum := sha256.Sum256(raw)
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		panic(err)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
 }
 

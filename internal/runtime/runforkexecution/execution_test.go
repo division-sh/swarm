@@ -297,8 +297,9 @@ func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningE
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
+			EventName: "work.requested",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("missing-agent", "", "", agentPlan),
+				testAgentFrontierRecipient(agentPlan, "work.requested", "", ""),
 			},
 		}},
 	}
@@ -4316,7 +4317,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	}
 }
 
-func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *testing.T) {
+func TestSelectedContractRecipientPlanPublishGuardAuthorizesEventMappingRejectsDiagnosticOnlyPlan(t *testing.T) {
 	frontier := testContractFrontierAdmission(testContractSelection())
 	sourceEventID := frontier.FrontierEvents[0].SourceEventID
 	routeAdmission := testSelectedContractRouteAdmission(frontier)
@@ -4329,7 +4330,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4338,7 +4339,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	err = guard.AuthorizeEvent(context.Background(), selectedContractGuardEvent(t, "fork-event",
 		"work.begin", runfork.RunForkSelectedContractExecutionOwner, sourceEventID))
 	if err != nil {
-		t.Fatalf("AuthorizeEvent canonical recipient plan: %v", err)
+		t.Fatalf("AuthorizeEvent selected source-to-child mapping: %v", err)
 	}
 
 	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event",
@@ -4352,12 +4353,12 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 				RouteSource: "selected_contracts",
 			}},
 		})
-	if err != nil {
-		t.Fatalf("Authorize canonical recipient plan: %v", err)
+	if err == nil || err.Error() != "publish plan lacks canonical recipient intent evidence" {
+		t.Fatalf("Authorize diagnostic-only plan = %v, want missing canonical intent evidence", err)
 	}
 }
 
-func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreateProjection(t *testing.T) {
+func TestSelectedContractRecipientPlanPublishGuardRejectsSyntheticProjectionWithoutIntentEvidence(t *testing.T) {
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner:                      runfork.RunForkSelectedContractRecipientPlanningOwner,
 		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
@@ -4368,22 +4369,18 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 			SourceEventID: "source-event",
 			EventName:     "validation.requested",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("validator-node", "validator/source-instance", "canonical_connect"),
+				testNodeFrontierRecipient(mustRunForkNode("validator", "validator-node"), "validation.requested", "validator/source-instance", "canonical_connect"),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 	evt := selectedContractGuardEvent(t, "fork-event",
 		"validation.requested", runfork.RunForkSelectedContractExecutionOwner, "source-event")
-	projection, err := events.NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "fork-case"})
-	if err != nil {
-		t.Fatalf("NewDeliveryPayloadProjection: %v", err)
-	}
 	base := bus.PublishRecipientPlan{
 		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 			Type:        "node",
@@ -4394,25 +4391,16 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 	}
 
 	tests := []struct {
-		name    string
-		routes  []events.DeliveryRoute
-		wantErr bool
+		name   string
+		routes []events.DeliveryRoute
 	}{
 		{
-			name: "create fresh projected route accepts fork-local path",
-			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}),
-				PayloadProjection: projection,
-			}},
+			name:   "existing target cannot substitute for intent evidence",
+			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 		},
 		{
-			name:    "select canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
-			wantErr: true,
-		},
-		{
-			name:    "select-or-create canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
-			wantErr: true,
+			name:   "materializing target cannot substitute for intent evidence",
+			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 		},
 	}
 	for _, tc := range tests {
@@ -4420,14 +4408,8 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 			actual := base
 			actual.DeliveryRoutes = tc.routes
 			err := guard.Authorize(context.Background(), evt, actual)
-			if tc.wantErr {
-				if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
-					t.Fatalf("Authorize error = %v, want concrete-path mismatch", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Authorize fresh create projection: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "lacks canonical recipient intent evidence") {
+				t.Fatalf("Authorize error = %v, want missing canonical intent evidence", err)
 			}
 		})
 	}
@@ -4453,13 +4435,13 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 			SourceEventID: "source-event",
 			EventName:     "item.received",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("target-agent", "", "selected_contracts", agentidentity.Plan{}),
-				testNodeFrontierRecipient("test-node", "", "selected_contracts"),
+				testAgentFrontierRecipient(mustTestAgentPlan(selectedContractTestRootAgentIdentity(t, "target-agent")), "item.received", "", "selected_contracts"),
+				testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", "", "selected_contracts"),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source, selectedContractWorkflowProjection{childRunID: "fork-run"})
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4495,7 +4477,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 }
 
-func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t *testing.T) {
+func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapEventMappingRejectsDiagnosticOnlyPlan(t *testing.T) {
 	frontier := testContractFrontierAdmission(testContractSelection())
 	sourceEventID := frontier.FrontierEvents[0].SourceEventID
 	routeAdmission := testSelectedContractRouteAdmission(frontier)
@@ -4508,11 +4490,17 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"}, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
+
+	err = guard.AuthorizeEvent(context.Background(), selectedContractGuardEvent(t, "fork-event",
+		"work.begin", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, sourceEventID))
+	if err != nil {
+		t.Fatalf("AuthorizeEvent contract-swap source-to-child mapping: %v", err)
+	}
 
 	err = guard.Authorize(context.Background(), selectedContractGuardEvent(t, "fork-event",
 		"work.begin", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, sourceEventID),
@@ -4525,8 +4513,8 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 				RouteSource: "selected_contracts",
 			}},
 		})
-	if err != nil {
-		t.Fatalf("Authorize contract-swap owner recipient plan: %v", err)
+	if err == nil || err.Error() != "publish plan lacks canonical recipient intent evidence" {
+		t.Fatalf("Authorize contract-swap diagnostic-only plan = %v, want missing canonical intent evidence", err)
 	}
 }
 
@@ -4543,7 +4531,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4592,8 +4580,8 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 				RouteSource: "selected_contracts",
 			}},
 		})
-	if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
-		t.Fatalf("Authorize wrong recipient error = %v, want recipient-plan mismatch", err)
+	if err == nil || !strings.Contains(err.Error(), "lacks canonical recipient intent evidence") {
+		t.Fatalf("Authorize diagnostic-only recipient error = %v, want missing canonical intent evidence", err)
 	}
 }
 

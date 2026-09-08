@@ -62,7 +62,10 @@ func prepareRunForkSelectedContractRouteResolution(
 	if err := validateRunForkSelectedContractRouteRecoverySelection("route resolution frontier", selection, frontier.ContractSelection); err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
 	}
-	count, eventIDs, fingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	count, eventIDs, fingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+	}
 	if count != topology.FrontierEventCount || !equalTrimmedStrings(eventIDs, topology.FrontierSourceEventIDs) || fingerprint != strings.TrimSpace(topology.FrontierEvidenceFingerprint) {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route topology does not match the fixed-event frontier")
 	}

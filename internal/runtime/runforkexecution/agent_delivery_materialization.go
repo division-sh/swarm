@@ -99,16 +99,13 @@ func selectedContractPlannedAgentRecipientPlans(planning runfork.RunForkSelected
 	seen := map[agentidentity.Plan]struct{}{}
 	for _, event := range planning.RecipientPlanEvents {
 		for _, recipient := range event.Recipients {
+			if err := recipient.Validate(); err != nil {
+				return nil, err
+			}
 			if !recipient.Recipient.IsAgent() {
 				continue
 			}
 			plan := recipient.AgentPlan.Normalize()
-			if err := plan.Validate(); err != nil {
-				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact declaration plan: %w", recipient.Recipient.ID(), err)
-			}
-			if plan.AgentID() != recipient.Recipient.ID() {
-				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with declaration plan %s", recipient.Recipient.ID(), plan.Description())
-			}
 			seen[plan] = struct{}{}
 		}
 	}

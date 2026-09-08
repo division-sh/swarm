@@ -24,7 +24,7 @@ func TestSelectedContractSourceProjectionPreservesProducerRoutingAcrossDifferent
 		SourceEventID: "source-event", EventName: "work.ready", EntityID: "entity-one", RoutingSource: producer,
 	}}
 
-	projected, err := projectSelectedContractSourceEventWorkflowStates("fork-run", states, eventsIn)
+	projected, _, err := projectSelectedContractSourceEventWorkflowStates("fork-run", states, eventsIn)
 	if err != nil {
 		t.Fatalf("project selected-contract source event: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestSelectedContractSourceProjectionPreservesProducerRoutingAcrossDifferent
 }
 
 func TestSelectedContractSourceProjectionRejectsMissingProducerRoutingAuthority(t *testing.T) {
-	_, err := projectSelectedContractSourceEventWorkflowStates(
+	_, _, err := projectSelectedContractSourceEventWorkflowStates(
 		"fork-run",
 		[]runfork.RunForkSelectedContractWorkflowState{{
 			SourceEventID: "source-event", EntityID: "entity-one", FlowID: "root",

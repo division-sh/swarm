@@ -3,14 +3,12 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -41,10 +39,14 @@ func BuildSelectedContractRecipientPlanning(req SelectedContractRecipientPlannin
 	if err := validateSelectedContractRouteTopology(admission, routeAdmission, routeTopology); err != nil {
 		return runfork.RunForkSelectedContractRecipientPlanning{}, err
 	}
-	return canonicalSelectedContractRecipientPlanning(admission, routeTopology), nil
+	return canonicalSelectedContractRecipientPlanning(admission, routeTopology)
 }
 
-func canonicalSelectedContractRecipientPlanning(frontier runfork.RunForkContractFrontierAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology) runfork.RunForkSelectedContractRecipientPlanning {
+func canonicalSelectedContractRecipientPlanning(frontier runfork.RunForkContractFrontierAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology) (runfork.RunForkSelectedContractRecipientPlanning, error) {
+	planEvents, err := selectedContractRecipientPlanEvents(frontier.FrontierEvents)
+	if err != nil {
+		return runfork.RunForkSelectedContractRecipientPlanning{}, err
+	}
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
 		Message: "selected-contract recipient planning is non-mutating; event append, delivery writes, and handler execution remain separately gated",
@@ -64,13 +66,13 @@ func canonicalSelectedContractRecipientPlanning(frontier runfork.RunForkContract
 		FrontierEventCount:          routeTopology.FrontierEventCount,
 		FrontierSourceEventIDs:      append([]string(nil), routeTopology.FrontierSourceEventIDs...),
 		FrontierEvidenceFingerprint: routeTopology.FrontierEvidenceFingerprint,
-		RecipientPlanEvents:         selectedContractRecipientPlanEvents(frontier.FrontierEvents),
+		RecipientPlanEvents:         planEvents,
 		RequiredEvidence:            selectedContractRecipientPlanningRequiredEvidence(routeTopology),
 		RequiredConsumers:           selectedContractRecipientPlanningRequiredConsumers(),
 		BlockedSiblings:             selectedContractRecipientPlanningBlockedSiblings(),
 		InvalidPaths:                selectedContractRecipientPlanningInvalidPaths(),
 		UnsupportedBlockers:         blockers,
-	}
+	}, nil
 }
 
 func selectedContractRecipientPlanningSupported(blockers []runfork.RunForkUnsupportedBlocker) bool {
@@ -87,16 +89,20 @@ func selectedContractRecipientPlanningSupported(blockers []runfork.RunForkUnsupp
 	return true
 }
 
-func selectedContractRecipientPlanEvents(events []runfork.RunForkContractFrontierEvent) []runfork.RunForkSelectedContractRecipientPlanEvent {
+func selectedContractRecipientPlanEvents(events []runfork.RunForkContractFrontierEvent) ([]runfork.RunForkSelectedContractRecipientPlanEvent, error) {
 	if len(events) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]runfork.RunForkSelectedContractRecipientPlanEvent, 0, len(events))
 	for _, event := range events {
+		recipients, err := sortedFrontierRecipients(event.DerivedRecipients)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, runfork.RunForkSelectedContractRecipientPlanEvent{
 			SourceEventID: strings.TrimSpace(event.SourceEventID),
 			EventName:     strings.TrimSpace(event.EventName),
-			Recipients:    sortedFrontierRecipients(event.DerivedRecipients),
+			Recipients:    recipients,
 			Disposition:   runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		})
 	}
@@ -106,31 +112,11 @@ func selectedContractRecipientPlanEvents(events []runfork.RunForkContractFrontie
 		}
 		return out[i].EventName < out[j].EventName
 	})
-	return out
+	return out, nil
 }
 
-func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) []runfork.RunForkContractFrontierRecipient {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
-	seen := map[frontierRecipientKey]struct{}{}
-	for _, recipient := range in {
-		recipient = runfork.NewRunForkContractFrontierRecipient(
-			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
-		)
-		if recipient.Recipient.Empty() {
-			continue
-		}
-		key := recipientKey(recipient)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, recipient)
-	}
-	sort.Slice(out, func(i, j int) bool { return frontierRecipientLess(out[i], out[j]) })
-	return out
+func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) ([]runfork.RunForkContractFrontierRecipient, error) {
+	return forkrecipient.CanonicalSet(in)
 }
 
 func selectedContractRecipientPlanningRequiredEvidence(routeTopology runfork.RunForkSelectedContractRouteTopology) []runfork.RunForkSelectedContractExecutionBoundary {
@@ -162,13 +148,13 @@ func selectedContractRecipientPlanningRequiredConsumers() []runfork.RunForkSelec
 			Concept:     "selected_execution_publish_path",
 			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "selected execution must consume recipient-plan evidence through the fork-local runtime container before EventBus.Publish can derive selected-fork recipients",
+			Reason:      "selected execution consumes complete core/forkrecipient evidence through the fork-local runtime container before selected publication",
 		},
 		{
 			Concept:     "eventbus_publish_recipient_guard",
 			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       "internal/runtime/bus.EventBus.Publish",
-			Reason:      "the live publish path remains a downstream consumer and must validate routed recipients against this owner before delivery writes",
+			Reason:      "the live publish path validates effective typed delivery intents against selected recipient evidence after context projection and before delivery writes; diagnostics are not authority",
 		},
 	}
 }
@@ -258,7 +244,10 @@ func validateSelectedContractRecipientPlanning(frontier runfork.RunForkContractF
 	if err := validateSelectionMatches("recipient planning", routeTopology.ContractSelection, planning.ContractSelection); err != nil {
 		return err
 	}
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		return err
+	}
 	if planning.FrontierEventCount != frontierEventCount {
 		return fmt.Errorf("selected-contract recipient planning frontier count mismatch: got %d want %d", planning.FrontierEventCount, frontierEventCount)
 	}
@@ -268,8 +257,15 @@ func validateSelectedContractRecipientPlanning(frontier runfork.RunForkContractF
 	if strings.TrimSpace(planning.FrontierEvidenceFingerprint) != frontierFingerprint {
 		return fmt.Errorf("selected-contract recipient planning frontier fingerprint mismatch")
 	}
-	canonical := canonicalSelectedContractRecipientPlanning(frontier, routeTopology)
-	if !reflect.DeepEqual(planning, canonical) {
+	canonical, err := canonicalSelectedContractRecipientPlanning(frontier, routeTopology)
+	if err != nil {
+		return err
+	}
+	equal, err := runfork.EqualSelectedContractRecipientPlanning(planning, canonical)
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract recipient planning does not match canonical route-topology evidence")
 	}
 	return validateSelectedContractRouteTopology(frontier, routeAdmission, routeTopology)
@@ -306,10 +302,14 @@ type selectedContractRecipientPlanPublishGuard struct {
 	sourceByForkEvent  map[string]string
 	sourceAgents       map[string]struct{}
 	semanticSource     semanticview.Source
+	workflowProjection selectedContractWorkflowProjection
 }
 
-func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelectedContractRecipientPlanning, source semanticview.Source, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
+func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelectedContractRecipientPlanning, source semanticview.Source, projection selectedContractWorkflowProjection, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
 	if err := validateSelectedContractRecipientPlanningForPublish(planning); err != nil {
+		return nil, err
+	}
+	if err := projection.requireChildRun(projection.childRunID); err != nil {
 		return nil, err
 	}
 	if len(sourceAgents) == 0 {
@@ -331,13 +331,23 @@ func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelect
 		if sourceEventID == "" {
 			continue
 		}
-		plans[sourceEventID] = event
+		bound := event
+		bound.Recipients = make([]runfork.RunForkContractFrontierRecipient, len(event.Recipients))
+		for index, recipient := range event.Recipients {
+			var err error
+			bound.Recipients[index], err = projection.BindRecipient(sourceEventID, recipient)
+			if err != nil {
+				return nil, fmt.Errorf("bind selected-contract recipient for source event %s: %w", sourceEventID, err)
+			}
+		}
+		plans[sourceEventID] = bound
 	}
 	return &selectedContractRecipientPlanPublishGuard{
 		plansBySourceEvent: plans,
 		sourceByForkEvent:  map[string]string{},
 		sourceAgents:       allowedAgents,
 		semanticSource:     source,
+		workflowProjection: projection,
 	}, nil
 }
 
@@ -378,73 +388,80 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if len(actual.SubscriptionRecipients) > 0 {
 		return fmt.Errorf("selected-contract publish path cannot use live subscriptions as fork recipient truth")
 	}
-	expectedKeys := expectedRecipientKeys(expected.Recipients)
-	actualKeys := actualRecipientKeys(actual.RoutedRecipients)
-	freshCreateProjection, err := hasFreshCreateRecipientProjection(actual)
+	selected, err := forkrecipient.CanonicalSet(expected.Recipients)
 	if err != nil {
 		return err
 	}
-	if freshCreateProjection {
-		// A fresh create projection proves that canonical lifecycle routing
-		// replaced the source-run path with a new fork-local instance decision.
-		expectedKeys = expectedRecipientIdentityKeys(expected.Recipients)
-		actualKeys = actualRecipientIdentityKeys(actual.RoutedRecipients)
+	actuals, err := actual.RecipientActuals()
+	if err != nil {
+		return err
 	}
-	if !recipientKeysEqual(expectedKeys, actualKeys) {
-		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s: expected=%v actual=%v fresh_create_projection=%t", runfork.RunForkSelectedContractRecipientPlanningOwner, sourceEventID, expectedKeys, actualKeys, freshCreateProjection)
+	remaining := make(map[forkrecipient.Key]forkrecipient.Evidence, len(selected))
+	for _, recipient := range selected {
+		key, err := recipient.Key()
+		if err != nil {
+			return err
+		}
+		remaining[key] = recipient
+	}
+	for _, actual := range actuals {
+		projected, err := selectedEvidenceFromActual(g.semanticSource, evt, actual)
+		if err != nil {
+			return err
+		}
+		key, err := projected.Key()
+		if err != nil {
+			return err
+		}
+		want, exists := remaining[key]
+		if !exists {
+			return fmt.Errorf("selected-contract publish has an unselected execution authority for source event %s", sourceEventID)
+		}
+		if err := want.Satisfies(g.workflowProjection.childRunID, projected, actual.Route().AgentIdentity); err != nil {
+			return fmt.Errorf("selected-contract recipient for source event %s: %w", sourceEventID, err)
+		}
+		delete(remaining, key)
+	}
+	if len(remaining) != 0 {
+		return fmt.Errorf("selected-contract publish is missing %d selected execution authorities for source event %s", len(remaining), sourceEventID)
 	}
 	return nil
 }
 
-func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bool, error) {
-	if len(plan.RoutedRecipients) == 0 || len(plan.DeliveryRoutes) == 0 {
-		return false, nil
-	}
-	if err := events.ValidateDeliveryRouteProjections(plan.DeliveryRoutes); err != nil {
-		return false, fmt.Errorf("selected-contract publish path has invalid delivery projection evidence: %w", err)
-	}
-
-	projectedPaths := make(map[events.DeliveryRecipient]string, len(plan.DeliveryRoutes))
-	for _, route := range plan.DeliveryRoutes {
-		route = route.Normalized()
-		if route.PayloadProjection.Empty() {
-			continue
+func selectedEvidenceFromActual(source semanticview.Source, evt events.Event, actual runtimebus.PublishRecipientActual) (forkrecipient.Evidence, error) {
+	route := actual.Route()
+	input := forkrecipient.Input{Recipient: route.Recipient, Path: route.Target.Route().FlowInstance}
+	if route.Recipient.IsAgent() {
+		plan, err := route.AgentIdentity.Plan()
+		if err != nil {
+			return forkrecipient.Evidence{}, err
 		}
-		key := route.Recipient
-		path := route.Target.Route().FlowInstance
-		if key.Empty() || path == "" {
-			return false, nil
+		input.AgentPlan = plan
+		input.Path, err = selectedContractAgentRecipientPath(source, plan)
+		if err != nil {
+			return forkrecipient.Evidence{}, err
 		}
-		if previous, exists := projectedPaths[key]; exists && previous != path {
-			return false, nil
+		input.HandlerEvent = evt.Type()
+	} else {
+		input.HandlerNode = actual.Handler().Node()
+		input.HandlerEvent, _ = actual.Handler().EventOverride()
+	}
+	if plan, connected := actual.ConnectPlan(); connected {
+		pin, present := route.ConnectClaim.ReceiverIdentity()
+		if !present {
+			return forkrecipient.Evidence{}, fmt.Errorf("selected connect actual lacks receiver pin")
 		}
-		projectedPaths[key] = path
-	}
-	if len(projectedPaths) == 0 {
-		return false, nil
-	}
-
-	actualPaths := make(map[events.DeliveryRecipient]string, len(plan.RoutedRecipients))
-	for _, recipient := range plan.RoutedRecipients {
-		key, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID)
-		path := strings.Trim(strings.TrimSpace(recipient.Path), "/")
-		if !ok || path == "" {
-			return false, nil
+		localEvent, present := route.ConnectClaim.ReceiverEvent()
+		if !present {
+			return forkrecipient.Evidence{}, fmt.Errorf("selected connect actual lacks receiver event")
 		}
-		if previous, exists := actualPaths[key]; exists && previous != path {
-			return false, nil
+		if route.Recipient.IsNode() && input.HandlerEvent != localEvent {
+			return forkrecipient.Evidence{}, fmt.Errorf("selected connect handler contradicts execution claim")
 		}
-		actualPaths[key] = path
+		input.HandlerEvent = localEvent
+		return forkrecipient.NewConnect(input, plan, pin)
 	}
-	if len(projectedPaths) != len(actualPaths) {
-		return false, nil
-	}
-	for key, path := range actualPaths {
-		if projectedPaths[key] != path {
-			return false, nil
-		}
-	}
-	return true, nil
+	return forkrecipient.NewLocal(input)
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
@@ -454,7 +471,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if !g.authorizesEvent(evt) {
 		return nil, nil
 	}
-	if err := g.Authorize(ctx, evt, actual); err != nil {
+	if err := g.AuthorizeEvent(ctx, evt); err != nil {
 		return nil, err
 	}
 	_, expected, err := g.expectedRecipientPlanEvent(evt)
@@ -476,6 +493,9 @@ func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(evt events.Event) (string, runfork.RunForkSelectedContractRecipientPlanEvent, error) {
+	if err := g.workflowProjection.requireChildRun(evt.RunID()); err != nil {
+		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, err
+	}
 	forkEventID := strings.TrimSpace(evt.ID())
 	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
 	if sourceEventID == "" {
@@ -497,8 +517,14 @@ func selectedContractNodeDeliveryRoutes(source semanticview.Source, eventName st
 	}
 	out := make([]runtimebus.DeliveryRouteBlueprint, 0, len(in))
 	for _, recipient := range in {
+		if err := recipient.Validate(); err != nil {
+			return nil, err
+		}
 		if !recipient.Recipient.IsNode() {
 			continue
+		}
+		if _, _, connected := recipient.Connect(); connected {
+			return nil, fmt.Errorf("selected connect recipient requires canonical connect route production")
 		}
 		node, exact := recipient.Recipient.Node()
 		if !exact {
@@ -517,7 +543,7 @@ func selectedContractNodeDeliveryRoutes(source semanticview.Source, eventName st
 		}
 		route := runtimebus.DeliveryRouteBlueprint{
 			Recipient: events.MustNodeDeliveryRecipient(node),
-			Handler:   handler.ForEvent(events.EventType(semanticview.ResolveExecutableNodeEventProof(source, node, eventName).Local)),
+			Handler:   handler.ForEvent(recipient.HandlerEvent()),
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
 			route.Target.FlowInstance = path
@@ -525,118 +551,4 @@ func selectedContractNodeDeliveryRoutes(source semanticview.Source, eventName st
 		out = append(out, route)
 	}
 	return out, nil
-}
-
-func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {
-	out := make([]frontierRecipientKey, 0, len(in))
-	for _, recipient := range in {
-		recipient = runfork.NewRunForkContractFrontierRecipient(
-			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
-		)
-		if recipient.Recipient.Empty() {
-			continue
-		}
-		out = append(out, recipientKey(recipient))
-	}
-	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
-	return out
-}
-
-func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []frontierRecipientKey {
-	out := make([]frontierRecipientKey, 0, len(in))
-	for _, recipient := range in {
-		typedRecipient, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID)
-		if !ok {
-			continue
-		}
-		out = append(out, recipientKey(runfork.NewRunForkContractFrontierRecipient(
-			typedRecipient, recipient.Path, recipient.RouteSource, agentidentity.Plan{},
-		)))
-	}
-	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
-	return out
-}
-
-func expectedRecipientIdentityKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {
-	out := make([]frontierRecipientKey, 0, len(in))
-	for _, recipient := range in {
-		if !recipient.Recipient.Empty() {
-			out = append(out, frontierRecipientKey{recipient: recipient.Recipient})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
-	return out
-}
-
-func actualRecipientIdentityKeys(in []runtimebus.PublishDiagnosticRecipient) []frontierRecipientKey {
-	out := make([]frontierRecipientKey, 0, len(in))
-	for _, recipient := range in {
-		if typedRecipient, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID); ok {
-			out = append(out, frontierRecipientKey{recipient: typedRecipient})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
-	return out
-}
-
-func recipientKeysEqual(left, right []frontierRecipientKey) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
-type frontierRecipientKey struct {
-	recipient   events.DeliveryRecipient
-	path        string
-	routeSource string
-}
-
-func recipientKey(recipient runfork.RunForkContractFrontierRecipient) frontierRecipientKey {
-	return frontierRecipientKey{
-		recipient: recipient.Recipient,
-		path:      strings.TrimSpace(recipient.Path), routeSource: recipient.RouteSourceCode(),
-	}
-}
-
-func frontierRecipientKeyLess(left, right frontierRecipientKey) bool {
-	if left.recipient.Code() != right.recipient.Code() {
-		return left.recipient.Code() < right.recipient.Code()
-	}
-	if left.recipient.ID() != right.recipient.ID() {
-		return left.recipient.ID() < right.recipient.ID()
-	}
-	if left.path != right.path {
-		return left.path < right.path
-	}
-	return left.routeSource < right.routeSource
-}
-
-func frontierRecipientLess(left, right runfork.RunForkContractFrontierRecipient) bool {
-	return frontierRecipientKeyLess(recipientKey(left), recipientKey(right))
-}
-
-func deliveryRecipientFromReadback(kind, id string) (events.DeliveryRecipient, bool) {
-	var (
-		recipient events.DeliveryRecipient
-		err       error
-	)
-	switch strings.TrimSpace(kind) {
-	case "node":
-		var node runtimeidentity.ExecutableNode
-		node, err = runtimeidentity.ParseExecutableNodeKey(id)
-		if err == nil {
-			recipient, err = events.NewNodeDeliveryRecipient(node)
-		}
-	case "agent":
-		recipient, err = events.NewAgentDeliveryRecipient(id)
-	default:
-		return events.DeliveryRecipient{}, false
-	}
-	return recipient, err == nil
 }

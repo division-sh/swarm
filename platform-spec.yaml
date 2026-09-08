@@ -16925,12 +16925,36 @@ run_model:
       3g_selected_contract_recipient_planning: 'For selected-contract mutating fork execution, fork-local recipient
         planning is a separate owner beyond route topology. The selected execution model, admission, publish path, and
         EventBus.Publish recipient guard consume runtime.run_fork.selected_contract_recipient_planning before selected
-        fork recipient derivation. The owner plans recipients from selected binding, frontier evidence, route admission,
+        fork publication. The owner plans recipients from selected binding, frontier evidence, route admission,
         and route topology evidence only; source deliveries, source route rows, source recipients, source receipts,
         source dead letters, and post-fork source outcomes are not executable fork truth or suppressors. This owner is
         still non-mutating: it does not persist route rows, write deliveries, run handlers, or own receipts, dead
         letters, idempotency, emitted follow-ups, timers, sessions, turns, source-advanced policy, contract swap, or
         UI/API execution state.'
+      3g0_selected_contract_recipient_authority: 'Historical source delivery evidence, selected declaration
+        evidence, and effective fork publication routes are distinct facts. Historical delivery routes retain their
+        complete source-run identity, target ownership, payload projection, reply context and connect execution claim;
+        their presence does not replace selected-source recipient derivation. core/forkrecipient owns selected
+        recipient equality, ordering, deduplication, fingerprints and strict private wire decoding. Selected evidence
+        carries the exact recipient, route scope, complete runless agent Plan when applicable, exact handler-local
+        event and node when applicable, and either local authority or the compiled connect plan and receiver-pin
+        association. The compiled connect evaluator supplies this association before flattened recipient projection.
+        Diagnostic provenance labels are not recipient identity, including when evidence is nested in a topology,
+        frontier or planning aggregate. Other aggregate admission metadata remains exact. Stored byte-integrity
+        hashes may include diagnostic bytes, but agreement with regenerated execution evidence uses the semantic
+        recipient relation rather than equality of those hashes. Agent Plan remains runless; executable agent
+        Identity is composed with the admitted child run, never copied from historical source-run identity.
+        Binding a root declaration to its concrete child route consumes the existing admitted workflow-state
+        correspondence and affects only an execution copy of selected evidence. Missing correspondence cannot
+        authorize a path rewrite; source or sibling runs cannot satisfy that child binding. This relation does not
+        acquire receiver state or transfer a producer entity to a receiving flow.
+        EventBus supplies actual authority from persistent delivery intents, retaining handler and plan evidence
+        alongside complete delivery routes. Final selected-to-actual agreement occurs after default delivery context
+        projection and before publication, while subsequent event readmission and aggregate validation remain required.
+        Missing or contradictory authority fails closed; normalization cannot discard a malformed persistent intent
+        before validation. Complete canonical recipient evidence is retained by topology, readiness, materialization,
+        persistence and recovery consumers. Manager recovery validates and exposes persisted evidence; it does not
+        provide a separate diagnostic-recipient publication guard or enable a new restart execution surface.'
       3g1_selected_contract_fork_local_agent_runtime_materializer_executor: 'For selected-contract mutating fork
         execution, planned selected agent recipients may execute only through
         runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor after recipient

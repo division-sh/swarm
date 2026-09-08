@@ -265,6 +265,9 @@ func selectedContractWorkflowStateProjectionWithReadiness(
 		eventID := strings.TrimSpace(event.SourceEventID)
 		entityID := entityByEvent[eventID]
 		for _, recipient := range event.Recipients {
+			if err := recipient.Validate(); err != nil {
+				return nil, err
+			}
 			if recipient.Recipient.IsAgent() {
 				state, required, err := selectedContractTemplateAgentWorkflowState(source, plan, eventID, recipient)
 				if err != nil {
@@ -309,6 +312,9 @@ func selectedContractTemplateAgentWorkflowState(
 	eventID string,
 	recipient runfork.RunForkContractFrontierRecipient,
 ) (runfork.RunForkSelectedContractWorkflowState, bool, error) {
+	if err := recipient.Validate(); err != nil {
+		return runfork.RunForkSelectedContractWorkflowState{}, false, err
+	}
 	path := strings.Trim(strings.TrimSpace(recipient.Path), "/")
 	flowID, template := selectedContractTemplateFlowForPath(source, path)
 	if !template {

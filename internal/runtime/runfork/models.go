@@ -14,7 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -143,77 +143,11 @@ type RunForkContractFrontierEvent struct {
 	RuntimeEventOwners      []string                           `json:"runtime_event_owners,omitempty"`
 	WorkflowNodeSubscribers []string                           `json:"workflow_node_subscribers,omitempty"`
 	DerivedRecipients       []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	// Historical source routes remain evidence, never selected recipient authority.
+	HistoricalDeliveryRoutes []events.DeliveryRoute `json:"historical_delivery_routes,omitempty"`
 }
 
-type RunForkContractFrontierRecipient struct {
-	Recipient   events.DeliveryRecipient `json:"-"`
-	Path        string                   `json:"path,omitempty"`
-	routeSource string
-	AgentPlan   agentidentity.Plan `json:"agent_plan,omitempty"`
-}
-
-func NewRunForkContractFrontierRecipient(recipient events.DeliveryRecipient, path, routeSource string, plan agentidentity.Plan) RunForkContractFrontierRecipient {
-	if recipient.Empty() {
-		return RunForkContractFrontierRecipient{}
-	}
-	return RunForkContractFrontierRecipient{
-		Recipient: recipient, Path: strings.TrimSpace(path), routeSource: strings.TrimSpace(routeSource),
-		AgentPlan: plan.Normalize(),
-	}
-}
-
-func (r RunForkContractFrontierRecipient) RouteSourceCode() string { return r.routeSource }
-
-type runForkContractFrontierRecipientWire struct {
-	SubscriberType string             `json:"subscriber_type"`
-	SubscriberID   string             `json:"subscriber_id"`
-	Path           string             `json:"path,omitempty"`
-	RouteSource    string             `json:"route_source,omitempty"`
-	AgentPlan      agentidentity.Plan `json:"agent_plan,omitempty"`
-}
-
-func (r RunForkContractFrontierRecipient) MarshalJSON() ([]byte, error) {
-	if r.Recipient.Empty() {
-		return nil, fmt.Errorf("run-fork contract frontier recipient is required")
-	}
-	return json.Marshal(runForkContractFrontierRecipientWire{
-		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), Path: strings.TrimSpace(r.Path),
-		RouteSource: r.RouteSourceCode(), AgentPlan: r.AgentPlan.Normalize(),
-	})
-}
-
-func (r *RunForkContractFrontierRecipient) UnmarshalJSON(raw []byte) error {
-	if r == nil {
-		return fmt.Errorf("run-fork contract frontier recipient destination is nil")
-	}
-	var wire runForkContractFrontierRecipientWire
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil {
-		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
-	}
-	var (
-		recipient events.DeliveryRecipient
-		err       error
-	)
-	switch strings.TrimSpace(wire.SubscriberType) {
-	case "node":
-		var node runtimeidentity.ExecutableNode
-		node, err = runtimeidentity.ParseExecutableNodeKey(wire.SubscriberID)
-		if err == nil {
-			recipient, err = events.NewNodeDeliveryRecipient(node)
-		}
-	case "agent":
-		recipient, err = events.NewAgentDeliveryRecipient(wire.SubscriberID)
-	default:
-		err = fmt.Errorf("recipient kind is invalid")
-	}
-	if err != nil {
-		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
-	}
-	*r = NewRunForkContractFrontierRecipient(recipient, wire.Path, wire.RouteSource, wire.AgentPlan)
-	return nil
-}
+type RunForkContractFrontierRecipient = forkrecipient.Evidence
 
 func RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item RunForkPendingWork) bool {
 	if strings.TrimSpace(item.Classification) != RunForkPendingClassificationDeadLetter {
@@ -816,10 +750,11 @@ type RunForkSelectedContractDynamicTopologyProof struct {
 }
 
 type RunForkSelectedContractRouteEvent struct {
-	SourceEventID     string                             `json:"source_event_id,omitempty"`
-	EventName         string                             `json:"event_name"`
-	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
-	Disposition       string                             `json:"disposition"`
+	SourceEventID            string                             `json:"source_event_id,omitempty"`
+	EventName                string                             `json:"event_name"`
+	DerivedRecipients        []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	HistoricalDeliveryRoutes []events.DeliveryRoute             `json:"historical_delivery_routes,omitempty"`
+	Disposition              string                             `json:"disposition"`
 }
 
 type RunForkSelectedContractRecipientPlanning struct {
@@ -991,71 +926,72 @@ type RunForkHistoricalReplayExecutableWork struct {
 	Classification   string `json:"classification"`
 }
 
-func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {
-	type routeRecipient struct {
-		SubscriberType string `json:"subscriber_type,omitempty"`
-		SubscriberID   string `json:"subscriber_id,omitempty"`
-		Path           string `json:"path,omitempty"`
-		RouteSource    string `json:"route_source,omitempty"`
-	}
+func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string, error) {
 	type frontierEvent struct {
-		SourceEventID           string           `json:"source_event_id,omitempty"`
-		EventName               string           `json:"event_name,omitempty"`
-		SourceClassifications   []string         `json:"source_classifications,omitempty"`
-		SourceFlowInstances     []string         `json:"source_flow_instances,omitempty"`
-		SourceSubscriberTypes   []string         `json:"source_subscriber_types,omitempty"`
-		SourceSubscriberIDs     []string         `json:"source_subscriber_ids,omitempty"`
-		RuntimeEventOwners      []string         `json:"runtime_event_owners,omitempty"`
-		WorkflowNodeSubscribers []string         `json:"workflow_node_subscribers,omitempty"`
-		DerivedRecipients       []routeRecipient `json:"derived_recipients,omitempty"`
+		SourceEventID             string   `json:"source_event_id,omitempty"`
+		EventName                 string   `json:"event_name,omitempty"`
+		SourceClassifications     []string `json:"source_classifications,omitempty"`
+		SourceFlowInstances       []string `json:"source_flow_instances,omitempty"`
+		SourceSubscriberTypes     []string `json:"source_subscriber_types,omitempty"`
+		SourceSubscriberIDs       []string `json:"source_subscriber_ids,omitempty"`
+		RuntimeEventOwners        []string `json:"runtime_event_owners,omitempty"`
+		WorkflowNodeSubscribers   []string `json:"workflow_node_subscribers,omitempty"`
+		DerivedRecipients         []string `json:"derived_recipients,omitempty"`
+		HistoricalRouteIdentities []string `json:"historical_route_identities,omitempty"`
 	}
 
-	events := make([]frontierEvent, 0, len(frontier.FrontierEvents))
+	encodedEvents := make([]json.RawMessage, 0, len(frontier.FrontierEvents))
 	ids := map[string]struct{}{}
-	for _, event := range frontier.FrontierEvents {
+	for index, event := range frontier.FrontierEvents {
 		sourceEventID := strings.TrimSpace(event.SourceEventID)
 		eventName := strings.TrimSpace(event.EventName)
 		if sourceEventID != "" {
 			ids[sourceEventID] = struct{}{}
 		}
-		recipients := make([]routeRecipient, 0, len(event.DerivedRecipients))
-		for _, recipient := range event.DerivedRecipients {
-			recipients = append(recipients, routeRecipient{
-				SubscriberType: recipient.Recipient.Code(),
-				SubscriberID:   recipient.Recipient.ID(),
-				Path:           strings.TrimSpace(recipient.Path),
-				RouteSource:    recipient.RouteSourceCode(),
-			})
+		selected, err := forkrecipient.CanonicalSet(event.DerivedRecipients)
+		if err != nil {
+			return 0, nil, "", fmt.Errorf("frontier event %d selected recipients: %w", index, err)
 		}
-		sort.Slice(recipients, func(i, j int) bool {
-			if recipients[i].SubscriberType != recipients[j].SubscriberType {
-				return recipients[i].SubscriberType < recipients[j].SubscriberType
+		recipients := make([]string, 0, len(selected))
+		for _, recipient := range selected {
+			fingerprint, err := recipient.Fingerprint()
+			if err != nil {
+				return 0, nil, "", fmt.Errorf("frontier event %d selected recipient fingerprint: %w", index, err)
 			}
-			if recipients[i].SubscriberID != recipients[j].SubscriberID {
-				return recipients[i].SubscriberID < recipients[j].SubscriberID
+			recipients = append(recipients, fingerprint)
+		}
+		if err := events.ValidateDeliveryRoutes(event.HistoricalDeliveryRoutes); err != nil {
+			return 0, nil, "", fmt.Errorf("frontier event %d historical routes: %w", index, err)
+		}
+		historical := make([]string, 0, len(event.HistoricalDeliveryRoutes))
+		for routeIndex, route := range event.HistoricalDeliveryRoutes {
+			identity, err := route.Identity()
+			if err != nil {
+				return 0, nil, "", fmt.Errorf("frontier event %d historical route %d: %w", index, routeIndex, err)
 			}
-			if recipients[i].Path != recipients[j].Path {
-				return recipients[i].Path < recipients[j].Path
-			}
-			return recipients[i].RouteSource < recipients[j].RouteSource
+			historical = append(historical, events.EncodeDeliveryRouteIdentity(identity))
+		}
+		sort.Strings(historical)
+		encoded, err := json.Marshal(frontierEvent{
+			SourceEventID:             sourceEventID,
+			EventName:                 eventName,
+			SourceClassifications:     sortedTrimmedStrings(event.SourceClassifications),
+			SourceFlowInstances:       sortedTrimmedStrings(event.SourceFlowInstances),
+			SourceSubscriberTypes:     sortedTrimmedStrings(event.SourceSubscriberTypes),
+			SourceSubscriberIDs:       sortedTrimmedStrings(event.SourceSubscriberIDs),
+			RuntimeEventOwners:        sortedTrimmedStrings(event.RuntimeEventOwners),
+			WorkflowNodeSubscribers:   sortedTrimmedStrings(event.WorkflowNodeSubscribers),
+			DerivedRecipients:         recipients,
+			HistoricalRouteIdentities: historical,
 		})
-		events = append(events, frontierEvent{
-			SourceEventID:           sourceEventID,
-			EventName:               eventName,
-			SourceClassifications:   sortedTrimmedStrings(event.SourceClassifications),
-			SourceFlowInstances:     sortedTrimmedStrings(event.SourceFlowInstances),
-			SourceSubscriberTypes:   sortedTrimmedStrings(event.SourceSubscriberTypes),
-			SourceSubscriberIDs:     sortedTrimmedStrings(event.SourceSubscriberIDs),
-			RuntimeEventOwners:      sortedTrimmedStrings(event.RuntimeEventOwners),
-			WorkflowNodeSubscribers: sortedTrimmedStrings(event.WorkflowNodeSubscribers),
-			DerivedRecipients:       recipients,
-		})
+		if err != nil {
+			return 0, nil, "", fmt.Errorf("encode frontier event %d: %w", index, err)
+		}
+		encodedEvents = append(encodedEvents, encoded)
 	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].SourceEventID != events[j].SourceEventID {
-			return events[i].SourceEventID < events[j].SourceEventID
-		}
-		return events[i].EventName < events[j].EventName
+	// Include the complete event projection in ordering, including tied event IDs.
+	sort.Slice(encodedEvents, func(i, j int) bool {
+		return string(encodedEvents[i]) < string(encodedEvents[j])
 	})
 
 	sourceEventIDs := make([]string, 0, len(ids))
@@ -1064,9 +1000,12 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 	}
 	sort.Strings(sourceEventIDs)
 
-	payload, _ := json.Marshal(events)
+	payload, err := json.Marshal(encodedEvents)
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("encode frontier evidence: %w", err)
+	}
 	sum := sha256.Sum256(payload)
-	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:])
+	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:]), nil
 }
 
 const (

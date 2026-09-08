@@ -280,11 +280,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	sourceEvents, err = projectSelectedContractSourceEventWorkflowStates(req.ForkRunID, req.WorkflowStates, sourceEvents)
+	sourceEvents, workflowProjection, err := projectSelectedContractSourceEventWorkflowStates(req.ForkRunID, req.WorkflowStates, sourceEvents)
 	if err != nil {
 		return nil, err
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, c.proof.ExecutionOwner)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, workflowProjection, c.proof.ExecutionOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -487,16 +487,19 @@ func projectSelectedContractSourceEventWorkflowStates(
 	forkRunID string,
 	states []runfork.RunForkSelectedContractWorkflowState,
 	eventsIn []runfork.RunForkSelectedContractSourceEvent,
-) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	type projectedWorkflowOwner struct {
-		state runfork.RunForkSelectedContractWorkflowState
-		route runtimeflowidentity.Route
+) ([]runfork.RunForkSelectedContractSourceEvent, selectedContractWorkflowProjection, error) {
+	projection := selectedContractWorkflowProjection{
+		childRunID:    strings.TrimSpace(forkRunID),
+		bySourceEvent: make(map[string]selectedContractProjectedWorkflowOwner, len(eventsIn)),
 	}
-	ownersByEntity := make(map[string]projectedWorkflowOwner, len(states))
+	if err := projection.requireChildRun(forkRunID); err != nil {
+		return nil, selectedContractWorkflowProjection{}, err
+	}
+	ownersByEntity := make(map[string]selectedContractProjectedWorkflowOwner, len(states))
 	for _, state := range states {
 		entityID := strings.TrimSpace(state.EntityID)
 		if entityID == "" {
-			return nil, fmt.Errorf("selected-contract source event projection requires exact entity identity")
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event projection requires exact entity identity")
 		}
 		route := state.Route
 		switch state.AddressKind {
@@ -505,15 +508,19 @@ func projectSelectedContractSourceEventWorkflowStates(
 		case runfork.RunForkSelectedContractWorkflowStateExact:
 			route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 		default:
-			return nil, fmt.Errorf("selected-contract source event projection has unsupported address kind %q", state.AddressKind)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event projection has unsupported address kind %q", state.AddressKind)
 		}
 		if !route.Valid() {
-			return nil, fmt.Errorf("selected-contract source event projection requires exact workflow route")
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event projection requires exact workflow route")
 		}
-		if existing, ok := ownersByEntity[entityID]; ok && existing.route != route {
-			return nil, fmt.Errorf("selected-contract source event entity %s has conflicting workflow routes", entityID)
+		owner := selectedContractProjectedWorkflowOwner{
+			entityID: entityID, flowID: strings.TrimSpace(state.FlowID),
+			addressKind: state.AddressKind, route: route,
 		}
-		ownersByEntity[entityID] = projectedWorkflowOwner{state: state, route: route}
+		if existing, ok := ownersByEntity[entityID]; ok && existing != owner {
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event entity %s has conflicting workflow routes or owners", entityID)
+		}
+		ownersByEntity[entityID] = owner
 	}
 	out := append([]runfork.RunForkSelectedContractSourceEvent(nil), eventsIn...)
 	for index := range out {
@@ -523,29 +530,37 @@ func projectSelectedContractSourceEventWorkflowStates(
 		}
 		out[index].FlowInstance = owner.route.InstancePath
 		if out[index].RoutingSource.Empty() {
-			return nil, fmt.Errorf("selected-contract source event %s requires exact persisted producer routing authority", out[index].SourceEventID)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event %s requires exact persisted producer routing authority", out[index].SourceEventID)
 		}
 		if route := out[index].RoutingSource.Route(); !route.Empty() && strings.TrimSpace(route.EntityID) != strings.TrimSpace(out[index].EntityID) {
-			return nil, fmt.Errorf("selected-contract source event %s producer route entity %s disagrees with projected event entity %s", out[index].SourceEventID, route.EntityID, out[index].EntityID)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event %s producer route entity %s disagrees with projected event entity %s", out[index].SourceEventID, route.EntityID, out[index].EntityID)
 		}
+		sourceEventID := strings.TrimSpace(out[index].SourceEventID)
+		if sourceEventID == "" {
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract workflow correspondence requires exact source event identity")
+		}
+		if existing, ok := projection.bySourceEvent[sourceEventID]; ok && existing != owner {
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract source event %s has conflicting workflow correspondence", sourceEventID)
+		}
+		projection.bySourceEvent[sourceEventID] = owner
 		if strings.TrimSpace(out[index].EventName) != "platform.activity_requested" {
 			continue
 		}
 		var payload map[string]any
 		if err := json.Unmarshal(out[index].Payload, &payload); err != nil {
-			return nil, fmt.Errorf("decode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("decode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
 		}
 		if payload == nil {
-			return nil, fmt.Errorf("selected-contract activity route projection for %s requires object payload", out[index].SourceEventID)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("selected-contract activity route projection for %s requires object payload", out[index].SourceEventID)
 		}
 		payload["flow_instance"] = owner.route.InstancePath
 		raw, err := json.Marshal(payload)
 		if err != nil {
-			return nil, fmt.Errorf("encode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
+			return nil, selectedContractWorkflowProjection{}, fmt.Errorf("encode selected-contract activity route projection for %s: %w", out[index].SourceEventID, err)
 		}
 		out[index].Payload = raw
 	}
-	return out, nil
+	return out, projection, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) error {

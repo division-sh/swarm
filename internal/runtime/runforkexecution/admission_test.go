@@ -1198,14 +1198,17 @@ func testContractFrontierAdmission(selection runfork.RunForkContractSelection) r
 			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
 			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
+				testNodeFrontierRecipient(mustRunForkNode("flow-a", "alpha-intake"), "work.begin", "flow-a/alpha-intake", "selected_contracts"),
 			},
 		}},
 	}
 }
 
 func testSelectedContractRouteAdmission(frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractRouteAdmission {
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		panic(err)
+	}
 	return runfork.RunForkSelectedContractRouteAdmission{
 		Owner:                          runfork.RunForkSelectedContractRouteAdmissionOwner,
 		FutureRouteReconstructionOwner: runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",

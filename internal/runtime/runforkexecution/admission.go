@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -507,7 +506,11 @@ func validateSelectedContractExecutionModel(binding runfork.RunForkSelectedContr
 	if model.FrontierEventCount != frontier.FrontierEventCount {
 		return fmt.Errorf("selected-contract execution admission model frontier count mismatch: got %d want %d", model.FrontierEventCount, frontier.FrontierEventCount)
 	}
-	if !reflect.DeepEqual(model.FrontierEvents, selectedContractFrontierEvents(frontier.FrontierEvents)) {
+	equal, err := runfork.EqualSelectedContractFrontierEvents(model.FrontierEvents, selectedContractFrontierEvents(frontier.FrontierEvents))
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract execution admission model frontier events do not match durable frontier evidence")
 	}
 	if model.RouteTopology == nil {
@@ -516,7 +519,11 @@ func validateSelectedContractExecutionModel(binding runfork.RunForkSelectedContr
 	if err := validateSelectedContractRouteTopology(frontier, routeAdmission, *model.RouteTopology); err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(*model.RouteTopology, routeTopology) {
+	equal, err = runfork.EqualSelectedContractRouteTopology(*model.RouteTopology, routeTopology)
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract execution admission model route topology does not match canonical route topology truth")
 	}
 	if model.RecipientPlanning == nil {

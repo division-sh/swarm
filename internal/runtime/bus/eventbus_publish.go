@@ -1816,11 +1816,11 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := validateRoutedNodeDeliveryAuthority(ctx, eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
-	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
-		return RoutePlan{}, err
-	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
+	if err := eb.authorizePublishRecipientPlan(ctx, evt, routePlan); err != nil {
+		return RoutePlan{}, err
+	}
 	if recordDiagnostic {
 		eb.recordPublishDiagnostic(ctx, evt, routePlan)
 	}
@@ -1870,6 +1870,7 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 }
 
 func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) PublishRecipientPlan {
+	actuals, actualErr := routePlan.recipientActuals()
 	routePlan = routePlan.Normalized()
 	deliveryRoutes := routePlan.DeliveryRoutes()
 	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), evt.RoutingSource())
@@ -1879,6 +1880,9 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 		DeliveryRoutes:         deliveryRoutes,
 		TargetFailure:          routePlan.TargetFailure.Code(),
+		actualPresent:          true,
+		actuals:                actuals,
+		actualErr:              actualErr,
 		canonicalAuthority: routePlan.CanonicalRouteOwnerMatched() || len(deliveryRoutes) > 0 ||
 			!routePlan.TargetFailure.Empty() || classification.DeliberateNoSubscriber(),
 	}

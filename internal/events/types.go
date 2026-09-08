@@ -768,6 +768,17 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rec
 
 func (c ConnectExecutionClaim) Empty() bool { return !c.present }
 
+func (c ConnectExecutionClaim) ReceiverIdentity() (ConnectReceiverIdentity, bool) {
+	if !c.present {
+		return ConnectReceiverIdentity{}, false
+	}
+	return AdmitConnectReceiverIdentity(c.receiverPinDigest), true
+}
+
+func (c ConnectExecutionClaim) ReceiverEvent() (EventType, bool) {
+	return EventType(c.handlerEvent), c.present && c.handlerEvent != ""
+}
+
 func (c ConnectExecutionClaim) validateRecipient(recipient DeliveryRecipient) error {
 	if c.Empty() {
 		return nil

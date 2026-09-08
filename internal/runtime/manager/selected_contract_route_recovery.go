@@ -8,20 +8,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 )
 
 const (
 	SelectedContractRoutePersistenceOwner = "store.run_fork.selected_contract_route_persistence"
 	SelectedContractRouteRecoveryOwner    = "runtime.run_fork.selected_contract_route_recovery"
 
-	selectedContractExecutionOwner         = "runtime.run_fork.selected_contract_execution"
 	selectedContractRouteTopologyOwner     = "runtime.run_fork.selected_contract_route_topology"
 	selectedContractRecipientPlanningOwner = "runtime.run_fork.selected_contract_recipient_planning"
 )
@@ -50,7 +46,6 @@ type SelectedContractRouteRecoveryTruth struct {
 	Record            SelectedContractRouteRecoveryRecord
 	RouteTopology     selectedContractRecoveredRouteTopology
 	RecipientPlanning selectedContractRecoveredRecipientPlanning
-	recipientGuard    selectedContractRecoveredRecipientGuard
 }
 
 type selectedContractRecoveredRouteTopology struct {
@@ -91,17 +86,7 @@ type selectedContractRecoveredRecipientPlanEvent struct {
 	Disposition   string                               `json:"disposition"`
 }
 
-type selectedContractRecoveredRecipient struct {
-	SubscriberType string `json:"subscriber_type,omitempty"`
-	SubscriberID   string `json:"subscriber_id,omitempty"`
-	Path           string `json:"path,omitempty"`
-	RouteSource    string `json:"route_source,omitempty"`
-}
-
-type selectedContractRecoveredRecipientGuard struct {
-	plansBySourceEvent map[string]selectedContractRecoveredRecipientPlanEvent
-	sourceByForkEvent  map[string]string
-}
+type selectedContractRecoveredRecipient = forkrecipient.Evidence
 
 type selectedContractRouteRecoveryLister interface {
 	ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]SelectedContractRouteRecoveryRecord, error)
@@ -213,7 +198,6 @@ func decodeSelectedContractRouteRecoveryTruth(record SelectedContractRouteRecove
 		Record:            record,
 		RouteTopology:     topology,
 		RecipientPlanning: planning,
-		recipientGuard:    newSelectedContractRecoveredRecipientGuard(planning),
 	}, nil
 }
 
@@ -236,169 +220,6 @@ func selectedContractRecoveredJSONFingerprint(raw json.RawMessage) (string, erro
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func newSelectedContractRecoveredRecipientGuard(planning selectedContractRecoveredRecipientPlanning) selectedContractRecoveredRecipientGuard {
-	plans := map[string]selectedContractRecoveredRecipientPlanEvent{}
-	for _, event := range planning.RecipientPlanEvents {
-		sourceEventID := strings.TrimSpace(event.SourceEventID)
-		if sourceEventID == "" {
-			continue
-		}
-		plans[sourceEventID] = event
-	}
-	return selectedContractRecoveredRecipientGuard{
-		plansBySourceEvent: plans,
-		sourceByForkEvent:  map[string]string{},
-	}
-}
-
-func (g *selectedContractRecoveredRecipientGuard) ExpectForkEvent(forkEventID, sourceEventID string) {
-	if g == nil {
-		return
-	}
-	forkEventID = strings.TrimSpace(forkEventID)
-	sourceEventID = strings.TrimSpace(sourceEventID)
-	if forkEventID == "" || sourceEventID == "" {
-		return
-	}
-	g.sourceByForkEvent[forkEventID] = sourceEventID
-}
-
-func (g *selectedContractRecoveredRecipientGuard) AuthorizeEvent(ctx context.Context, evt events.Event) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !events.ProducerIs(evt, events.EventProducerPlatform, selectedContractExecutionOwner) || evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
-		return nil
-	}
-	_, _, err := g.expectedRecipientPlanEvent(evt)
-	return err
-}
-
-func (g *selectedContractRecoveredRecipientGuard) Authorize(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !events.ProducerIs(evt, events.EventProducerPlatform, selectedContractExecutionOwner) || evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
-		return nil
-	}
-	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
-	if err != nil {
-		return err
-	}
-	if len(actual.SubscriptionRecipients) > 0 {
-		return fmt.Errorf("selected-contract recovered route truth cannot use live subscriptions as fork recipient truth")
-	}
-	if !selectedContractRecoveredRecipientKeysEqual(selectedContractRecoveredExpectedRecipientKeys(expected.Recipients), selectedContractRecoveredActualRecipientKeys(actual.RoutedRecipients)) {
-		return fmt.Errorf("selected-contract recovered routed recipients do not match %s for source event %s", selectedContractRecipientPlanningOwner, sourceEventID)
-	}
-	return nil
-}
-
-func (g *selectedContractRecoveredRecipientGuard) expectedRecipientPlanEvent(evt events.Event) (string, selectedContractRecoveredRecipientPlanEvent, error) {
-	if g == nil {
-		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered recipient guard is required")
-	}
-	forkEventID := strings.TrimSpace(evt.ID())
-	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
-	if sourceEventID == "" {
-		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish path missing %s evidence for fork event %s", selectedContractRecipientPlanningOwner, forkEventID)
-	}
-	expected, ok := g.plansBySourceEvent[sourceEventID]
-	if !ok {
-		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish path has no recipient plan for source event %s", sourceEventID)
-	}
-	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type())) {
-		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type(), expected.EventName)
-	}
-	return sourceEventID, expected, nil
-}
-
-func selectedContractRecoveredExpectedRecipientKeys(in []selectedContractRecoveredRecipient) []selectedContractRecoveredRecipientIdentity {
-	out := make([]selectedContractRecoveredRecipientIdentity, 0, len(in))
-	for _, recipient := range in {
-		key, ok := selectedContractRecoveredRecipientKey(recipient)
-		if !ok {
-			continue
-		}
-		out = append(out, key)
-	}
-	sort.Slice(out, func(i, j int) bool { return selectedContractRecoveredRecipientLess(out[i], out[j]) })
-	return out
-}
-
-func selectedContractRecoveredActualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []selectedContractRecoveredRecipientIdentity {
-	out := make([]selectedContractRecoveredRecipientIdentity, 0, len(in))
-	for _, recipient := range in {
-		key, ok := selectedContractRecoveredRecipientKey(selectedContractRecoveredRecipient{
-			SubscriberType: recipient.Type, SubscriberID: recipient.ID,
-			Path: recipient.Path, RouteSource: recipient.RouteSource,
-		})
-		if !ok {
-			continue
-		}
-		out = append(out, key)
-	}
-	sort.Slice(out, func(i, j int) bool { return selectedContractRecoveredRecipientLess(out[i], out[j]) })
-	return out
-}
-
-func selectedContractRecoveredRecipientKeysEqual(left, right []selectedContractRecoveredRecipientIdentity) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
-type selectedContractRecoveredRecipientIdentity struct {
-	recipient   events.DeliveryRecipient
-	path        string
-	routeSource string
-}
-
-func selectedContractRecoveredRecipientKey(recipient selectedContractRecoveredRecipient) (selectedContractRecoveredRecipientIdentity, bool) {
-	var (
-		typedRecipient events.DeliveryRecipient
-		err            error
-	)
-	switch strings.TrimSpace(recipient.SubscriberType) {
-	case "node":
-		var node runtimeidentity.ExecutableNode
-		node, err = runtimeidentity.ParseExecutableNodeKey(recipient.SubscriberID)
-		if err == nil {
-			typedRecipient, err = events.NewNodeDeliveryRecipient(node)
-		}
-	case "agent":
-		typedRecipient, err = events.NewAgentDeliveryRecipient(recipient.SubscriberID)
-	default:
-		return selectedContractRecoveredRecipientIdentity{}, false
-	}
-	if err != nil {
-		return selectedContractRecoveredRecipientIdentity{}, false
-	}
-	return selectedContractRecoveredRecipientIdentity{
-		recipient: typedRecipient, path: strings.TrimSpace(recipient.Path),
-		routeSource: strings.TrimSpace(recipient.RouteSource),
-	}, true
-}
-
-func selectedContractRecoveredRecipientLess(left, right selectedContractRecoveredRecipientIdentity) bool {
-	if left.recipient.Code() != right.recipient.Code() {
-		return left.recipient.Code() < right.recipient.Code()
-	}
-	if left.recipient.ID() != right.recipient.ID() {
-		return left.recipient.ID() < right.recipient.ID()
-	}
-	if left.path != right.path {
-		return left.path < right.path
-	}
-	return left.routeSource < right.routeSource
-}
-
 func (am *AgentManager) SelectedContractRouteRecoverySnapshot() map[string]SelectedContractRouteRecoveryTruth {
 	if am == nil {
 		return nil
@@ -410,24 +231,4 @@ func (am *AgentManager) SelectedContractRouteRecoverySnapshot() map[string]Selec
 		out[forkRunID] = truth
 	}
 	return out
-}
-
-func (am *AgentManager) SelectedContractRouteRecoveryRecipientGuard(forkRunID string) (selectedContractRecoveredRecipientGuard, bool) {
-	if am == nil {
-		return selectedContractRecoveredRecipientGuard{}, false
-	}
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	truth, ok := am.selectedContractRouteRecoveries[strings.TrimSpace(forkRunID)]
-	if !ok {
-		return selectedContractRecoveredRecipientGuard{}, false
-	}
-	guard := selectedContractRecoveredRecipientGuard{
-		plansBySourceEvent: map[string]selectedContractRecoveredRecipientPlanEvent{},
-		sourceByForkEvent:  map[string]string{},
-	}
-	for sourceEventID, plan := range truth.recipientGuard.plansBySourceEvent {
-		guard.plansBySourceEvent[sourceEventID] = plan
-	}
-	return guard, true
 }
